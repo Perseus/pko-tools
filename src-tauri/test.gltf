@@ -1,0 +1,473 @@
+{
+  "accessors": [
+    {
+      "bufferView": 0,
+      "byteOffset": 0,
+      "count": 45,
+      "componentType": 5126,
+      "type": "MAT4",
+      "name": "InverseBindAccessor"
+    }
+  ],
+  "asset": {
+    "version": "2.0"
+  },
+  "buffers": [
+    {
+      "byteLength": 2880,
+      "name": "InverseBindMatrices",
+      "uri": "data:application/octet-stream;base64,AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA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"
+    }
+  ],
+  "bufferViews": [
+    {
+      "buffer": 0,
+      "byteLength": 2880,
+      "byteOffset": 0,
+      "byteStride": 64,
+      "name": "InverseBindMatrices"
+    }
+  ],
+  "scene": 0,
+  "nodes": [
+    {
+      "children": [
+        1,
+        2,
+        37
+      ],
+      "name": "Bip01"
+    },
+    {
+      "name": "Bip01 Footsteps"
+    },
+    {
+      "children": [
+        3,
+        27,
+        32,
+        38
+      ],
+      "name": "Bip01 Pelvis"
+    },
+    {
+      "children": [
+        4
+      ],
+      "name": "Bip01 Spine"
+    },
+    {
+      "children": [
+        5,
+        39
+      ],
+      "name": "Bip01 Spine1"
+    },
+    {
+      "children": [
+        6,
+        10,
+        18
+      ],
+      "name": "Bip01 Neck"
+    },
+    {
+      "children": [
+        7,
+        8,
+        40
+      ],
+      "name": "Bip01 Head"
+    },
+    {
+      "name": "Bip01 HeadNub"
+    },
+    {
+      "children": [
+        9
+      ],
+      "name": "Bip01 Ponytail1"
+    },
+    {
+      "name": "Bip01 Ponytail1Nub"
+    },
+    {
+      "children": [
+        11
+      ],
+      "name": "Bip01 L Clavicle"
+    },
+    {
+      "children": [
+        12
+      ],
+      "name": "Bip01 L UpperArm"
+    },
+    {
+      "children": [
+        13
+      ],
+      "name": "Bip01 L ForeArm"
+    },
+    {
+      "children": [
+        14,
+        16,
+        41
+      ],
+      "name": "Bip01 L Hand"
+    },
+    {
+      "children": [
+        15
+      ],
+      "name": "Bip01 L Finger0"
+    },
+    {
+      "name": "Bip01 L Finger0Nub"
+    },
+    {
+      "children": [
+        17
+      ],
+      "name": "Bip01 L Finger1"
+    },
+    {
+      "name": "Bip01 L Finger1Nub"
+    },
+    {
+      "children": [
+        19
+      ],
+      "name": "Bip01 R Clavicle"
+    },
+    {
+      "children": [
+        20
+      ],
+      "name": "Bip01 R UpperArm"
+    },
+    {
+      "children": [
+        21
+      ],
+      "name": "Bip01 R ForeArm"
+    },
+    {
+      "children": [
+        22,
+        24,
+        26,
+        42
+      ],
+      "name": "Bip01 R Hand"
+    },
+    {
+      "children": [
+        23
+      ],
+      "name": "Bip01 R Finger0"
+    },
+    {
+      "name": "Bip01 R Finger0Nub"
+    },
+    {
+      "children": [
+        25
+      ],
+      "name": "Bip01 R Finger1"
+    },
+    {
+      "name": "Bip01 R Finger1Nub"
+    },
+    {
+      "name": "Dummy01"
+    },
+    {
+      "children": [
+        28
+      ],
+      "name": "Bip01 L Thigh"
+    },
+    {
+      "children": [
+        29,
+        43
+      ],
+      "name": "Bip01 L Calf"
+    },
+    {
+      "children": [
+        30
+      ],
+      "name": "Bip01 L Foot"
+    },
+    {
+      "children": [
+        31
+      ],
+      "name": "Bip01 L Toe0"
+    },
+    {
+      "name": "Bip01 L Toe0Nub"
+    },
+    {
+      "children": [
+        33
+      ],
+      "name": "Bip01 R Thigh"
+    },
+    {
+      "children": [
+        34,
+        44
+      ],
+      "name": "Bip01 R Calf"
+    },
+    {
+      "children": [
+        35
+      ],
+      "name": "Bip01 R Foot"
+    },
+    {
+      "children": [
+        36
+      ],
+      "name": "Bip01 R Toe0"
+    },
+    {
+      "name": "Bip01 R Toe0Nub"
+    },
+    {
+      "extras": {"dummy": true},
+      "matrix": [
+        -0.02078385,
+        0.99807054,
+        -0.05850875,
+        0.0,
+        -0.9997836,
+        -0.020799337,
+        0.00034437887,
+        0.0,
+        -0.0008732304,
+        0.058503248,
+        0.99828684,
+        0.0,
+        0.0,
+        0.0,
+        1.202183,
+        1.0
+      ],
+      "name": "Dummy 0"
+    },
+    {
+      "extras": {"dummy": true},
+      "matrix": [
+        0.9975287,
+        0.061100658,
+        0.03469212,
+        0.0,
+        -0.060574528,
+        0.9980349,
+        -0.016020114,
+        0.0,
+        -0.035602786,
+        0.013879048,
+        0.9992696,
+        0.0,
+        0.004112873,
+        0.036713656,
+        1.2020572,
+        1.0
+      ],
+      "name": "Dummy 3"
+    },
+    {
+      "extras": {"dummy": true},
+      "matrix": [
+        1.0,
+        3.45237e-8,
+        -1.3000876e-7,
+        0.0,
+        -3.6879726e-8,
+        0.9999998,
+        -4.1068157e-7,
+        0.0,
+        1.3043393e-7,
+        3.9214396e-7,
+        1.0000001,
+        0.0,
+        0.009359124,
+        0.030098325,
+        1.5705549,
+        1.0
+      ],
+      "name": "Dummy 2"
+    },
+    {
+      "extras": {"dummy": true},
+      "matrix": [
+        0.9994279,
+        0.008949156,
+        0.032615665,
+        0.0,
+        -0.012987969,
+        0.9919697,
+        0.12580587,
+        0.0,
+        -0.031227894,
+        -0.12615757,
+        0.9915186,
+        0.0,
+        0.025814943,
+        0.008982236,
+        2.0816188,
+        1.0
+      ],
+      "name": "Dummy 1"
+    },
+    {
+      "extras": {"dummy": true},
+      "matrix": [
+        0.2921994,
+        0.8389713,
+        0.45907167,
+        0.0,
+        -0.6983329,
+        -0.14079055,
+        0.7017898,
+        0.0,
+        0.6534146,
+        -0.5256474,
+        0.5447424,
+        0.0,
+        0.20301504,
+        0.016636139,
+        1.2935371,
+        1.0
+      ],
+      "name": "Dummy 6"
+    },
+    {
+      "extras": {"dummy": true},
+      "matrix": [
+        0.9283006,
+        -0.3584384,
+        -0.09889403,
+        0.0,
+        0.36817104,
+        0.923281,
+        0.109552324,
+        0.0,
+        0.052039225,
+        -0.13810758,
+        0.98904926,
+        0.0,
+        -0.4552725,
+        0.042890985,
+        0.98448026,
+        1.0
+      ],
+      "name": "Dummy 9"
+    },
+    {
+      "extras": {"dummy": true},
+      "matrix": [
+        0.9975286,
+        0.06110053,
+        0.034692194,
+        0.0,
+        -0.060574368,
+        0.99803483,
+        -0.016020432,
+        0.0,
+        -0.035602897,
+        0.013879264,
+        0.9992694,
+        0.0,
+        0.21328993,
+        0.005545882,
+        0.59607,
+        1.0
+      ],
+      "name": "Dummy 11"
+    },
+    {
+      "extras": {"dummy": true},
+      "matrix": [
+        0.9975286,
+        0.06110075,
+        0.034692086,
+        0.0,
+        -0.06057462,
+        0.99803483,
+        -0.016020253,
+        0.0,
+        -0.035602763,
+        0.013879205,
+        0.99926966,
+        0.0,
+        -0.21530154,
+        -0.0035133113,
+        0.59379303,
+        1.0
+      ],
+      "name": "Dummy 14"
+    }
+  ],
+  "scenes": [
+    {
+      "name": "TestScene",
+      "nodes": [
+        0
+      ]
+    }
+  ],
+  "skins": [
+    {
+      "inverseBindMatrices": 0,
+      "joints": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18,
+        19,
+        20,
+        21,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36
+      ],
+      "name": "TestSkin",
+      "skeleton": 0
+    }
+  ]
+}
