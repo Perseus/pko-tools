@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use rusqlite::{Connection, Row};
+use rusqlite::Connection;
 use serde::Serialize;
 
 use crate::db;

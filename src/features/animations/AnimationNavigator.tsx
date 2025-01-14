@@ -1,7 +1,6 @@
-import { getAnimationFiles } from "@/commands/project";
 import { currentProjectAtom } from "@/store/project";
 import { useAtom, useAtomValue } from "jotai";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { useVirtualizer, Virtualizer } from "@tanstack/react-virtual";
 import React, { useEffect, useState } from "react";
 import { ScrollAreaVirtualizable } from "@/components/ui/scroll-area-virtualizable";
 import { SidebarContent, SidebarHeader } from "@/components/ui/sidebar";
@@ -13,11 +12,19 @@ import {
   selectedAnimationAtom,
 } from "@/store/animation";
 import { Channel, invoke } from "@tauri-apps/api/core";
+import { Character } from "@/types/character";
+import { getCharacterList } from "@/commands/character";
+import { selectedCharacterAtom } from "@/store/character";
+import { Input } from "@/components/ui/input";
+import { Label } from "@radix-ui/react-dropdown-menu";
 
 export default function AnimationNavigator() {
-  const [animationFiles, setAnimationFiles] = useState<string[]>([]);
+  const [characters, setCharacters] = useState<Character[]>([]);
+  const [filteredCharacters, setFilteredCharacters]  = useState<Character[]>([]);
+  const [query, setQuery] = useState("");
+
   const currentProject = useAtomValue(currentProjectAtom);
-  const [, setSelectedAnimationFile] = useAtom(selectedAnimationAtom);
+  const [, setSelectedCharacter] = useAtom(selectedCharacterAtom);
   const [, setCurrentAnimationAction] = useAtom(currentAnimationActionAtom);
   const [, setCurrentActionProgress] = useAtom(currentActionProgressAtom);
   const [, setCurrentActionStatus] = useAtom(currentActionStatusAtom);
@@ -25,29 +32,39 @@ export default function AnimationNavigator() {
   useEffect(() => {
     async function fetchAnimationFiles() {
       if (currentProject) {
-        const files = await getAnimationFiles(currentProject?.id);
-        setAnimationFiles(files);
+        const characters = await getCharacterList(currentProject?.id);
+        setCharacters(characters);
       }
     }
 
     fetchAnimationFiles();
   }, [currentProject]);
 
+  useEffect(() => {
+    setFilteredCharacters(
+      characters.filter((character) =>
+        character.name.toLowerCase().includes(query.toLowerCase())
+      )
+    );
+  }, [query, characters]);
+
+
+
   const parentRef = React.useRef(null);
-  const rowVirtualizer = useVirtualizer({
-    count: animationFiles.length,
+  let rowVirtualizer: Virtualizer<Element, Element> = useVirtualizer({
+    count: filteredCharacters.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 40,
   });
 
-  async function selectAnimationFile(animationFile: string) {
-    if (!selectAnimationFile) {
+  async function selectCharacter(character: Character) {
+    if (!character) {
       return;
     }
 
-    console.log("Selected animation file:", animationFile, currentProject);
+    console.log("Selected character: ", character);
 
-    setSelectedAnimationFile(animationFile);
+    setSelectedCharacter(character);
     setCurrentAnimationAction("load-animation");
     const onEvent = new Channel<[string, number]>();
     onEvent.onmessage = (message: [string, number]) => {
@@ -56,17 +73,19 @@ export default function AnimationNavigator() {
       setCurrentActionStatus(status);
       setCurrentActionProgress(progress);
     };
-    await invoke("load_animation", {
-      location: `${currentProject?.projectDirectory}/animation/${animationFile}`,
-      onEvent,
-    });
+    // await invoke("load_animation", {
+    //   location: `${currentProject?.projectDirectory}/animation/${characterId}`,
+    //   onEvent,
+    // });
   }
 
   return (
     <>
       <SidebarHeader>
         <SidebarContent>
-          <span className="text-md font-semibold">Animations</span>
+          <span className="text-md font-semibold">Characters</span>
+          <Label className="text-xs"> Search </Label>  
+          <Input id="search" value={query} onChange={(e) => setQuery(e.target.value)} />
         </SidebarContent>
       </SidebarHeader>
       <ScrollAreaVirtualizable
@@ -95,10 +114,10 @@ export default function AnimationNavigator() {
                 className="text-sm"
                 variant="link"
                 onClick={() =>
-                  selectAnimationFile(animationFiles[virtualRow.index])
+                  selectCharacter(characters[virtualRow.index])
                 }
               >
-                {animationFiles[virtualRow.index]}
+                {filteredCharacters[virtualRow.index].id}: {filteredCharacters[virtualRow.index].name}
               </Button>
             </div>
           ))}

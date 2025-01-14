@@ -1,6 +1,6 @@
-use crate::{db, AppState};
+use crate::AppState;
 
-use super::project::{self, Project};
+use super::project::{Project};
 
 #[tauri::command]
 pub fn get_projects_list() -> Vec<Project> {

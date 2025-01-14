@@ -9,11 +9,7 @@ export const getCurrentProject = async (): Promise<Project> => {
   return invoke("get_current_project");
 };
 
-export const getAnimationFiles = async (
-  projectId: string
-): Promise<string[]> => {
-  return invoke("get_animation_files", { projectId });
-};
+
 
 export const createProject = async (
   projectName: string,

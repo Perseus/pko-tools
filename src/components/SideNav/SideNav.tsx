@@ -32,11 +32,6 @@ export default function SideNav() {
         url: "#",
         items: [
           {
-            title: "Animations",
-            url: "/animations",
-            isActive: pathname.startsWith("/animations"),
-          },
-          {
             title: "Characters",
             url: "/characters",
             isActive: pathname.startsWith("/characters"),

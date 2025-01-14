@@ -1,11 +1,9 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 mod animation;
+mod character;
 mod db;
 mod preferences;
 mod projects;
-
-use std::path::PathBuf;
-use std::str::FromStr;
 
 use tauri::Manager;
 
@@ -45,6 +43,8 @@ pub fn run() {
             projects::commands::create_project,
             projects::commands::get_animation_files,
             animation::commands::load_animation,
+            character::commands::get_character_list,
+            character::commands::open_character,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

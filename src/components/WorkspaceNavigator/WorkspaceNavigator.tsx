@@ -8,8 +8,7 @@ export default function WorkspaceNavigator() {
       <SidebarContent>
         <Routes>
           <Route path="/" element={<div>norm</div>} />
-          <Route path="/animations" element={<AnimationNavigator />} />
-          <Route path="/characters" element={<div />} />
+          <Route path="/characters" element={<AnimationNavigator/>} />
         </Routes>
       </SidebarContent>
     </Sidebar>

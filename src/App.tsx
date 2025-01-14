@@ -50,8 +50,7 @@ function App() {
           <Routes>
             <Route path="/" element={<div />} />
             <Route path="/project-creator" element={<ProjectCreator />} />
-            <Route path="/animations" element={<AnimationPage />} />
-            <Route path="/characters" element={<div />} />
+            <Route path="/characters" element={<AnimationPage/>} />
           </Routes>
           <WorkspaceNavigator />
         </main>
