@@ -1,5 +1,12 @@
+mod animation;
 pub mod commands;
+mod helper;
 mod info;
+mod math;
+mod mesh;
+mod model;
+mod texture;
+
 use std::path::PathBuf;
 
 use info::get_character;

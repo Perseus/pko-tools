@@ -119,7 +119,6 @@ fn matrix4_to_quaternion(mat: Matrix4<f32>) -> Quaternion<f32> {
         let z = 0.25 * s;
         Quaternion::new(w, x, y, z).normalize()
     }
-
 }
 
 impl LwMatrix43 {

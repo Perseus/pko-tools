@@ -1,6 +1,8 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+
 mod animation;
 mod character;
+mod d3d;
 mod db;
 mod preferences;
 mod projects;
