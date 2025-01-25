@@ -36,8 +36,6 @@ pub fn get_all_characters(project_id: uuid::Uuid) -> anyhow::Result<Vec<Characte
             project_dir.to_str().unwrap()
         );
 
-        println!("Loading character info from {}", character_info_file);
-
         return parse_character_info(PathBuf::from(character_info_file));
     }
 

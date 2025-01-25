@@ -1,4 +1,4 @@
-import AnimationStatusBar from "@/features/animations/AnimationStatusBar";
+import CharacterStatusBar from "@/features/character/CharacterStatusBar";
 import { Route, Routes, useLocation } from "react-router";
 
 interface StatusBarProps {
@@ -12,7 +12,7 @@ export default function StatusBar({ className }: StatusBarProps) {
       {location.pathname}
 
       <Routes>
-        <Route path="/animations" element={<AnimationStatusBar />} />
+        <Route path="/animations" element={<CharacterStatusBar />} />
       </Routes>
     </footer>
   );

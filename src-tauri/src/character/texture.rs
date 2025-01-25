@@ -46,10 +46,16 @@ pub enum ColorKeyType {
 
 #[binrw]
 pub struct ColorValue4F {
-    r: f32,
-    g: f32,
-    b: f32,
-    a: f32,
+    pub r: f32,
+    pub g: f32,
+    pub b: f32,
+    pub a: f32,
+}
+
+impl ColorValue4F { 
+    pub fn to_slice(&self) -> [f32; 4] {
+        [self.r, self.g, self.b, self.a]
+    }
 }
 
 #[repr(u32)]
@@ -71,24 +77,24 @@ pub struct CharMaterial {
     // diffuse
     // base color of the material when lit by diffuse (direct) light
     // diffuse light scatters evenly across the surface, giving the material its primary visible color
-    dif: ColorValue4F,
+    pub dif: ColorValue4F,
 
     // ambient light
     // baseline level of brightness of the material when lit by ambient light
-    amb: ColorValue4F,
+    pub amb: ColorValue4F,
 
     // specular
     // color of the highlights on the material when lit by specular (reflected) light
-    spe: Option<ColorValue4F>,
+    pub spe: Option<ColorValue4F>,
 
     // emissive
     // color of the material when it is self-illuminated
-    emi: Option<ColorValue4F>,
+    pub emi: Option<ColorValue4F>,
 
     // shininess
     // high values produce a small, concentrated highlight
     // low values produce a large, diffused highlight
-    power: f32,
+    pub power: f32,
 }
 
 impl CharMaterial {
@@ -117,9 +123,9 @@ impl CharMaterial {
 #[derive(Default, Copy, Clone, Debug)]
 #[binrw]
 pub struct RenderStateAtom {
-    state: u32,
-    value0: u32,
-    value1: u32,
+    pub state: u32,
+    pub value0: u32,
+    pub value1: u32,
 }
 
 impl RenderStateAtom {
@@ -161,45 +167,45 @@ impl LwColorValue4b {
 pub struct TextureInfo {
     // texture stage? there seem to be multiple stages in lwIUtil.cpp, FN: lwPrimitiveTexLitA
     // dont fully understand the concept yet
-    stage: u32,
+    pub stage: u32,
 
     // level of texture
     // used to reduce resource utilization by reducing the level of detail the "further" away the object is
-    level: u32,
+    pub level: u32,
 
     // dont know what this does yet
-    usage: u32,
+    pub usage: u32,
 
     // pixel format for the texture buffers
     // eg. number of bits for each color channel, number of bits for alpha channel etc.
-    d3d_format: D3DFormat,
+    pub d3d_format: D3DFormat,
 
     // pool type for the texture buffers
     // describes where data is stored in memory and how it is managed between the CPU and GPU
-    d3d_pool: D3DPool,
+    pub d3d_pool: D3DPool,
 
     // whether the data should be "padded" to a certain byte alignment
     // to ensure efficient data access by the CPU/GPU
     // this is done to ensure that we minimize the number of operations being performed
     // when the CPU/GPU is reading/writing data
-    byte_alignment_flag: u32,
+    pub byte_alignment_flag: u32,
 
     // source of texture data
-    _type: TextureType,
+    pub _type: TextureType,
 
     // width and height of the texture
-    width: u32,
-    height: u32,
+    pub width: u32,
+    pub height: u32,
 
     // color key type
-    colorkey_type: ColorKeyType,
-    colorkey: LwColorValue4b,
+    pub colorkey_type: ColorKeyType,
+    pub colorkey: LwColorValue4b,
 
-    file_name: [u8; 64],
+    pub file_name: [u8; 64],
 
-    data: u32,
+    pub data: u32,
 
-    tss_set: [RenderStateAtom; 8],
+    pub tss_set: [RenderStateAtom; 8],
 }
 
 impl TextureInfo {
@@ -247,11 +253,11 @@ pub struct TextureInfo0001 {
 }
 
 pub struct CharMaterialTextureInfo {
-    opacity: f32,
-    transp_type: MaterialTextureInfoTransparencyType,
-    material: CharMaterial,
-    rs_set: [RenderStateAtom; 8],
-    tex_seq: [TextureInfo; 4],
+    pub opacity: f32,
+    pub transp_type: MaterialTextureInfoTransparencyType,
+    pub material: CharMaterial,
+    pub rs_set: [RenderStateAtom; 8],
+    pub tex_seq: [TextureInfo; 4],
 }
 
 impl CharMaterialTextureInfo {

@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use super::{info::get_all_characters, Character};
+use super::{info::get_all_characters, Character, get_character_gltf_json};
 
 #[tauri::command]
 pub async fn get_character_list(project_id: String) -> Result<Vec<Character>, String> {
@@ -15,4 +15,12 @@ pub async fn get_character_list(project_id: String) -> Result<Vec<Character>, St
 }
 
 #[tauri::command]
-pub async fn open_character(project_id: String, character_id: u32) {}
+pub async fn load_character(project_id: String, character_id: u32) -> Result<String, String> {
+    println!("Loading character: {} in project: {}", character_id, project_id);
+    let project_id = uuid::Uuid::from_str(&project_id).unwrap();
+    let char_gltf_json = get_character_gltf_json(project_id, character_id);
+    if char_gltf_json.is_err() {
+        return Err(char_gltf_json.err().unwrap().to_string());
+    }
+    Ok(char_gltf_json.unwrap())
+}

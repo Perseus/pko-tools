@@ -1,15 +1,18 @@
-use std::ffi::c_void;
+use std::{ffi::c_void, fs::File, io::BufWriter, path::PathBuf, vec};
 
 use crate::{
-    animation::character::{LW_INVALID_INDEX, LW_MAX_NAME},
+    animation::character::{LwBoneFile, LW_INVALID_INDEX, LW_MAX_NAME},
     d3d::{D3DBlend, D3DCmpFunc, D3DFormat, D3DPool, D3DRenderStateType},
 };
+use ::gltf::json::{self, scene::UnitQuaternion, Index, Node, Scene};
+use base64::{prelude::BASE64_STANDARD, Engine};
 use binrw::{binrw, BinRead, BinWrite, Error, NullString};
+use gltf::json as gltf;
 use gltf::Texture;
 
 use crate::animation::character::LwMatrix44;
 
-use super::{helper::HelperData, mesh::CharacterMeshInfo, texture::CharMaterialTextureInfo};
+use super::{helper::HelperData, mesh::CharacterMeshInfo, texture::CharMaterialTextureInfo, GLTFFieldsToAggregate};
 
 pub const EXP_OBJ_VERSION_0_0_0_0: u32 = 0x00000000;
 pub const EXP_OBJ_VERSION_1_0_0_0: u32 = 0x00001000;
@@ -169,8 +172,51 @@ pub struct CharacterGeometricModel {
     helper_data: Option<HelperData>,
 }
 
+
+impl CharacterGeometricModel {
+    pub fn get_gltf_mesh_primitive(&self, fields_to_aggregate: &mut GLTFFieldsToAggregate) -> gltf::mesh::Primitive{
+        let mesh_info = self.mesh_info.as_ref().unwrap();
+        mesh_info.get_gltf_primitive(fields_to_aggregate, &self.material_seq)
+    }
+    // pub fn to_gltf(&self, anim: LwBoneFile, fields_to_aggregate: &mut GLTFFieldsToAggregate) -> gltf::Root {
+    //     let (skin, nodes) = anim.to_gltf_skin_and_nodes(fields_to_aggregate);
+    //     anim.to_gltf_animations_and_sampler(fields_to_aggregate);
+
+
+    //     let root = gltf::Root {
+    //         nodes,
+    //         skins: vec![skin],
+    //         images: fields_to_aggregate.image,
+    //         scene: Some(Index::new(0)),
+    //         accessors: fields_to_aggregate.accessor,
+    //         buffers: fields_to_aggregate.buffer,
+    //         buffer_views: fields_to_aggregate.buffer_view,
+    //         textures: fields_to_aggregate.texture,
+    //         materials: fields_to_aggregate.material,
+    //         samplers: fields_to_aggregate.sampler,
+    //         animations: fields_to_aggregate.animation,
+    //         ..Default::default()
+    //     };
+
+    //     let file = File::create("test.gltf").unwrap();
+    //     let writer = BufWriter::new(file);
+    //     json::serialize::to_writer_pretty(writer, &root).unwrap();
+
+    //     root
+    // }
+
+    pub fn from_file(file_path: PathBuf) -> anyhow::Result<Self> {
+        let file = File::open(file_path)?;
+        let mut reader = std::io::BufReader::new(file);
+        let geom: CharacterGeometricModel = BinRead::read_options(&mut reader, binrw::Endian::Little, ())?;
+        Ok(geom)
+    }
+}
+
 #[cfg(test)]
 mod tests {
+
+    use crate::animation::character::{LwBoneFile};
 
     use super::*;
 
@@ -196,4 +242,27 @@ mod tests {
         assert_eq!(helper.bsphere_num, 7);
         assert_eq!(helper.bsphere_seq[0].sphere.r, 0.8649084)
     }
+
+    // #[test]
+    // fn it_writes_gltf_file() {
+    //     let model_data = include_bytes!("../../test_artifacts/0730000000.lgo");
+    //     let mut model_reader = std::io::Cursor::new(model_data);
+
+    //     let geom: CharacterGeometricModel =
+    //         BinRead::read_options(&mut model_reader, binrw::Endian::Little, ()).unwrap();
+
+    //     let anim_data = include_bytes!("../../test_artifacts/0730.lab");
+    //     let mut anim_reader = std::io::Cursor::new(anim_data);
+
+    //     let (tx, rx) = tokio::sync::mpsc::channel::<(String, u8)>(100);
+
+    //     let anim: LwBoneFile = BinRead::read_options(
+    //         &mut anim_reader,
+    //         binrw::Endian::Little,
+    //         ()
+    //     )
+    //     .unwrap();
+
+    //     geom.to_gltf(anim);
+    // }
 }

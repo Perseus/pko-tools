@@ -6,6 +6,7 @@ mod d3d;
 mod db;
 mod preferences;
 mod projects;
+mod broadcast;
 
 use tauri::Manager;
 
@@ -46,7 +47,7 @@ pub fn run() {
             projects::commands::get_animation_files,
             animation::commands::load_animation,
             character::commands::get_character_list,
-            character::commands::open_character,
+            character::commands::load_character,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

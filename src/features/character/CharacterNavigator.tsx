@@ -5,29 +5,21 @@ import React, { useEffect, useState } from "react";
 import { ScrollAreaVirtualizable } from "@/components/ui/scroll-area-virtualizable";
 import { SidebarContent, SidebarHeader } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
-import {
-  currentActionProgressAtom,
-  currentActionStatusAtom,
-  currentAnimationActionAtom,
-  selectedAnimationAtom,
-} from "@/store/animation";
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { Character } from "@/types/character";
 import { getCharacterList } from "@/commands/character";
-import { selectedCharacterAtom } from "@/store/character";
+import { characterGltfJsonAtom, selectedCharacterAtom } from "@/store/character";
 import { Input } from "@/components/ui/input";
 import { Label } from "@radix-ui/react-dropdown-menu";
 
-export default function AnimationNavigator() {
+export default function CharacterNavigator() {
   const [characters, setCharacters] = useState<Character[]>([]);
   const [filteredCharacters, setFilteredCharacters]  = useState<Character[]>([]);
+  const [, setCharacterGltfJson] = useAtom(characterGltfJsonAtom);
   const [query, setQuery] = useState("");
 
   const currentProject = useAtomValue(currentProjectAtom);
   const [, setSelectedCharacter] = useAtom(selectedCharacterAtom);
-  const [, setCurrentAnimationAction] = useAtom(currentAnimationActionAtom);
-  const [, setCurrentActionProgress] = useAtom(currentActionProgressAtom);
-  const [, setCurrentActionStatus] = useAtom(currentActionStatusAtom);
 
   useEffect(() => {
     async function fetchAnimationFiles() {
@@ -62,21 +54,19 @@ export default function AnimationNavigator() {
       return;
     }
 
-    console.log("Selected character: ", character);
 
     setSelectedCharacter(character);
-    setCurrentAnimationAction("load-animation");
     const onEvent = new Channel<[string, number]>();
     onEvent.onmessage = (message: [string, number]) => {
       const [status, progress] = message;
-
-      setCurrentActionStatus(status);
-      setCurrentActionProgress(progress);
     };
-    // await invoke("load_animation", {
-    //   location: `${currentProject?.projectDirectory}/animation/${characterId}`,
-    //   onEvent,
-    // });
+    const character_gltf_json = await invoke<string>("load_character", {
+      projectId: currentProject?.id,
+      characterId: character.id,
+      onEvent,
+    });
+
+    setCharacterGltfJson(character_gltf_json);
   }
 
   return (
@@ -114,7 +104,7 @@ export default function AnimationNavigator() {
                 className="text-sm"
                 variant="link"
                 onClick={() =>
-                  selectCharacter(characters[virtualRow.index])
+                  selectCharacter(filteredCharacters[virtualRow.index])
                 }
               >
                 {filteredCharacters[virtualRow.index].id}: {filteredCharacters[virtualRow.index].name}

@@ -14,7 +14,7 @@ import { useAtom } from "jotai";
 import { currentProjectAtom, projectListAtom } from "./store/project";
 import { useEffect } from "react";
 import StatusBar from "./components/StatusBar/StatusBar";
-import AnimationPage from "./pages/animations";
+import CharacterPage from "./pages/characters";
 import WorkspaceNavigator from "./components/WorkspaceNavigator/WorkspaceNavigator";
 import ProjectCreator from "./pages/project-creator/ProjectCreator";
 import { Toaster } from "./components/ui/toaster";
@@ -50,7 +50,7 @@ function App() {
           <Routes>
             <Route path="/" element={<div />} />
             <Route path="/project-creator" element={<ProjectCreator />} />
-            <Route path="/characters" element={<AnimationPage/>} />
+            <Route path="/characters" element={<CharacterPage/>} />
           </Routes>
           <WorkspaceNavigator />
         </main>

@@ -7,7 +7,7 @@ import {
 import { useAtomValue } from "jotai";
 import { Progress } from "@/components/ui/progress";
 
-export default function AnimationStatusBar() {
+export default function CharacterStatusBar() {
   const selectedAnimation = useAtomValue(selectedAnimationAtom);
   const animationActionStatus = useAtomValue(currentActionStatusAtom);
   const animationActionProgress = useAtomValue(currentActionProgressAtom);

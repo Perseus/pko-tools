@@ -7,7 +7,7 @@ use cgmath::{InnerSpace, Matrix4, Quaternion, Vector2, Vector3};
 pub struct LwVector3(
     #[br(map = |raw: [f32; 3]| Vector3::new(raw[0], raw[1], raw[2]))]
     #[bw(map = |v: &Vector3<f32>| [v.x, v.y, v.z])]
-    Vector3<f32>,
+    pub Vector3<f32>,
 );
 
 #[binrw]
@@ -16,7 +16,7 @@ pub struct LwVector3(
 pub struct LwVector2(
     #[br(map = |raw: [f32; 2]| Vector2::new(raw[0], raw[1]))]
     #[bw(map = |v: &Vector2<f32>| [v.x, v.y])]
-    Vector2<f32>,
+    pub Vector2<f32>,
 );
 
 impl Default for LwVector2 {
@@ -155,6 +155,29 @@ impl LwMatrix44 {
         (LwVector3(translation), LwQuaternion(rotation_quat), scale)
     }
 }
+
+#[binrw]
+#[derive(Debug, Clone)]
+#[br(little)]
+pub struct LwMatrix43(
+    // data in the .lab format is stored in row-major
+    // we want to convert it to column-major
+    #[br(map = |raw: [f32; 12]| Matrix4::new(
+        raw[0], raw[3], raw[6], raw[9],
+        raw[1], raw[4], raw[7], raw[10],
+        raw[2], raw[5], raw[8], raw[11], 
+        0.0, 0.0, 0.0, 1.0
+    ))]
+
+    // we want to convert it back to row-major while writing to the file again
+    #[bw(map = |m: &Matrix4<f32>| [
+        m.x.x, m.y.x, m.z.x, 
+        m.w.x, m.x.y, m.y.y,
+        m.z.y, m.w.y, m.x.z,
+        m.y.z, m.z.z, m.w.z
+    ])]
+    Matrix4<f32>,
+);
 
 #[binrw]
 #[derive(Debug, Clone)]

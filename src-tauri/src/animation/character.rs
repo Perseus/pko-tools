@@ -1,9 +1,9 @@
 use base64::prelude::*;
-use cgmath::{InnerSpace, Matrix, Matrix4, Quaternion, Vector3};
-use gltf::json::{
-    self, accessor::{ComponentType, GenericComponentType, Type}, buffer::View, scene::UnitQuaternion, validation::{self, USize64}, Accessor, Buffer, Index, Node, Root, Scene, Skin
-};
-use serde_json::value::RawValue;
+use cgmath::{InnerSpace,  Matrix3, Matrix4, Quaternion,  Vector3};
+use gltf::{animation::Property, json::{
+    self, accessor::{ComponentType, GenericComponentType, Type}, animation::{Channel, Sampler, Target}, buffer::{self, View}, scene::UnitQuaternion, validation::{self, Checked, USize64}, Accessor, Animation, Buffer, Index, Node, Root, Scene, Skin
+}};
+use serde_json::{value::RawValue};
 use std::{collections::HashMap, fs::File, io::BufWriter, path::PathBuf};
 
 pub struct Character {
@@ -12,6 +12,8 @@ pub struct Character {
 
 use binrw::{binrw, BinRead, BinResult, VecArgs};
 use std::io::{Read, Seek};
+
+use crate::character::GLTFFieldsToAggregate;
 
 // Constants
 pub const LW_MAX_NAME: usize = 64;
@@ -62,29 +64,26 @@ impl LwQuaternion {
 #[derive(Debug, Clone)]
 #[br(little)]
 pub struct LwMatrix43(
-    // data in the .lab format is stored in row-major
-    // we want to convert it to column-major
     #[br(map = |raw: [f32; 12]| Matrix4::new(
-        raw[0], raw[3], raw[6], raw[9],
-        raw[1], raw[4], raw[7], raw[10],
-        raw[2], raw[5], raw[8], raw[11], 
-        0.0, 0.0, 0.0, 1.0
+        raw[0], raw[1], raw[2], 0.0,
+        raw[3], raw[4], raw[5], 0.0,
+        raw[6], raw[7], raw[8], 0.0,
+        raw[9], raw[10], raw[11], 1.0
     ))]
 
     // we want to convert it back to row-major while writing to the file again
     #[bw(map = |m: &Matrix4<f32>| [
-        m.x.x, m.y.x, m.z.x, 
-        m.w.x, m.x.y, m.y.y,
-        m.z.y, m.w.y, m.x.z,
-        m.y.z, m.z.z, m.w.z
+        m.x.x, m.y.x, m.z.x, m.w.x,
+        m.x.y, m.y.y, m.z.y, m.w.y,
+        m.x.z, m.y.z, m.z.z, m.w.z
     ])]
     Matrix4<f32>,
 );
 
 fn matrix4_to_quaternion(mat: Matrix4<f32>) -> Quaternion<f32> {
-    let m00 = mat.x.x; let m01 = mat.y.x; let m02 = mat.z.x;
-    let m10 = mat.x.y; let m11 = mat.y.y; let m12 = mat.z.y;
-    let m20 = mat.x.z; let m21 = mat.y.z; let m22 = mat.z.z;
+    let m00 = mat.x.x; let m01 = mat.x.y; let m02 = mat.x.z;
+    let m10 = mat.y.x; let m11 = mat.y.y; let m12 = mat.y.z;
+    let m20 = mat.z.x; let m21 = mat.z.y; let m22 = mat.z.z;
 
     let trace = m00 + m11 + m22;
     if trace > 0.0 {
@@ -123,11 +122,13 @@ fn matrix4_to_quaternion(mat: Matrix4<f32>) -> Quaternion<f32> {
 
 impl LwMatrix43 {
     pub fn to_translation_rotation_scale(&self) -> (LwVector3, LwQuaternion, LwVector3) {
-        let translation = LwVector3(Vector3::new(self.0.x.z, self.0.y.z, self.0.z.z));
+        // For column-major 4x3 matrix, translation is in the 4th column (w component)
+        let translation = LwVector3(Vector3::new(self.0.w.x, self.0.w.y, self.0.w.z));
 
-        let mut col0 = Vector3::new(self.0.x.x, self.0.y.x, self.0.z.x);
-        let mut col1 = Vector3::new(self.0.x.y, self.0.y.y, self.0.z.y);
-        let mut col2 = Vector3::new(self.0.x.z, self.0.y.z, self.0.z.z);
+        // In column-major, each column vector is already separated
+        let mut col0 = Vector3::new(self.0.x.x, self.0.x.y, self.0.x.z);
+        let mut col1 = Vector3::new(self.0.y.x, self.0.y.y, self.0.y.z); 
+        let mut col2 = Vector3::new(self.0.z.x, self.0.z.y, self.0.z.z);
 
         let scale_x = col0.magnitude();
         let scale_y = col1.magnitude();
@@ -138,14 +139,8 @@ impl LwMatrix43 {
         if scale_y != 0.0 { col1 /= scale_y; }
         if scale_z != 0.0 { col2 /= scale_z; }
 
-        let rot_mat = Matrix4::new(
-            col0.x, col1.x, col2.x, 0.0,
-            col0.y, col1.y, col2.y, 0.0,
-            col0.z, col1.z, col2.z, 0.0,
-            0.0, 0.0, 0.0, 1.0
-        );
-
-        let rotation = matrix4_to_quaternion(rot_mat);
+        let rotation_matrix = Matrix3::from_cols(col0, col1, col2);
+        let rotation = Quaternion::from(rotation_matrix);
 
         (translation, LwQuaternion(rotation), scale)
     }
@@ -157,10 +152,10 @@ impl LwMatrix43 {
 #[br(little)]
 pub struct LwMatrix44(
     #[br(map = |raw: [f32; 16]| Matrix4::new(
-        raw[0], raw[4], raw[8], raw[12],
-        raw[1], raw[5], raw[9], raw[13],
-        raw[2], raw[6], raw[10], raw[14],
-        raw[3], raw[7], raw[11], raw[15]
+        raw[0], raw[1], raw[2], raw[3],
+        raw[4], raw[5], raw[6], raw[7],
+        raw[8], raw[9], raw[10], raw[11],
+        raw[12], raw[13], raw[14], raw[15]
     ))]
     #[bw(map = |m: &Matrix4<f32>| [
         m.x.x, m.y.x, m.z.x, m.w.x,
@@ -260,7 +255,6 @@ pub struct LwBoneDummyInfo {
 
 #[binrw]
 #[derive(Debug)]
-#[br(import { frame_num: u32, key_type:  u32, version: u32, parent_id: u32 })]
 pub struct LwBoneKeyInfo {
     #[br(default)]
     pub mat43_seq: Option<Vec<LwMatrix43>>,
@@ -400,17 +394,14 @@ pub struct LwBoneFile {
     pub key_seq: Vec<LwBoneKeyInfo>,
 }
 
-pub struct LwBoneFileArgs<'a> {
-    update_channel: &'a tokio::sync::mpsc::Sender<(String, u8)>,
-}
 
 impl BinRead for LwBoneFile {
-    type Args<'a> = LwBoneFileArgs<'a>;
+    type Args<'a> = ();
 
     fn read_options<R: Read + Seek>(
         reader: &mut R,
         opts: binrw::Endian,
-        args: Self::Args<'_>,
+        _args: Self::Args<'_>,
     ) -> BinResult<Self> {
         let mut this = LwBoneFile {
             version: 0,
@@ -427,20 +418,20 @@ impl BinRead for LwBoneFile {
             key_seq: Vec::new(),
         };
 
-        args.update_channel
-            .try_send(("Reading version".to_string(), 10));
+        // args.update_channel
+        //     .try_send(("Reading version".to_string(), 10));
         this.version = u32::read_options(reader, opts, ())?;
 
         if this.version == 0 {
             this.old_version = u32::read_options(reader, opts, ())?;
         }
 
-        args.update_channel
-            .try_send(("Reading header".to_string(), 20));
+        // args.update_channel
+        //     .try_send(("Reading header".to_string(), 20));
         this.header = LwBoneInfoHeader::read_options(reader, opts, ())?;
 
-        args.update_channel
-            .try_send(("Reading bone information".to_string(), 30));
+        // args.update_channel
+        //     .try_send(("Reading bone information".to_string(), 30));
         this.base_seq = Vec::read_options(
             reader,
             opts,
@@ -450,8 +441,8 @@ impl BinRead for LwBoneFile {
             },
         )?;
 
-        args.update_channel
-            .try_send(("Reading initial position matrices".to_string(), 40));
+        // args.update_channel
+        //     .try_send(("Reading initial position matrices".to_string(), 40));
         this.invmat_seq = Vec::read_options(
             reader,
             opts,
@@ -461,8 +452,8 @@ impl BinRead for LwBoneFile {
             },
         )?;
 
-        args.update_channel
-            .try_send(("Reading dummy information".to_string(), 60));
+        // args.update_channel
+        //     .try_send(("Reading dummy information".to_string(), 60));
         this.dummy_seq = Vec::read_options(
             reader,
             opts,
@@ -472,8 +463,8 @@ impl BinRead for LwBoneFile {
             },
         )?;
 
-        args.update_channel
-            .try_send(("Reading keyframe data".to_string(), 100));
+        // args.update_channel
+        //     .try_send(("Reading keyframe data".to_string(), 100));
 
         let mut key_infos = Vec::with_capacity(this.header.bone_num as usize);
         for i in 0..this.header.bone_num {
@@ -537,6 +528,443 @@ impl LwBoneFile {
         };
 
         Ok((LwQuaternion(Quaternion::new(0.0, 0.0, 0.0, 1.0)), LwVector3(Vector3::new(0.0, 0.0, 0.0))))
+    }
+
+    pub fn to_gltf_skin_and_nodes(&self, fields_to_aggregate: &mut GLTFFieldsToAggregate) -> (
+        Skin,
+        Vec<Node>
+    ) {
+        let bone_num = self.header.bone_num as usize;
+        let mut bone_id_to_node_index = HashMap::new();
+        let mut gltf_nodes = Vec::with_capacity(bone_num);
+
+        for i in 0..bone_num {
+            let base_info = &self.base_seq[i];
+            let node_index = i;
+
+            bone_id_to_node_index.insert(base_info.id, node_index);
+            let (rotation, translation) = self.get_node_rot_and_translation(node_index, 0).unwrap();
+            let node = Node {
+                camera: None,
+                children: None,
+                matrix: None,
+                rotation: Some(UnitQuaternion(rotation.to_slice())),
+                scale: None,
+                translation: Some(translation.to_slice()),
+                skin: None,
+                mesh: None,
+                name: Some(base_info.name.clone()),
+                extensions: None,
+                extras: Default::default(),
+                weights: None,
+            };
+
+            gltf_nodes.push(node);
+        }
+
+        let dummy_num = self.header.dummy_num as usize;
+        let mut dummy_id_to_node_index = HashMap::new();    
+
+        for i in 0..dummy_num {
+            let dummy_info = &self.dummy_seq[i];
+            let node_index = i + bone_num;
+
+            let dummy_extras = RawValue::from_string(r#"{"dummy": true}"#.to_string()).unwrap();
+            let (translation, rotation, _) = dummy_info.mat.to_translation_rotation_scale();
+
+            let node = Node {
+                camera: None,
+                children: None,
+                matrix: None,
+                rotation: Some(UnitQuaternion(rotation.to_slice())),
+                scale: None,
+                translation: Some(translation.to_slice()),
+                skin: None,
+                mesh: None,
+                name: Some(format!("Dummy {}", dummy_info.id)),
+                extensions: None,
+                extras: Some(dummy_extras),
+                weights: None,
+            };
+            dummy_id_to_node_index.insert(dummy_info.id, node_index);
+            gltf_nodes.push(node);
+        }
+
+        let mut root_nodes: Vec<Index<Node>> = Vec::new();
+
+        for i in 0..bone_num {
+            let base_info = &self.base_seq[i];
+            let parent_id = base_info.parent_id;
+
+            if parent_id == LW_INVALID_INDEX {
+                root_nodes.push(Index::new(i as u32));
+            } else if let Some(&parent_node_index) = bone_id_to_node_index.get(&parent_id) {
+                let gltf_node = &mut gltf_nodes[parent_node_index];
+                if gltf_node.children.is_none() {
+                    gltf_node.children = Some(vec![Index::new(i as u32)]);
+                } else if let Some(ref mut children) = gltf_node.children {
+                    children.push(Index::new(i as u32));
+                }
+            }
+        }
+
+        for i in 0..dummy_num {
+            let dummy_info = &self.dummy_seq[i];
+            let parent_bone_id = dummy_info.parent_bone_id;
+
+            if let Some(&parent_node_index) = bone_id_to_node_index.get(&parent_bone_id) {
+                let gltf_node = &mut gltf_nodes[parent_node_index];
+                if gltf_node.children.is_none() {
+                    gltf_node.children = Some(vec![Index::new((i + bone_num) as u32)]);
+                } else if let Some(ref mut children) = gltf_node.children {
+                    children.push(Index::new((i + bone_num) as u32));
+                }
+            }
+        }
+
+        let ibm_count = bone_num + dummy_num;
+        let ibm_byte_count = ibm_count * 16 * std::mem::size_of::<f32>();
+        let mut buffer_data: Vec<u8> = Vec::with_capacity(ibm_byte_count);
+
+        for i in 0..bone_num {
+            let mat = &mut self.invmat_seq[i].to_slice();
+            let mat_bytes = bytemuck::cast_slice(mat);
+
+            buffer_data.extend_from_slice(mat_bytes);
+        }
+
+        for i in 0..dummy_num {
+            let mat = &mut self.dummy_seq[i].mat.to_slice();
+            mat.iter_mut().for_each(|x| *x = x.clamp(-1.0, 1.0));
+
+            let mat_bytes = bytemuck::cast_slice(mat);
+
+            buffer_data.extend_from_slice(mat_bytes);
+        }
+
+        let ibm_buffer_index = fields_to_aggregate.buffer.len();
+        let ibm_buffer_view_index = fields_to_aggregate.buffer_view.len();
+        let ibm_accessor_index = fields_to_aggregate.accessor.len();
+
+        let ibm_buffer = Buffer {
+            byte_length: USize64(ibm_byte_count as u64),
+            uri: Some(format!("data:application/octet-stream;base64,{}", BASE64_STANDARD.encode(&buffer_data))),
+            extensions: None,
+            extras: Default::default(),
+            name: Some("InverseBindMatricesBuffer".to_string()),
+        };
+
+        let ibm_buffer_view = View {
+            buffer: Index::new(ibm_buffer_index as u32),
+            byte_length: USize64(ibm_byte_count as u64),
+            byte_offset: Some(USize64(0)),
+            byte_stride: None,
+            target: None,
+            extensions: None,
+            extras: Default::default(),
+            name: Some("InverseBindMatricesBufferView".to_string()),
+        };
+
+        let ibm_accessor = Accessor {
+            name: Some("InverseBindMatricesAccessor".to_string()),
+            buffer_view: Some(Index::new(ibm_buffer_view_index as u32)),
+            byte_offset: Some(USize64(0)),
+            component_type: validation::Checked::Valid(GenericComponentType(ComponentType::F32)),
+            count: USize64(ibm_count as u64),
+            extensions: None,
+            extras: Default::default(),
+            max: None,
+            min: None,
+            normalized: false,
+            sparse: None,
+            type_: validation::Checked::Valid(Type::Mat4),
+        };
+
+        fields_to_aggregate.buffer.push(ibm_buffer);
+        fields_to_aggregate.buffer_view.push(ibm_buffer_view);
+        fields_to_aggregate.accessor.push(ibm_accessor);
+
+        gltf_nodes.push(Node{
+            mesh: Some(Index::new(0)),
+            skin: Some(Index::new(0)),
+            name: Some("CharacterSkinnedMesh".to_string()),
+            ..Default::default()
+        });
+
+        let skin = Skin {
+            inverse_bind_matrices: Some(Index::new(ibm_accessor_index as u32)),
+            skeleton: root_nodes.first().cloned(),
+            joints: (0..bone_num).map(|i| Index::new(i as u32)).collect(),
+            name: Some("CharacterSkin".to_string()),
+            extensions: None,
+            extras: Default::default(),
+        };
+
+
+        (
+            skin,
+            gltf_nodes,
+        )
+
+    }
+
+
+    fn get_keyframe_timings(&self) -> Vec<f32> {
+        const FRAME_RATE: f32 = 30.0;
+        const FRAME_DURATION: f32 = 1.0 / FRAME_RATE;
+
+        (0..self.header.frame_num).map(|i| i as f32 * FRAME_DURATION).collect()
+    }
+
+
+    pub fn to_gltf_animations_and_sampler(&self, fields_to_aggregate: &mut GLTFFieldsToAggregate) {
+        let mut channels: Vec<Channel> = Vec::new();
+        let mut samplers: Vec<Sampler> = Vec::new();
+
+        let keyframe_timings = self.get_keyframe_timings();
+
+        let keyframe_buffer_index = fields_to_aggregate.buffer.len();
+        let keyframe_buffer_view_index = fields_to_aggregate.buffer_view.len();
+        let keyframe_accessor_index = fields_to_aggregate.accessor.len();
+
+        let mut keyframe_timings_buffer_data: Vec<u8>= vec![];
+        for frame_timing in &keyframe_timings {
+            keyframe_timings_buffer_data.extend_from_slice(&frame_timing.to_le_bytes());
+        }
+
+        let keyframe_timings_buffer = Buffer{
+            byte_length: USize64(keyframe_timings_buffer_data.len() as u64),
+            uri: Some(format!("data:application/octet-stream;base64,{}", BASE64_STANDARD.encode(&keyframe_timings_buffer_data))),
+            extensions: None,
+            extras: None,
+            name: Some("KeyframeTimings".to_string()),
+        };
+
+        let keyframe_timings_buffer_view = buffer::View{
+            buffer: Index::new(keyframe_buffer_index as u32),
+            byte_length: USize64(keyframe_timings_buffer_data.len() as u64),
+            byte_offset: Some(USize64(0)),
+            byte_stride: None,
+            extensions: None,
+            extras: None,
+            name: Some("KeyframeBufferView".to_string()),
+            target: None,
+        };
+
+        let keyframe_timings_accessor = Accessor{
+            buffer_view: Some(Index::new(keyframe_buffer_view_index as u32)),
+            byte_offset: Some(USize64(0)),
+            component_type: validation::Checked::Valid(GenericComponentType(ComponentType::F32)),
+            count: USize64(keyframe_timings.len() as u64),
+            extensions: None,
+            extras: None,
+            max: None,
+            min: None,
+            name: Some("KeyframeTimingsAccessor".to_string()),
+            normalized: false,
+            sparse: None,
+            type_:  validation::Checked::Valid(Type::Scalar),
+        };
+
+        fields_to_aggregate.accessor.push(keyframe_timings_accessor);
+        fields_to_aggregate.buffer.push(keyframe_timings_buffer);
+        fields_to_aggregate.buffer_view.push(keyframe_timings_buffer_view);
+
+        for i in 0..self.header.bone_num {
+            let keyframe_seq = &self.key_seq[i as usize];
+            let (translation, rotation) =  match self.header.key_type {
+                BONE_KEY_TYPE_QUAT => {
+                    let translation = keyframe_seq.pos_seq.as_ref().unwrap();
+                    let rotation = keyframe_seq.quat_seq.as_ref().unwrap();
+
+                    (translation.clone(), rotation.clone())
+                }
+                BONE_KEY_TYPE_MAT43 => {
+                    let animation_mat = keyframe_seq.mat43_seq.as_ref().unwrap();
+                    let mut translation_vec = vec![];
+                    let mut rotation_vec = vec![];
+
+                    for mat in animation_mat {
+                        let (translation, rotation, _) = mat.to_translation_rotation_scale();
+                        translation_vec.push(translation);
+                        rotation_vec.push(rotation);
+                    }
+
+                    (translation_vec, rotation_vec)
+                }
+
+                _ => panic!("Unsupported key type"),
+            };
+
+            let mut keyframe_translation_buffer_data: Vec<u8> = vec![];
+            let mut keyframe_rotation_buffer_data: Vec<u8> = vec![];
+
+            for j in 0..self.header.frame_num {
+                let frame_translation = translation.get(j as usize).unwrap();
+                let frame_rotation = rotation.get(j as usize).unwrap();
+
+                keyframe_translation_buffer_data.extend_from_slice(&frame_translation.0.x.to_le_bytes());
+                keyframe_translation_buffer_data.extend_from_slice(&frame_translation.0.y.to_le_bytes());
+                keyframe_translation_buffer_data.extend_from_slice(&frame_translation.0.z.to_le_bytes());
+
+                keyframe_rotation_buffer_data.extend_from_slice(&frame_rotation.0.v.x.to_le_bytes());
+                keyframe_rotation_buffer_data.extend_from_slice(&frame_rotation.0.v.y.to_le_bytes());
+                keyframe_rotation_buffer_data.extend_from_slice(&frame_rotation.0.v.z.to_le_bytes());
+                keyframe_rotation_buffer_data.extend_from_slice(&frame_rotation.0.s.to_le_bytes());
+            }
+
+            let keyframe_translation_buffer_index = fields_to_aggregate.buffer.len();
+            let keyframe_translation_buffer_view_index = fields_to_aggregate.buffer_view.len();
+            let keyframe_translation_accessor_index = fields_to_aggregate.accessor.len();
+
+            let keyframe_translation_buffer = Buffer{
+                byte_length: USize64(keyframe_translation_buffer_data.len() as u64),
+                uri: Some(format!("data:application/octet-stream;base64,{}", BASE64_STANDARD.encode(&keyframe_translation_buffer_data))),
+                extensions: None,
+                extras: None,
+                name: Some(format!("KeyframeTranslationBuffer_{}", i)),
+            };
+
+            let keyframe_translation_buffer_view = buffer::View{
+                buffer: Index::new(keyframe_translation_buffer_index as u32),
+                byte_length: USize64(keyframe_translation_buffer_data.len() as u64),
+                byte_offset: Some(USize64(0)),
+                byte_stride: None,
+                target: Some(
+                    validation::Checked::Valid(
+                        buffer::Target::ArrayBuffer
+                    )
+                ),
+                extensions: None,
+                extras: None,
+                name: Some(format!("KeyframeTranslationBufferView_{}", i)),
+            };
+
+            let keyframe_translation_accessor = Accessor{
+                buffer_view: Some(Index::new(keyframe_translation_buffer_view_index as u32)),
+                byte_offset: Some(USize64(0)),
+                component_type: validation::Checked::Valid(GenericComponentType(ComponentType::F32)),
+                count: USize64(keyframe_timings.len() as u64),
+                extensions: None,
+                extras: None,
+                max: None,
+                min: None,
+                name: Some(format!("KeyframeTranslationAccessor_{}", i)),
+                normalized: false,
+                sparse: None,
+                type_: validation::Checked::Valid(Type::Vec3),
+            };
+
+            fields_to_aggregate.accessor.push(keyframe_translation_accessor);
+            fields_to_aggregate.buffer.push(keyframe_translation_buffer);
+            fields_to_aggregate.buffer_view.push(keyframe_translation_buffer_view);
+
+            let keyframe_rotation_buffer_index = fields_to_aggregate.buffer.len();
+            let keyframe_rotation_buffer_view_index = fields_to_aggregate.buffer_view.len();
+            let keyframe_rotation_accessor_index = fields_to_aggregate.accessor.len();
+
+            let keyframe_rotation_buffer = Buffer{
+                byte_length: USize64(keyframe_rotation_buffer_data.len() as u64),
+                uri: Some(format!("data:application/octet-stream;base64,{}", BASE64_STANDARD.encode(&keyframe_rotation_buffer_data))),
+                extensions: None,
+                extras: None,
+                name: Some(format!("KeyframeRotationBuffer_{}", i)),
+            };
+
+            let keyframe_rotation_buffer_view = buffer::View{
+                buffer: Index::new(keyframe_rotation_buffer_index as u32),
+                byte_length: USize64(keyframe_rotation_buffer_data.len() as u64),
+                byte_offset: Some(USize64(0)),
+                byte_stride: None,
+                target: Some(
+                    validation::Checked::Valid(
+                        buffer::Target::ArrayBuffer
+                    )
+                ),
+                extensions: None,
+                extras: None,
+                name: Some(format!("KeyframeRotationBufferView_{}", i)),
+            };
+
+            let keyframe_rotation_accessor = Accessor{
+                buffer_view: Some(Index::new(keyframe_rotation_buffer_view_index as u32)),
+                byte_offset: Some(USize64(0)),
+                component_type: validation::Checked::Valid(GenericComponentType(ComponentType::F32)),
+                count: USize64(keyframe_timings.len() as u64),
+                extensions: None,
+                extras: None,
+                max: None,
+                min: None,
+                name: Some(format!("KeyframeRotationAccessor_{}", i)),
+                normalized: false,
+                sparse: None,
+                type_: validation::Checked::Valid(Type::Vec4),
+            };
+
+            fields_to_aggregate.accessor.push(keyframe_rotation_accessor);
+            fields_to_aggregate.buffer.push(keyframe_rotation_buffer);
+            fields_to_aggregate.buffer_view.push(keyframe_rotation_buffer_view);
+
+            
+            let translation_sampler = Sampler{
+                input: Index::new(keyframe_accessor_index as u32),
+                interpolation: Checked::Valid(json::animation::Interpolation::Linear),
+                extensions: None,
+                extras: None,
+                output: Index::new(keyframe_translation_accessor_index as u32),
+            };
+
+            let rotation_sampler = Sampler{
+                input: Index::new(keyframe_accessor_index as u32),
+                interpolation: Checked::Valid(json::animation::Interpolation::Linear),
+                extensions: None,
+                extras: None,
+                output: Index::new(keyframe_rotation_accessor_index as u32),
+            };
+
+            let translation_sampler_index = samplers.len();
+            samplers.push(translation_sampler);
+
+            let rotation_sampler_index = samplers.len();
+            samplers.push(rotation_sampler);
+
+            let translation_channel = Channel{
+                extensions: None,
+                extras: None,
+                sampler: Index::new(translation_sampler_index as u32),
+                target: Target{
+                    node: Index::new(i),
+                    path: Checked::Valid(Property::Translation),
+                    extensions: None,
+                    extras: None,
+                },
+            };
+
+            let rotation_channel = Channel{
+                extensions: None,
+                extras: None,
+                sampler: Index::new(rotation_sampler_index as u32),
+                target: Target{
+                    node: Index::new(i),
+                    path: Checked::Valid(Property::Rotation),
+                    extensions: None,
+                    extras: None,
+                },
+            };
+
+            channels.push(translation_channel);
+            channels.push(rotation_channel);
+        }
+
+       let animation = Animation{
+            channels,
+            extensions: None,
+            extras: None,
+            name: Some("CharacterAnimation".to_string()),
+            samplers,
+       };
+
+       fields_to_aggregate.animation.push(animation);
     }
     pub fn to_gltf(&self) {
         let mut bone_id_to_node_index = HashMap::new();
@@ -742,6 +1170,13 @@ impl LwBoneFile {
         let writer = BufWriter::new(file);
         json::serialize::to_writer_pretty(writer, &root).unwrap();
     }
+
+    pub fn from_file(file_path: PathBuf) -> anyhow::Result<Self> {
+        let file = File::open(file_path)?;
+        let mut reader = std::io::BufReader::new(file);
+        let anim: LwBoneFile = BinRead::read_options(&mut reader, binrw::Endian::Little,())?;
+        Ok(anim)
+    }
 }
 
 impl Character {
@@ -761,9 +1196,7 @@ impl Character {
             let lw_bone_file: LwBoneFile = BinRead::read_options(
                 &mut file,
                 binrw::Endian::Little,
-                LwBoneFileArgs {
-                    update_channel: &update_channel,
-                },
+                ()
             )
             .unwrap();
 

@@ -1,9 +1,10 @@
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import CharacterWorkbench from "@/features/character/CharacterWorkbench";
 import { currentProjectAtom } from "@/store/project";
 import { useAtomValue } from "jotai";
 import { AlertCircle } from "lucide-react";
 
-export default function AnimationPage() {
+export default function CharacterPage() {
   const currentProject = useAtomValue(currentProjectAtom);
   if (!currentProject) {
     return (
@@ -19,5 +20,7 @@ export default function AnimationPage() {
     );
   }
 
-  return <div></div>;
+  return (
+        <CharacterWorkbench/>
+  );
 }
