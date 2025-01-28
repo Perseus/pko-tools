@@ -7,13 +7,21 @@ mod mesh;
 pub mod model;
 mod texture;
 
-use std::{fs::File, io::BufWriter, path::{Path, PathBuf}};
+use std::{
+    fs::File,
+    io::BufWriter,
+    path::{Path, PathBuf},
+};
 
-use ::gltf::json::Index;
+use ::gltf::{buffer, image, json::Index, Buffer, Document, Gltf};
+use binrw::BinWrite;
 use info::get_character;
 use serde::{Deserialize, Serialize};
 
-use crate::{db, projects::{self, project}};
+use crate::{
+    db,
+    projects::{self, project},
+};
 use gltf::json as gltf;
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -40,7 +48,6 @@ pub struct Character {
     shadow: u16,
     action_id: u16,
 }
-
 
 pub struct GLTFFieldsToAggregate {
     pub buffer: Vec<gltf::Buffer>,
@@ -94,20 +101,32 @@ impl Character {
     }
 
     pub fn get_gltf_json(&self, project_dir: &Path) -> anyhow::Result<String> {
-        let parts= self.get_parts();
+        let parts = self.get_parts();
         let mut model_locations = vec![];
 
         for i in 0..parts.len() {
             let model_id_base = self.model as u32 * 1000000;
             let suit_id = self.suit_id as u32 * 10000;
             let model_id = model_id_base + suit_id + i as u32;
-            let model_location = format!("{}/model/character/{:0>10}.lgo", project_dir.to_str().unwrap(), model_id);
+            let model_location = format!(
+                "{}/model/character/{:0>10}.lgo",
+                project_dir.to_str().unwrap(),
+                model_id
+            );
             println!("Model location: {:?}", model_location);
             model_locations.push(model_location);
         }
 
-        let models: Vec<model::CharacterGeometricModel> = model_locations.iter().map(|location| model::CharacterGeometricModel::from_file(PathBuf::from(location))).collect::<anyhow::Result<Vec<_>>>()?;
-        let animation = super::animation::character::LwBoneFile::from_file(PathBuf::from(format!("{}/animation/{:0>4}.lab", project_dir.to_str().unwrap(), self.model)))?;
+        let models: Vec<model::CharacterGeometricModel> = model_locations
+            .iter()
+            .map(|location| model::CharacterGeometricModel::from_file(PathBuf::from(location)))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let animation =
+            super::animation::character::LwBoneFile::from_file(PathBuf::from(format!(
+                "{}/animation/{:0>4}.lab",
+                project_dir.to_str().unwrap(),
+                self.model
+            )))?;
 
         let mut fields_to_aggregate = GLTFFieldsToAggregate {
             buffer: vec![],
@@ -119,19 +138,23 @@ impl Character {
             sampler: vec![],
             animation: vec![],
             skin: vec![],
-            nodes: vec![],  
+            nodes: vec![],
         };
 
-
-        let primitives = models.iter().map(|model| model.get_gltf_mesh_primitive(&mut fields_to_aggregate)).collect::<Vec<_>>();
+        let primitives = models
+            .iter()
+            .map(|model| model.get_gltf_mesh_primitive(&mut fields_to_aggregate))
+            .collect::<Vec<_>>();
         let (skin, nodes) = animation.to_gltf_skin_and_nodes(&mut fields_to_aggregate);
         fields_to_aggregate.skin.push(skin);
         fields_to_aggregate.nodes.extend(nodes);
         animation.to_gltf_animations_and_sampler(&mut fields_to_aggregate);
 
-
-        let scene = gltf::Scene{
-            nodes: vec![Index::new(0), Index::new((fields_to_aggregate.nodes.len() - 1) as u32)],
+        let scene = gltf::Scene {
+            nodes: vec![
+                Index::new(0),
+                Index::new((fields_to_aggregate.nodes.len() - 1) as u32),
+            ],
             name: Some("DefaultScene".to_string()),
             extensions: None,
             extras: None,
@@ -145,7 +168,7 @@ impl Character {
             extras: None,
         };
 
-        let gltf = gltf::Root{
+        let gltf = gltf::Root {
             nodes: fields_to_aggregate.nodes,
             skins: fields_to_aggregate.skin,
             scenes: vec![scene],
@@ -169,9 +192,28 @@ impl Character {
         let gltf_as_string = serde_json::to_string(&gltf)?;
         Ok(gltf_as_string)
     }
+
+    pub fn from_gltf(
+        gltf: Document,
+        buffers: Vec<buffer::Data>,
+        images: Vec<image::Data>,
+    ) -> anyhow::Result<Self> {
+        let animation_data =
+            super::animation::character::LwBoneFile::from_gltf(gltf, buffers, images)?;
+        let file = File::create("./test_artifacts/test.lab").unwrap();
+        let mut writer = BufWriter::new(file);
+        animation_data
+            .write_options(&mut writer, binrw::Endian::Little, ())
+            .unwrap();
+
+        unimplemented!()
+    }
 }
 
-pub fn get_character_gltf_json(project_id: uuid::Uuid, character_id: u32) -> anyhow::Result<String> {
+pub fn get_character_gltf_json(
+    project_id: uuid::Uuid,
+    character_id: u32,
+) -> anyhow::Result<String> {
     let project = projects::project::Project::get_project(project_id)?;
     let character = get_character(project_id, character_id)?;
 
@@ -179,4 +221,50 @@ pub fn get_character_gltf_json(project_id: uuid::Uuid, character_id: u32) -> any
 
     let gltf_json = character.get_gltf_json(project_dir)?;
     Ok(gltf_json)
+}
+
+#[cfg(test)]
+mod test {
+    use ::gltf::{import, Gltf};
+
+    use super::*;
+
+    #[test]
+    fn is_able_to_parse_gltf() {
+        let (gltf, buffers, images) =
+            import(PathBuf::from("./test_artifacts/test-unconvert.gltf")).unwrap();
+        let character = Character::from_gltf(gltf, buffers, images).unwrap();
+        println!("{:?}", character);
+    }
+
+    #[test]
+    fn is_able_to_convert_lab_back_to_gltf() {
+        let character = Character {
+            id: 1104,
+            name: "Balasteer the Wicked".to_string(),
+            action_id: 0,
+            ctrl_type: 0,
+            eeff_id: 0,
+            effect_action_id: "".to_string(),
+            feff_id: "".to_string(),
+            icon_name: "".to_string(),
+            mesh_part_0: 1,
+            mesh_part_1: 0,
+            mesh_part_2: 0,
+            mesh_part_3: 0,
+            mesh_part_4: 0,
+            mesh_part_5: 0,
+            mesh_part_6: 0,
+            mesh_part_7: 0,
+            model: 909,
+            model_type: 4,
+            shadow: 0,
+            suit_id: 0,
+            suit_num: 0,
+        };
+
+        let gltf = character.get_gltf_json(Path::new("/mnt/d/EA 1.0.1"));
+        assert!(gltf.is_ok());
+
+    }
 }

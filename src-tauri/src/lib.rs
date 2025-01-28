@@ -45,7 +45,6 @@ pub fn run() {
             projects::commands::get_current_project,
             projects::commands::create_project,
             projects::commands::get_animation_files,
-            animation::commands::load_animation,
             character::commands::get_character_list,
             character::commands::load_character,
         ])
