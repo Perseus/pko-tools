@@ -106,7 +106,7 @@ impl Project {
             for path in paths {
                 let path = path.unwrap().path();
                 let path = path.file_name().unwrap().to_str().unwrap();
-                if path.starts_with("preferences") {
+                if path.starts_with("preferences") || !path.ends_with(".sqlite") {
                     continue;
                 }
 

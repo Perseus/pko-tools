@@ -81,51 +81,40 @@ pub struct BoundingSphereInfo {
 #[binrw]
 #[derive(Debug)]
 pub struct HelperData {
-    #[br(dbg)]
     pub _type: u32,
 
     #[br(if(_type & HELPER_TYPE_DUMMY > 0))]
-    #[br(dbg)]
     pub dummy_num: u32,
 
     #[br(if(dummy_num > 0))]
     #[br(count = dummy_num)]
-    #[br(dbg)]
     pub dummy_seq: Vec<HelperDummyInfo>,
 
     #[br(if(_type &  HELPER_TYPE_BOX > 0))]
-    #[br(dbg)]
     pub box_num: u32,
 
     #[br(if(box_num > 0))]
     #[br(count = box_num)]
-    #[br(dbg)]
     pub box_seq: Vec<HelperBoxInfo>,
 
-    #[br(dbg)]
     #[br(if(_type & HELPER_TYPE_MESH > 0))]
     pub mesh_num: u32,
 
     #[br(if(mesh_num > 0))]
     #[br(count = mesh_num)]
-    #[br(dbg)]
     pub mesh_seq: Vec<HelperMeshInfo>,
 
     #[br(if(_type & HELPER_TYPE_BBOX > 0))]
-    #[br(dbg)]
     pub bbox_num: u32,
 
     #[br(if(bbox_num > 0))]
-    #[br(dbg)]
     #[br(count = bbox_num)]
     pub bbox_seq: Vec<BoundingBoxInfo>,
 
     #[br(if(_type & HELPER_TYPE_BSPHERE > 0))]
-    #[br(dbg)]
     pub bsphere_num: u32,
 
     #[br(if(bsphere_num > 0))]
-    #[br(dbg)]
     #[br(count = bsphere_num)]
     pub bsphere_seq: Vec<BoundingSphereInfo>,
 }

@@ -1,32 +1,31 @@
-import {
-  currentActionProgressAtom,
-  currentActionStatusAtom,
-  currentAnimationActionAtom,
-  selectedAnimationAtom,
-} from "@/store/animation";
 import { useAtomValue } from "jotai";
 import { Progress } from "@/components/ui/progress";
+import { characterLoadingStatusAtom, selectedCharacterAtom } from "@/store/character";
+import { useEffect, useState } from "react";
 
 export default function CharacterStatusBar() {
-  const selectedAnimation = useAtomValue(selectedAnimationAtom);
-  const animationActionStatus = useAtomValue(currentActionStatusAtom);
-  const animationActionProgress = useAtomValue(currentActionProgressAtom);
+  const characterLoadingStatus = useAtomValue(characterLoadingStatusAtom);
+  const [loadingProgress, setLoadingProgress] = useState(0);
 
-  const currentAction = useAtomValue(currentAnimationActionAtom);
+
+  useEffect(() => {
+    if (characterLoadingStatus) {
+      setLoadingProgress((characterLoadingStatus.subActionCurrentStep / characterLoadingStatus.subActionTotalSteps) * 100);
+    }
+  }, [characterLoadingStatus]);
 
   return (
     <>
       <div className="grid grid-cols-3 gap-1">
-        {selectedAnimation && (
-          <div> Selected animation: {selectedAnimation} </div>
-        )}
-        {currentAction === "load-animation" && (
-          <div className="flex flex-col">
-            {animationActionProgress < 100 && (
-              <span className="text-xs">{animationActionStatus}</span>
+        <div></div>
+        {characterLoadingStatus && (
+          <div className="flex flex-col justify-center items-center gap-1">
+            { characterLoadingStatus.action }
+            {characterLoadingStatus.subActionCurrentStep < characterLoadingStatus.subActionTotalSteps && (
+              <span className="text-xs">{characterLoadingStatus.action } - {characterLoadingStatus.subAction}</span>
             )}
             <Progress
-              value={animationActionProgress}
+              value={loadingProgress}
               className="h-4"
             ></Progress>
           </div>

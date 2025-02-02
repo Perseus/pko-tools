@@ -41,4 +41,9 @@ impl Preferences {
 
         None
     }
+
+    pub fn set_current_project(&self, project_id: String) {
+        let db = self.db.db.lock().unwrap();
+        db.execute("INSERT OR REPLACE INTO preferences (key, value) VALUES ('current_project', ?)", [project_id]).unwrap();
+    }
 }

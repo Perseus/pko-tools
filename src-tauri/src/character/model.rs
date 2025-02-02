@@ -4,7 +4,7 @@ use crate::{
     animation::character::{LwBoneFile, LW_INVALID_INDEX, LW_MAX_NAME},
     d3d::{D3DBlend, D3DCmpFunc, D3DFormat, D3DPool, D3DRenderStateType},
 };
-use ::gltf::json::{self, scene::UnitQuaternion, Index, Node, Scene};
+use ::gltf::{buffer, image, json::{self, scene::UnitQuaternion, Index, Node, Scene}, Document};
 use base64::{prelude::BASE64_STANDARD, Engine};
 use binrw::{binrw, BinRead, BinWrite, Error, NullString};
 use gltf::json as gltf;
@@ -210,6 +210,11 @@ impl CharacterGeometricModel {
         let mut reader = std::io::BufReader::new(file);
         let geom: CharacterGeometricModel = BinRead::read_options(&mut reader, binrw::Endian::Little, ())?;
         Ok(geom)
+    }
+
+    pub fn from_gltf(gltf: &Document, buffers: &Vec<buffer::Data>, images: &Vec<image::Data>) -> anyhow::Result<Self> {
+
+        unimplemented!()
     }
 }
 

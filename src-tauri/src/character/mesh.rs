@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::{collections::{BTreeMap, HashMap}, fs::File};
 
 use crate::d3d::{D3DPrimitiveType, D3DVertexElement9};
 use ::gltf::{
@@ -9,6 +9,7 @@ use ::gltf::{
 use base64::{prelude::BASE64_STANDARD, Engine};
 use binrw::{binrw, BinRead, BinWrite};
 use gltf::json as gltf;
+use image::ImageReader;
 
 use super::{
     math::{LwVector2, LwVector3},
@@ -166,7 +167,7 @@ impl BinRead for CharacterMeshInfo {
         let mut index_seq: Vec<u32> = vec![];
         let mut subset_seq: Vec<CharacterMeshSubsetInfo> = vec![];
 
-        if version > EXP_OBJ_VERSION_1_0_0_4 {
+        if version >= EXP_OBJ_VERSION_1_0_0_4 {
             header = CharacterInfoMeshHeader::read_options(reader, endian, ())?;
             if header.vertex_element_num > 0 {
                 for _ in 0..header.vertex_element_num {
@@ -800,11 +801,13 @@ impl CharacterMeshInfo {
             file_name += core::str::from_utf8(&[texture_info.file_name[i]]).unwrap();
         }
 
-        file_name += ".png";
-        let image_file = "../../../../../../mnt/d/EA 1.0.1/texture/character/".to_string() + &file_name;
-        println!("texture_file: {}", image_file);
-        let image_file_as_bytes = std::fs::read(image_file).unwrap();
-        let image_as_data_uri = format!("data:image/png;base64,{}", BASE64_STANDARD.encode(&image_file_as_bytes));
+        let mut image_file = "../../../../../../mnt/d/EA 1.0.1/texture/character/".to_string() + &file_name + ".bmp";
+        let original_image = ImageReader::open(image_file).unwrap().decode().unwrap();
+        original_image.save_with_format(format!("./state/textures/{}.{}", file_name, "png"), image::ImageFormat::Png).unwrap();
+
+        image_file = format!("./state/textures/{}.{}", file_name, "png");
+        let image_as_png = std::fs::read(image_file).unwrap();
+        let image_as_data_uri = format!("data:image/png;base64,{}", BASE64_STANDARD.encode(&image_as_png));
 
         let image = gltf::Image{
             name: Some("image".to_string()),

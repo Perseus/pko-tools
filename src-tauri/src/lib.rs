@@ -43,10 +43,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             projects::commands::get_projects_list,
             projects::commands::get_current_project,
+            projects::commands::select_project,
             projects::commands::create_project,
             projects::commands::get_animation_files,
             character::commands::get_character_list,
             character::commands::load_character,
+            character::commands::export_to_gltf,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

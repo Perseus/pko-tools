@@ -19,11 +19,18 @@ import {
 import { useAtom } from "jotai";
 import { currentProjectAtom, projectListAtom } from "@/store/project";
 import { NavLink, useLocation } from "react-router";
+import { invoke } from "@tauri-apps/api/core";
+import { Project } from "@/types/project";
 
 export default function SideNav() {
   const [projectList] = useAtom(projectListAtom);
   const [currentProject, setCurrentProject] = useAtom(currentProjectAtom);
   const pathname = useLocation().pathname;
+
+  async function selectProject(project: Project) {
+    setCurrentProject(project);
+    await invoke('select_project', { projectId: project.id });
+  }
 
   const navigationData = {
     navMain: [
@@ -77,7 +84,7 @@ export default function SideNav() {
                 {projectList.map((project) => (
                   <DropdownMenuItem
                     key={project.id}
-                    onClick={() => setCurrentProject(project)}
+                    onClick={() => selectProject(project)}
                     className="hover:cursor-pointer"
                   >
                     {project.name}

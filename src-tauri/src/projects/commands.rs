@@ -12,9 +12,24 @@ pub fn get_projects_list() -> Vec<Project> {
 }
 
 #[tauri::command]
-pub fn get_current_project(state: tauri::State<AppState>) -> Option<String> {
+pub fn get_current_project(state: tauri::State<AppState>) -> Option<Project> {
     let preferences = &state.preferences;
-    preferences.get_current_project()
+    let project_id = preferences.get_current_project()?;
+
+    let project_id = uuid::Uuid::parse_str(&project_id);
+    if project_id.is_err() {
+        return None;
+    }
+
+    let project_uuid = project_id.unwrap();
+    let project = Project::get_project(project_uuid);
+
+    if project.is_err() {
+        return None;
+    }
+
+    let project = project.unwrap();
+    Some(project)
 }
 
 #[tauri::command]
@@ -57,4 +72,17 @@ pub async fn get_animation_files(project_id: String) -> Vec<String> {
     }
 
     animation_files.unwrap()
+}
+
+#[tauri::command]
+pub fn select_project(state: tauri::State<AppState>, project_id: String) -> Result<(), String> {
+    let project_id = uuid::Uuid::parse_str(&project_id);
+    if project_id.is_err() {
+        return Err("Invalid project ID".to_owned());
+    }
+
+    let project_id = project_id.unwrap();
+    state.preferences.set_current_project(project_id.to_string());
+
+    Ok(())
 }

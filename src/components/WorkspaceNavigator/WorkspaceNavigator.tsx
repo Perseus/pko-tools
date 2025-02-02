@@ -7,7 +7,7 @@ export default function WorkspaceNavigator() {
     <Sidebar side="right">
       <SidebarContent>
         <Routes>
-          <Route path="/" element={<div>norm</div>} />
+          <Route path="/" element={<div></div>} />
           <Route path="/characters" element={<CharacterNavigator/>} />
         </Routes>
       </SidebarContent>

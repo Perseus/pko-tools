@@ -16,6 +16,7 @@ use std::{
 use ::gltf::{buffer, image, json::Index, Buffer, Document, Gltf};
 use binrw::BinWrite;
 use info::get_character;
+use model::CharacterGeometricModel;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -113,7 +114,6 @@ impl Character {
                 project_dir.to_str().unwrap(),
                 model_id
             );
-            println!("Model location: {:?}", model_location);
             model_locations.push(model_location);
         }
 
@@ -185,10 +185,6 @@ impl Character {
             ..Default::default()
         };
 
-        let file = File::create("test.gltf").unwrap();
-        let writer = BufWriter::new(file);
-        serde_json::to_writer_pretty(writer, &gltf)?;
-
         let gltf_as_string = serde_json::to_string(&gltf)?;
         Ok(gltf_as_string)
     }
@@ -199,12 +195,13 @@ impl Character {
         images: Vec<image::Data>,
     ) -> anyhow::Result<Self> {
         let animation_data =
-            super::animation::character::LwBoneFile::from_gltf(gltf, buffers, images)?;
-        let file = File::create("./test_artifacts/test.lab").unwrap();
+            super::animation::character::LwBoneFile::from_gltf(&gltf, &buffers, &images)?;
+        let file = File::create("./test_artifacts/test.lab")?;
         let mut writer = BufWriter::new(file);
         animation_data
-            .write_options(&mut writer, binrw::Endian::Little, ())
-            .unwrap();
+            .write_options(&mut writer, binrw::Endian::Little, ())?;
+
+        let mesh_data = CharacterGeometricModel::from_gltf(&gltf, &buffers, &images)?;
 
         unimplemented!()
     }
@@ -232,7 +229,7 @@ mod test {
     #[test]
     fn is_able_to_parse_gltf() {
         let (gltf, buffers, images) =
-            import(PathBuf::from("./test_artifacts/test-unconvert.gltf")).unwrap();
+            import(PathBuf::from("./test_artifacts/untitled.gltf")).unwrap();
         let character = Character::from_gltf(gltf, buffers, images).unwrap();
         println!("{:?}", character);
     }
@@ -240,7 +237,7 @@ mod test {
     #[test]
     fn is_able_to_convert_lab_back_to_gltf() {
         let character = Character {
-            id: 1104,
+            id: 958,
             name: "Balasteer the Wicked".to_string(),
             action_id: 0,
             ctrl_type: 0,
@@ -256,7 +253,7 @@ mod test {
             mesh_part_5: 0,
             mesh_part_6: 0,
             mesh_part_7: 0,
-            model: 909,
+            model: 105,
             model_type: 4,
             shadow: 0,
             suit_id: 0,
@@ -264,7 +261,7 @@ mod test {
         };
 
         let gltf = character.get_gltf_json(Path::new("/mnt/d/EA 1.0.1"));
-        assert!(gltf.is_ok());
+        gltf.unwrap();
 
     }
 }

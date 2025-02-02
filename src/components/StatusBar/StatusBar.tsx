@@ -6,13 +6,10 @@ interface StatusBarProps {
 }
 
 export default function StatusBar({ className }: StatusBarProps) {
-  const location = useLocation();
   return (
     <footer className={`w-full bg-primary p-2 ${className} text-secondary`}>
-      {location.pathname}
-
       <Routes>
-        <Route path="/animations" element={<CharacterStatusBar />} />
+        <Route path="/characters" element={<CharacterStatusBar />} />
       </Routes>
     </footer>
   );
