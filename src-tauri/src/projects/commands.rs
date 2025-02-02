@@ -1,6 +1,6 @@
 use crate::AppState;
 
-use super::project::{Project};
+use super::project::Project;
 
 #[tauri::command]
 pub fn get_projects_list() -> Vec<Project> {
@@ -82,7 +82,9 @@ pub fn select_project(state: tauri::State<AppState>, project_id: String) -> Resu
     }
 
     let project_id = project_id.unwrap();
-    state.preferences.set_current_project(project_id.to_string());
+    state
+        .preferences
+        .set_current_project(project_id.to_string());
 
     Ok(())
 }

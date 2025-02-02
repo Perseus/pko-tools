@@ -498,7 +498,14 @@ impl BinRead for LwBoneFile {
         let total_parsing_steps = 6;
         let mut current_step = 1;
 
-        crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate("Loading animations".to_string(), "Fetching version".to_string(), current_step, total_parsing_steps)).unwrap();
+        crate::broadcast::get_broadcaster()
+            .send(BroadcastMessage::ModelLoadingUpdate(
+                "Loading animations".to_string(),
+                "Fetching version".to_string(),
+                current_step,
+                total_parsing_steps,
+            ))
+            .unwrap();
         this.version = u32::read_options(reader, opts, ())?;
 
         if this.version == 0 {
@@ -507,11 +514,25 @@ impl BinRead for LwBoneFile {
 
         current_step += 1;
 
-        crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate("Loading animations".to_string(), "Reading header".to_string(), current_step, total_parsing_steps)).unwrap();
+        crate::broadcast::get_broadcaster()
+            .send(BroadcastMessage::ModelLoadingUpdate(
+                "Loading animations".to_string(),
+                "Reading header".to_string(),
+                current_step,
+                total_parsing_steps,
+            ))
+            .unwrap();
         this.header = LwBoneInfoHeader::read_options(reader, opts, ())?;
 
         current_step += 1;
-        crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate("Loading animations".to_string(), "Reading bone hierarchy".to_string(), current_step, total_parsing_steps)).unwrap();
+        crate::broadcast::get_broadcaster()
+            .send(BroadcastMessage::ModelLoadingUpdate(
+                "Loading animations".to_string(),
+                "Reading bone hierarchy".to_string(),
+                current_step,
+                total_parsing_steps,
+            ))
+            .unwrap();
 
         this.base_seq = Vec::read_options(
             reader,
@@ -523,7 +544,14 @@ impl BinRead for LwBoneFile {
         )?;
 
         current_step += 1;
-        crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate("Loading animations".to_string(), "Reading inverse bind matrices".to_string(), current_step, total_parsing_steps)).unwrap();
+        crate::broadcast::get_broadcaster()
+            .send(BroadcastMessage::ModelLoadingUpdate(
+                "Loading animations".to_string(),
+                "Reading inverse bind matrices".to_string(),
+                current_step,
+                total_parsing_steps,
+            ))
+            .unwrap();
 
         this.invmat_seq = Vec::read_options(
             reader,
@@ -535,7 +563,14 @@ impl BinRead for LwBoneFile {
         )?;
 
         current_step += 1;
-        crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate("Loading animations".to_string(), "Reading dummy information".to_string(), current_step, total_parsing_steps)).unwrap();
+        crate::broadcast::get_broadcaster()
+            .send(BroadcastMessage::ModelLoadingUpdate(
+                "Loading animations".to_string(),
+                "Reading dummy information".to_string(),
+                current_step,
+                total_parsing_steps,
+            ))
+            .unwrap();
 
         this.dummy_seq = Vec::read_options(
             reader,
@@ -547,7 +582,14 @@ impl BinRead for LwBoneFile {
         )?;
 
         current_step += 1;
-        crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate("Loading animations".to_string(), "Reading animation keyframe data".to_string(), current_step, total_parsing_steps)).unwrap();
+        crate::broadcast::get_broadcaster()
+            .send(BroadcastMessage::ModelLoadingUpdate(
+                "Loading animations".to_string(),
+                "Reading animation keyframe data".to_string(),
+                current_step,
+                total_parsing_steps,
+            ))
+            .unwrap();
 
         let mut key_infos = Vec::with_capacity(this.header.bone_num as usize);
         for i in 0..this.header.bone_num {

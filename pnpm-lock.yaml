@@ -50,6 +50,9 @@ dependencies:
   '@tauri-apps/plugin-opener':
     specifier: ^2
     version: 2.2.3
+  '@tauri-apps/plugin-sql':
+    specifier: ~2
+    version: 2.2.0
   '@types/three':
     specifier: ^0.172.0
     version: 0.172.0
@@ -1983,6 +1986,12 @@ packages:
 
   /@tauri-apps/plugin-opener@2.2.3:
     resolution: {integrity: sha512-QZDtGwqs2ssjc+GbHzTFlN0gtgXR7B1dcphIJ3vBrX+PXOdI58hP82TyT2rbH2myBVj2uWkyqKhM8FbbGopqng==}
+    dependencies:
+      '@tauri-apps/api': 2.2.0
+    dev: false
+
+  /@tauri-apps/plugin-sql@2.2.0:
+    resolution: {integrity: sha512-yGdybpaMENe/p6lTXslvDHYNNvD9qB7palaBBF5fJHdYSkwd3vrLiYU9dFfLwUAwnsBylND55EiivWsjhazejA==}
     dependencies:
       '@tauri-apps/api': 2.2.0
     dev: false

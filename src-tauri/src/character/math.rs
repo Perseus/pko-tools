@@ -168,7 +168,6 @@ pub struct LwMatrix43(
         raw[2], raw[5], raw[8], raw[11], 
         0.0, 0.0, 0.0, 1.0
     ))]
-
     // we want to convert it back to row-major while writing to the file again
     #[bw(map = |m: &Matrix4<f32>| [
         m.x.x, m.y.x, m.z.x, 

@@ -4,7 +4,11 @@ use crate::{
     animation::character::{LwBoneFile, LW_INVALID_INDEX, LW_MAX_NAME},
     d3d::{D3DBlend, D3DCmpFunc, D3DFormat, D3DPool, D3DRenderStateType},
 };
-use ::gltf::{buffer, image, json::{self, scene::UnitQuaternion, Index, Node, Scene}, Document};
+use ::gltf::{
+    buffer, image,
+    json::{self, scene::UnitQuaternion, Index, Node, Scene},
+    Document,
+};
 use base64::{prelude::BASE64_STANDARD, Engine};
 use binrw::{binrw, BinRead, BinWrite, Error, NullString};
 use gltf::json as gltf;
@@ -12,7 +16,10 @@ use gltf::Texture;
 
 use crate::animation::character::LwMatrix44;
 
-use super::{helper::HelperData, mesh::CharacterMeshInfo, texture::CharMaterialTextureInfo, GLTFFieldsToAggregate};
+use super::{
+    helper::HelperData, mesh::CharacterMeshInfo, texture::CharMaterialTextureInfo,
+    GLTFFieldsToAggregate,
+};
 
 pub const EXP_OBJ_VERSION_0_0_0_0: u32 = 0x00000000;
 pub const EXP_OBJ_VERSION_1_0_0_0: u32 = 0x00001000;
@@ -172,16 +179,17 @@ pub struct CharacterGeometricModel {
     helper_data: Option<HelperData>,
 }
 
-
 impl CharacterGeometricModel {
-    pub fn get_gltf_mesh_primitive(&self, fields_to_aggregate: &mut GLTFFieldsToAggregate) -> gltf::mesh::Primitive{
+    pub fn get_gltf_mesh_primitive(
+        &self,
+        fields_to_aggregate: &mut GLTFFieldsToAggregate,
+    ) -> gltf::mesh::Primitive {
         let mesh_info = self.mesh_info.as_ref().unwrap();
         mesh_info.get_gltf_primitive(fields_to_aggregate, &self.material_seq)
     }
     // pub fn to_gltf(&self, anim: LwBoneFile, fields_to_aggregate: &mut GLTFFieldsToAggregate) -> gltf::Root {
     //     let (skin, nodes) = anim.to_gltf_skin_and_nodes(fields_to_aggregate);
     //     anim.to_gltf_animations_and_sampler(fields_to_aggregate);
-
 
     //     let root = gltf::Root {
     //         nodes,
@@ -208,12 +216,16 @@ impl CharacterGeometricModel {
     pub fn from_file(file_path: PathBuf) -> anyhow::Result<Self> {
         let file = File::open(file_path)?;
         let mut reader = std::io::BufReader::new(file);
-        let geom: CharacterGeometricModel = BinRead::read_options(&mut reader, binrw::Endian::Little, ())?;
+        let geom: CharacterGeometricModel =
+            BinRead::read_options(&mut reader, binrw::Endian::Little, ())?;
         Ok(geom)
     }
 
-    pub fn from_gltf(gltf: &Document, buffers: &Vec<buffer::Data>, images: &Vec<image::Data>) -> anyhow::Result<Self> {
-
+    pub fn from_gltf(
+        gltf: &Document,
+        buffers: &Vec<buffer::Data>,
+        images: &Vec<image::Data>,
+    ) -> anyhow::Result<Self> {
         unimplemented!()
     }
 }
@@ -221,7 +233,7 @@ impl CharacterGeometricModel {
 #[cfg(test)]
 mod tests {
 
-    use crate::animation::character::{LwBoneFile};
+    use crate::animation::character::LwBoneFile;
 
     use super::*;
 

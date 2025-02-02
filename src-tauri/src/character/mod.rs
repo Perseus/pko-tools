@@ -198,8 +198,7 @@ impl Character {
             super::animation::character::LwBoneFile::from_gltf(&gltf, &buffers, &images)?;
         let file = File::create("./test_artifacts/test.lab")?;
         let mut writer = BufWriter::new(file);
-        animation_data
-            .write_options(&mut writer, binrw::Endian::Little, ())?;
+        animation_data.write_options(&mut writer, binrw::Endian::Little, ())?;
 
         let mesh_data = CharacterGeometricModel::from_gltf(&gltf, &buffers, &images)?;
 
@@ -262,6 +261,5 @@ mod test {
 
         let gltf = character.get_gltf_json(Path::new("/mnt/d/EA 1.0.1"));
         gltf.unwrap();
-
     }
 }

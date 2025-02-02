@@ -52,7 +52,7 @@ pub struct ColorValue4F {
     pub a: f32,
 }
 
-impl ColorValue4F { 
+impl ColorValue4F {
     pub fn to_slice(&self) -> [f32; 4] {
         [self.r, self.g, self.b, self.a]
     }

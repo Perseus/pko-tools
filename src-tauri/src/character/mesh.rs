@@ -1,10 +1,22 @@
-use std::{collections::{BTreeMap, HashMap}, fs::File};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fs::File,
+};
 
 use crate::d3d::{D3DPrimitiveType, D3DVertexElement9};
 use ::gltf::{
-    buffer, json::{
-        accessor::{ComponentType, GenericComponentType},  image::MimeType, material::{EmissiveFactor, PbrBaseColorFactor, PbrMetallicRoughness, StrengthFactor}, texture, validation::{Checked, USize64, Validate}, Accessor, Index, Material
-    }, material::AlphaMode, texture::MagFilter, Semantic
+    buffer,
+    json::{
+        accessor::{ComponentType, GenericComponentType},
+        image::MimeType,
+        material::{EmissiveFactor, PbrBaseColorFactor, PbrMetallicRoughness, StrengthFactor},
+        texture,
+        validation::{Checked, USize64, Validate},
+        Accessor, Index, Material,
+    },
+    material::AlphaMode,
+    texture::MagFilter,
+    Semantic,
 };
 use base64::{prelude::BASE64_STANDARD, Engine};
 use binrw::{binrw, BinRead, BinWrite};
@@ -13,10 +25,14 @@ use image::ImageReader;
 
 use super::{
     math::{LwVector2, LwVector3},
-    model::{ EXP_OBJ_VERSION, EXP_OBJ_VERSION_0_0_0_0, EXP_OBJ_VERSION_1_0_0_3,
-        EXP_OBJ_VERSION_1_0_0_4, LW_MAX_TEXTURESTAGE_NUM,
+    model::{
+        EXP_OBJ_VERSION, EXP_OBJ_VERSION_0_0_0_0, EXP_OBJ_VERSION_1_0_0_3, EXP_OBJ_VERSION_1_0_0_4,
+        LW_MAX_TEXTURESTAGE_NUM,
     },
-    texture::{CharMaterialTextureInfo, MaterialTextureInfoTransparencyType, RenderStateAtom, TextureInfo}, GLTFFieldsToAggregate,
+    texture::{
+        CharMaterialTextureInfo, MaterialTextureInfoTransparencyType, RenderStateAtom, TextureInfo,
+    },
+    GLTFFieldsToAggregate,
 };
 
 pub const LW_MESH_RS_NUM: usize = 8;
@@ -789,7 +805,11 @@ impl CharacterMeshInfo {
         (joint_indices_accessor_index, weights_accessor_index)
     }
 
-    fn get_material_accessor(&self, fields_to_aggregate: &mut GLTFFieldsToAggregate, materials: &Option<Vec<CharMaterialTextureInfo>>) -> usize {
+    fn get_material_accessor(
+        &self,
+        fields_to_aggregate: &mut GLTFFieldsToAggregate,
+        materials: &Option<Vec<CharMaterialTextureInfo>>,
+    ) -> usize {
         let material_seq = &materials.as_ref().unwrap()[0];
         let texture_info = &material_seq.tex_seq[0];
         let mut file_name = String::new();
@@ -801,15 +821,24 @@ impl CharacterMeshInfo {
             file_name += core::str::from_utf8(&[texture_info.file_name[i]]).unwrap();
         }
 
-        let mut image_file = "../../../../../../mnt/d/EA 1.0.1/texture/character/".to_string() + &file_name + ".bmp";
+        let mut image_file =
+            "../../../../../../mnt/d/EA 1.0.1/texture/character/".to_string() + &file_name + ".bmp";
         let original_image = ImageReader::open(image_file).unwrap().decode().unwrap();
-        original_image.save_with_format(format!("./state/textures/{}.{}", file_name, "png"), image::ImageFormat::Png).unwrap();
+        original_image
+            .save_with_format(
+                format!("./state/textures/{}.{}", file_name, "png"),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
 
         image_file = format!("./state/textures/{}.{}", file_name, "png");
         let image_as_png = std::fs::read(image_file).unwrap();
-        let image_as_data_uri = format!("data:image/png;base64,{}", BASE64_STANDARD.encode(&image_as_png));
+        let image_as_data_uri = format!(
+            "data:image/png;base64,{}",
+            BASE64_STANDARD.encode(&image_as_png)
+        );
 
-        let image = gltf::Image{
+        let image = gltf::Image {
             name: Some("image".to_string()),
             buffer_view: None,
             extensions: None,
@@ -821,7 +850,7 @@ impl CharacterMeshInfo {
         let image_index = fields_to_aggregate.image.len();
         fields_to_aggregate.image.push(image);
 
-        let sampler = gltf::texture::Sampler{
+        let sampler = gltf::texture::Sampler {
             mag_filter: Some(Checked::Valid(MagFilter::Linear)),
             min_filter: Some(Checked::Valid(texture::MinFilter::LinearMipmapLinear)),
             wrap_s: Checked::Valid(texture::WrappingMode::Repeat),
@@ -832,7 +861,7 @@ impl CharacterMeshInfo {
         let sampler_index = fields_to_aggregate.sampler.len();
         fields_to_aggregate.sampler.push(sampler);
 
-        let texture = gltf::Texture{
+        let texture = gltf::Texture {
             name: Some("texture".to_string()),
             sampler: Some(Index::new(sampler_index as u32)),
             source: Index::new(image_index as u32),
@@ -845,23 +874,21 @@ impl CharacterMeshInfo {
 
         let emi = material_seq.material.emi.as_ref().unwrap();
 
-        let material = gltf::Material{
-            alpha_mode: Checked::Valid(
-                match material_seq.transp_type {
-                    MaterialTextureInfoTransparencyType::Filter => AlphaMode::Opaque,
-                    MaterialTextureInfoTransparencyType::Additive => AlphaMode::Blend,
-                    MaterialTextureInfoTransparencyType::Additive1 => AlphaMode::Blend,
-                    MaterialTextureInfoTransparencyType::Additive2 => AlphaMode::Blend,
-                    MaterialTextureInfoTransparencyType::Additive3 => AlphaMode::Blend,
-                    MaterialTextureInfoTransparencyType::Subtractive => AlphaMode::Blend,
-                    MaterialTextureInfoTransparencyType::Subtractive1 => AlphaMode::Blend,
-                    MaterialTextureInfoTransparencyType::Subtractive2 => AlphaMode::Blend,
-                    MaterialTextureInfoTransparencyType::Subtractive3 => AlphaMode::Blend,
-                },
-            ),
-            pbr_metallic_roughness: PbrMetallicRoughness{
+        let material = gltf::Material {
+            alpha_mode: Checked::Valid(match material_seq.transp_type {
+                MaterialTextureInfoTransparencyType::Filter => AlphaMode::Opaque,
+                MaterialTextureInfoTransparencyType::Additive => AlphaMode::Blend,
+                MaterialTextureInfoTransparencyType::Additive1 => AlphaMode::Blend,
+                MaterialTextureInfoTransparencyType::Additive2 => AlphaMode::Blend,
+                MaterialTextureInfoTransparencyType::Additive3 => AlphaMode::Blend,
+                MaterialTextureInfoTransparencyType::Subtractive => AlphaMode::Blend,
+                MaterialTextureInfoTransparencyType::Subtractive1 => AlphaMode::Blend,
+                MaterialTextureInfoTransparencyType::Subtractive2 => AlphaMode::Blend,
+                MaterialTextureInfoTransparencyType::Subtractive3 => AlphaMode::Blend,
+            }),
+            pbr_metallic_roughness: PbrMetallicRoughness {
                 base_color_factor: PbrBaseColorFactor(material_seq.material.dif.to_slice()),
-                base_color_texture: Some(texture::Info{
+                base_color_texture: Some(texture::Info {
                     index: Index::new(texture_index as u32),
                     tex_coord: 0,
                     extensions: None,
@@ -873,9 +900,7 @@ impl CharacterMeshInfo {
                 extensions: None,
                 extras: None,
             },
-            emissive_factor: EmissiveFactor(
-                [emi.r, emi.g, emi.b],
-            ),
+            emissive_factor: EmissiveFactor([emi.r, emi.g, emi.b]),
             ..Default::default()
         };
 
@@ -959,8 +984,11 @@ impl CharacterMeshInfo {
         }
     }
 
-    pub fn get_gltf_primitive(&self, fields_to_aggregate: &mut GLTFFieldsToAggregate, materials: &Option<Vec<CharMaterialTextureInfo>>) -> gltf::mesh::Primitive {
+    pub fn get_gltf_primitive(
+        &self,
+        fields_to_aggregate: &mut GLTFFieldsToAggregate,
+        materials: &Option<Vec<CharMaterialTextureInfo>>,
+    ) -> gltf::mesh::Primitive {
         self.get_primitive(fields_to_aggregate, materials)
     }
-
 }

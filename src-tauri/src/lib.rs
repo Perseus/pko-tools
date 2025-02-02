@@ -1,12 +1,12 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
 mod animation;
+mod broadcast;
 mod character;
 mod d3d;
 mod db;
 mod preferences;
 mod projects;
-mod broadcast;
 
 use tauri::Manager;
 
@@ -18,6 +18,7 @@ struct AppState {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_sql::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let preferences = preferences::Preferences::new();
