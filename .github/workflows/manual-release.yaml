@@ -21,8 +21,6 @@ jobs:
         with:
           node-version: lts/*
 
-      - uses: pnpm/action-setup@v4
-
 
       - name: get version
         run: echo "PACKAGE_VERSION=$(node -p "require('./package.json').version")" >> $GITHUB_ENV
@@ -51,8 +49,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: "ubuntu-22.04"
-            args: ""
+          # - platform: "ubuntu-22.04"
+          #   args: ""
           - platform: "windows-latest"
             args: ""
 
@@ -64,6 +62,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: lts/*
+      
+      - uses: pnpm/action-setup@v4
 
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable
