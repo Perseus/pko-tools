@@ -1,6 +1,6 @@
 import { useAtomValue } from "jotai";
 import { Progress } from "@/components/ui/progress";
-import { characterLoadingStatusAtom, selectedCharacterAtom } from "@/store/character";
+import { characterLoadingStatusAtom } from "@/store/character";
 import { useEffect, useState } from "react";
 
 export default function CharacterStatusBar() {

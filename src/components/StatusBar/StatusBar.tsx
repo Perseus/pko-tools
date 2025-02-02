@@ -1,5 +1,5 @@
 import CharacterStatusBar from "@/features/character/CharacterStatusBar";
-import { Route, Routes, useLocation } from "react-router";
+import { Route, Routes } from "react-router";
 
 interface StatusBarProps {
   className?: string;

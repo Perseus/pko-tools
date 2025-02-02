@@ -1,8 +1,8 @@
 import { characterGltfJsonAtom } from "@/store/character";
-import { useAtom, useAtomValue } from "jotai";
+import {  useAtomValue } from "jotai";
 import { Suspense, useEffect, useRef, useState } from "react";
-import { useGLTF, OrbitControls, Grid, CameraControls, KeyboardControls, Environment, useAnimations, useHelper, Loader, useProgress } from '@react-three/drei';
-import { Canvas, extend, ObjectMap, useFrame, useLoader } from '@react-three/fiber';
+import { useGLTF, OrbitControls,  CameraControls,  Environment, useAnimations } from '@react-three/drei';
+import { Canvas, useFrame} from '@react-three/fiber';
 import * as THREE from 'three';
 import { useControls, Leva } from 'leva';
 

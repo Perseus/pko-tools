@@ -1,8 +1,6 @@
 import {
   Routes,
   Route,
-  BrowserRouter,
-  useLocation,
   useNavigate,
 } from "react-router";
 

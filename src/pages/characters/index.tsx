@@ -1,5 +1,4 @@
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import CharacterActions from "@/features/character/CharacterActions";
 import CharacterWorkbench from "@/features/character/CharacterWorkbench";
 import { currentProjectAtom } from "@/store/project";
 import { useAtomValue } from "jotai";

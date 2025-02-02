@@ -5,7 +5,7 @@ import React, { useEffect, useState } from "react";
 import { ScrollAreaVirtualizable } from "@/components/ui/scroll-area-virtualizable";
 import { SidebarContent, SidebarHeader } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
-import { Channel, invoke } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import { Character } from "@/types/character";
 import { getCharacterList } from "@/commands/character";
 import { characterGltfJsonAtom, characterLoadingStatusAtom, selectedCharacterAtom } from "@/store/character";
