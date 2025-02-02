@@ -64,7 +64,8 @@ jobs:
           node-version: lts/*
       
       - uses: pnpm/action-setup@v4
-      - uses: ccorsi/setup-sqlite@v1.2.0
+      - name: install sqlite
+        run: sudo apt-get install -y sqlite3
 
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable
