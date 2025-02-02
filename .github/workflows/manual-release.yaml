@@ -64,7 +64,7 @@ jobs:
           node-version: lts/*
       
       - uses: pnpm/action-setup@v4
-      - uses: actions/setup-sqlite@v1
+      - uses: ccorsi/setup-sqlite@v1.2.0
 
       - name: install Rust stable
         uses: dtolnay/rust-toolchain@stable
