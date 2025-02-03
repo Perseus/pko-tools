@@ -1,5 +1,5 @@
 use binrw::binrw;
-use cgmath::{InnerSpace, Matrix4, Quaternion, Vector2, Vector3};
+use cgmath::{InnerSpace, Matrix3, Matrix4, Quaternion, Vector2, Vector3};
 
 #[binrw]
 #[derive(Debug, Clone)]
@@ -9,6 +9,13 @@ pub struct LwVector3(
     #[bw(map = |v: &Vector3<f32>| [v.x, v.y, v.z])]
     pub Vector3<f32>,
 );
+
+impl LwVector3 {
+    pub fn to_slice(&self) -> [f32; 3] {
+        let v = &self.0;
+        [v.x, v.y, v.z]
+    }
+}
 
 #[binrw]
 #[derive(Debug, Clone, Copy)]
@@ -31,7 +38,7 @@ impl Default for LwVector2 {
 pub struct LwQuaternion(
     #[br(map = |raw: [f32; 4]| Quaternion::new(raw[3], raw[0], raw[1], raw[2])) ]
     #[bw(map = |q: &Quaternion<f32>| [q.v.x, q.v.y, q.v.z, q.s])]
-    Quaternion<f32>,
+    pub Quaternion<f32>,
 );
 
 impl LwQuaternion {
@@ -41,7 +48,7 @@ impl LwQuaternion {
     }
 }
 
-fn matrix4_to_quaternion(mat: Matrix4<f32>) -> Quaternion<f32> {
+pub fn matrix4_to_quaternion(mat: Matrix4<f32>) -> Quaternion<f32> {
     let m00 = mat.x.x;
     let m01 = mat.y.x;
     let m02 = mat.z.x;
@@ -59,7 +66,7 @@ fn matrix4_to_quaternion(mat: Matrix4<f32>) -> Quaternion<f32> {
         let x = (m21 - m12) * s;
         let y = (m02 - m20) * s;
         let z = (m10 - m01) * s;
-        Quaternion::new(x, y, z, w).normalize()
+        Quaternion::new(w, x, y, z).normalize()
     } else if m00 > m11 && m00 > m22 {
         let s = 2.0 * (1.0 + m00 - m11 - m22).sqrt();
         let inv_s = 1.0 / s;
@@ -103,7 +110,7 @@ pub struct LwMatrix44(
         m.x.z, m.y.z, m.z.z, m.w.z,
         m.x.w, m.y.w, m.z.w, m.w.w
     ])]
-    Matrix4<f32>,
+    pub Matrix4<f32>,
 );
 
 impl LwMatrix44 {
@@ -175,8 +182,40 @@ pub struct LwMatrix43(
         m.z.y, m.w.y, m.x.z,
         m.y.z, m.z.z, m.w.z
     ])]
-    Matrix4<f32>,
+    pub Matrix4<f32>,
 );
+
+impl LwMatrix43 {
+    pub fn to_translation_rotation_scale(&self) -> (LwVector3, LwQuaternion, LwVector3) {
+        // For column-major 4x3 matrix, translation is in the 4th column (w component)
+        let translation = LwVector3(Vector3::new(self.0.w.x, self.0.w.y, self.0.w.z));
+
+        // In column-major, each column vector is already separated
+        let mut col0 = Vector3::new(self.0.x.x, self.0.x.y, self.0.x.z);
+        let mut col1 = Vector3::new(self.0.y.x, self.0.y.y, self.0.y.z);
+        let mut col2 = Vector3::new(self.0.z.x, self.0.z.y, self.0.z.z);
+
+        let scale_x = col0.magnitude();
+        let scale_y = col1.magnitude();
+        let scale_z = col2.magnitude();
+        let scale = LwVector3(Vector3::new(scale_x, scale_y, scale_z));
+
+        if scale_x != 0.0 {
+            col0 /= scale_x;
+        }
+        if scale_y != 0.0 {
+            col1 /= scale_y;
+        }
+        if scale_z != 0.0 {
+            col2 /= scale_z;
+        }
+
+        let rotation_matrix = Matrix3::from_cols(col0, col1, col2);
+        let rotation = Quaternion::from(rotation_matrix);
+
+        (translation, LwQuaternion(rotation), scale)
+    }
+}
 
 #[binrw]
 #[derive(Debug, Clone)]

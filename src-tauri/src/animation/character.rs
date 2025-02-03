@@ -16,13 +16,8 @@ use gltf::{
 use ptree::{print_tree, TreeBuilder};
 use serde_json::value::RawValue;
 use std::{
-    cmp::Ordering, collections::HashMap, fs::File, io::BufWriter, path::PathBuf, sync::Mutex,
+    collections::HashMap, fs::File, path::PathBuf, sync::Mutex,
 };
-use tauri::utils::acl::identifier;
-
-pub struct Character {
-    animation_file_path: PathBuf,
-}
 
 #[derive(Debug, Clone)]
 struct MinimalBone {
@@ -37,7 +32,7 @@ struct MinimalBone {
 use binrw::{binrw, BinRead, BinResult, BinWrite, VecArgs};
 use std::io::{Read, Seek};
 
-use crate::{broadcast::BroadcastMessage, character::GLTFFieldsToAggregate};
+use crate::{broadcast::BroadcastMessage, character::GLTFFieldsToAggregate, math::{matrix4_to_quaternion, LwMatrix43, LwMatrix44, LwQuaternion, LwVector3}};
 
 // Constants
 pub const LW_MAX_NAME: usize = 64;
@@ -48,244 +43,6 @@ pub const BONE_KEY_TYPE_MAT43: u32 = 1;
 pub const BONE_KEY_TYPE_MAT44: u32 = 2;
 pub const BONE_KEY_TYPE_QUAT: u32 = 3;
 
-//--------------------------------------------------------------------------------
-// Basic vector/matrix types (assuming 32-bit floats in a tight array).
-
-#[binrw]
-#[derive(Debug, Clone)]
-#[br(little)]
-pub struct LwVector3(
-    #[br(map = |raw: [f32; 3]| Vector3::new(raw[0], raw[1], raw[2]))]
-    #[bw(map = |v: &Vector3<f32>| [v.x, v.y, v.z])]
-    Vector3<f32>,
-);
-
-impl LwVector3 {
-    pub fn to_slice(&self) -> [f32; 3] {
-        let v = &self.0;
-        [v.x, v.y, v.z]
-    }
-}
-
-#[binrw]
-#[derive(Debug, Clone)]
-#[br(little)]
-pub struct LwQuaternion(
-    #[br(map = |raw: [f32; 4]| Quaternion::new(raw[3], raw[0], raw[1], raw[2])) ]
-    #[bw(map = |q: &Quaternion<f32>| [q.v.x, q.v.y, q.v.z, q.s])]
-    Quaternion<f32>,
-);
-
-impl LwQuaternion {
-    pub fn to_slice(&self) -> [f32; 4] {
-        let q = &self.0;
-        [q.v.x, q.v.y, q.v.z, q.s]
-    }
-}
-
-// 4×3 matrix (row-major?), total 12 floats
-#[binrw]
-#[derive(Debug, Clone)]
-#[br(little)]
-pub struct LwMatrix43(
-    #[br(map = |raw: [f32; 12]| Matrix4::new(
-        raw[0], raw[1], raw[2], 0.0,
-        raw[3], raw[4], raw[5], 0.0,
-        raw[6], raw[7], raw[8], 0.0,
-        raw[9], raw[10], raw[11], 1.0
-    ))]
-    // we want to convert it back to row-major while writing to the file again
-    #[bw(map = |m: &Matrix4<f32>| [
-        m.x.x, m.y.x, m.z.x, m.w.x,
-        m.x.y, m.y.y, m.z.y, m.w.y,
-        m.x.z, m.y.z, m.z.z, m.w.z
-    ])]
-    Matrix4<f32>,
-);
-
-fn matrix4_to_quaternion(mat: Matrix4<f32>) -> Quaternion<f32> {
-    let m00 = mat.x.x;
-    let m01 = mat.x.y;
-    let m02 = mat.x.z;
-    let m10 = mat.y.x;
-    let m11 = mat.y.y;
-    let m12 = mat.y.z;
-    let m20 = mat.z.x;
-    let m21 = mat.z.y;
-    let m22 = mat.z.z;
-
-    let trace = m00 + m11 + m22;
-    if trace > 0.0 {
-        let s = 0.5 / (trace + 1.0).sqrt();
-        let w = 0.25 / s;
-        let x = (m21 - m12) * s;
-        let y = (m02 - m20) * s;
-        let z = (m10 - m01) * s;
-        Quaternion::new(w, x, y, z).normalize()
-    } else if m00 > m11 && m00 > m22 {
-        let s = 2.0 * (1.0 + m00 - m11 - m22).sqrt();
-        let inv_s = 1.0 / s;
-        let w = (m21 - m12) * inv_s;
-        let x = 0.25 * s;
-        let y = (m01 + m10) * inv_s;
-        let z = (m02 + m20) * inv_s;
-        Quaternion::new(w, x, y, z).normalize()
-    } else if m11 > m22 {
-        let s = 2.0 * (1.0 + m11 - m00 - m22).sqrt();
-        let inv_s = 1.0 / s;
-        let w = (m02 - m20) * inv_s;
-        let x = (m01 + m10) * inv_s;
-        let y = 0.25 * s;
-        let z = (m12 + m21) * inv_s;
-        Quaternion::new(w, x, y, z).normalize()
-    } else {
-        let s = 2.0 * (1.0 + m22 - m00 - m11).sqrt();
-        let inv_s = 1.0 / s;
-        let w = (m10 - m01) * inv_s;
-        let x = (m02 + m20) * inv_s;
-        let y = (m12 + m21) * inv_s;
-        let z = 0.25 * s;
-        Quaternion::new(w, x, y, z).normalize()
-    }
-}
-
-impl LwMatrix43 {
-    pub fn to_translation_rotation_scale(&self) -> (LwVector3, LwQuaternion, LwVector3) {
-        // For column-major 4x3 matrix, translation is in the 4th column (w component)
-        let translation = LwVector3(Vector3::new(self.0.w.x, self.0.w.y, self.0.w.z));
-
-        // In column-major, each column vector is already separated
-        let mut col0 = Vector3::new(self.0.x.x, self.0.x.y, self.0.x.z);
-        let mut col1 = Vector3::new(self.0.y.x, self.0.y.y, self.0.y.z);
-        let mut col2 = Vector3::new(self.0.z.x, self.0.z.y, self.0.z.z);
-
-        let scale_x = col0.magnitude();
-        let scale_y = col1.magnitude();
-        let scale_z = col2.magnitude();
-        let scale = LwVector3(Vector3::new(scale_x, scale_y, scale_z));
-
-        if scale_x != 0.0 {
-            col0 /= scale_x;
-        }
-        if scale_y != 0.0 {
-            col1 /= scale_y;
-        }
-        if scale_z != 0.0 {
-            col2 /= scale_z;
-        }
-
-        let rotation_matrix = Matrix3::from_cols(col0, col1, col2);
-        let rotation = Quaternion::from(rotation_matrix);
-
-        (translation, LwQuaternion(rotation), scale)
-    }
-}
-
-// 4×4 matrix, total 16 floats
-#[binrw]
-#[derive(Debug, Clone)]
-#[br(little)]
-pub struct LwMatrix44(
-    #[br(map = |raw: [f32; 16]| Matrix4::new(
-        raw[0], raw[1], raw[2], raw[3],
-        raw[4], raw[5], raw[6], raw[7],
-        raw[8], raw[9], raw[10], raw[11],
-        raw[12], raw[13], raw[14], raw[15]
-    ))]
-    #[bw(map = |m: &Matrix4<f32>| [
-        m.x.x, m.x.y, m.x.z, m.x.w,
-        m.y.x, m.y.y, m.y.z, m.y.w,
-        m.z.x, m.z.y, m.z.z, m.z.w,
-        m.w.x, m.w.y, m.w.z, m.w.w,
-    ])]
-    Matrix4<f32>,
-);
-
-impl LwMatrix44 {
-    pub fn to_slice(&self) -> [f32; 16] {
-        let m = &self.0;
-        [
-            m.x.x, m.x.y, m.x.z, m.x.w, m.y.x, m.y.y, m.y.z, m.y.w, m.z.x, m.z.y, m.z.z, m.z.w,
-            m.w.x, m.w.y, m.w.z, m.w.w,
-        ]
-    }
-
-    pub fn to_row_major_slice(&self) -> [f32; 16] {
-        let m = &self.0;
-        [
-            m.x.x, m.y.x, m.z.x, m.w.x, m.x.y, m.y.y, m.z.y, m.w.y, m.x.z, m.y.z, m.z.z, m.w.z,
-            m.x.w, m.y.w, m.z.w, m.w.w,
-        ]
-    }
-
-    pub fn to_translation_rotation_scale(&self) -> (LwVector3, LwQuaternion, LwVector3) {
-        let translation = Vector3::new(self.0.x.z, self.0.y.z, self.0.z.z);
-
-        let mut col0 = Vector3::new(self.0.x.x, self.0.y.x, self.0.z.x);
-        let mut col1 = Vector3::new(self.0.x.y, self.0.y.y, self.0.z.y);
-        let mut col2 = Vector3::new(self.0.x.z, self.0.y.z, self.0.z.z);
-
-        let scale_x = col0.magnitude();
-        let scale_y = col1.magnitude();
-        let scale_z = col2.magnitude();
-        let scale = LwVector3(Vector3::new(scale_x, scale_y, scale_z));
-
-        if scale_x != 0.0 {
-            col0 /= scale_x;
-        }
-        if scale_y != 0.0 {
-            col1 /= scale_y;
-        }
-        if scale_z != 0.0 {
-            col2 /= scale_z;
-        }
-
-        let rot_mat = Matrix4::new(
-            col0.x, col1.x, col2.x, 0.0, col0.y, col1.y, col2.y, 0.0, col0.z, col1.z, col2.z, 0.0,
-            0.0, 0.0, 0.0, 1.0,
-        );
-
-        let rotation_quat = matrix4_to_quaternion(rot_mat);
-
-        (LwVector3(translation), LwQuaternion(rotation_quat), scale)
-    }
-
-    pub fn to_translation_rotation_scale_for_columnar(
-        &self,
-    ) -> (LwVector3, LwQuaternion, LwVector3) {
-        let translation = Vector3::new(self.0.w.x, self.0.w.y, self.0.w.z);
-
-        let mut col0 = Vector3::new(self.0.x.x, self.0.x.y, self.0.x.z);
-        let mut col1 = Vector3::new(self.0.y.x, self.0.y.y, self.0.y.z);
-        let mut col2 = Vector3::new(self.0.z.x, self.0.z.y, self.0.z.z);
-
-        let scale_x = col0.magnitude();
-        let scale_y = col1.magnitude();
-        let scale_z = col2.magnitude();
-        let scale = LwVector3(Vector3::new(scale_x, scale_y, scale_z));
-
-        if scale_x != 0.0 {
-            col0 /= scale_x;
-        }
-
-        if scale_y != 0.0 {
-            col1 /= scale_y;
-        }
-
-        if scale_z != 0.0 {
-            col2 /= scale_z;
-        }
-
-        let rot_mat = Matrix4::new(
-            col0.x, col1.x, col2.x, 0.0, col0.y, col1.y, col2.y, 0.0, col0.z, col1.z, col2.z, 0.0,
-            0.0, 0.0, 0.0, 1.0,
-        );
-
-        let rotation_quat = matrix4_to_quaternion(rot_mat);
-
-        (LwVector3(translation), LwQuaternion(rotation_quat), scale)
-    }
-}
 
 #[binrw]
 #[derive(Debug, Clone, Default)]
@@ -641,7 +398,6 @@ impl LwBoneFile {
         node_id: usize,
         frame: usize,
     ) -> Result<(LwQuaternion, LwVector3), String> {
-        // let mut rot_seq = Vec::new();
         let key_seq = &self.key_seq[node_id];
         let key_type = &self.header.key_type;
 
@@ -651,7 +407,7 @@ impl LwBoneFile {
                 let mat = key_seq.get(frame).unwrap();
                 let (translation, rotation, _scale) = mat.to_translation_rotation_scale();
 
-                return Ok((rotation, translation));
+                Ok((rotation, translation))
             }
 
             BONE_KEY_TYPE_MAT44 => {
@@ -659,7 +415,7 @@ impl LwBoneFile {
                 let mat = key_seq.get(frame).unwrap();
                 let (translation, rotation, _scale) = mat.to_translation_rotation_scale();
 
-                return Ok((rotation, translation));
+                Ok((rotation, translation))
             }
 
             BONE_KEY_TYPE_QUAT => {
@@ -669,15 +425,10 @@ impl LwBoneFile {
                 let translation = pos_seq.get(frame).unwrap();
                 let rotation = quat_seq.get(frame).unwrap();
 
-                return Ok((rotation.clone(), translation.clone()));
+                Ok((rotation.clone(), translation.clone()))
             }
-            _ => {}
-        };
-
-        Ok((
-            LwQuaternion(Quaternion::new(0.0, 0.0, 0.0, 1.0)),
-            LwVector3(Vector3::new(0.0, 0.0, 0.0)),
-        ))
+            _ => Err("Unsupported key type".to_string()),
+        }
     }
 
     pub fn to_gltf_skin_and_nodes(
@@ -688,6 +439,7 @@ impl LwBoneFile {
         let mut bone_id_to_node_index = HashMap::new();
         let mut gltf_nodes = Vec::with_capacity(bone_num);
 
+        // create nodes for bones and dummy objects
         for i in 0..bone_num {
             let base_info = &self.base_seq[i];
             let node_index = i;
@@ -745,6 +497,7 @@ impl LwBoneFile {
 
         let mut root_nodes: Vec<Index<Node>> = Vec::new();
 
+        // create the hierarchy of nodes
         for i in 0..bone_num {
             let base_info = &self.base_seq[i];
             let parent_id = base_info.parent_id;
@@ -761,6 +514,7 @@ impl LwBoneFile {
             }
         }
 
+        // create the hierarchy of nodes for dummy objects
         for i in 0..dummy_num {
             let dummy_info = &self.dummy_seq[i];
             let parent_bone_id = dummy_info.parent_bone_id;
@@ -776,6 +530,7 @@ impl LwBoneFile {
             }
         }
 
+        // create the inverse bind matrices buffer
         let ibm_count = bone_num + dummy_num;
         let ibm_byte_count = ibm_count * 16 * std::mem::size_of::<f32>();
         let mut buffer_data: Vec<u8> = Vec::with_capacity(ibm_byte_count);
@@ -864,6 +619,11 @@ impl LwBoneFile {
         const FRAME_RATE: f32 = 30.0;
         const FRAME_DURATION: f32 = 1.0 / FRAME_RATE;
 
+        // we need one "timing" for each frame.
+        // the timing is the time in seconds of the frame
+        // the frame rate is the number of frames per second
+        // the frame duration is the time it takes to play one frame
+        // so we need to multiply the frame number by the frame duration to get the timing
         (0..self.header.frame_num)
             .map(|i| i as f32 * FRAME_DURATION)
             .collect()
@@ -1149,6 +909,7 @@ impl LwBoneFile {
         Ok(anim)
     }
 
+    // debugging fn, creates a tree of gltf nodes
     fn add_node_to_tree(
         node: &gltf::Node,
         tree: &mut TreeBuilder,
@@ -1171,6 +932,7 @@ impl LwBoneFile {
         }
     }
 
+    // debugging fn, prints a tree of gltf nodes
     fn print_node_tree(gltf: &Document) {
         let mut node_already_parsed = Mutex::new(HashMap::<usize, bool>::new());
         let mut tree = TreeBuilder::new("nodes".to_string());
@@ -1183,6 +945,7 @@ impl LwBoneFile {
         print_tree(&tree.build());
     }
 
+    // debugging fn, creates a tree of LAB bones
     fn add_bone_to_tree(
         bone: &MinimalBone,
         bone_idx: usize,
@@ -1210,6 +973,7 @@ impl LwBoneFile {
         }
     }
 
+    // debugging fn, prints a tree of LAB bones
     fn print_bone_tree(bones: &Vec<LwBoneBaseInfo>, dummies: &Vec<LwBoneDummyInfo>) {
         let mut min_bones: Vec<MinimalBone> = vec![];
 
@@ -1259,6 +1023,13 @@ impl LwBoneFile {
         print_tree(&tree.build());
     }
 
+    // nodes in GLTF are not necessarily going to be in the "hierarchical" order
+    // they will contain data about the children, but the array itself can be randomly arranged
+    // we need to create the hierarchy of bones and dummies in the order they should be processed
+    // in the LAB file, bones are stored in the order of the hierarchy, like the depth-first traversal of a graph
+    // along with the bones, the inverse bind matrices are also stored in that order
+    // this returns a vector of tuples, where the first element is the original index of the bone/dummy
+    // and the second element is the new index of the bone/dummy
     fn get_ideal_bone_order(
         bones: &Vec<LwBoneBaseInfo>,
         dummies: &Vec<LwBoneDummyInfo>,
@@ -1276,18 +1047,8 @@ impl LwBoneFile {
             })
         }
 
-        // for dummy in dummies.clone() {
-        //     min_bones.push(MinimalBone{
-        //         id: dummy.id,
-        //         _type: 1,
-        //         children: vec![],
-        //         name: format!("Dummy {}", dummy.id),
-        //         parent_id: dummy.parent_bone_id,
-        //     });
-        // }
-
+        // we create the hierarchy first, setting the children of each bone
         let min_bones_ro = min_bones.clone();
-
         min_bones_ro.iter().enumerate().for_each(|(idx, bone)| {
             if bone.parent_id != LW_INVALID_INDEX {
                 let parent_bone = min_bones
@@ -1305,6 +1066,7 @@ impl LwBoneFile {
         let mut tree = TreeBuilder::new("bones".to_string());
         let mut ideal_order: Vec<(u32, u32)> = vec![];
 
+        // then we iterate through the root bones (of which there should ideally only be 1) and create a tree of bones
         for (idx, bone) in root_bones.iter().enumerate() {
             LwBoneFile::add_bone_to_tree(bone, idx, &min_bones, &mut tree, &mut ideal_order);
         }
@@ -1318,9 +1080,6 @@ impl LwBoneFile {
         images: &Vec<image::Data>,
     ) -> anyhow::Result<Self> {
         let nodes = gltf.nodes();
-        for node in gltf.nodes() {
-            println!("node {:?}", node.name());
-        }
         let animations = gltf.animations();
 
         if animations.len() == 0 {
@@ -1335,6 +1094,7 @@ impl LwBoneFile {
         let mut idx_to_node = HashMap::<u32, gltf::Node>::new();
         let mut child_node_index_to_parent_node_index = HashMap::<u32, u32>::new();
         let mut child_dummy_index_to_parent_node_index = HashMap::<u32, u32>::new();
+        
         for node in gltf.nodes() {
             let children = node.children();
             for child in children {
@@ -1415,7 +1175,6 @@ impl LwBoneFile {
         let mut bone_id_to_orig_idx = HashMap::<u32, u32>::new();
         let mut orig_bone_id_to_new_id = HashMap::<u32, u32>::new();
 
-        println!("{:?}", ideal_order);
         let mut reordered_bones: Vec<LwBoneBaseInfo> = vec![];
         for (i, entry) in ideal_order.iter().enumerate() {
             let bone = bones.iter().find(|b| b.id == entry.1).unwrap();
@@ -1438,43 +1197,13 @@ impl LwBoneFile {
             d.parent_bone_id = *new_parent_id;
         });
 
-        // let reordered_bones_clone = reordered_bones.clone();
-        // reordered_bones.iter_mut().for_each(|bone| {
-        //     if bone.parent_id != LW_INVALID_INDEX {
-        //         let (new_parent_bone_idx, _) = reordered_bones_clone.iter().enumerate().find(|b| b.1.id == bone.parent_id).unwrap();
-        //         bone.parent_id = new_parent_bone_idx as u32;
-        //     }
-        // });
-
-        // dummies.iter_mut().for_each(|d| {
-        //     let (new_parent_bone_idx, _) = reordered_bones_clone.iter().enumerate().find(|b| b.1.id == d.parent_bone_id).unwrap();
-        //     d.parent_bone_id = new_parent_bone_idx as u32;
-        // });
 
         bones = reordered_bones;
         LwBoneFile::print_bone_tree(&bones, &dummies);
-        dummies.iter().for_each(|dummy| {
-            println!("dummy id: {}, parent_id {}", dummy.id, dummy.parent_bone_id);
-        });
-
-        bones.iter().for_each(|b| {
-            println!("bone id: {}, parent_id: {}", b.id, b.parent_id);
-        });
-
-        // let mut reordered_ibm_vec: Vec<LwMatrix44> = vec![];
-        // for bone in &bones {
-        //     let orig_idx = bone_id_to_orig_idx.get(&bone.id).unwrap();
-        //     let orig_ibm = ibm_data.get(*orig_idx as usize).unwrap();
-        //     reordered_ibm_vec.push(orig_ibm.clone());
-        // }
-
-        // ibm_data = reordered_ibm_vec;
-
         // inverse bind matrices
         let skin = gltf.skins().nth(0).unwrap();
         let ibm = skin.inverse_bind_matrices().unwrap();
         let ibm_accessor = ibm.view().unwrap();
-        let ibm_target = ibm_accessor.target();
 
         let ibm_buffer = ibm_accessor.buffer();
         let ibm_buffer_data = buffers.get(ibm_buffer.index()).unwrap();
@@ -1485,9 +1214,6 @@ impl LwBoneFile {
         let mut ibm_data: Vec<LwMatrix44> =
             vec![LwMatrix44(Matrix4::<f32>::identity(),); bones.len()];
 
-        for node in gltf.nodes() {
-            println!("node name {:?}", node.name().unwrap());
-        }
         for (i, joint) in skin.joints().enumerate() {
             let ibm = LwMatrix44::read_options(&mut reader, binrw::Endian::Little, ()).unwrap();
             if let Some(extras) = joint.extras() {
@@ -1509,7 +1235,6 @@ impl LwBoneFile {
         // keyframe data
         let animation = animations.last().unwrap();
 
-        println!("{:?}", animation.channels().count());
         // there should be two channels for each bone (translation and rotation)
         if animation.channels().count() != bone_num * 2 {
             return Err(anyhow::anyhow!("Invalid animation channels count"));
@@ -1520,22 +1245,6 @@ impl LwBoneFile {
         let mut node_idx_to_rotation_data = HashMap::<u32, Vec<LwQuaternion>>::new();
         let mut frame_num = 0;
 
-        // for node in gltf.nodes() {
-        //     let mut translation_data: Vec<LwVector3> = vec![];
-        //     let mut rotation_data: Vec<LwQuaternion> = vec![];
-
-        //     let transform = node.transform();
-        //     let node_idx = node.index() as u32;
-        //     let transformation_mat = transform.matrix();
-        //     let mat = LwMatrix44(Matrix4::from(transformation_mat));
-        //     let (trans, rot, scale) = mat.to_translation_rotation_scale_for_columnar();
-
-        //     translation_data.push(trans);
-        //     rotation_data.push(rot);
-
-        //     node_idx_to_translation_data.insert(node_idx, translation_data);
-        //     node_idx_to_rotation_data.insert(node_idx, rotation_data);
-        // }
 
         for channel in channels {
             let target = channel.target();
@@ -1628,13 +1337,5 @@ impl LwBoneFile {
             key_seq: keyframe_vec,
             old_version: 0,
         })
-    }
-}
-
-impl Character {
-    pub fn new(animation_file_path: PathBuf) -> Self {
-        Self {
-            animation_file_path,
-        }
     }
 }

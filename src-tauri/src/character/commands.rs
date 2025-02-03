@@ -1,6 +1,6 @@
 use std::{fs::File, io::Write, str::FromStr};
 
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter};
 
 use crate::{broadcast::get_broadcaster, AppState};
 
