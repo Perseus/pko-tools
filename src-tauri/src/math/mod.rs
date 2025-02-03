@@ -1,5 +1,5 @@
 use binrw::binrw;
-use cgmath::{InnerSpace, Matrix4, Quaternion, Vector2, Vector3};
+use cgmath::{InnerSpace, Matrix3, Matrix4, Quaternion, Vector2, Vector3};
 
 #[binrw]
 #[derive(Debug, Clone)]
@@ -110,7 +110,7 @@ pub struct LwMatrix44(
         m.x.z, m.y.z, m.z.z, m.w.z,
         m.x.w, m.y.w, m.z.w, m.w.w
     ])]
-    Matrix4<f32>,
+    pub Matrix4<f32>,
 );
 
 impl LwMatrix44 {
@@ -182,8 +182,40 @@ pub struct LwMatrix43(
         m.z.y, m.w.y, m.x.z,
         m.y.z, m.z.z, m.w.z
     ])]
-    Matrix4<f32>,
+    pub Matrix4<f32>,
 );
+
+impl LwMatrix43 {
+    pub fn to_translation_rotation_scale(&self) -> (LwVector3, LwQuaternion, LwVector3) {
+        // For column-major 4x3 matrix, translation is in the 4th column (w component)
+        let translation = LwVector3(Vector3::new(self.0.w.x, self.0.w.y, self.0.w.z));
+
+        // In column-major, each column vector is already separated
+        let mut col0 = Vector3::new(self.0.x.x, self.0.x.y, self.0.x.z);
+        let mut col1 = Vector3::new(self.0.y.x, self.0.y.y, self.0.y.z);
+        let mut col2 = Vector3::new(self.0.z.x, self.0.z.y, self.0.z.z);
+
+        let scale_x = col0.magnitude();
+        let scale_y = col1.magnitude();
+        let scale_z = col2.magnitude();
+        let scale = LwVector3(Vector3::new(scale_x, scale_y, scale_z));
+
+        if scale_x != 0.0 {
+            col0 /= scale_x;
+        }
+        if scale_y != 0.0 {
+            col1 /= scale_y;
+        }
+        if scale_z != 0.0 {
+            col2 /= scale_z;
+        }
+
+        let rotation_matrix = Matrix3::from_cols(col0, col1, col2);
+        let rotation = Quaternion::from(rotation_matrix);
+
+        (translation, LwQuaternion(rotation), scale)
+    }
+}
 
 #[binrw]
 #[derive(Debug, Clone)]

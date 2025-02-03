@@ -2,7 +2,7 @@ use std::{ffi::c_void, fs::File, io::BufWriter, path::PathBuf, vec};
 
 use crate::{
     animation::character::{LwBoneFile, LW_INVALID_INDEX, LW_MAX_NAME},
-    d3d::{D3DBlend, D3DCmpFunc, D3DFormat, D3DPool, D3DRenderStateType},
+    d3d::{D3DBlend, D3DCmpFunc, D3DFormat, D3DPool, D3DRenderStateType}, math::LwMatrix44,
 };
 use ::gltf::{
     buffer, image,
@@ -13,8 +13,6 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 use binrw::{binrw, BinRead, BinWrite, Error, NullString};
 use gltf::json as gltf;
 use gltf::Texture;
-
-use crate::animation::character::LwMatrix44;
 
 use super::{
     helper::HelperData, mesh::CharacterMeshInfo, texture::CharMaterialTextureInfo,
