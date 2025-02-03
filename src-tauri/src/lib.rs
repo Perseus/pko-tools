@@ -7,6 +7,7 @@ mod d3d;
 mod db;
 mod preferences;
 mod projects;
+mod math;
 
 use tauri::Manager;
 

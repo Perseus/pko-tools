@@ -1,6 +1,7 @@
 use binrw::{binrw, BinRead};
 
-use super::math::{LwBox, LwMatrix44, LwPlane, LwSphere, LwVector3};
+use crate::math::{LwBox, LwMatrix44, LwPlane, LwSphere, LwVector3};
+
 
 pub const HELPER_TYPE_DUMMY: u32 = 0x0001;
 pub const HELPER_TYPE_BOX: u32 = 0x0002;

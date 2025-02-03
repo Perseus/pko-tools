@@ -10,6 +10,13 @@ pub struct LwVector3(
     pub Vector3<f32>,
 );
 
+impl LwVector3 {
+    pub fn to_slice(&self) -> [f32; 3] {
+        let v = &self.0;
+        [v.x, v.y, v.z]
+    }
+}
+
 #[binrw]
 #[derive(Debug, Clone, Copy)]
 #[br(little)]
@@ -31,7 +38,7 @@ impl Default for LwVector2 {
 pub struct LwQuaternion(
     #[br(map = |raw: [f32; 4]| Quaternion::new(raw[3], raw[0], raw[1], raw[2])) ]
     #[bw(map = |q: &Quaternion<f32>| [q.v.x, q.v.y, q.v.z, q.s])]
-    Quaternion<f32>,
+    pub Quaternion<f32>,
 );
 
 impl LwQuaternion {
@@ -41,7 +48,7 @@ impl LwQuaternion {
     }
 }
 
-fn matrix4_to_quaternion(mat: Matrix4<f32>) -> Quaternion<f32> {
+pub fn matrix4_to_quaternion(mat: Matrix4<f32>) -> Quaternion<f32> {
     let m00 = mat.x.x;
     let m01 = mat.y.x;
     let m02 = mat.z.x;
@@ -59,7 +66,7 @@ fn matrix4_to_quaternion(mat: Matrix4<f32>) -> Quaternion<f32> {
         let x = (m21 - m12) * s;
         let y = (m02 - m20) * s;
         let z = (m10 - m01) * s;
-        Quaternion::new(x, y, z, w).normalize()
+        Quaternion::new(w, x, y, z).normalize()
     } else if m00 > m11 && m00 > m22 {
         let s = 2.0 * (1.0 + m00 - m11 - m22).sqrt();
         let inv_s = 1.0 / s;

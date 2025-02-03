@@ -1,10 +1,9 @@
 use binrw::{binrw, BinRead, BinWrite, VecArgs};
 use gltf::json as gltf;
 
-use crate::animation::character::{LwBoneBaseInfo, LwBoneDummyInfo, LwBoneInfoHeader};
+use crate::{animation::character::{LwBoneBaseInfo, LwBoneDummyInfo, LwBoneInfoHeader}, math::{LwMatrix43, LwMatrix44, LwQuaternion, LwVector3}};
 
 use super::{
-    math::{LwMatrix43, LwMatrix44, LwQuaternion, LwVector3},
     model::LW_MAX_TEXTURESTAGE_NUM,
     texture::TextureInfo,
 };

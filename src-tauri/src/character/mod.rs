@@ -2,7 +2,6 @@ mod animation;
 pub mod commands;
 mod helper;
 mod info;
-mod math;
 mod mesh;
 pub mod model;
 mod texture;

@@ -16,13 +16,8 @@ use gltf::{
 use ptree::{print_tree, TreeBuilder};
 use serde_json::value::RawValue;
 use std::{
-    cmp::Ordering, collections::HashMap, fs::File, io::BufWriter, path::PathBuf, sync::Mutex,
+    collections::HashMap, fs::File, io::BufWriter, path::PathBuf, sync::Mutex,
 };
-use tauri::utils::acl::identifier;
-
-pub struct Character {
-    animation_file_path: PathBuf,
-}
 
 #[derive(Debug, Clone)]
 struct MinimalBone {
@@ -37,7 +32,7 @@ struct MinimalBone {
 use binrw::{binrw, BinRead, BinResult, BinWrite, VecArgs};
 use std::io::{Read, Seek};
 
-use crate::{broadcast::BroadcastMessage, character::GLTFFieldsToAggregate};
+use crate::{broadcast::BroadcastMessage, character::GLTFFieldsToAggregate, math::{matrix4_to_quaternion, LwQuaternion, LwVector3}};
 
 // Constants
 pub const LW_MAX_NAME: usize = 64;
@@ -48,40 +43,6 @@ pub const BONE_KEY_TYPE_MAT43: u32 = 1;
 pub const BONE_KEY_TYPE_MAT44: u32 = 2;
 pub const BONE_KEY_TYPE_QUAT: u32 = 3;
 
-//--------------------------------------------------------------------------------
-// Basic vector/matrix types (assuming 32-bit floats in a tight array).
-
-#[binrw]
-#[derive(Debug, Clone)]
-#[br(little)]
-pub struct LwVector3(
-    #[br(map = |raw: [f32; 3]| Vector3::new(raw[0], raw[1], raw[2]))]
-    #[bw(map = |v: &Vector3<f32>| [v.x, v.y, v.z])]
-    Vector3<f32>,
-);
-
-impl LwVector3 {
-    pub fn to_slice(&self) -> [f32; 3] {
-        let v = &self.0;
-        [v.x, v.y, v.z]
-    }
-}
-
-#[binrw]
-#[derive(Debug, Clone)]
-#[br(little)]
-pub struct LwQuaternion(
-    #[br(map = |raw: [f32; 4]| Quaternion::new(raw[3], raw[0], raw[1], raw[2])) ]
-    #[bw(map = |q: &Quaternion<f32>| [q.v.x, q.v.y, q.v.z, q.s])]
-    Quaternion<f32>,
-);
-
-impl LwQuaternion {
-    pub fn to_slice(&self) -> [f32; 4] {
-        let q = &self.0;
-        [q.v.x, q.v.y, q.v.z, q.s]
-    }
-}
 
 // 4×3 matrix (row-major?), total 12 floats
 #[binrw]
@@ -103,51 +64,6 @@ pub struct LwMatrix43(
     Matrix4<f32>,
 );
 
-fn matrix4_to_quaternion(mat: Matrix4<f32>) -> Quaternion<f32> {
-    let m00 = mat.x.x;
-    let m01 = mat.x.y;
-    let m02 = mat.x.z;
-    let m10 = mat.y.x;
-    let m11 = mat.y.y;
-    let m12 = mat.y.z;
-    let m20 = mat.z.x;
-    let m21 = mat.z.y;
-    let m22 = mat.z.z;
-
-    let trace = m00 + m11 + m22;
-    if trace > 0.0 {
-        let s = 0.5 / (trace + 1.0).sqrt();
-        let w = 0.25 / s;
-        let x = (m21 - m12) * s;
-        let y = (m02 - m20) * s;
-        let z = (m10 - m01) * s;
-        Quaternion::new(w, x, y, z).normalize()
-    } else if m00 > m11 && m00 > m22 {
-        let s = 2.0 * (1.0 + m00 - m11 - m22).sqrt();
-        let inv_s = 1.0 / s;
-        let w = (m21 - m12) * inv_s;
-        let x = 0.25 * s;
-        let y = (m01 + m10) * inv_s;
-        let z = (m02 + m20) * inv_s;
-        Quaternion::new(w, x, y, z).normalize()
-    } else if m11 > m22 {
-        let s = 2.0 * (1.0 + m11 - m00 - m22).sqrt();
-        let inv_s = 1.0 / s;
-        let w = (m02 - m20) * inv_s;
-        let x = (m01 + m10) * inv_s;
-        let y = 0.25 * s;
-        let z = (m12 + m21) * inv_s;
-        Quaternion::new(w, x, y, z).normalize()
-    } else {
-        let s = 2.0 * (1.0 + m22 - m00 - m11).sqrt();
-        let inv_s = 1.0 / s;
-        let w = (m10 - m01) * inv_s;
-        let x = (m02 + m20) * inv_s;
-        let y = (m12 + m21) * inv_s;
-        let z = 0.25 * s;
-        Quaternion::new(w, x, y, z).normalize()
-    }
-}
 
 impl LwMatrix43 {
     pub fn to_translation_rotation_scale(&self) -> (LwVector3, LwQuaternion, LwVector3) {
@@ -641,7 +557,6 @@ impl LwBoneFile {
         node_id: usize,
         frame: usize,
     ) -> Result<(LwQuaternion, LwVector3), String> {
-        // let mut rot_seq = Vec::new();
         let key_seq = &self.key_seq[node_id];
         let key_type = &self.header.key_type;
 
@@ -1628,13 +1543,5 @@ impl LwBoneFile {
             key_seq: keyframe_vec,
             old_version: 0,
         })
-    }
-}
-
-impl Character {
-    pub fn new(animation_file_path: PathBuf) -> Self {
-        Self {
-            animation_file_path,
-        }
     }
 }

@@ -3,7 +3,7 @@ use std::{
     fs::File,
 };
 
-use crate::d3d::{D3DPrimitiveType, D3DVertexElement9};
+use crate::{d3d::{D3DPrimitiveType, D3DVertexElement9}, math::{LwVector2, LwVector3}};
 use ::gltf::{
     buffer,
     json::{
@@ -24,7 +24,6 @@ use gltf::json as gltf;
 use image::ImageReader;
 
 use super::{
-    math::{LwVector2, LwVector3},
     model::{
         EXP_OBJ_VERSION, EXP_OBJ_VERSION_0_0_0_0, EXP_OBJ_VERSION_1_0_0_3, EXP_OBJ_VERSION_1_0_0_4,
         LW_MAX_TEXTURESTAGE_NUM,
