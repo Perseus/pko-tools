@@ -1,10 +1,5 @@
 name: "publish"
 
-on:
-  push:
-    branches:
-      - master
-
 jobs:
   create-release:
     permissions:
