@@ -255,14 +255,13 @@ impl BinRead for LwBoneFile {
         let total_parsing_steps = 6;
         let mut current_step = 1;
 
-        crate::broadcast::get_broadcaster()
+        let _ = crate::broadcast::get_broadcaster()
             .send(BroadcastMessage::ModelLoadingUpdate(
                 "Loading animations".to_string(),
                 "Fetching version".to_string(),
                 current_step,
                 total_parsing_steps,
-            ))
-            .unwrap();
+            )); 
         this.version = u32::read_options(reader, opts, ())?;
 
         if this.version == 0 {
@@ -271,25 +270,23 @@ impl BinRead for LwBoneFile {
 
         current_step += 1;
 
-        crate::broadcast::get_broadcaster()
+        let _ = crate::broadcast::get_broadcaster()
             .send(BroadcastMessage::ModelLoadingUpdate(
                 "Loading animations".to_string(),
                 "Reading header".to_string(),
                 current_step,
                 total_parsing_steps,
-            ))
-            .unwrap();
+            ));
         this.header = LwBoneInfoHeader::read_options(reader, opts, ())?;
 
         current_step += 1;
-        crate::broadcast::get_broadcaster()
+        let _ = crate::broadcast::get_broadcaster()
             .send(BroadcastMessage::ModelLoadingUpdate(
                 "Loading animations".to_string(),
                 "Reading bone hierarchy".to_string(),
                 current_step,
                 total_parsing_steps,
-            ))
-            .unwrap();
+            ));
 
         this.base_seq = Vec::read_options(
             reader,
@@ -301,14 +298,13 @@ impl BinRead for LwBoneFile {
         )?;
 
         current_step += 1;
-        crate::broadcast::get_broadcaster()
+        let _ = crate::broadcast::get_broadcaster()
             .send(BroadcastMessage::ModelLoadingUpdate(
                 "Loading animations".to_string(),
                 "Reading inverse bind matrices".to_string(),
                 current_step,
                 total_parsing_steps,
-            ))
-            .unwrap();
+            ));
 
         this.invmat_seq = Vec::read_options(
             reader,
@@ -320,14 +316,13 @@ impl BinRead for LwBoneFile {
         )?;
 
         current_step += 1;
-        crate::broadcast::get_broadcaster()
+        let _ = crate::broadcast::get_broadcaster()
             .send(BroadcastMessage::ModelLoadingUpdate(
                 "Loading animations".to_string(),
                 "Reading dummy information".to_string(),
                 current_step,
                 total_parsing_steps,
-            ))
-            .unwrap();
+            ));
 
         this.dummy_seq = Vec::read_options(
             reader,
@@ -339,14 +334,13 @@ impl BinRead for LwBoneFile {
         )?;
 
         current_step += 1;
-        crate::broadcast::get_broadcaster()
+        let _ = crate::broadcast::get_broadcaster()
             .send(BroadcastMessage::ModelLoadingUpdate(
                 "Loading animations".to_string(),
                 "Reading animation keyframe data".to_string(),
                 current_step,
                 total_parsing_steps,
-            ))
-            .unwrap();
+            ));
 
         let mut key_infos = Vec::with_capacity(this.header.bone_num as usize);
         for i in 0..this.header.bone_num {
@@ -1032,7 +1026,6 @@ impl LwBoneFile {
     // and the second element is the new index of the bone/dummy
     fn get_ideal_bone_order(
         bones: &Vec<LwBoneBaseInfo>,
-        dummies: &Vec<LwBoneDummyInfo>,
     ) -> Vec<(u32, u32)> {
         let mut min_bones: Vec<MinimalBone> = vec![];
 
@@ -1171,7 +1164,7 @@ impl LwBoneFile {
             }
         });
 
-        let ideal_order = LwBoneFile::get_ideal_bone_order(&bones, &dummies);
+        let ideal_order = LwBoneFile::get_ideal_bone_order(&bones);
         let mut bone_id_to_orig_idx = HashMap::<u32, u32>::new();
         let mut orig_bone_id_to_new_id = HashMap::<u32, u32>::new();
 
@@ -1197,9 +1190,8 @@ impl LwBoneFile {
             d.parent_bone_id = *new_parent_id;
         });
 
-
         bones = reordered_bones;
-        LwBoneFile::print_bone_tree(&bones, &dummies);
+
         // inverse bind matrices
         let skin = gltf.skins().nth(0).unwrap();
         let ibm = skin.inverse_bind_matrices().unwrap();
