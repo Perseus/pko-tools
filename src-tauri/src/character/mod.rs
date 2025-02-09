@@ -150,15 +150,17 @@ impl Character {
 
 
         let helpers = models.iter().map(|model| model.get_gltf_helper_nodes()).collect::<Vec<_>>();
-        for helper_nodes in helpers {
-            fields_to_aggregate.nodes.extend(helper_nodes);
+        let mut total_helper_nodes = 0;
+        for helper_nodes in helpers.iter() {
+            total_helper_nodes += helper_nodes.len();
+            fields_to_aggregate.nodes.extend(helper_nodes.clone());
         }
         animation.to_gltf_animations_and_sampler(&mut fields_to_aggregate);
 
         let scene = gltf::Scene {
             nodes: vec![
                 Index::new(0),
-                Index::new((fields_to_aggregate.nodes.len() - 1) as u32),
+                Index::new((fields_to_aggregate.nodes.len() - total_helper_nodes - 1) as u32),
             ],
             name: Some("DefaultScene".to_string()),
             extensions: None,

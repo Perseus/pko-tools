@@ -1,5 +1,7 @@
 export type Character = {
   id: number;
   name: string;
-  modelType: string;
+  model_type: string;
+  model: number;
+  suit_id: number;
 }

@@ -1,4 +1,4 @@
-use std::{fs::File, io::Write, str::FromStr};
+use std::{fs::File, io::Write, path::Path, str::FromStr};
 
 use tauri::{AppHandle, Emitter};
 
@@ -47,8 +47,7 @@ pub async fn export_to_gltf(
     app: AppHandle,
     app_state: tauri::State<'_, AppState>,
     character_id: u32,
-    target_path: String,
-) -> Result<(), String> {
+) -> Result<String, String> {
     let current_project = app_state.preferences.get_current_project();
     if current_project.is_none() {
         return Err("No project selected".to_string());
@@ -70,14 +69,19 @@ pub async fn export_to_gltf(
             return Err(character.err().unwrap().to_string());
         }
 
+        let exports_dir = Path::new("./exports/gltf");
+        if !exports_dir.exists() {
+            std::fs::create_dir_all(exports_dir).unwrap();
+        }
+
         let gltf_json = character.unwrap();
-        let path = target_path + "/" + &character_id.to_string() + ".gltf";
-        let file = File::create(path);
+        let path = exports_dir.join(format!("{}.gltf", character_id));
+        let file = File::create(path.clone());
         if let Ok(mut file) = file {
             file.write_all(gltf_json.as_bytes()).unwrap();
         }
 
-        return Ok(());
+        return Ok(path.to_string_lossy().to_string());
     }
 
     Err("Invalid project id".to_string())
