@@ -2,7 +2,6 @@ use binrw::{binrw, BinRead};
 
 use crate::math::{LwBox, LwMatrix44, LwPlane, LwSphere, LwVector3};
 
-
 pub const HELPER_TYPE_DUMMY: u32 = 0x0001;
 pub const HELPER_TYPE_BOX: u32 = 0x0002;
 pub const HELPER_TYPE_MESH: u32 = 0x0004;
@@ -85,37 +84,47 @@ pub struct HelperData {
     pub _type: u32,
 
     #[br(if(_type & HELPER_TYPE_DUMMY > 0))]
+    #[bw(if(_type & HELPER_TYPE_DUMMY > 0))]
     pub dummy_num: u32,
 
     #[br(if(dummy_num > 0))]
     #[br(count = dummy_num)]
+    #[bw(if(*dummy_num > 0))]
     pub dummy_seq: Vec<HelperDummyInfo>,
 
     #[br(if(_type &  HELPER_TYPE_BOX > 0))]
+    #[bw(if(_type &  HELPER_TYPE_BOX > 0))]
     pub box_num: u32,
 
     #[br(if(box_num > 0))]
     #[br(count = box_num)]
+    #[bw(if(*box_num > 0))]
     pub box_seq: Vec<HelperBoxInfo>,
 
     #[br(if(_type & HELPER_TYPE_MESH > 0))]
+    #[bw(if(_type & HELPER_TYPE_MESH > 0))]
     pub mesh_num: u32,
 
     #[br(if(mesh_num > 0))]
     #[br(count = mesh_num)]
+    #[bw(if(*mesh_num > 0))]
     pub mesh_seq: Vec<HelperMeshInfo>,
 
     #[br(if(_type & HELPER_TYPE_BBOX > 0))]
+    #[bw(if(_type & HELPER_TYPE_BBOX > 0))]
     pub bbox_num: u32,
 
     #[br(if(bbox_num > 0))]
     #[br(count = bbox_num)]
+    #[bw(if(*bbox_num > 0))]
     pub bbox_seq: Vec<BoundingBoxInfo>,
 
     #[br(if(_type & HELPER_TYPE_BSPHERE > 0))]
+    #[bw(if(_type & HELPER_TYPE_BSPHERE > 0))]
     pub bsphere_num: u32,
 
     #[br(if(bsphere_num > 0))]
     #[br(count = bsphere_num)]
+    #[bw(if(*bsphere_num > 0))]
     pub bsphere_seq: Vec<BoundingSphereInfo>,
 }

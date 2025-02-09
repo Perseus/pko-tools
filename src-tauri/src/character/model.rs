@@ -1,8 +1,16 @@
-use std::{ffi::c_void, fs::File, io::BufWriter, path::PathBuf, vec};
+use std::{
+    ffi::c_void,
+    fs::File,
+    io::BufWriter,
+    path::{Path, PathBuf},
+    vec,
+};
 
 use crate::{
     animation::character::{LwBoneFile, LW_INVALID_INDEX, LW_MAX_NAME},
-    d3d::{D3DBlend, D3DCmpFunc, D3DFormat, D3DPool, D3DRenderStateType}, math::LwMatrix44,
+    character::{helper::BoundingSphereInfo, mesh::CharacterInfoMeshHeader, texture},
+    d3d::{D3DBlend, D3DCmpFunc, D3DFormat, D3DPool, D3DRenderStateType},
+    math::{LwMatrix44, LwSphere, LwVector3},
 };
 use ::gltf::{
     buffer, image,
@@ -11,11 +19,14 @@ use ::gltf::{
 };
 use base64::{prelude::BASE64_STANDARD, Engine};
 use binrw::{binrw, BinRead, BinWrite, Error, NullString};
+use cgmath::{Matrix4, SquareMatrix, Vector3};
 use gltf::json as gltf;
 use gltf::Texture;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, value::RawValue};
 
 use super::{
-    helper::HelperData, mesh::CharacterMeshInfo, texture::CharMaterialTextureInfo,
+    helper::{HelperData}, mesh::CharacterMeshInfo, texture::CharMaterialTextureInfo,
     GLTFFieldsToAggregate,
 };
 
@@ -42,6 +53,25 @@ pub const LW_MTL_RS_NUM: u32 = 8;
 
 pub const D3DRS_ALPHAFUNC: u32 = D3DRenderStateType::AlphaFunc as u32;
 pub const D3DRS_ALPHAREF: u32 = D3DRenderStateType::AlphaRef as u32;
+
+pub const LW_RENDERCTRL_VS_FIXEDFUNCTION: u32 = 1;
+pub const LW_RENDERCTRL_VS_VERTEXBLEND: u32 = 2;
+pub const LW_RENDERCTRL_VS_VERTEXBLEND_DX9: u32 = 3;
+pub const LW_RENDERCTRL_VS_USER: u32 = 0x100;
+pub const LW_RENDERCTRL_VS_INVALID: u32 = 0xffffffff;
+
+#[repr(u32)]
+#[derive(Debug, Default, Copy, Clone)]
+#[binrw]
+#[br(repr = u32)]
+#[bw(repr = u32)]
+pub enum GeomObjType {
+    #[default]
+    Generic = 0,
+
+    BB = 1,
+    BB2 = 2,
+}
 
 #[derive(Debug, Default, Copy, Clone)]
 #[binrw]
@@ -158,6 +188,7 @@ pub struct CharacterGeometricModel {
     header: CharGeoModelInfoHeader,
 
     #[br(if(version == EXP_OBJ_VERSION_0_0_0_0))]
+    #[bw(if(*version == EXP_OBJ_VERSION_0_0_0_0))]
     old_version: u32,
 
     #[br(if(header.mesh_size > 0))]
@@ -180,36 +211,45 @@ pub struct CharacterGeometricModel {
 impl CharacterGeometricModel {
     pub fn get_gltf_mesh_primitive(
         &self,
+        project_dir: &Path,
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
-    ) -> gltf::mesh::Primitive {
+    ) -> anyhow::Result<gltf::mesh::Primitive> {
         let mesh_info = self.mesh_info.as_ref().unwrap();
-        mesh_info.get_gltf_primitive(fields_to_aggregate, &self.material_seq)
+        let primitive = mesh_info.get_gltf_primitive(project_dir, fields_to_aggregate, &self.material_seq);
+
+        Ok(primitive)
     }
-    // pub fn to_gltf(&self, anim: LwBoneFile, fields_to_aggregate: &mut GLTFFieldsToAggregate) -> gltf::Root {
-    //     let (skin, nodes) = anim.to_gltf_skin_and_nodes(fields_to_aggregate);
-    //     anim.to_gltf_animations_and_sampler(fields_to_aggregate);
 
-    //     let root = gltf::Root {
-    //         nodes,
-    //         skins: vec![skin],
-    //         images: fields_to_aggregate.image,
-    //         scene: Some(Index::new(0)),
-    //         accessors: fields_to_aggregate.accessor,
-    //         buffers: fields_to_aggregate.buffer,
-    //         buffer_views: fields_to_aggregate.buffer_view,
-    //         textures: fields_to_aggregate.texture,
-    //         materials: fields_to_aggregate.material,
-    //         samplers: fields_to_aggregate.sampler,
-    //         animations: fields_to_aggregate.animation,
-    //         ..Default::default()
-    //     };
+    pub fn get_gltf_helper_nodes(&self) -> Vec<gltf::Node> {
+        let helper_data = self.helper_data.as_ref().unwrap();
+        let mut nodes = vec![];
+        for bsphere in helper_data.bsphere_seq.iter() {
+            let node = gltf::Node{
+                camera: None,
+                children: None,
+                extensions: None,
+                matrix: Some(bsphere.mat.to_slice()),
+                mesh: None,
+                name: Some(format!("BoundingSphere{}", bsphere.id)),
+                rotation: None,
+                scale: None,
+                skin: None,
+                translation: None,
+                weights: None,
+                extras: Some(
+                    RawValue::from_string(
+                        format!(
+                            r#"{{"radius":{},"type":"bounding_sphere","id":{}}}"#, bsphere.sphere.r, bsphere.id
+                        )
+                    ).unwrap()
+                ),
+            };
 
-    //     let file = File::create("test.gltf").unwrap();
-    //     let writer = BufWriter::new(file);
-    //     json::serialize::to_writer_pretty(writer, &root).unwrap();
+            nodes.push(node);
+        }
 
-    //     root
-    // }
+        nodes
+    }
 
     pub fn from_file(file_path: PathBuf) -> anyhow::Result<Self> {
         let file = File::open(file_path)?;
@@ -224,7 +264,102 @@ impl CharacterGeometricModel {
         buffers: &Vec<buffer::Data>,
         images: &Vec<image::Data>,
     ) -> anyhow::Result<Self> {
-        unimplemented!()
+        let material_seq = texture::CharMaterialTextureInfo::from_gltf(gltf, buffers, images)?;
+        let mtl_size = {
+            let mut size = 0;
+            for material in material_seq.iter() {
+                size += std::mem::size_of_val(&material.opacity);
+                size += std::mem::size_of_val(&material.transp_type);
+                size += std::mem::size_of_val(&material.material);
+                size += std::mem::size_of_val(&material.rs_set);
+                size += std::mem::size_of_val(&material.tex_seq);
+            }
+
+            if size > 0 {
+                size += std::mem::size_of::<u32>();
+            }
+            size
+        };
+        let mesh = CharacterMeshInfo::from_gltf(gltf, buffers, images)?;
+        let mut helper_data = HelperData{
+            _type: 32,
+            bsphere_num: 0,
+            bsphere_seq: vec![],
+            dummy_num: 0,
+            dummy_seq: vec![],
+            box_num: 0,
+            box_seq: vec![],
+            mesh_num: 0,
+            mesh_seq: vec![],
+            bbox_num: 0,
+            bbox_seq: vec![],
+        };
+
+        #[derive(Deserialize)]
+        struct HelperDataExtras {
+            radius: f32,
+            id: u32,
+            r#type: String,
+        }
+
+        for node in gltf.nodes() {
+            if node.extras().is_some() {
+                let extras = node.extras().as_ref().unwrap();
+                let extras_data = serde_json::from_str::<HelperDataExtras>(extras.get());
+                if extras_data.is_ok() {
+                    let extras_data = extras_data.unwrap();
+                    match extras_data.r#type.as_str() {
+                        "bounding_sphere" => {
+                            let translation = node.transform().decomposed().0;
+                            helper_data.bsphere_num += 1;
+                            helper_data.bsphere_seq.push(BoundingSphereInfo{
+                                id: extras_data.id,
+                                sphere: LwSphere{
+                                    c: LwVector3(Vector3::new(0.0, 0.0,0.0 )),
+                                    r: extras_data.radius,
+                                },
+                                mat: LwMatrix44(Matrix4::from_translation(Vector3::new(translation[0], translation[1], translation[2]))),
+                            });
+                        },
+                        "bounding_box" => {},
+                        _ => {}
+                    };
+                }
+            }
+        }
+
+        let geom_header = CharGeoModelInfoHeader {
+            id: 0,
+            parent_id: LW_INVALID_INDEX,
+            anim_size: 0, // TODO: check if there are any models with animations present, could not find any
+            _type: GeomObjType::Generic as u32,
+            mat_local: LwMatrix44(Matrix4::identity()),
+            rcci: RenderCtrlCreateInfo {
+                ctrl_id: LW_RENDERCTRL_VS_VERTEXBLEND,
+                decl_id: 12,
+                vs_id: 2,
+                ps_id: LW_INVALID_INDEX,
+            },
+            helper_size: 50,
+            mtl_size: mtl_size as u32,
+            mesh_size: 61504,
+            state_ctrl: StateCtrl {
+                // most default values seem to be "enabled" and "visible"
+                // i found a few that were had "transparent" as true as well
+                // but not sure how to decide that right now, so will figure that out later
+                _state_seq: [1, 1, 0, 0, 0, 0, 0, 0],
+            },
+        };
+
+        Ok(CharacterGeometricModel {
+            version: EXP_OBJ_VERSION_1_0_0_4,
+            header: geom_header,
+            old_version: 0,
+            material_num: 1, // TODO: hardcoding this as 1 for now, need to see how it works for all models
+            material_seq: Some(material_seq), // TODO: fill these in once we've extracted this data
+            mesh_info: Some(mesh),
+            helper_data: Some(helper_data),
+        })
     }
 }
 

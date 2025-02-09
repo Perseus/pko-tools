@@ -1,4 +1,10 @@
+use std::io::{Cursor, Seek};
+
+use ::image::{ImageFormat, ImageReader};
+use base64::{prelude::BASE64_STANDARD, Engine};
 use binrw::{binrw, BinRead, BinWrite, Error};
+use gltf::{buffer, Document, Texture};
+use image::Rgb;
 
 use crate::{
     animation::character::{LW_INVALID_INDEX, LW_MAX_NAME},
@@ -277,6 +283,91 @@ impl CharMaterialTextureInfo {
             tex_seq,
         }
     }
+
+    pub fn from_gltf(
+        gltf: &Document,
+        buffers: &Vec<buffer::Data>,
+        images: &Vec<gltf::image::Data>,
+    ) -> anyhow::Result<Vec<Self>> {
+        let mut material_seq: Vec<Self> = vec![];
+        let mut material = Self::new();
+        material.transp_type = MaterialTextureInfoTransparencyType::Filter;
+        material.opacity = 1.0;
+
+        for gltf_mat in gltf.materials() {
+            let roughness = gltf_mat.pbr_metallic_roughness();
+            let base_color_texture = roughness.base_color_texture().unwrap();
+            let base_color_factor = roughness.base_color_factor();
+            let emissive_factor = gltf_mat.emissive_factor();
+
+            let texture = base_color_texture.texture();
+            let image_data = images.get(texture.source().index()).unwrap();
+            if image_data.format != gltf::image::Format::R8G8B8 {
+                return Err(anyhow::anyhow!("Unsupported image format, not R8G8B8"));
+            }
+
+            let img: image::ImageBuffer<Rgb<u8>, _> = image::ImageBuffer::from_raw(
+                image_data.width,
+                image_data.height,
+                image_data.pixels.clone(),
+            )
+            .unwrap();
+
+            img.save_with_format("./state/textures/test.bmp", ImageFormat::Bmp)?;
+
+            let mut file_name: [u8; 64] = [0; 64];
+            for (i, char) in "test.bmp".chars().enumerate() {
+                file_name[i] = char as u8;
+            }
+
+            material.tex_seq[0] = TextureInfo {
+                stage: 0,
+                level: 1,
+                usage: 0,
+                d3d_format: D3DFormat::Unknown,
+                d3d_pool: D3DPool::Default,
+                _type: TextureType::File,
+                colorkey: LwColorValue4b::from_color(0),
+                colorkey_type: ColorKeyType::None,
+                data: 0,
+                byte_alignment_flag: 0,
+                file_name,
+                width: 0,
+                height: 0,
+                tss_set: [RenderStateAtom::new(); 8],
+            };
+            material.material = CharMaterial {
+                emi: Some(ColorValue4F {
+                    r: emissive_factor[0],
+                    g: emissive_factor[1],
+                    b: emissive_factor[2],
+                    a: 0.0,
+                }),
+                dif: ColorValue4F {
+                    r: base_color_factor[0],
+                    g: base_color_factor[1],
+                    b: base_color_factor[2],
+                    a: base_color_factor[3],
+                },
+                amb: ColorValue4F{
+                    r: 1.0,
+                    g: 1.0,
+                    b: 1.0,
+                    a: 1.0,
+                },
+                spe: Some(ColorValue4F {
+                    r: 1.0,
+                    g: 1.0,
+                    b: 1.0,
+                    a: 1.0,
+                }),
+                power: 0.0,
+            };
+        }
+
+        material_seq.push(material);
+        Ok(material_seq)
+    }
 }
 
 impl BinRead for CharMaterialTextureInfo {
@@ -492,12 +583,23 @@ impl BinRead for CharMaterialTextureInfo {
 impl BinWrite for CharMaterialTextureInfo {
     type Args<'a> = ();
 
-    fn write_options<W: std::io::Write>(
+    fn write_options<W: std::io::Write + Seek>(
         &self,
         writer: &mut W,
         endian: binrw::Endian,
         args: Self::Args<'_>,
     ) -> binrw::BinResult<()> {
+        f32::write_le(&self.opacity, writer)?;
+        MaterialTextureInfoTransparencyType::write_le(&self.transp_type, writer)?;
+        CharMaterial::write_le(&self.material, writer)?;
+        for rs in self.rs_set.iter() {
+            RenderStateAtom::write_le(rs, writer)?;
+        }
+
+        for tex in self.tex_seq.iter() {
+            TextureInfo::write_le(tex, writer)?;
+        }
+        
         Ok(())
     }
 }

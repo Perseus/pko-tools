@@ -142,11 +142,17 @@ impl Character {
 
         let primitives = models
             .iter()
-            .map(|model| model.get_gltf_mesh_primitive(&mut fields_to_aggregate))
+            .map(|model| model.get_gltf_mesh_primitive(project_dir, &mut fields_to_aggregate))
             .collect::<Vec<_>>();
         let (skin, nodes) = animation.to_gltf_skin_and_nodes(&mut fields_to_aggregate);
         fields_to_aggregate.skin.push(skin);
         fields_to_aggregate.nodes.extend(nodes);
+
+
+        let helpers = models.iter().map(|model| model.get_gltf_helper_nodes()).collect::<Vec<_>>();
+        for helper_nodes in helpers {
+            fields_to_aggregate.nodes.extend(helper_nodes);
+        }
         animation.to_gltf_animations_and_sampler(&mut fields_to_aggregate);
 
         let scene = gltf::Scene {
@@ -161,7 +167,7 @@ impl Character {
 
         let mesh = gltf::Mesh {
             name: Some("mesh".to_string()),
-            primitives,
+            primitives: primitives.iter().map(|p| p.as_ref().unwrap().clone()).collect(),
             weights: None,
             extensions: None,
             extras: None,
@@ -184,7 +190,7 @@ impl Character {
             ..Default::default()
         };
 
-        let gltf_as_string = serde_json::to_string(&gltf)?;
+        let gltf_as_string = serde_json::to_string_pretty(&gltf)?;
         Ok(gltf_as_string)
     }
 
@@ -200,6 +206,9 @@ impl Character {
         animation_data.write_options(&mut writer, binrw::Endian::Little, ())?;
 
         let mesh_data = CharacterGeometricModel::from_gltf(&gltf, &buffers, &images)?;
+        let file = File::create("./test_artifacts/test.lgo")?;
+        let mut writer = BufWriter::new(file);
+        mesh_data.write_options(&mut writer, binrw::Endian::Little, ())?;
 
         unimplemented!()
     }
@@ -220,6 +229,8 @@ pub fn get_character_gltf_json(
 
 #[cfg(test)]
 mod test {
+    use std::{io::Write, thread};
+
     use ::gltf::{import, Gltf};
 
     use super::*;
@@ -259,6 +270,7 @@ mod test {
         };
 
         let gltf = character.get_gltf_json(Path::new("/mnt/d/EA 1.0.1"));
-        gltf.unwrap();
+        let mut file = File::create("./test_artifacts/test.gltf").unwrap();
+        file.write_all(gltf.unwrap().as_bytes()).unwrap();
     }
 }
