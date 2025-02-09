@@ -28,3 +28,4 @@ node_modules
 src-tauri/test_artifacts/*
 test.gltf
 src-tauri/exports
+src-tauri/imports

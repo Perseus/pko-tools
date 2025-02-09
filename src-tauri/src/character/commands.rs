@@ -1,5 +1,6 @@
-use std::{fs::File, io::Write, path::Path, str::FromStr};
+use std::{fs::File, io::Write, path::{Path, PathBuf}, str::FromStr};
 
+use gltf::import;
 use tauri::{AppHandle, Emitter};
 
 use crate::{broadcast::get_broadcaster, AppState};
@@ -83,6 +84,60 @@ pub async fn export_to_gltf(
 
         return Ok(path.to_string_lossy().to_string());
     }
+
+    Err("Invalid project id".to_string())
+}
+
+#[tauri::command]
+pub async fn import_character_from_gltf(
+    app: AppHandle,
+    app_state: tauri::State<'_, AppState>,
+    model_id: u32,
+    file_path: String,
+) -> Result<String, String> {
+    let current_project = app_state.preferences.get_current_project();
+    if current_project.is_none() {
+        return Err("No project selected".to_string());
+    }
+
+    let project_id = current_project.unwrap();
+    if let Ok(project_uuid) = uuid::Uuid::from_str(&project_id) {
+        let mut receiver = get_broadcaster().subscribe();
+
+        tauri::async_runtime::spawn(async move {
+            while let Ok(message) = receiver.recv().await {
+                app.emit("import_character_from_gltf_update", message)
+                    .unwrap_or_else(|e| eprintln!("Error emitting import_character_from_gltf_update: {}", e));
+            }
+        });
+
+
+        let file = File::open(file_path.clone());
+        if file.is_err() {
+            return Err(format!("Failed to open file: {}, error: {}", file_path, file.err().unwrap()));
+        }
+
+        let gltf_data = import(PathBuf::from(file_path));
+        if gltf_data.is_err() {
+            return Err(format!("Failed to import glTF data: {}", gltf_data.err().unwrap()));
+        }
+
+        let (
+            gltf,
+            buffers,
+            images
+        ) = gltf_data.unwrap();
+
+        let character = Character::import_gltf_with_char_id(gltf, buffers, images, model_id);
+        if character.is_err() {
+            return Err(format!("Something failed while parsing the glTF file: {}", character.err().unwrap()));
+        }
+
+        let (animation_file_name, mesh_file_name) = character.unwrap();
+        return Ok(format!("glTF data imported successfully. Animation file: {}, Mesh file: {}", animation_file_name, mesh_file_name));
+    }
+
+
 
     Err("Invalid project id".to_string())
 }

@@ -288,11 +288,14 @@ impl CharMaterialTextureInfo {
         gltf: &Document,
         buffers: &Vec<buffer::Data>,
         images: &Vec<gltf::image::Data>,
+        model_id: u32,
     ) -> anyhow::Result<Vec<Self>> {
         let mut material_seq: Vec<Self> = vec![];
         let mut material = Self::new();
         material.transp_type = MaterialTextureInfoTransparencyType::Filter;
         material.opacity = 1.0;
+
+        let model_id = format!("{:0>10}", model_id * 1000000);
 
         for gltf_mat in gltf.materials() {
             let roughness = gltf_mat.pbr_metallic_roughness();
@@ -313,10 +316,10 @@ impl CharMaterialTextureInfo {
             )
             .unwrap();
 
-            img.save_with_format("./state/textures/test.bmp", ImageFormat::Bmp)?;
+            img.save_with_format(format!("./imports/character/texture/{}.bmp", model_id), ImageFormat::Bmp)?;
 
             let mut file_name: [u8; 64] = [0; 64];
-            for (i, char) in "test.bmp".chars().enumerate() {
+            for (i, char) in format!("{}.bmp", model_id).chars().enumerate() {
                 file_name[i] = char as u8;
             }
 

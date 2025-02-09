@@ -3,13 +3,16 @@ import { selectedCharacterAtom } from "@/store/character";
 import { useAtomValue } from "jotai";
 import { useState } from "react";
 import ExportToGltf from "./ExportToGltf";
+import ImportFromGltf from "./ImportFromGltf";
 
 export default function CharacterActions() {
   const selectedCharacter = useAtomValue(selectedCharacterAtom);
   const [isExportToGltfDialogOpen, setIsExportToGltfDialogOpen] = useState(false);
+  const [isImportFromGltfDialogOpen, setIsImportFromGltfDialogOpen] = useState(false);
 
   return <div className="flex mt-4">
     <ExportToGltf onOpenChange={setIsExportToGltfDialogOpen} open={isExportToGltfDialogOpen} onExportFinished={() => setIsExportToGltfDialogOpen(false)} />
+    <ImportFromGltf onOpenChange={setIsImportFromGltfDialogOpen} open={isImportFromGltfDialogOpen} onImportFinished={() => setIsImportFromGltfDialogOpen(false)} />
     {selectedCharacter && (
       <div>
         <div className="text-sm mb-4">
@@ -20,5 +23,9 @@ export default function CharacterActions() {
         </Button>
       </div>
     )}
+
+    <Button className="mt-2" variant="default" onClick={() => setIsImportFromGltfDialogOpen(true)}>
+      Import from glTF
+    </Button>
   </div>;
 }
