@@ -147,6 +147,12 @@ impl Character {
         let (skin, nodes) = animation.to_gltf_skin_and_nodes(&mut fields_to_aggregate);
         fields_to_aggregate.skin.push(skin);
         fields_to_aggregate.nodes.extend(nodes);
+
+
+        let helpers = models.iter().map(|model| model.get_gltf_helper_nodes()).collect::<Vec<_>>();
+        for helper_nodes in helpers {
+            fields_to_aggregate.nodes.extend(helper_nodes);
+        }
         animation.to_gltf_animations_and_sampler(&mut fields_to_aggregate);
 
         let scene = gltf::Scene {
@@ -161,7 +167,7 @@ impl Character {
 
         let mesh = gltf::Mesh {
             name: Some("mesh".to_string()),
-            primitives,
+            primitives: primitives.iter().map(|p| p.as_ref().unwrap().clone()).collect(),
             weights: None,
             extensions: None,
             extras: None,

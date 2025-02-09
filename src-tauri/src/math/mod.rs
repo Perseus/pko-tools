@@ -99,16 +99,16 @@ pub fn matrix4_to_quaternion(mat: Matrix4<f32>) -> Quaternion<f32> {
 #[br(little)]
 pub struct LwMatrix44(
     #[br(map = |raw: [f32; 16]| Matrix4::new(
-        raw[0], raw[4], raw[8], raw[12],
-        raw[1], raw[5], raw[9], raw[13],
-        raw[2], raw[6], raw[10], raw[14],
-        raw[3], raw[7], raw[11], raw[15]
+        raw[0], raw[1], raw[2], raw[3],
+        raw[4], raw[5], raw[6], raw[7],
+        raw[8], raw[9], raw[10], raw[11],
+        raw[12], raw[13], raw[14], raw[15]
     ))]
     #[bw(map = |m: &Matrix4<f32>| [
-        m.x.x, m.y.x, m.z.x, m.w.x,
-        m.x.y, m.y.y, m.z.y, m.w.y,
-        m.x.z, m.y.z, m.z.z, m.w.z,
-        m.x.w, m.y.w, m.z.w, m.w.w
+        m.x.x, m.x.y, m.x.z, m.x.w,
+        m.y.x, m.y.y, m.y.z, m.y.w,
+        m.z.x, m.z.y, m.z.z, m.z.w,
+        m.w.x, m.w.y, m.w.z, m.w.w
     ])]
     pub Matrix4<f32>,
 );
@@ -161,6 +161,15 @@ impl LwMatrix44 {
 
         (LwVector3(translation), LwQuaternion(rotation_quat), scale)
     }
+
+    /// Create a transformation matrix that first scales then translates.
+    /// (Since a sphere is invariant under rotation, we ignore it.)
+    pub fn from_translation_scale(translation: Vector3<f32>, scale: f32) -> Self {
+        // Note: glTF expects column-major matrices.
+        let trans = Matrix4::from_translation(translation);
+        let scale = Matrix4::from_scale(scale);
+        LwMatrix44(trans * scale)
+    }
 }
 
 #[binrw]
@@ -170,17 +179,16 @@ pub struct LwMatrix43(
     // data in the .lab format is stored in row-major
     // we want to convert it to column-major
     #[br(map = |raw: [f32; 12]| Matrix4::new(
-        raw[0], raw[3], raw[6], raw[9],
-        raw[1], raw[4], raw[7], raw[10],
-        raw[2], raw[5], raw[8], raw[11], 
-        0.0, 0.0, 0.0, 1.0
+        raw[0], raw[1], raw[2], 0.0,
+        raw[3], raw[4], raw[5], 0.0,
+        raw[6], raw[7], raw[8], 0.0,
+        raw[9], raw[10], raw[11], 1.0,
     ))]
     // we want to convert it back to row-major while writing to the file again
     #[bw(map = |m: &Matrix4<f32>| [
-        m.x.x, m.y.x, m.z.x, 
-        m.w.x, m.x.y, m.y.y,
-        m.z.y, m.w.y, m.x.z,
-        m.y.z, m.z.z, m.w.z
+        m.x.x, m.y.x, m.z.x, m.w.x,
+        m.x.y, m.y.y, m.z.y, m.w.y,
+        m.x.z, m.y.z, m.z.z, m.w.z
     ])]
     pub Matrix4<f32>,
 );

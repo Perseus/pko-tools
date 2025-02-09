@@ -8,9 +8,9 @@ use std::{
 
 use crate::{
     animation::character::{LwBoneFile, LW_INVALID_INDEX, LW_MAX_NAME},
-    character::{mesh::CharacterInfoMeshHeader, texture},
+    character::{helper::BoundingSphereInfo, mesh::CharacterInfoMeshHeader, texture},
     d3d::{D3DBlend, D3DCmpFunc, D3DFormat, D3DPool, D3DRenderStateType},
-    math::LwMatrix44,
+    math::{LwMatrix44, LwSphere, LwVector3},
 };
 use ::gltf::{
     buffer, image,
@@ -19,12 +19,14 @@ use ::gltf::{
 };
 use base64::{prelude::BASE64_STANDARD, Engine};
 use binrw::{binrw, BinRead, BinWrite, Error, NullString};
-use cgmath::{Matrix4, SquareMatrix};
+use cgmath::{Matrix4, SquareMatrix, Vector3};
 use gltf::json as gltf;
 use gltf::Texture;
+use serde::{Deserialize, Serialize};
+use serde_json::{json, value::RawValue};
 
 use super::{
-    helper::HelperData, mesh::CharacterMeshInfo, texture::CharMaterialTextureInfo,
+    helper::{HelperData}, mesh::CharacterMeshInfo, texture::CharMaterialTextureInfo,
     GLTFFieldsToAggregate,
 };
 
@@ -211,9 +213,42 @@ impl CharacterGeometricModel {
         &self,
         project_dir: &Path,
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
-    ) -> gltf::mesh::Primitive {
+    ) -> anyhow::Result<gltf::mesh::Primitive> {
         let mesh_info = self.mesh_info.as_ref().unwrap();
-        mesh_info.get_gltf_primitive(project_dir, fields_to_aggregate, &self.material_seq)
+        let primitive = mesh_info.get_gltf_primitive(project_dir, fields_to_aggregate, &self.material_seq);
+
+        Ok(primitive)
+    }
+
+    pub fn get_gltf_helper_nodes(&self) -> Vec<gltf::Node> {
+        let helper_data = self.helper_data.as_ref().unwrap();
+        let mut nodes = vec![];
+        for bsphere in helper_data.bsphere_seq.iter() {
+            let node = gltf::Node{
+                camera: None,
+                children: None,
+                extensions: None,
+                matrix: Some(bsphere.mat.to_slice()),
+                mesh: None,
+                name: Some(format!("BoundingSphere{}", bsphere.id)),
+                rotation: None,
+                scale: None,
+                skin: None,
+                translation: None,
+                weights: None,
+                extras: Some(
+                    RawValue::from_string(
+                        format!(
+                            r#"{{"radius":{},"type":"bounding_sphere","id":{}}}"#, bsphere.sphere.r, bsphere.id
+                        )
+                    ).unwrap()
+                ),
+            };
+
+            nodes.push(node);
+        }
+
+        nodes
     }
 
     pub fn from_file(file_path: PathBuf) -> anyhow::Result<Self> {
@@ -246,6 +281,53 @@ impl CharacterGeometricModel {
             size
         };
         let mesh = CharacterMeshInfo::from_gltf(gltf, buffers, images)?;
+        let mut helper_data = HelperData{
+            _type: 32,
+            bsphere_num: 0,
+            bsphere_seq: vec![],
+            dummy_num: 0,
+            dummy_seq: vec![],
+            box_num: 0,
+            box_seq: vec![],
+            mesh_num: 0,
+            mesh_seq: vec![],
+            bbox_num: 0,
+            bbox_seq: vec![],
+        };
+
+        #[derive(Deserialize)]
+        struct HelperDataExtras {
+            radius: f32,
+            id: u32,
+            r#type: String,
+        }
+
+        for node in gltf.nodes() {
+            if node.extras().is_some() {
+                let extras = node.extras().as_ref().unwrap();
+                let extras_data = serde_json::from_str::<HelperDataExtras>(extras.get());
+                if extras_data.is_ok() {
+                    let extras_data = extras_data.unwrap();
+                    match extras_data.r#type.as_str() {
+                        "bounding_sphere" => {
+                            let translation = node.transform().decomposed().0;
+                            helper_data.bsphere_num += 1;
+                            helper_data.bsphere_seq.push(BoundingSphereInfo{
+                                id: extras_data.id,
+                                sphere: LwSphere{
+                                    c: LwVector3(Vector3::new(0.0, 0.0,0.0 )),
+                                    r: extras_data.radius,
+                                },
+                                mat: LwMatrix44(Matrix4::from_translation(Vector3::new(translation[0], translation[1], translation[2]))),
+                            });
+                        },
+                        "bounding_box" => {},
+                        _ => {}
+                    };
+                }
+            }
+        }
+
         let geom_header = CharGeoModelInfoHeader {
             id: 0,
             parent_id: LW_INVALID_INDEX,
@@ -258,7 +340,7 @@ impl CharacterGeometricModel {
                 vs_id: 2,
                 ps_id: LW_INVALID_INDEX,
             },
-            helper_size: 0, // TODO: fill these in after all the other data has been extracted
+            helper_size: 50,
             mtl_size: mtl_size as u32,
             mesh_size: 61504,
             state_ctrl: StateCtrl {
@@ -276,7 +358,7 @@ impl CharacterGeometricModel {
             material_num: 1, // TODO: hardcoding this as 1 for now, need to see how it works for all models
             material_seq: Some(material_seq), // TODO: fill these in once we've extracted this data
             mesh_info: Some(mesh),
-            helper_data: None, // TODO: fill these in once we've extracted this data
+            helper_data: Some(helper_data),
         })
     }
 }
