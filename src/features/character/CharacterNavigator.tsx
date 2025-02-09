@@ -56,7 +56,6 @@ export default function CharacterNavigator() {
       return;
     }
 
-
     setSelectedCharacter(character);
     listen<{ ModelLoadingUpdate: (string | number)[] }>("load_character_update", (event) => {
       const modelLoadingUpdate = event.payload.ModelLoadingUpdate;

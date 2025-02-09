@@ -148,17 +148,21 @@ impl Character {
         fields_to_aggregate.skin.push(skin);
         fields_to_aggregate.nodes.extend(nodes);
 
-
-        let helpers = models.iter().map(|model| model.get_gltf_helper_nodes()).collect::<Vec<_>>();
-        for helper_nodes in helpers {
-            fields_to_aggregate.nodes.extend(helper_nodes);
+        let helpers = models
+            .iter()
+            .map(|model| model.get_gltf_helper_nodes())
+            .collect::<Vec<_>>();
+        let mut total_helper_nodes = 0;
+        for helper_nodes in helpers.iter() {
+            total_helper_nodes += helper_nodes.len();
+            fields_to_aggregate.nodes.extend(helper_nodes.clone());
         }
         animation.to_gltf_animations_and_sampler(&mut fields_to_aggregate);
 
         let scene = gltf::Scene {
             nodes: vec![
                 Index::new(0),
-                Index::new((fields_to_aggregate.nodes.len() - 1) as u32),
+                Index::new((fields_to_aggregate.nodes.len() - total_helper_nodes - 1) as u32),
             ],
             name: Some("DefaultScene".to_string()),
             extensions: None,
@@ -167,7 +171,10 @@ impl Character {
 
         let mesh = gltf::Mesh {
             name: Some("mesh".to_string()),
-            primitives: primitives.iter().map(|p| p.as_ref().unwrap().clone()).collect(),
+            primitives: primitives
+                .iter()
+                .map(|p| p.as_ref().unwrap().clone())
+                .collect(),
             weights: None,
             extensions: None,
             extras: None,
@@ -205,12 +212,49 @@ impl Character {
         let mut writer = BufWriter::new(file);
         animation_data.write_options(&mut writer, binrw::Endian::Little, ())?;
 
-        let mesh_data = CharacterGeometricModel::from_gltf(&gltf, &buffers, &images)?;
+        let mesh_data = CharacterGeometricModel::from_gltf(&gltf, &buffers, &images, 1)?;
         let file = File::create("./test_artifacts/test.lgo")?;
         let mut writer = BufWriter::new(file);
         mesh_data.write_options(&mut writer, binrw::Endian::Little, ())?;
 
         unimplemented!()
+    }
+
+    pub fn import_gltf_with_char_id(
+        gltf: Document,
+        buffers: Vec<buffer::Data>,
+        images: Vec<image::Data>,
+        model_id: u32,
+    ) -> anyhow::Result<(String, String)> {
+        let import_dirs = vec![
+            "./imports",
+            "./imports/character",
+            "./imports/character/animation",
+            "./imports/character/model",
+            "./imports/character/texture",
+        ];
+        for dir in import_dirs {
+            let dir_path = Path::new(dir);
+            if !dir_path.exists() {
+                std::fs::create_dir_all(dir_path)?;
+            }
+        }
+        let animation_data =
+            super::animation::character::LwBoneFile::from_gltf(&gltf, &buffers, &images)?;
+        let mesh_data = CharacterGeometricModel::from_gltf(&gltf, &buffers, &images, model_id)?;
+
+        let animation_file_name = format!("{:0>4}.lab", model_id);
+        let mesh_file_name = format!("{:0>10}.lgo", model_id * 1000000);
+
+        let file = File::create(format!("./imports/character/animation/{}", animation_file_name))?;
+        let mut writer = BufWriter::new(file);
+        animation_data.write_options(&mut writer, binrw::Endian::Little, ())?;
+
+        let file = File::create(format!("./imports/character/model/{}", mesh_file_name))?;
+        let mut writer = BufWriter::new(file);
+        mesh_data.write_options(&mut writer, binrw::Endian::Little, ())?;
+
+        Ok((animation_file_name, mesh_file_name))
     }
 }
 

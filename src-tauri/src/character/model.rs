@@ -263,8 +263,9 @@ impl CharacterGeometricModel {
         gltf: &Document,
         buffers: &Vec<buffer::Data>,
         images: &Vec<image::Data>,
+        model_id: u32,
     ) -> anyhow::Result<Self> {
-        let material_seq = texture::CharMaterialTextureInfo::from_gltf(gltf, buffers, images)?;
+        let material_seq = texture::CharMaterialTextureInfo::from_gltf(gltf, buffers, images, model_id)?;
         let mtl_size = {
             let mut size = 0;
             for material in material_seq.iter() {
@@ -356,7 +357,7 @@ impl CharacterGeometricModel {
             header: geom_header,
             old_version: 0,
             material_num: 1, // TODO: hardcoding this as 1 for now, need to see how it works for all models
-            material_seq: Some(material_seq), // TODO: fill these in once we've extracted this data
+            material_seq: Some(material_seq),
             mesh_info: Some(mesh),
             helper_data: Some(helper_data),
         })
