@@ -8,7 +8,7 @@ import { useAtomValue } from "jotai";
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
 
-export default function ExportToGltf({ onOpenChange }: { onOpenChange: (open: boolean) => void }) {
+export default function ExportToGltf({ onOpenChange, open, onExportFinished }: { onOpenChange: (open: boolean) => void, open: boolean, onExportFinished: () => void }) {
   const selectedCharacter = useAtomValue(selectedCharacterAtom);
   const [isExporting, setIsExporting] = useState(false);
   const { toast } = useToast();
@@ -30,6 +30,7 @@ export default function ExportToGltf({ onOpenChange }: { onOpenChange: (open: bo
         title: "Exported to glTF",
         description: `Exported to ${response}`
       });
+      onExportFinished();
     } catch (err: unknown) {
       toast({
         title: "Error exporting to glTF",
@@ -38,10 +39,9 @@ export default function ExportToGltf({ onOpenChange }: { onOpenChange: (open: bo
     } finally {
       setIsExporting(false);
     }
-
   }
 
-  return <Dialog defaultOpen={true} onOpenChange={onOpenChange}>
+  return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent>
       <DialogHeader>
         <DialogTitle> Export {selectedCharacter?.name} to glTF </DialogTitle>

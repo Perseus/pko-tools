@@ -9,7 +9,7 @@ export default function CharacterActions() {
   const [isExportToGltfDialogOpen, setIsExportToGltfDialogOpen] = useState(false);
 
   return <div className="flex mt-4">
-    {isExportToGltfDialogOpen && <ExportToGltf onOpenChange={setIsExportToGltfDialogOpen} />}
+    <ExportToGltf onOpenChange={setIsExportToGltfDialogOpen} open={isExportToGltfDialogOpen} onExportFinished={() => setIsExportToGltfDialogOpen(false)} />
     {selectedCharacter && (
       <div>
         <div className="text-sm mb-4">
