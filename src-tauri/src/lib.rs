@@ -18,6 +18,14 @@ struct AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _guard = sentry::init((
+        "https://c65ca12b93355ab81e41e8345ffc6e45@o1079101.ingest.us.sentry.io/4508793088901120",
+        sentry::ClientOptions {
+            release: sentry::release_name!(),
+            ..Default::default()
+        }
+    ));
+
     tauri::Builder::default()
         .plugin(tauri_plugin_sql::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
