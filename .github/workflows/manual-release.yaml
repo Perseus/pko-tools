@@ -81,6 +81,8 @@ jobs:
 
       - name: install frontend dependencies
         run: pnpm install # change this to npm, pnpm or bun depending on which one you use.
+      
+      - uses: Swatinem/rust-cache@v2
 
       - uses: tauri-apps/tauri-action@v0
         env:

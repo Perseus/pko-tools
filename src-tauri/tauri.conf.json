@@ -15,7 +15,8 @@
         "title": "pko-tools",
         "width": 1920,
         "height": 1080,
-        "resizable": true
+        "resizable": true,
+        "devtools": true
       }
     ],
     "security": {
