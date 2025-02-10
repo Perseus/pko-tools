@@ -1,3 +1,4 @@
+use core::f32;
 use std::{
     collections::{BTreeMap, HashMap}, fs::File, io::Seek, path::Path
 };
@@ -24,6 +25,7 @@ use ::gltf::{
 use base64::{prelude::BASE64_STANDARD, Engine};
 use binrw::{binrw, BinRead, BinWrite};
 use image::ImageReader;
+use serde_json::json;
 
 use super::{
     model::{
@@ -389,6 +391,40 @@ impl CharacterMeshInfo {
             )),
         };
 
+        let mut min_x = f32::MAX;
+        let mut min_y = f32::MAX;
+        let mut min_z = f32::MAX;
+
+        let mut max_x = f32::MIN;
+        let mut max_y = f32::MIN;
+        let mut max_z = f32::MIN;
+
+        for vertex in &self.vertex_seq {
+            if vertex.0.x < min_x {
+                min_x = vertex.0.x;
+            }
+
+            if vertex.0.y < min_y {
+                min_y = vertex.0.y;
+            }
+
+            if vertex.0.z < min_z {
+                min_z = vertex.0.z;
+            }
+
+            if vertex.0.x > max_x {
+                max_x = vertex.0.x;
+            }
+
+            if vertex.0.y > max_y {
+                max_y = vertex.0.y;
+            }
+
+            if vertex.0.z > max_z {
+                max_z = vertex.0.z;
+            }
+        }
+
         fields_to_aggregate.buffer.push(vertex_position_buffer);
 
         let vertex_position_buffer_view = gltf::json::buffer::View {
@@ -417,8 +453,8 @@ impl CharacterMeshInfo {
             count: USize64(self.vertex_seq.len() as u64),
             extensions: None,
             extras: None,
-            max: None,
-            min: None,
+            max: Some(json!([max_x, max_y, max_z])),
+            min: Some(json!([min_x, min_y, min_z])),
             name: Some("vertex_position_accessor".to_string()),
             type_: gltf::json::validation::Checked::Valid(gltf::json::accessor::Type::Vec3),
             normalized: false,

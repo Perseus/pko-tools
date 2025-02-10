@@ -14,7 +14,8 @@ use gltf::{
     Document,
 };
 use ptree::{print_tree, TreeBuilder};
-use serde_json::value::RawValue;
+use serde_json::{json, value::RawValue};
+use core::f32;
 use std::{
     collections::HashMap, fs::File, path::PathBuf, sync::Mutex,
 };
@@ -660,6 +661,16 @@ impl LwBoneFile {
             target: None,
         };
 
+        let mut keyframe_min = f32::MAX;
+        let mut keyframe_max = f32::MIN;
+        for timing in &keyframe_timings {
+            if *timing < keyframe_min {
+                keyframe_min = *timing;
+            }
+            if *timing > keyframe_max {
+                keyframe_max = *timing;
+            }
+        }
         let keyframe_timings_accessor = Accessor {
             buffer_view: Some(Index::new(keyframe_buffer_view_index as u32)),
             byte_offset: Some(USize64(0)),
@@ -667,8 +678,8 @@ impl LwBoneFile {
             count: USize64(keyframe_timings.len() as u64),
             extensions: None,
             extras: None,
-            max: None,
-            min: None,
+            max: Some(json!([keyframe_max])),
+            min: Some(json!([keyframe_min])),
             name: Some("KeyframeTimingsAccessor".to_string()),
             normalized: false,
             sparse: None,
