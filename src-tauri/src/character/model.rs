@@ -221,6 +221,10 @@ impl CharacterGeometricModel {
     }
 
     pub fn get_gltf_helper_nodes(&self) -> Vec<gltf::Node> {
+        if self.helper_data.is_none() {
+            return vec![];
+        }
+
         let helper_data = self.helper_data.as_ref().unwrap();
         let mut nodes = vec![];
         for bsphere in helper_data.bsphere_seq.iter() {

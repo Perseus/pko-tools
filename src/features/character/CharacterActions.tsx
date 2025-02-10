@@ -10,11 +10,11 @@ export default function CharacterActions() {
   const [isExportToGltfDialogOpen, setIsExportToGltfDialogOpen] = useState(false);
   const [isImportFromGltfDialogOpen, setIsImportFromGltfDialogOpen] = useState(false);
 
-  return <div className="flex mt-4">
+  return <div className="flex flex-col mt-4 gap-2">
     <ExportToGltf onOpenChange={setIsExportToGltfDialogOpen} open={isExportToGltfDialogOpen} onExportFinished={() => setIsExportToGltfDialogOpen(false)} />
     <ImportFromGltf onOpenChange={setIsImportFromGltfDialogOpen} open={isImportFromGltfDialogOpen} onImportFinished={() => setIsImportFromGltfDialogOpen(false)} />
     {selectedCharacter && (
-      <div>
+      <div className="flex flex-col gap-2">
         <div className="text-sm mb-4">
           Selected character: <strong> {selectedCharacter.name} </strong>
         </div>
