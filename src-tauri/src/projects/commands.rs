@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use crate::AppState;
 
 use super::project::Project;
@@ -85,6 +87,30 @@ pub fn select_project(state: tauri::State<AppState>, project_id: String) -> Resu
     state
         .preferences
         .set_current_project(project_id.to_string());
+
+    Ok(())
+}
+
+pub fn init_directories() -> Result<(), String> {
+    let paths = vec![
+        "./state",
+        "./state/textures",
+        "./imports",
+        "./imports/character",
+        "./imports/character/animation",
+        "./imports/character/model",
+        "./imports/character/texture",
+        "./exports/gltf",
+    ];
+
+    for dir in paths {
+        let dir_path = Path::new(dir);
+        if !dir_path.exists() {
+            if let Err(e) = std::fs::create_dir_all(dir_path) {
+                return Err(e.to_string());
+            }
+        }
+    }
 
     Ok(())
 }

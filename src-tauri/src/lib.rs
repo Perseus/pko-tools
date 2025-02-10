@@ -30,6 +30,7 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::new().build())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            let _ = projects::commands::init_directories();
             let preferences = preferences::Preferences::new();
             let mut state = AppState {
                 current_project: None,

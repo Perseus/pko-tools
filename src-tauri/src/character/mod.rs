@@ -226,19 +226,6 @@ impl Character {
         images: Vec<image::Data>,
         model_id: u32,
     ) -> anyhow::Result<(String, String)> {
-        let import_dirs = vec![
-            "./imports",
-            "./imports/character",
-            "./imports/character/animation",
-            "./imports/character/model",
-            "./imports/character/texture",
-        ];
-        for dir in import_dirs {
-            let dir_path = Path::new(dir);
-            if !dir_path.exists() {
-                std::fs::create_dir_all(dir_path)?;
-            }
-        }
         let animation_data =
             super::animation::character::LwBoneFile::from_gltf(&gltf, &buffers, &images)?;
         let mesh_data = CharacterGeometricModel::from_gltf(&gltf, &buffers, &images, model_id)?;

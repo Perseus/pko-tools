@@ -53,6 +53,7 @@ pub async fn export_to_gltf(
     if current_project.is_none() {
         return Err("No project selected".to_string());
     }
+    let exports_dir = Path::new("./exports/gltf");
 
     let project_id = current_project.unwrap();
     if let Ok(project_uuid) = uuid::Uuid::from_str(&project_id) {
@@ -68,11 +69,6 @@ pub async fn export_to_gltf(
         let character = get_character_gltf_json(project_uuid, character_id);
         if character.is_err() {
             return Err(character.err().unwrap().to_string());
-        }
-
-        let exports_dir = Path::new("./exports/gltf");
-        if !exports_dir.exists() {
-            std::fs::create_dir_all(exports_dir).unwrap();
         }
 
         let gltf_json = character.unwrap();
