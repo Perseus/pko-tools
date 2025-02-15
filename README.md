@@ -31,6 +31,8 @@ This tool is designed for converting game client assets into standard formats (s
 3. **User Interface:**  
    Once the client folder and `CharacterInfo.txt` are provided, the tool will display its UI, which includes a searchable list of characters and their respective models and animations.
 
+![Client UI](https://i.gyazo.com/784870bb1ed90c5d9b1833c36c057cec.png "Client.png")
+
 ---
 
 ## Usage Guide
