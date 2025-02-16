@@ -170,14 +170,22 @@ impl LwMatrix44 {
         let scale = Matrix4::from_scale(scale);
         LwMatrix44(trans * scale)
     }
+
+    pub fn normalize(&self) -> Self {
+        let (t, r, s) = self.to_translation_rotation_scale();
+        let norm_rot = r.0.normalize();
+        let scale = Matrix4::from_nonuniform_scale(s.0.x, s.0.y, s.0.z);
+
+        let new_mat = Matrix4::from_translation(t.0) * Matrix4::from(norm_rot) * scale;
+
+        LwMatrix44(new_mat)
+    }
 }
 
 #[binrw]
 #[derive(Debug, Clone)]
 #[br(little)]
 pub struct LwMatrix43(
-    // data in the .lab format is stored in row-major
-    // we want to convert it to column-major
     #[br(map = |raw: [f32; 12]| Matrix4::new(
         raw[0], raw[1], raw[2], 0.0,
         raw[3], raw[4], raw[5], 0.0,
@@ -186,9 +194,9 @@ pub struct LwMatrix43(
     ))]
     // we want to convert it back to row-major while writing to the file again
     #[bw(map = |m: &Matrix4<f32>| [
-        m.x.x, m.y.x, m.z.x, m.w.x,
-        m.x.y, m.y.y, m.z.y, m.w.y,
-        m.x.z, m.y.z, m.z.z, m.w.z
+        m.x.x, m.x.y, m.x.z, m.x.w,
+        m.y.x, m.y.y, m.y.z, m.y.w,
+        m.z.x, m.z.y, m.z.z, m.z.w
     ])]
     pub Matrix4<f32>,
 );

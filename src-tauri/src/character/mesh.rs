@@ -743,10 +743,15 @@ impl CharacterMeshInfo {
             .blend_seq
             .iter()
             .map(|blend| {
-                let indices = decode_indexd(blend.indexd);
-                let joint_indices =
-                    indices.map(|idx| *self.bone_index_seq.get(idx as usize).unwrap_or(&0) as u16);
+                let indices = blend.indexd.to_le_bytes();
+                let mut joint_indices =
+                    indices.map(|idx| *self.bone_index_seq.get(idx as usize).unwrap() as u16);
                 let weights = blend.weight;
+                joint_indices.iter_mut().enumerate().for_each(|(idx, j)| {
+                    if weights[idx] == 0.0 {
+                        *j = 0;
+                    }
+                });
 
                 (joint_indices, weights)
             })

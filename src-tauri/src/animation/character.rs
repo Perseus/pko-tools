@@ -388,11 +388,11 @@ impl BinWrite for LwBoneFile {
 }
 
 impl LwBoneFile {
-    fn get_node_rot_and_translation(
+    fn get_node_rot_and_translation_and_scale(
         &self,
         node_id: usize,
         frame: usize,
-    ) -> Result<(LwQuaternion, LwVector3), String> {
+    ) -> Result<(LwQuaternion, LwVector3, LwVector3), String> {
         let key_seq = &self.key_seq[node_id];
         let key_type = &self.header.key_type;
 
@@ -400,17 +400,17 @@ impl LwBoneFile {
             BONE_KEY_TYPE_MAT43 => {
                 let key_seq = key_seq.mat43_seq.as_ref().unwrap();
                 let mat = key_seq.get(frame).unwrap();
-                let (translation, rotation, _scale) = mat.to_translation_rotation_scale();
+                let (translation, rotation, scale) = mat.to_translation_rotation_scale();
 
-                Ok((rotation, translation))
+                Ok((rotation, translation, scale))
             }
 
             BONE_KEY_TYPE_MAT44 => {
                 let key_seq = key_seq.mat44_seq.as_ref().unwrap();
                 let mat = key_seq.get(frame).unwrap();
-                let (translation, rotation, _scale) = mat.to_translation_rotation_scale();
+                let (translation, rotation, scale) = mat.to_translation_rotation_scale();
 
-                Ok((rotation, translation))
+                Ok((rotation, translation, scale))
             }
 
             BONE_KEY_TYPE_QUAT => {
@@ -420,7 +420,9 @@ impl LwBoneFile {
                 let translation = pos_seq.get(frame).unwrap();
                 let rotation = quat_seq.get(frame).unwrap();
 
-                Ok((rotation.clone(), translation.clone()))
+                let scale = LwVector3(Vector3::new(1.0, 1.0, 1.0));
+
+                Ok((rotation.clone(), translation.clone(), scale))
             }
             _ => Err("Unsupported key type".to_string()),
         }
@@ -440,14 +442,14 @@ impl LwBoneFile {
             let node_index = i;
 
             bone_id_to_node_index.insert(base_info.id, node_index);
-            let (rotation, translation) = self.get_node_rot_and_translation(node_index, 0).unwrap();
+            let (rotation, translation, scale) = self.get_node_rot_and_translation_and_scale(node_index, 0).unwrap();
             let rot = LwQuaternion(rotation.0.normalize());
             let node = Node {
                 camera: None,
                 children: None,
                 matrix: None,
                 rotation: Some(UnitQuaternion(rot.to_slice())),
-                scale: None,
+                scale: Some(scale.to_slice()),
                 translation: Some(translation.to_slice()),
                 skin: None,
                 mesh: None,

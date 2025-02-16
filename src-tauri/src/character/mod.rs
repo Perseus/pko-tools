@@ -269,7 +269,7 @@ mod test {
     #[test]
     fn is_able_to_parse_gltf() {
         let (gltf, buffers, images) =
-            import(PathBuf::from("./test_artifacts/untitled.gltf")).unwrap();
+            import(PathBuf::from("./test_artifacts/test.gltf")).unwrap();
         let character = Character::from_gltf(gltf, buffers, images).unwrap();
         println!("{:?}", character);
     }
@@ -293,7 +293,7 @@ mod test {
             mesh_part_5: 0,
             mesh_part_6: 0,
             mesh_part_7: 0,
-            model: 105,
+            model: 201,
             model_type: 4,
             shadow: 0,
             suit_id: 0,
