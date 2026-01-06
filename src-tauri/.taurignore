@@ -1,2 +1,3 @@
 **/state/**
 *.gltf
+src-tauri/test_artifacts

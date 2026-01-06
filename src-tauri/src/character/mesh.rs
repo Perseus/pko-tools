@@ -907,8 +907,16 @@ impl CharacterMeshInfo {
             .join("texture/character/")
             .join(&file_name)
             .with_extension("bmp");
-        let original_image = ImageReader::open(image_file).unwrap().decode().unwrap();
+        let original_image_reader = ImageReader::open(image_file.clone());
+        if original_image_reader.is_err() {
+            panic!("Error opening image file: {:?}, error: {:?}", image_file.to_str(),original_image_reader.err().unwrap());
+        }
+        let original_image = original_image_reader.unwrap().decode();
+        if original_image.is_err() {
+            panic!("Error decoding image file: {:?}, error: {:?}", image_file.to_str(),original_image.err().unwrap());
+        }
         original_image
+            .unwrap()
             .save_with_format(
                 Path::new("state/textures/")
                     .join(&file_name)

@@ -5,9 +5,10 @@ mod broadcast;
 mod character;
 mod d3d;
 mod db;
+pub mod decompiler;
+mod math;
 mod preferences;
 mod projects;
-mod math;
 
 use tauri::Manager;
 
