@@ -243,7 +243,12 @@ impl CharacterGeometricModel {
                 extras: Some(
                     RawValue::from_string(
                         format!(
-                            r#"{{"radius":{},"type":"bounding_sphere","id":{}}}"#, bsphere.sphere.r, bsphere.id
+                            r#"{{"radius":{},"center":[{},{},{}],"type":"bounding_sphere","id":{}}}"#,
+                            bsphere.sphere.r,
+                            bsphere.sphere.c.0.x,
+                            bsphere.sphere.c.0.y,
+                            bsphere.sphere.c.0.z,
+                            bsphere.id
                         )
                     ).unwrap()
                 ),

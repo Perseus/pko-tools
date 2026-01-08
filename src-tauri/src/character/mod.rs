@@ -159,11 +159,20 @@ impl Character {
         }
         animation.to_gltf_animations_and_sampler(&mut fields_to_aggregate);
 
+        // Build scene node indices: root bone, skinned mesh, and all helper nodes (bounding spheres)
+        let mut scene_nodes = vec![
+            Index::new(0),  // Root bone
+            Index::new((fields_to_aggregate.nodes.len() - total_helper_nodes - 1) as u32),  // Skinned mesh
+        ];
+
+        // Add helper node indices to scene so they're loaded by glTF parsers
+        let helper_start_index = fields_to_aggregate.nodes.len() - total_helper_nodes;
+        for i in helper_start_index..fields_to_aggregate.nodes.len() {
+            scene_nodes.push(Index::new(i as u32));
+        }
+
         let scene = gltf::Scene {
-            nodes: vec![
-                Index::new(0),
-                Index::new((fields_to_aggregate.nodes.len() - total_helper_nodes - 1) as u32),
-            ],
+            nodes: scene_nodes,
             name: Some("DefaultScene".to_string()),
             extensions: None,
             extras: None,

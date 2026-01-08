@@ -444,6 +444,7 @@ impl LwBoneFile {
             bone_id_to_node_index.insert(base_info.id, node_index);
             let (rotation, translation, scale) = self.get_node_rot_and_translation_and_scale(node_index, 0).unwrap();
             let rot = LwQuaternion(rotation.0.normalize());
+            let bone_extras = RawValue::from_string(format!(r#"{{"bone_id":{}}}"#, base_info.id)).unwrap();
             let node = Node {
                 camera: None,
                 children: None,
@@ -455,7 +456,7 @@ impl LwBoneFile {
                 mesh: None,
                 name: Some(base_info.name.clone()),
                 extensions: None,
-                extras: Default::default(),
+                extras: Some(bone_extras),
                 weights: None,
             };
 
@@ -469,17 +470,17 @@ impl LwBoneFile {
             let dummy_info = &self.dummy_seq[i];
             let node_index = i + bone_num;
 
-            let dummy_extras = RawValue::from_string(r#"{"dummy": true}"#.to_string()).unwrap();
-            let (translation, rotation, _) = dummy_info.mat.to_translation_rotation_scale();
-            let rot = LwQuaternion(rotation.0.normalize());
+            let dummy_extras = RawValue::from_string(
+                format!(r#"{{"dummy":true,"id":{},"parent_bone_id":{}}}"#, dummy_info.id, dummy_info.parent_bone_id)
+            ).unwrap();
 
             let node = Node {
                 camera: None,
                 children: None,
-                matrix: None,
-                rotation: Some(UnitQuaternion(rot.to_slice())),
+                matrix: Some(dummy_info.mat.to_slice()),
+                rotation: None,
                 scale: None,
-                translation: Some(translation.to_slice()),
+                translation: None,
                 skin: None,
                 mesh: None,
                 name: Some(format!("Dummy {}", dummy_info.id)),
