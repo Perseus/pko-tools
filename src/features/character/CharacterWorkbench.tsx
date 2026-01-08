@@ -1,10 +1,12 @@
 import { characterGltfJsonAtom } from "@/store/character";
 import {  useAtomValue } from "jotai";
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useGLTF, OrbitControls,  CameraControls,  Environment, useAnimations } from '@react-three/drei';
 import { Canvas, useFrame} from '@react-three/fiber';
 import * as THREE from 'three';
 import { useControls, Leva } from 'leva';
+import { extractBoundingSpheres, BoundingSphereIndicators } from './BoundingSphereIndicators';
+import { SkeletonDebugHelpers } from './SkeletonDebugHelpers';
 
 function jsonToDataURI(json: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -41,6 +43,9 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
   const [currentKeyframe, setCurrentKeyframe] = useState(0);
   const timeAccumulator = useRef(0);
 
+  // Extract bounding spheres from the loaded glTF scene
+  const boundingSpheres = useMemo(() => extractBoundingSpheres(scene), [scene]);
+
   const [, setAnimationControls] = useControls(() => ({
     play: {
       value: playing,
@@ -62,6 +67,28 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
       }
     }
   }));
+
+  const { showBoundingSpheres, showBones, showDummies, ghostMeshOpacity } = useControls('Debug', {
+    showBoundingSpheres: {
+      value: false,
+      label: 'Show Bounding Spheres',
+    },
+    showBones: {
+      value: false,
+      label: 'Show Bones',
+    },
+    showDummies: {
+      value: false,
+      label: 'Show Dummies',
+    },
+    ghostMeshOpacity: {
+      value: 0.3,
+      min: 0,
+      max: 1,
+      step: 0.05,
+      label: 'Ghost Mesh Opacity',
+    },
+  });
 
 
   useFrame((_state, delta) => {
@@ -115,11 +142,54 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
     }
   }, [animations, actions, scene, mixer]);
 
+  // Apply ghost mode to mesh materials when showing bones/dummies
+  useEffect(() => {
+    const originalOpacities = new Map<THREE.Material, { opacity: number; transparent: boolean }>();
+    const shouldGhost = showBones || showDummies;
+
+    scene.traverse((object) => {
+      if (object instanceof THREE.Mesh && object.material) {
+        const materials = Array.isArray(object.material) ? object.material : [object.material];
+
+        materials.forEach((material) => {
+          if (!originalOpacities.has(material)) {
+            originalOpacities.set(material, {
+              opacity: material.opacity,
+              transparent: material.transparent
+            });
+          }
+
+          if (shouldGhost) {
+            material.transparent = true;
+            material.opacity = ghostMeshOpacity;
+          } else {
+            const original = originalOpacities.get(material);
+            if (original) {
+              material.opacity = original.opacity;
+              material.transparent = original.transparent;
+            }
+          }
+          material.needsUpdate = true;
+        });
+      }
+    });
+  }, [scene, showBones, showDummies, ghostMeshOpacity]);
+
 
   return <>
     <group rotation={[-Math.PI / 2, 0, 0]}>
       <primitive object={scene} />
+      <BoundingSphereIndicators
+        spheres={boundingSpheres}
+        visible={showBoundingSpheres}
+        scene={scene}
+      />
     </group>
+    <SkeletonDebugHelpers
+      scene={scene}
+      showBones={showBones}
+      showDummies={showDummies}
+    />
   </>;
 
 }
