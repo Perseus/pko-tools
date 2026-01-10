@@ -1,0 +1,138 @@
+name: "PR Build (Windows)"
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  check-command:
+    if: |
+      github.event.issue.pull_request &&
+      contains(github.event.comment.body, '/build')
+    runs-on: ubuntu-latest
+    outputs:
+      should_build: ${{ steps.check.outputs.should_build }}
+      pr_number: ${{ github.event.issue.number }}
+      pr_head_sha: ${{ steps.get-pr.outputs.head_sha }}
+      pr_head_ref: ${{ steps.get-pr.outputs.head_ref }}
+    steps:
+      - name: Check if comment is /build command
+        id: check
+        run: |
+          COMMENT="${{ github.event.comment.body }}"
+          if [[ "$COMMENT" == "/build" || "$COMMENT" == "/build "* ]]; then
+            echo "should_build=true" >> $GITHUB_OUTPUT
+          else
+            echo "should_build=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get PR details
+        id: get-pr
+        if: steps.check.outputs.should_build == 'true'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.issue.number
+            });
+            core.setOutput('head_sha', pr.head.sha);
+            core.setOutput('head_ref', pr.head.ref);
+
+  build-windows:
+    needs: check-command
+    if: needs.check-command.outputs.should_build == 'true'
+    runs-on: windows-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    outputs:
+      comment_id: ${{ steps.create-comment.outputs.comment_id }}
+
+    steps:
+      - name: Create initial comment
+        id: create-comment
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const { data: comment } = await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ needs.check-command.outputs.pr_number }},
+              body: `## 🔨 Windows Build Started\n\n**Commit:** \`${{ needs.check-command.outputs.pr_head_sha }}\`\n**Branch:** \`${{ needs.check-command.outputs.pr_head_ref }}\`\n**Triggered by:** @${{ github.event.comment.user.login }}\n\n⏳ Building... This may take a few minutes.\n\n[View workflow run](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})`
+            });
+            core.setOutput('comment_id', comment.id);
+
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check-command.outputs.pr_head_sha }}
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+
+      - name: Install frontend dependencies
+        run: pnpm install
+
+      - name: Get version
+        id: get-version
+        run: |
+          $version = node -p "require('./package.json').version"
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+
+      - name: Build Tauri app
+        id: build
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifact
+        id: upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: pko-tools-windows-pr-${{ needs.check-command.outputs.pr_number }}
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+          retention-days: 7
+
+      - name: Update comment on success
+        if: success()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const artifactUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: ${{ steps.create-comment.outputs.comment_id }},
+              body: `## ✅ Windows Build Successful\n\n**Commit:** \`${{ needs.check-command.outputs.pr_head_sha }}\`\n**Branch:** \`${{ needs.check-command.outputs.pr_head_ref }}\`\n**Version:** \`${{ steps.get-version.outputs.version }}\`\n**Triggered by:** @${{ github.event.comment.user.login }}\n\n### 📦 Download Artifacts\n\n[**Download Windows Installer (MSI/EXE)**](${artifactUrl})\n\n> Artifacts are available for 7 days. Click the link above and scroll to the "Artifacts" section at the bottom of the page.\n\n[View workflow run](${artifactUrl})`
+            });
+
+      - name: Update comment on failure
+        if: failure()
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const runUrl = `https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: ${{ steps.create-comment.outputs.comment_id }},
+              body: `## ❌ Windows Build Failed\n\n**Commit:** \`${{ needs.check-command.outputs.pr_head_sha }}\`\n**Branch:** \`${{ needs.check-command.outputs.pr_head_ref }}\`\n**Triggered by:** @${{ github.event.comment.user.login }}\n\n### Error Details\n\nThe build failed. Please check the workflow logs for details:\n\n[**View Build Logs**](${runUrl})\n\nCommon issues:\n- TypeScript compilation errors\n- Rust compilation errors\n- Missing dependencies\n- Tauri configuration issues`
+            });
