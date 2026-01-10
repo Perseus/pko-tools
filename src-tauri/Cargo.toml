@@ -20,6 +20,14 @@ incremental = true
 [profile.release]
 debug = true
 
+# CI-optimized profile: faster compilation, slightly larger binary
+[profile.ci]
+inherits = "release"
+debug = false
+lto = false           # LTO is very slow, skip for PR builds
+codegen-units = 16    # More parallel codegen (default release is 1)
+opt-level = 2         # Still optimized, but not max
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

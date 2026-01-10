@@ -80,11 +80,20 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.6
+
+      - name: Configure sccache
+        run: |
+          echo "SCCACHE_GHA_ENABLED=true" >> $env:GITHUB_ENV
+          echo "RUSTC_WRAPPER=sccache" >> $env:GITHUB_ENV
+
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             src-tauri
+          cache-on-failure: true
 
       - name: Install frontend dependencies
         run: pnpm install
@@ -100,6 +109,12 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SCCACHE_GHA_ENABLED: "true"
+          RUSTC_WRAPPER: sccache
+          # Optimize for compile speed, not runtime speed
+          CARGO_PROFILE_RELEASE_LTO: "false"
+          CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+          CARGO_PROFILE_RELEASE_DEBUG: "false"
 
       - name: Upload artifact
         id: upload
