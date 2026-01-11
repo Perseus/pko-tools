@@ -1144,6 +1144,7 @@ impl CharacterMeshInfo {
         doc: &gltf::Document,
         buffers: &Vec<gltf::buffer::Data>,
         images: &Vec<gltf::image::Data>,
+        bone_file: &crate::animation::character::LwBoneFile,
     ) -> anyhow::Result<Self> {
         let mut mesh = CharacterMeshInfo {
             blend_seq: vec![],
@@ -1303,44 +1304,69 @@ impl CharacterMeshInfo {
             }
         }
 
-        // for the bone index seq, we need to create a skeleton hierarchy that matches
-        // the hierarchy in the .lab/animation file
-        // the joints data contains indices of bones that affect the i-th vertex
-        // the index of the bone is based on the data in skin.joints
-        // to do this, first we need the new hierarchy
-        let hierarchy = Self::get_reordered_bone_hierarchy(doc);
-        let mut skin_bone_idx_to_bone_seq_idx: HashMap<u32, u32> = HashMap::new();
-        let mut joints_with_weight = HashMap::new();
+        // BUG #3 FIX: bone_index_seq must contain LAB bone array indices, not enumerate indices.
+        // The game engine does: bone_rtm[bone_index_seq[i]], so bone_index_seq values must be
+        // valid indices into the LAB bone array.
+        
+        // Step 1: Build mapping from glTF node index to LAB bone array position
+        let skin = doc.skins().nth(0).unwrap();
+        let mut gltf_node_idx_to_lab_bone_pos = HashMap::<u32, u32>::new();
+        for (lab_pos, bone) in bone_file.base_seq.iter().enumerate() {
+            gltf_node_idx_to_lab_bone_pos.insert(bone.original_node_index, lab_pos as u32);
+        }
+        
+        // Step 2: Build mapping from skin.joints() position to LAB bone array position
+        let mut skin_joint_pos_to_lab_bone_pos = HashMap::<u32, u32>::new();
+        for (skin_pos, joint) in skin.joints().enumerate() {
+            let gltf_node_idx = joint.index() as u32;
+            if let Some(lab_pos) = gltf_node_idx_to_lab_bone_pos.get(&gltf_node_idx) {
+                skin_joint_pos_to_lab_bone_pos.insert(skin_pos as u32, *lab_pos);
+            }
+        }
+        
+        // Step 3: Find which skin joints are actually used by the mesh (have weights)
+        let mut skin_joints_with_weight = HashMap::new();
         joint_seq.iter().for_each(|joint_seq_item| {
             let decomposed_seq_item = joint_seq_item.to_le_bytes();
-            decomposed_seq_item.iter().for_each(|dj| {
-                joints_with_weight.insert(*dj, true);
+            decomposed_seq_item.iter().for_each(|skin_joint_pos| {
+                skin_joints_with_weight.insert(*skin_joint_pos, true);
             });
         });
+        
+        // Step 4: Build bone_index_seq with LAB bone array indices, in LAB order
+        // Only include bones that are actually used by the mesh
+        let mut skin_joint_pos_to_bone_seq_idx = HashMap::<u32, u32>::new();
+        let mut bone_index_seq = Vec::new();
+        for (skin_pos, joint) in skin.joints().enumerate() {
+            let skin_pos_u32 = skin_pos as u32;
+            
+            // Only include this bone if it's used by the mesh
+            if !skin_joints_with_weight.contains_key(&(skin_pos as u8)) {
+                continue;
+            }
+            
+            // Look up the LAB bone array position for this joint
+            if let Some(lab_bone_pos) = skin_joint_pos_to_lab_bone_pos.get(&skin_pos_u32) {
+                // Map: skin joint position -> position in bone_index_seq array
+                skin_joint_pos_to_bone_seq_idx.insert(skin_pos_u32, bone_index_seq.len() as u32);
+                // Store the LAB bone array index (this is what the game engine uses!)
+                bone_index_seq.push(*lab_bone_pos);
+            } else {
+                panic!("Skin joint at position {} (glTF node {}) has no corresponding LAB bone", 
+                       skin_pos, joint.index());
+            }
+        }
 
-        let hierarchy_with_only_joints_with_weight: Vec<(usize, &(u32, u32))> = hierarchy
-            .iter()
-            .enumerate()
-            .filter(|(_, b)| joints_with_weight.contains_key(&(b.0 as u8)))
-            .collect::<Vec<(usize, &(u32, u32))>>();
-
-        let bone_index_seq = hierarchy_with_only_joints_with_weight
-            .iter()
-            .enumerate()
-            .map(|(bone_index_seq_idx, (bone_idx, (skin_bone_idx, _)))| {
-                skin_bone_idx_to_bone_seq_idx.insert(*skin_bone_idx, bone_index_seq_idx as u32);
-                *bone_idx as u32
-            } )
-            .collect::<Vec<u32>>();
-
+        // Step 5: Remap joint_seq from skin joint positions to bone_index_seq positions
+        // joint_seq contains skin.joints() positions, but we need indices into bone_index_seq
         joint_seq.iter_mut().for_each(|joint_seq_item| {
             let mut decomposed_seq_item = joint_seq_item.to_le_bytes();
-            decomposed_seq_item.iter_mut().for_each(|dj| {
-                let new_bone_idx = skin_bone_idx_to_bone_seq_idx.get(&(*dj as u32));
-                if new_bone_idx.is_some() {
-                    *dj = *new_bone_idx.unwrap() as u8;
+            decomposed_seq_item.iter_mut().for_each(|skin_joint_pos| {
+                let bone_seq_idx = skin_joint_pos_to_bone_seq_idx.get(&(*skin_joint_pos as u32));
+                if let Some(idx) = bone_seq_idx {
+                    *skin_joint_pos = *idx as u8;
                 } else {
-                    panic!("unable to find new bone index for deforming joint {:?}", dj);
+                    panic!("Unable to find bone_index_seq position for skin joint {}", skin_joint_pos);
                 }
             });
 

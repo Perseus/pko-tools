@@ -29,5 +29,7 @@ src-tauri/test_artifacts/*
 test.gltf
 src-tauri/exports
 src-tauri/imports
+state/*
 
 top-client
+client-src

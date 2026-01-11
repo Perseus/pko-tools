@@ -198,14 +198,14 @@ pub struct CharacterGeometricModel {
     #[br(count = material_num, args{
         inner: (version, material_num,)
     })]
-    material_seq: Option<Vec<CharMaterialTextureInfo>>,
+    pub material_seq: Option<Vec<CharMaterialTextureInfo>>,
 
     #[br(if(header.mesh_size > 0))]
     #[br(args(version,))]
-    mesh_info: Option<CharacterMeshInfo>,
+    pub mesh_info: Option<CharacterMeshInfo>,
 
     #[br(if(header.helper_size > 0))]
-    helper_data: Option<HelperData>,
+    pub helper_data: Option<HelperData>,
 }
 
 impl CharacterGeometricModel {
@@ -273,6 +273,7 @@ impl CharacterGeometricModel {
         buffers: &Vec<buffer::Data>,
         images: &Vec<image::Data>,
         model_id: u32,
+        bone_file: &crate::animation::character::LwBoneFile,
     ) -> anyhow::Result<Self> {
         let material_seq = texture::CharMaterialTextureInfo::from_gltf(gltf, buffers, images, model_id)?;
         let mtl_size = {
@@ -290,7 +291,7 @@ impl CharacterGeometricModel {
             }
             size
         };
-        let mesh = CharacterMeshInfo::from_gltf(gltf, buffers, images)?;
+        let mesh = CharacterMeshInfo::from_gltf(gltf, buffers, images, bone_file)?;
         let mut helper_data = HelperData{
             _type: 32,
             bsphere_num: 0,

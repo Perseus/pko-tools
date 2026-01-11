@@ -44,6 +44,32 @@ pub const BONE_KEY_TYPE_MAT43: u32 = 1;
 pub const BONE_KEY_TYPE_MAT44: u32 = 2;
 pub const BONE_KEY_TYPE_QUAT: u32 = 3;
 
+// Animation resampling constants
+const TARGET_FPS: f32 = 30.0;
+const FRAME_DURATION: f32 = 1.0 / TARGET_FPS;
+
+/// Represents a single keyframe with its time and value
+#[derive(Debug, Clone)]
+struct Keyframe<T: Clone> {
+    time: f32,
+    value: T,
+    /// For CUBICSPLINE: (in_tangent, out_tangent)
+    tangents: Option<(T, T)>,
+}
+
+/// Raw animation channel data extracted from glTF
+#[derive(Debug, Clone)]
+struct AnimationChannelData<T: Clone> {
+    keyframes: Vec<Keyframe<T>>,
+    interpolation: gltf::animation::Interpolation,
+}
+
+/// Per-bone animation data before resampling
+#[derive(Debug, Clone)]
+struct BoneAnimationData {
+    translation: Option<AnimationChannelData<LwVector3>>,
+    rotation: Option<AnimationChannelData<LwQuaternion>>,
+}
 
 #[binrw]
 #[derive(Debug, Clone, Default)]
@@ -76,6 +102,12 @@ pub struct LwBoneBaseInfo {
 
     pub id: u32,
     pub parent_id: u32,
+    
+    // Field to track original glTF node index during processing
+    // Not written to file - used for inverse bind matrix matching
+    #[br(ignore)]
+    #[bw(ignore)]
+    pub original_node_index: u32,
 }
 
 #[binrw]
@@ -426,6 +458,270 @@ impl LwBoneFile {
             }
             _ => Err("Unsupported key type".to_string()),
         }
+    }
+
+    /// Read keyframe times from the input accessor of an animation sampler
+    fn read_keyframe_times(
+        sampler: &gltf::animation::Sampler,
+        buffers: &[buffer::Data],
+    ) -> anyhow::Result<Vec<f32>> {
+        let input = sampler.input();
+        let input_view = input
+            .view()
+            .ok_or_else(|| anyhow::anyhow!("Input accessor has no buffer view"))?;
+        let buffer = input_view.buffer();
+        let buffer_data = buffers
+            .get(buffer.index())
+            .ok_or_else(|| anyhow::anyhow!("Buffer not found for input accessor"))?;
+
+        let byte_offset = input_view.offset() + input.offset();
+        let data = &buffer_data.0[byte_offset..];
+        let mut reader = std::io::Cursor::new(data);
+
+        let mut times = Vec::with_capacity(input.count());
+        for _ in 0..input.count() {
+            let time: f32 = BinRead::read_options(&mut reader, binrw::Endian::Little, ())?;
+            times.push(time);
+        }
+
+        Ok(times)
+    }
+
+    /// Read Vec3 keyframe values (handles CUBICSPLINE tangent data)
+    fn read_vec3_keyframes(
+        sampler: &gltf::animation::Sampler,
+        buffers: &[buffer::Data],
+        times: &[f32],
+    ) -> anyhow::Result<AnimationChannelData<LwVector3>> {
+        let output = sampler.output();
+        let output_view = output
+            .view()
+            .ok_or_else(|| anyhow::anyhow!("Output accessor has no buffer view"))?;
+        let buffer = output_view.buffer();
+        let buffer_data = buffers
+            .get(buffer.index())
+            .ok_or_else(|| anyhow::anyhow!("Buffer not found for output accessor"))?;
+
+        let byte_offset = output_view.offset() + output.offset();
+        let data = &buffer_data.0[byte_offset..];
+        let mut reader = std::io::Cursor::new(data);
+
+        let interpolation = sampler.interpolation();
+        let is_cubic = matches!(interpolation, gltf::animation::Interpolation::CubicSpline);
+
+        let keyframe_count = times.len();
+        let mut keyframes = Vec::with_capacity(keyframe_count);
+
+        for i in 0..keyframe_count {
+            if is_cubic {
+                // CUBICSPLINE: read in_tangent, value, out_tangent
+                let in_tangent =
+                    LwVector3::read_options(&mut reader, binrw::Endian::Little, ())?;
+                let value = LwVector3::read_options(&mut reader, binrw::Endian::Little, ())?;
+                let out_tangent =
+                    LwVector3::read_options(&mut reader, binrw::Endian::Little, ())?;
+                keyframes.push(Keyframe {
+                    time: times[i],
+                    value,
+                    tangents: Some((in_tangent, out_tangent)),
+                });
+            } else {
+                // LINEAR/STEP: read value only
+                let value = LwVector3::read_options(&mut reader, binrw::Endian::Little, ())?;
+                keyframes.push(Keyframe {
+                    time: times[i],
+                    value,
+                    tangents: None,
+                });
+            }
+        }
+
+        Ok(AnimationChannelData {
+            keyframes,
+            interpolation,
+        })
+    }
+
+    /// Read Quaternion keyframe values (handles CUBICSPLINE tangent data)
+    fn read_quat_keyframes(
+        sampler: &gltf::animation::Sampler,
+        buffers: &[buffer::Data],
+        times: &[f32],
+    ) -> anyhow::Result<AnimationChannelData<LwQuaternion>> {
+        let output = sampler.output();
+        let output_view = output
+            .view()
+            .ok_or_else(|| anyhow::anyhow!("Output accessor has no buffer view"))?;
+        let buffer = output_view.buffer();
+        let buffer_data = buffers
+            .get(buffer.index())
+            .ok_or_else(|| anyhow::anyhow!("Buffer not found for output accessor"))?;
+
+        let byte_offset = output_view.offset() + output.offset();
+        let data = &buffer_data.0[byte_offset..];
+        let mut reader = std::io::Cursor::new(data);
+
+        let interpolation = sampler.interpolation();
+        let is_cubic = matches!(interpolation, gltf::animation::Interpolation::CubicSpline);
+
+        let keyframe_count = times.len();
+        let mut keyframes = Vec::with_capacity(keyframe_count);
+
+        for i in 0..keyframe_count {
+            if is_cubic {
+                let in_tangent =
+                    LwQuaternion::read_options(&mut reader, binrw::Endian::Little, ())?;
+                let value = LwQuaternion::read_options(&mut reader, binrw::Endian::Little, ())?;
+                let out_tangent =
+                    LwQuaternion::read_options(&mut reader, binrw::Endian::Little, ())?;
+                keyframes.push(Keyframe {
+                    time: times[i],
+                    value: LwQuaternion(value.0.normalize()),
+                    tangents: Some((in_tangent, out_tangent)),
+                });
+            } else {
+                let value = LwQuaternion::read_options(&mut reader, binrw::Endian::Little, ())?;
+                keyframes.push(Keyframe {
+                    time: times[i],
+                    value: LwQuaternion(value.0.normalize()),
+                    tangents: None,
+                });
+            }
+        }
+
+        Ok(AnimationChannelData {
+            keyframes,
+            interpolation,
+        })
+    }
+
+    /// Find the surrounding keyframe indices for a given time using binary search
+    fn find_keyframe_indices(times: &[f32], target_time: f32) -> (usize, usize) {
+        let pos = times.partition_point(|&t| t < target_time);
+
+        if pos == 0 {
+            (0, 0) // Before first keyframe
+        } else if pos >= times.len() {
+            let last = times.len() - 1;
+            (last, last) // After last keyframe
+        } else {
+            (pos - 1, pos) // Between keyframes
+        }
+    }
+
+    /// Resample Vec3 animation channel to uniform 30fps
+    fn resample_vec3_channel(
+        channel: &AnimationChannelData<LwVector3>,
+        frame_count: usize,
+    ) -> Vec<LwVector3> {
+        let mut result = Vec::with_capacity(frame_count);
+        let keyframes = &channel.keyframes;
+        let times: Vec<f32> = keyframes.iter().map(|k| k.time).collect();
+
+        for frame_idx in 0..frame_count {
+            let target_time = frame_idx as f32 * FRAME_DURATION;
+            let (prev_idx, next_idx) = Self::find_keyframe_indices(&times, target_time);
+
+            let value = if prev_idx == next_idx {
+                // Exactly at or beyond a keyframe
+                keyframes[prev_idx].value.clone()
+            } else {
+                let prev_kf = &keyframes[prev_idx];
+                let next_kf = &keyframes[next_idx];
+                let delta_time = next_kf.time - prev_kf.time;
+                let t = if delta_time > 0.0 {
+                    (target_time - prev_kf.time) / delta_time
+                } else {
+                    0.0
+                };
+
+                match channel.interpolation {
+                    gltf::animation::Interpolation::Step => prev_kf.value.clone(),
+                    gltf::animation::Interpolation::Linear => prev_kf.value.lerp(&next_kf.value, t),
+                    gltf::animation::Interpolation::CubicSpline => {
+                        let out_tangent = prev_kf
+                            .tangents
+                            .as_ref()
+                            .map(|(_, out)| out.clone())
+                            .unwrap_or_else(|| prev_kf.value.clone());
+                        let in_tangent = next_kf
+                            .tangents
+                            .as_ref()
+                            .map(|(inp, _)| inp.clone())
+                            .unwrap_or_else(|| next_kf.value.clone());
+                        LwVector3::cubic_spline(
+                            &prev_kf.value,
+                            &out_tangent,
+                            &next_kf.value,
+                            &in_tangent,
+                            t,
+                            delta_time,
+                        )
+                    }
+                }
+            };
+
+            result.push(value);
+        }
+
+        result
+    }
+
+    /// Resample Quaternion animation channel to uniform 30fps
+    fn resample_quat_channel(
+        channel: &AnimationChannelData<LwQuaternion>,
+        frame_count: usize,
+    ) -> Vec<LwQuaternion> {
+        let mut result = Vec::with_capacity(frame_count);
+        let keyframes = &channel.keyframes;
+        let times: Vec<f32> = keyframes.iter().map(|k| k.time).collect();
+
+        for frame_idx in 0..frame_count {
+            let target_time = frame_idx as f32 * FRAME_DURATION;
+            let (prev_idx, next_idx) = Self::find_keyframe_indices(&times, target_time);
+
+            let value = if prev_idx == next_idx {
+                keyframes[prev_idx].value.clone()
+            } else {
+                let prev_kf = &keyframes[prev_idx];
+                let next_kf = &keyframes[next_idx];
+                let delta_time = next_kf.time - prev_kf.time;
+                let t = if delta_time > 0.0 {
+                    (target_time - prev_kf.time) / delta_time
+                } else {
+                    0.0
+                };
+
+                match channel.interpolation {
+                    gltf::animation::Interpolation::Step => prev_kf.value.clone(),
+                    gltf::animation::Interpolation::Linear => prev_kf.value.slerp(&next_kf.value, t),
+                    gltf::animation::Interpolation::CubicSpline => {
+                        let out_tangent = prev_kf
+                            .tangents
+                            .as_ref()
+                            .map(|(_, out)| out.clone())
+                            .unwrap_or_else(|| prev_kf.value.clone());
+                        let in_tangent = next_kf
+                            .tangents
+                            .as_ref()
+                            .map(|(inp, _)| inp.clone())
+                            .unwrap_or_else(|| next_kf.value.clone());
+                        LwQuaternion::cubic_spline(
+                            &prev_kf.value,
+                            &out_tangent,
+                            &next_kf.value,
+                            &in_tangent,
+                            t,
+                            delta_time,
+                        )
+                    }
+                }
+            };
+
+            result.push(LwQuaternion(value.0.normalize()));
+        }
+
+        result
     }
 
     pub fn to_gltf_skin_and_nodes(
@@ -1093,91 +1389,92 @@ impl LwBoneFile {
             return Err(anyhow::anyhow!("No animations found"));
         }
 
-        let mut dummy_num = 0;
+        // BUG FIX #4: Use skin.joints() as single source of truth for bones
+        // This ensures LAB and LGO reference the same skeleton
+        let skin = gltf.skins().nth(0)
+            .ok_or(anyhow::anyhow!("No skin found in glTF file"))?;
+
         let mut bones: Vec<LwBoneBaseInfo> = vec![];
         let mut bone_idx_to_vec_idx = HashMap::<u32, u32>::new();
+        let mut node_index_to_bone_array_pos = HashMap::<u32, u32>::new();
         let mut dummies: Vec<LwBoneDummyInfo> = vec![];
         let mut dummy_idx_to_bone_idx = HashMap::<u32, u32>::new();
         let mut idx_to_node = HashMap::<u32, gltf::Node>::new();
-        let mut child_node_index_to_parent_node_index = HashMap::<u32, u32>::new();
-        let mut child_dummy_index_to_parent_node_index = HashMap::<u32, u32>::new();
-        
-        for node in gltf.nodes() {
-            let children = node.children();
-            for child in children {
-                if let Some(extras) = child.extras() {
-                    let extra = extras.get();
-                    if extra.contains("dummy") {
-                        child_dummy_index_to_parent_node_index
-                            .insert(child.index() as u32, node.index() as u32);
-                    }
-                } else {
-                    child_node_index_to_parent_node_index
-                        .insert(child.index() as u32, node.index() as u32);
-                }
-            }
-        }
+        let mut dummy_num = 0;
 
-        let mut child_node_index_to_parent_node_vec_index = HashMap::<u32, u32>::new();
-        let mut child_dummy_index_to_parent_node_vec_index = HashMap::<u32, u32>::new();
-
-        for node in nodes {
-            idx_to_node.insert(node.index() as u32, node.clone());
-            if let Some(extras) = node.extras() {
+        // Extract bones from skin.joints() only
+        for joint in skin.joints() {
+            idx_to_node.insert(joint.index() as u32, joint.clone());
+            
+            // Skip dummy nodes (they go in dummy_seq)
+            if let Some(extras) = joint.extras() {
                 let extra = extras.get();
                 if extra.contains("dummy") {
                     let dummy_info = LwBoneDummyInfo {
-                        id: node.index() as u32,
+                        id: joint.index() as u32,
                         parent_bone_id: LW_INVALID_INDEX,
                         mat: LwMatrix44(Matrix4::<f32>::identity()),
                     };
                     dummies.push(dummy_info);
-                    dummy_idx_to_bone_idx.insert(node.index() as u32, dummy_num as u32);
+                    dummy_idx_to_bone_idx.insert(joint.index() as u32, dummy_num);
                     dummy_num += 1;
-
-                    if let Some(parent_node_idx) =
-                        child_dummy_index_to_parent_node_index.get(&(node.index() as u32))
-                    {
-                        child_dummy_index_to_parent_node_vec_index
-                            .insert(node.index() as u32, *parent_node_idx);
-                    }
+                    continue;
                 }
-            } else if node.mesh().is_none() {
-                let bone_base_info = LwBoneBaseInfo {
-                    id: node.index() as u32,
-                    parent_id: LW_INVALID_INDEX,
-                    name: node.name().unwrap().to_string(),
-                };
-                let bone_idx = bones.len();
-                bones.push(bone_base_info);
-                bone_idx_to_vec_idx.insert(node.index() as u32, bone_idx as u32);
+            }
+            
+            let array_pos = bones.len() as u32;
+            let bone = LwBoneBaseInfo {
+                id: joint.index() as u32,  // Temporary: node index
+                parent_id: LW_INVALID_INDEX,  // Will be set below
+                name: joint.name().unwrap_or("unnamed").to_string(),
+                original_node_index: joint.index() as u32,
+            };
+            
+            bones.push(bone);
+            bone_idx_to_vec_idx.insert(joint.index() as u32, array_pos);
+            node_index_to_bone_array_pos.insert(joint.index() as u32, array_pos);
+        }
 
-                // check if the node has a parent node
-                if let Some(parent_node_idx) =
-                    child_node_index_to_parent_node_index.get(&(node.index() as u32))
-                {
-                    child_node_index_to_parent_node_vec_index
-                        .insert(node.index() as u32, *parent_node_idx);
+        // BUG FIX #1: Build parent relationships using array positions
+        // NOT node indices - this is critical for game engine
+        for (bone_array_pos, bone) in bones.iter_mut().enumerate() {
+            let node = idx_to_node.get(&bone.original_node_index).unwrap();
+            
+            // Find this node's parent in skin.joints()
+            let parent_joint = skin.joints().find(|j| {
+                j.children().any(|c| c.index() == node.index())
+            });
+            
+            if let Some(parent) = parent_joint {
+                // Convert parent node index → parent bone array position
+                if let Some(parent_array_pos) = node_index_to_bone_array_pos.get(&(parent.index() as u32)) {
+                    bone.parent_id = *parent_array_pos;
+                } else {
+                    eprintln!("Warning: Bone '{}' has parent node {} which is not in skeleton", 
+                              bone.name, parent.index());
+                    bone.parent_id = LW_INVALID_INDEX;
+                }
+            }
+            // else: no parent found, remains as root (LW_INVALID_INDEX)
+        }
+
+        // Handle dummy parent relationships
+        for dummy in dummies.iter_mut() {
+            let dummy_node = idx_to_node.get(&dummy.id);
+            if let Some(node) = dummy_node {
+                let parent_joint = skin.joints().find(|j| {
+                    j.children().any(|c| c.index() == node.index())
+                });
+                
+                if let Some(parent) = parent_joint {
+                    if let Some(parent_array_pos) = node_index_to_bone_array_pos.get(&(parent.index() as u32)) {
+                        dummy.parent_bone_id = *parent_array_pos;
+                    }
                 }
             }
         }
 
-        // skeleton hierarchy
-        bones.iter_mut().for_each(|bone| {
-            if let Some(parent_node_vec_idx) = child_node_index_to_parent_node_index.get(&bone.id) {
-                bone.parent_id = *parent_node_vec_idx;
-            }
-        });
-
-        // dummy hierarchy
-        dummies.iter_mut().for_each(|dummy| {
-            if let Some(parent_node_vec_idx) =
-                child_dummy_index_to_parent_node_vec_index.get(&dummy.id)
-            {
-                dummy.parent_bone_id = *parent_node_vec_idx;
-            }
-        });
-
+        // Reorder bones to depth-first (parent before children)
         let ideal_order = LwBoneFile::get_ideal_bone_order(&bones);
         let mut bone_id_to_orig_idx = HashMap::<u32, u32>::new();
         let mut orig_bone_id_to_new_id = HashMap::<u32, u32>::new();
@@ -1192,21 +1489,47 @@ impl LwBoneFile {
             reordered_bones.push(new_bone);
         }
 
+        // BUG FIX #2: Map old array positions → new array positions
+        // NOT node indices - parent_id already stores array positions from Bug #1 fix
+        let mut old_pos_to_new_pos = HashMap::<u32, u32>::new();
+        for (new_pos, entry) in ideal_order.iter().enumerate() {
+            // entry.0 is the original array position
+            old_pos_to_new_pos.insert(entry.0, new_pos as u32);
+        }
+
+        // Update parent IDs to reflect new positions after reordering
         reordered_bones.iter_mut().for_each(|bone| {
             if bone.parent_id != LW_INVALID_INDEX {
-                let new_parent_id = orig_bone_id_to_new_id.get(&bone.parent_id).unwrap();
-                bone.parent_id = *new_parent_id;
+                bone.parent_id = *old_pos_to_new_pos.get(&bone.parent_id)
+                    .expect("Parent bone should have been reordered");
             }
         });
 
+        // Validate depth-first ordering (parent < child)
+        for (idx, bone) in reordered_bones.iter().enumerate() {
+            if bone.parent_id != LW_INVALID_INDEX {
+                assert!(
+                    bone.parent_id < idx as u32,
+                    "Bone {} '{}': parent_id {} should be < {} (depth-first ordering violated)",
+                    bone.id, bone.name, bone.parent_id, idx
+                );
+            }
+        }
+
+        // Update dummy parent IDs
         dummies.iter_mut().for_each(|d| {
-            let new_parent_id = orig_bone_id_to_new_id.get(&d.parent_bone_id).unwrap();
-            d.parent_bone_id = *new_parent_id;
+            if d.parent_bone_id != LW_INVALID_INDEX {
+                d.parent_bone_id = *orig_bone_id_to_new_id.get(&d.parent_bone_id)
+                    .expect("Dummy parent bone should exist");
+            }
         });
 
         bones = reordered_bones;
 
         // inverse bind matrices
+        // BUG #5 FIX: Read all IBMs into a HashMap keyed by glTF node index first,
+        // then assign them to the final bone array by matching original_node_index.
+        // This ensures IBMs are correctly matched to bones even after reordering.
         let skin = gltf.skins().nth(0).unwrap();
         let ibm = skin.inverse_bind_matrices().unwrap();
         let ibm_accessor = ibm.view().unwrap();
@@ -1215,127 +1538,205 @@ impl LwBoneFile {
         let ibm_buffer_data = buffers.get(ibm_buffer.index()).unwrap();
         let ibm_buffer_as_slice = ibm_buffer_data.0.as_slice();
         let ibm_start = ibm.offset() + ibm_accessor.offset();
-        let ibm_data = &ibm_buffer_as_slice[ibm_start..];
-        let mut reader = std::io::Cursor::new(ibm_data);
-        let mut ibm_data: Vec<LwMatrix44> =
-            vec![LwMatrix44(Matrix4::<f32>::identity(),); bones.len()];
-
-        for (i, joint) in skin.joints().enumerate() {
+        let ibm_data_raw = &ibm_buffer_as_slice[ibm_start..];
+        let mut reader = std::io::Cursor::new(ibm_data_raw);
+        
+        // Step 1: Read all IBMs and store them by glTF node index
+        let mut ibm_by_node_index = std::collections::HashMap::<u32, LwMatrix44>::new();
+        for joint in skin.joints() {
             let ibm = LwMatrix44::read_options(&mut reader, binrw::Endian::Little, ()).unwrap();
+            let node_index = joint.index() as u32;
+            
+            // Handle dummies
             if let Some(extras) = joint.extras() {
                 let extra = extras.get();
                 if extra.contains("dummy") {
-                    let dummy_idx = dummy_idx_to_bone_idx.get(&(joint.index() as u32)).unwrap();
+                    let dummy_idx = dummy_idx_to_bone_idx.get(&node_index).unwrap();
                     let transform = joint.transform();
                     let dummy_transform = LwMatrix44(Matrix4::from(transform.matrix()));
                     dummies[*dummy_idx as usize].mat = dummy_transform;
+                    continue; // Don't store IBM for dummies
                 }
+            }
+            
+            ibm_by_node_index.insert(node_index, ibm);
+        }
+        
+        // Step 2: Assign IBMs to final bone array by matching original_node_index
+        let mut ibm_data: Vec<LwMatrix44> =
+            vec![LwMatrix44(Matrix4::<f32>::identity(),); bones.len()];
+        for (final_pos, bone) in bones.iter().enumerate() {
+            if let Some(ibm) = ibm_by_node_index.get(&bone.original_node_index) {
+                ibm_data[final_pos] = ibm.clone();
             } else {
-                let node_idx = orig_bone_id_to_new_id.get(&(joint.index() as u32)).unwrap();
-                ibm_data[*node_idx as usize] = ibm;
+                panic!("No inverse bind matrix found for bone {} '{}' with original_node_index {}",
+                       bone.id, bone.name, bone.original_node_index);
             }
         }
 
         let bone_num = ibm_data.len();
 
-        // keyframe data
+        // === STEP 3: Calculate animation duration and frame count ===
         let animation = animations.last().unwrap();
+        let mut max_time: f32 = 0.0;
 
-        // there should be two channels for each bone (translation and rotation)
-        if animation.channels().count() != bone_num * 2 {
-            return Err(anyhow::anyhow!("Invalid animation channels count"));
+        // First pass: determine animation duration from all channels
+        for channel in animation.channels() {
+            let sampler = channel.sampler();
+            let times = Self::read_keyframe_times(&sampler, buffers)?;
+            if let Some(&last_time) = times.last() {
+                max_time = max_time.max(last_time);
+            }
         }
 
-        let channels = animation.channels();
-        let mut node_idx_to_translation_data = HashMap::<u32, Vec<LwVector3>>::new();
-        let mut node_idx_to_rotation_data = HashMap::<u32, Vec<LwQuaternion>>::new();
-        let mut frame_num = 0;
+        // Calculate frame count: duration * fps + 1 (include both endpoints)
+        // Frame 0 is at time 0, frame N is at time N/fps
+        // So if max_time is 20.467 seconds at 30fps, we need frames 0..614 = 615 frames
+        let frame_count = ((max_time * TARGET_FPS).round() as usize) + 1;
+        if frame_count <= 1 {
+            return Err(anyhow::anyhow!("Animation has zero or one frame"));
+        }
 
+        // === STEP 4: Extract animation channels per bone ===
+        let mut bone_anim_data: HashMap<u32, BoneAnimationData> = HashMap::new();
 
-        for channel in channels {
+        for channel in animation.channels() {
             let target = channel.target();
             let target_node = target.node();
             let node_idx = target_node.index() as u32;
             let property = target.property();
             let sampler = channel.sampler();
-            let output = sampler.output();
-            let output_view = output.view().unwrap();
-            let buffer = output_view.buffer();
-            let buffer_data = buffers.get(buffer.index()).unwrap();
 
-            // all channels should have the same number of frames
-            if frame_num != 0 && frame_num != output.count() {
-                return Err(anyhow::anyhow!("Invalid frame number"));
-            } else {
-                frame_num = output.count();
-            }
+            // Skip nodes that aren't bones (e.g., mesh nodes)
+            let new_node_idx = match orig_bone_id_to_new_id.get(&node_idx) {
+                Some(idx) => *idx,
+                None => continue, // Not a bone, skip
+            };
 
-            // we only support f32
-            if output.data_type() != ComponentType::F32 {
-                return Err(anyhow::anyhow!("Unsupported data type"));
-            }
+            // Read keyframe times
+            let times = Self::read_keyframe_times(&sampler, buffers)?;
 
-            let mut translation_data: Vec<LwVector3> = vec![];
-            let mut rotation_data: Vec<LwQuaternion> = vec![];
-            let byte_offset = output_view.offset();
-            let buffer_as_slice = buffer_data.0.as_slice();
-            let start = output.offset() + byte_offset;
-            let data = &buffer_as_slice[start..];
-            let new_node_idx = orig_bone_id_to_new_id.get(&node_idx).unwrap();
+            // Get or create bone animation data
+            let bone_data = bone_anim_data
+                .entry(new_node_idx)
+                .or_insert_with(|| BoneAnimationData {
+                    translation: None,
+                    rotation: None,
+                });
 
-            if property == Property::Translation {
-                let mut reader = std::io::Cursor::new(data);
-                for _ in 0..frame_num {
-                    let translation =
-                        LwVector3::read_options(&mut reader, binrw::Endian::Little, ()).unwrap();
-                    translation_data.push(translation);
+            match property {
+                Property::Translation => {
+                    let channel_data = Self::read_vec3_keyframes(&sampler, buffers, &times)?;
+                    bone_data.translation = Some(channel_data);
                 }
-                node_idx_to_translation_data.insert(*new_node_idx, translation_data);
-            } else if property == Property::Rotation {
-                let mut reader = std::io::Cursor::new(data);
-                for _ in 0..frame_num {
-                    let rotation =
-                        LwQuaternion::read_options(&mut reader, binrw::Endian::Little, ()).unwrap();
-                    rotation_data.push(rotation);
+                Property::Rotation => {
+                    let channel_data = Self::read_quat_keyframes(&sampler, buffers, &times)?;
+                    bone_data.rotation = Some(channel_data);
                 }
-                node_idx_to_rotation_data.insert(*new_node_idx, rotation_data);
-            } else {
-                return Err(anyhow::anyhow!("Invalid property").context(format!(
-                    "property: {:?}, node_idx: {:?}",
-                    property, node_idx
-                )));
+                Property::Scale => {
+                    // Log warning and skip - .lab format doesn't support scale
+                    println!(
+                        "Warning: Scale channel ignored for bone {} (node {})",
+                        new_node_idx, node_idx
+                    );
+                }
+                Property::MorphTargetWeights => {
+                    // Skip morph targets
+                    continue;
+                }
             }
         }
 
-        let mut keyframe_vec: Vec<LwBoneKeyInfo> = vec![];
+        // === STEP 5: Resample and build keyframe sequences ===
+        let mut keyframe_vec: Vec<LwBoneKeyInfo> = Vec::with_capacity(bones.len());
 
         for bone in &bones {
-            let translation_data = node_idx_to_translation_data.get(&bone.id);
-            let rotation_data = node_idx_to_rotation_data.get(&bone.id);
-            if translation_data.is_some() && rotation_data.is_some() {
-                let translation_data = translation_data.unwrap().clone();
-                let rotation_data = rotation_data.unwrap().clone();
+            let bone_data = bone_anim_data.get(&bone.id);
 
-                let bone_key_info = LwBoneKeyInfo {
-                    mat43_seq: None,
-                    mat44_seq: None,
-                    pos_seq: Some(translation_data),
-                    quat_seq: Some(rotation_data),
-                };
+            let (translation_data, rotation_data) = match bone_data {
+                Some(data) => {
+                    // Resample available channels
+                    let translations = match &data.translation {
+                        Some(channel) => Self::resample_vec3_channel(channel, frame_count),
+                        None => {
+                            // Use rest pose translation from node transform
+                            let orig_idx = bone_id_to_orig_idx.get(&bone.id).unwrap_or(&bone.id);
+                            let node = idx_to_node.get(orig_idx);
+                            let rest_pos = match node {
+                                Some(n) => {
+                                    let (t, _, _) = n.transform().decomposed();
+                                    LwVector3(Vector3::new(t[0], t[1], t[2]))
+                                }
+                                None => LwVector3(Vector3::new(0.0, 0.0, 0.0)),
+                            };
+                            vec![rest_pos; frame_count]
+                        }
+                    };
 
-                keyframe_vec.push(bone_key_info);
-            } else {
-                println!("no keyframe data for bone: {:?}", bone.id);
-            }
+                    let rotations = match &data.rotation {
+                        Some(channel) => Self::resample_quat_channel(channel, frame_count),
+                        None => {
+                            // Use rest pose rotation from node transform
+                            let orig_idx = bone_id_to_orig_idx.get(&bone.id).unwrap_or(&bone.id);
+                            let node = idx_to_node.get(orig_idx);
+                            let rest_rot = match node {
+                                Some(n) => {
+                                    let (_, r, _) = n.transform().decomposed();
+                                    LwQuaternion(Quaternion::new(r[3], r[0], r[1], r[2]).normalize())
+                                }
+                                None => LwQuaternion(Quaternion::new(1.0, 0.0, 0.0, 0.0)),
+                            };
+                            vec![rest_rot; frame_count]
+                        }
+                    };
+
+                    (translations, rotations)
+                }
+                None => {
+                    // Bone has no animation data - use rest pose
+                    println!(
+                        "Warning: No animation data for bone {}, using rest pose",
+                        bone.id
+                    );
+                    let orig_idx = bone_id_to_orig_idx.get(&bone.id).unwrap_or(&bone.id);
+                    let node = idx_to_node.get(orig_idx);
+
+                    let (rest_pos, rest_rot) = match node {
+                        Some(n) => {
+                            let (t, r, _) = n.transform().decomposed();
+                            (
+                                LwVector3(Vector3::new(t[0], t[1], t[2])),
+                                LwQuaternion(Quaternion::new(r[3], r[0], r[1], r[2]).normalize()),
+                            )
+                        }
+                        None => (
+                            LwVector3(Vector3::new(0.0, 0.0, 0.0)),
+                            LwQuaternion(Quaternion::new(1.0, 0.0, 0.0, 0.0)),
+                        ),
+                    };
+
+                    (vec![rest_pos; frame_count], vec![rest_rot; frame_count])
+                }
+            };
+
+            let bone_key_info = LwBoneKeyInfo {
+                mat43_seq: None,
+                mat44_seq: None,
+                pos_seq: Some(translation_data),
+                quat_seq: Some(rotation_data),
+            };
+
+            keyframe_vec.push(bone_key_info);
         }
 
+        // === STEP 6: Build and return LwBoneFile ===
         Ok(LwBoneFile {
             version: 4101,
             header: LwBoneInfoHeader {
                 bone_num: bone_num as u32,
                 dummy_num: dummy_num as u32,
-                frame_num: frame_num as u32,
-                key_type: 3,
+                frame_num: frame_count as u32,
+                key_type: BONE_KEY_TYPE_QUAT,
             },
             base_seq: bones,
             invmat_seq: ibm_data,
@@ -1343,5 +1744,135 @@ impl LwBoneFile {
             key_seq: keyframe_vec,
             old_version: 0,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_find_keyframe_indices_before_first() {
+        let times = vec![0.0, 0.5, 1.0, 1.5];
+        let (prev, next) = LwBoneFile::find_keyframe_indices(&times, -0.1);
+        assert_eq!(prev, 0);
+        assert_eq!(next, 0);
+    }
+
+    #[test]
+    fn test_find_keyframe_indices_at_first() {
+        let times = vec![0.0, 0.5, 1.0, 1.5];
+        let (prev, next) = LwBoneFile::find_keyframe_indices(&times, 0.0);
+        assert_eq!(prev, 0);
+        assert_eq!(next, 0);
+    }
+
+    #[test]
+    fn test_find_keyframe_indices_between() {
+        let times = vec![0.0, 0.5, 1.0, 1.5];
+        let (prev, next) = LwBoneFile::find_keyframe_indices(&times, 0.25);
+        assert_eq!(prev, 0);
+        assert_eq!(next, 1);
+    }
+
+    #[test]
+    fn test_find_keyframe_indices_at_middle() {
+        let times = vec![0.0, 0.5, 1.0, 1.5];
+        let (prev, next) = LwBoneFile::find_keyframe_indices(&times, 0.75);
+        assert_eq!(prev, 1);
+        assert_eq!(next, 2);
+    }
+
+    #[test]
+    fn test_find_keyframe_indices_after_last() {
+        let times = vec![0.0, 0.5, 1.0, 1.5];
+        let (prev, next) = LwBoneFile::find_keyframe_indices(&times, 2.0);
+        assert_eq!(prev, 3);
+        assert_eq!(next, 3);
+    }
+
+    #[test]
+    fn test_resample_linear_translation() {
+        // Create channel with keyframes at 0.0 and 1.0 seconds
+        let channel = AnimationChannelData {
+            keyframes: vec![
+                Keyframe {
+                    time: 0.0,
+                    value: LwVector3(Vector3::new(0.0, 0.0, 0.0)),
+                    tangents: None,
+                },
+                Keyframe {
+                    time: 1.0,
+                    value: LwVector3(Vector3::new(30.0, 0.0, 0.0)),
+                    tangents: None,
+                },
+            ],
+            interpolation: gltf::animation::Interpolation::Linear,
+        };
+
+        // Resample to 31 frames (0.0 to 1.0 at 30fps)
+        let result = LwBoneFile::resample_vec3_channel(&channel, 31);
+
+        assert_eq!(result.len(), 31);
+        assert!((result[0].0.x - 0.0).abs() < 0.1); // Frame 0 = 0.0s
+        assert!((result[15].0.x - 15.0).abs() < 0.1); // Frame 15 = 0.5s = 15.0
+        assert!((result[30].0.x - 30.0).abs() < 0.1); // Frame 30 = 1.0s = 30.0
+    }
+
+    #[test]
+    fn test_resample_step_translation() {
+        let channel = AnimationChannelData {
+            keyframes: vec![
+                Keyframe {
+                    time: 0.0,
+                    value: LwVector3(Vector3::new(0.0, 0.0, 0.0)),
+                    tangents: None,
+                },
+                Keyframe {
+                    time: 0.5,
+                    value: LwVector3(Vector3::new(10.0, 0.0, 0.0)),
+                    tangents: None,
+                },
+            ],
+            interpolation: gltf::animation::Interpolation::Step,
+        };
+
+        let result = LwBoneFile::resample_vec3_channel(&channel, 31);
+
+        // STEP: should hold previous value until next keyframe
+        // Frame 0 (t=0.0): at first keyframe, value = 0.0
+        assert!((result[0].0.x - 0.0).abs() < 0.01);
+        // Frame 10 (t=0.333s): before second keyframe, value = 0.0
+        assert!((result[10].0.x - 0.0).abs() < 0.01);
+        // Frame 14 (t=0.467s): still before 0.5s, value = 0.0
+        assert!((result[14].0.x - 0.0).abs() < 0.01);
+        // Frame 15 (t=0.5s exactly): STEP uses prev value in the segment, so still 0.0
+        // (glTF STEP holds value until the NEXT keyframe time is reached in interpolation)
+        assert!((result[15].0.x - 0.0).abs() < 0.01);
+        // Frame 16+ (t>0.5s): after keyframe, value = 10.0
+        assert!((result[16].0.x - 10.0).abs() < 0.01);
+        assert!((result[30].0.x - 10.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_resample_single_keyframe() {
+        // Single keyframe should be repeated for all frames
+        let channel = AnimationChannelData {
+            keyframes: vec![Keyframe {
+                time: 0.0,
+                value: LwVector3(Vector3::new(5.0, 10.0, 15.0)),
+                tangents: None,
+            }],
+            interpolation: gltf::animation::Interpolation::Linear,
+        };
+
+        let result = LwBoneFile::resample_vec3_channel(&channel, 10);
+
+        assert_eq!(result.len(), 10);
+        for frame in &result {
+            assert!((frame.0.x - 5.0).abs() < 0.001);
+            assert!((frame.0.y - 10.0).abs() < 0.001);
+            assert!((frame.0.z - 15.0).abs() < 0.001);
+        }
     }
 }

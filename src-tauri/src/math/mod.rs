@@ -15,6 +15,43 @@ impl LwVector3 {
         let v = &self.0;
         [v.x, v.y, v.z]
     }
+
+    /// Linear interpolation between two vectors
+    pub fn lerp(&self, other: &LwVector3, t: f32) -> LwVector3 {
+        LwVector3(Vector3::new(
+            self.0.x + (other.0.x - self.0.x) * t,
+            self.0.y + (other.0.y - self.0.y) * t,
+            self.0.z + (other.0.z - self.0.z) * t,
+        ))
+    }
+
+    /// Hermite spline interpolation for CUBICSPLINE mode
+    /// p0: start value, m0: start out-tangent, p1: end value, m1: end in-tangent
+    /// t: interpolation factor [0, 1], delta_time: time between keyframes
+    pub fn cubic_spline(
+        p0: &LwVector3,
+        m0: &LwVector3,
+        p1: &LwVector3,
+        m1: &LwVector3,
+        t: f32,
+        delta_time: f32,
+    ) -> LwVector3 {
+        let t2 = t * t;
+        let t3 = t2 * t;
+
+        // Hermite basis functions
+        let h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
+        let h10 = t3 - 2.0 * t2 + t;
+        let h01 = -2.0 * t3 + 3.0 * t2;
+        let h11 = t3 - t2;
+
+        // Scale tangents by delta_time per glTF spec
+        LwVector3(Vector3::new(
+            h00 * p0.0.x + h10 * delta_time * m0.0.x + h01 * p1.0.x + h11 * delta_time * m1.0.x,
+            h00 * p0.0.y + h10 * delta_time * m0.0.y + h01 * p1.0.y + h11 * delta_time * m1.0.y,
+            h00 * p0.0.z + h10 * delta_time * m0.0.z + h01 * p1.0.z + h11 * delta_time * m1.0.z,
+        ))
+    }
 }
 
 #[binrw]
@@ -45,6 +82,71 @@ impl LwQuaternion {
     pub fn to_slice(&self) -> [f32; 4] {
         let q = &self.0;
         [q.v.x, q.v.y, q.v.z, q.s]
+    }
+
+    /// Spherical linear interpolation between two quaternions
+    pub fn slerp(&self, other: &LwQuaternion, t: f32) -> LwQuaternion {
+        // Ensure we take the shortest path by checking dot product
+        // If dot < 0, negate one quaternion to take shorter arc
+        let mut q1 = other.0;
+        let dot = self.0.s * other.0.s + self.0.v.x * other.0.v.x + self.0.v.y * other.0.v.y + self.0.v.z * other.0.v.z;
+        if dot < 0.0 {
+            q1 = Quaternion::new(-q1.s, -q1.v.x, -q1.v.y, -q1.v.z);
+        }
+        
+        let result = self.0.slerp(q1, t);
+        LwQuaternion(result.normalize())
+    }
+
+    /// Hermite spline interpolation for quaternions (CUBICSPLINE)
+    /// p0: start value, m0: start out-tangent, p1: end value, m1: end in-tangent
+    /// t: interpolation factor [0, 1], delta_time: time between keyframes
+    /// Note: glTF spec says to normalize the result
+    pub fn cubic_spline(
+        p0: &LwQuaternion,
+        m0: &LwQuaternion,
+        p1: &LwQuaternion,
+        m1: &LwQuaternion,
+        t: f32,
+        delta_time: f32,
+    ) -> LwQuaternion {
+        // Ensure we take the shortest path by checking dot product
+        let mut p1_adj = p1.0;
+        let mut m1_adj = m1.0;
+        let dot = p0.0.s * p1.0.s + p0.0.v.x * p1.0.v.x + p0.0.v.y * p1.0.v.y + p0.0.v.z * p1.0.v.z;
+        if dot < 0.0 {
+            p1_adj = Quaternion::new(-p1.0.s, -p1.0.v.x, -p1.0.v.y, -p1.0.v.z);
+            m1_adj = Quaternion::new(-m1.0.s, -m1.0.v.x, -m1.0.v.y, -m1.0.v.z);
+        }
+        
+        let t2 = t * t;
+        let t3 = t2 * t;
+
+        // Hermite basis functions
+        let h00 = 2.0 * t3 - 3.0 * t2 + 1.0;
+        let h10 = t3 - 2.0 * t2 + t;
+        let h01 = -2.0 * t3 + 3.0 * t2;
+        let h11 = t3 - t2;
+
+        // Apply to each component, scale tangents by delta_time per glTF spec
+        let s = h00 * p0.0.s
+            + h10 * delta_time * m0.0.s
+            + h01 * p1_adj.s
+            + h11 * delta_time * m1_adj.s;
+        let vx = h00 * p0.0.v.x
+            + h10 * delta_time * m0.0.v.x
+            + h01 * p1_adj.v.x
+            + h11 * delta_time * m1_adj.v.x;
+        let vy = h00 * p0.0.v.y
+            + h10 * delta_time * m0.0.v.y
+            + h01 * p1_adj.v.y
+            + h11 * delta_time * m1_adj.v.y;
+        let vz = h00 * p0.0.v.z
+            + h10 * delta_time * m0.0.v.z
+            + h01 * p1_adj.v.z
+            + h11 * delta_time * m1_adj.v.z;
+
+        LwQuaternion(Quaternion::new(s, vx, vy, vz).normalize())
     }
 }
 
@@ -257,4 +359,69 @@ pub struct LwPlane {
 pub struct LwSphere {
     pub c: LwVector3,
     pub r: f32,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_vec3_lerp_at_zero() {
+        let a = LwVector3(Vector3::new(0.0, 0.0, 0.0));
+        let b = LwVector3(Vector3::new(10.0, 20.0, 30.0));
+        let result = a.lerp(&b, 0.0);
+        assert!((result.0.x - 0.0).abs() < 0.001);
+        assert!((result.0.y - 0.0).abs() < 0.001);
+        assert!((result.0.z - 0.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_vec3_lerp_at_half() {
+        let a = LwVector3(Vector3::new(0.0, 0.0, 0.0));
+        let b = LwVector3(Vector3::new(10.0, 20.0, 30.0));
+        let result = a.lerp(&b, 0.5);
+        assert!((result.0.x - 5.0).abs() < 0.001);
+        assert!((result.0.y - 10.0).abs() < 0.001);
+        assert!((result.0.z - 15.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_vec3_lerp_at_one() {
+        let a = LwVector3(Vector3::new(0.0, 0.0, 0.0));
+        let b = LwVector3(Vector3::new(10.0, 20.0, 30.0));
+        let result = a.lerp(&b, 1.0);
+        assert!((result.0.x - 10.0).abs() < 0.001);
+        assert!((result.0.y - 20.0).abs() < 0.001);
+        assert!((result.0.z - 30.0).abs() < 0.001);
+    }
+
+    #[test]
+    fn test_quat_slerp_at_zero() {
+        let identity = LwQuaternion(Quaternion::new(1.0, 0.0, 0.0, 0.0));
+        let rotated = LwQuaternion(Quaternion::new(0.707, 0.707, 0.0, 0.0).normalize());
+        let result = identity.slerp(&rotated, 0.0);
+        // Should be close to identity
+        assert!((result.0.s - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_quat_slerp_at_one() {
+        let identity = LwQuaternion(Quaternion::new(1.0, 0.0, 0.0, 0.0));
+        let rotated = LwQuaternion(Quaternion::new(0.707, 0.707, 0.0, 0.0).normalize());
+        let result = identity.slerp(&rotated, 1.0);
+        // Should be close to rotated
+        assert!((result.0.s - rotated.0.s).abs() < 0.01);
+        assert!((result.0.v.x - rotated.0.v.x).abs() < 0.01);
+    }
+
+    #[test]
+    fn test_quat_slerp_at_half() {
+        let identity = LwQuaternion(Quaternion::new(1.0, 0.0, 0.0, 0.0));
+        // 90 degree rotation around X
+        let rotated = LwQuaternion(Quaternion::new(0.707, 0.707, 0.0, 0.0).normalize());
+        let result = identity.slerp(&rotated, 0.5);
+        // Should be ~45 degrees (cos(22.5deg) ≈ 0.924 for w)
+        assert!(result.0.s > 0.9);
+        assert!(result.0.v.x > 0.3);
+    }
 }

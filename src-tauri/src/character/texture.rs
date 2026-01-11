@@ -316,7 +316,7 @@ impl CharMaterialTextureInfo {
             )
             .unwrap();
 
-            img.save_with_format(format!("./imports/character/texture/{}.bmp", model_id), ImageFormat::Bmp)?;
+            img.save_with_format(format!("./imports/character/texture/character/{}.bmp", model_id), ImageFormat::Bmp)?;
 
             let mut file_name: [u8; 64] = [0; 64];
             for (i, char) in format!("{}.bmp", model_id).chars().enumerate() {
