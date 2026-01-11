@@ -1,8 +1,8 @@
-mod animation;
+pub mod animation;
 pub mod commands;
-mod helper;
+pub mod helper;
 mod info;
-mod mesh;
+pub mod mesh;
 pub mod model;
 mod texture;
 
@@ -221,7 +221,7 @@ impl Character {
         let mut writer = BufWriter::new(file);
         animation_data.write_options(&mut writer, binrw::Endian::Little, ())?;
 
-        let mesh_data = CharacterGeometricModel::from_gltf(&gltf, &buffers, &images, 1)?;
+        let mesh_data = CharacterGeometricModel::from_gltf(&gltf, &buffers, &images, 1, &animation_data)?;
         let file = File::create("./test_artifacts/test.lgo")?;
         let mut writer = BufWriter::new(file);
         mesh_data.write_options(&mut writer, binrw::Endian::Little, ())?;
@@ -237,7 +237,7 @@ impl Character {
     ) -> anyhow::Result<(String, String)> {
         let animation_data =
             super::animation::character::LwBoneFile::from_gltf(&gltf, &buffers, &images)?;
-        let mesh_data = CharacterGeometricModel::from_gltf(&gltf, &buffers, &images, model_id)?;
+        let mesh_data = CharacterGeometricModel::from_gltf(&gltf, &buffers, &images, model_id, &animation_data)?;
 
         let animation_file_name = format!("{:0>4}.lab", model_id);
         let mesh_file_name = format!("{:0>10}.lgo", model_id * 1000000);

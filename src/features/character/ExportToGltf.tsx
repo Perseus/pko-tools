@@ -4,9 +4,15 @@ import { useToast } from "@/hooks/use-toast";
 import { selectedCharacterAtom } from "@/store/character";
 import { DialogDescription } from "@radix-ui/react-dialog";
 import { invoke } from "@tauri-apps/api/core";
+import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useAtomValue } from "jotai";
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
+
+interface ExportResult {
+  filePath: string;
+  folderPath: string;
+}
 
 export default function ExportToGltf({ onOpenChange, open, onExportFinished }: { onOpenChange: (open: boolean) => void, open: boolean, onExportFinished: () => void }) {
   const selectedCharacter = useAtomValue(selectedCharacterAtom);
@@ -14,6 +20,14 @@ export default function ExportToGltf({ onOpenChange, open, onExportFinished }: {
   const { toast } = useToast();
 
   let fileName = selectedCharacter?.id;
+
+  async function openInExplorer(filePath: string) {
+    try {
+      await revealItemInDir(filePath);
+    } catch (err) {
+      console.error("Failed to open folder:", err);
+    }
+  }
 
   async function exportGltf() {
     if (!selectedCharacter) {
@@ -23,12 +37,22 @@ export default function ExportToGltf({ onOpenChange, open, onExportFinished }: {
     setIsExporting(true);
 
     try {
-      const response = await invoke<string>('export_to_gltf', {
+      const response = await invoke<ExportResult>('export_to_gltf', {
         characterId: selectedCharacter.id
       });
       toast({
         title: "Exported to glTF",
-        description: `Exported to ${response}`
+        description: (
+          <div className="flex flex-col gap-1">
+            <span>Exported to {response.filePath}</span>
+            <button
+              onClick={() => openInExplorer(response.filePath)}
+              className="text-xs text-blue-400 hover:text-blue-300 underline text-left cursor-pointer"
+            >
+              Click to open in Explorer
+            </button>
+          </div>
+        ),
       });
       onExportFinished();
     } catch (err: unknown) {
@@ -47,8 +71,8 @@ export default function ExportToGltf({ onOpenChange, open, onExportFinished }: {
         <DialogTitle> Export {selectedCharacter?.name} to glTF </DialogTitle>
       </DialogHeader>
       <DialogDescription>
-        This will create a glTF file called <strong>{fileName}</strong> in the <strong>exports/gltf</strong> directory next to your
-        pko-tools installation.
+        This will create a glTF file called <strong>{fileName}.gltf</strong> in the <strong>pko-tools/exports/gltf</strong> folder
+        inside your game client directory.
       </DialogDescription>
       <DialogFooter>
         <Button variant="default" onClick={exportGltf} disabled={isExporting}>

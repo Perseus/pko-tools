@@ -1,12 +1,12 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
-mod animation;
+pub mod animation;
 mod broadcast;
-mod character;
+pub mod character;
 mod d3d;
 mod db;
 pub mod decompiler;
-mod math;
+pub mod math;
 mod preferences;
 mod projects;
 
