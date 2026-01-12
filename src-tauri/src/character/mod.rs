@@ -49,6 +49,23 @@ pub struct Character {
     action_id: u16,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CharacterMetadata {
+    pub character_id: u32,
+    pub character_name: String,
+    pub model_id: u16,
+    pub animation_id: u16,
+    pub bone_count: u32,
+    pub frame_count: u32,
+    pub dummy_count: u32,
+    pub vertex_count: u32,
+    pub triangle_count: u32,
+    pub material_count: u32,
+    pub model_parts: Vec<u16>,
+    pub bounding_spheres: u32,
+    pub bounding_boxes: u32,
+}
+
 pub struct GLTFFieldsToAggregate {
     pub buffer: Vec<gltf::Buffer>,
     pub buffer_view: Vec<gltf::buffer::View>,
@@ -98,6 +115,80 @@ impl Character {
         }
 
         parts
+    }
+
+    pub fn get_metadata(&self, project_dir: &Path) -> anyhow::Result<CharacterMetadata> {
+        let parts = self.get_parts();
+        let mut model_locations = vec![];
+
+        for i in 0..parts.len() {
+            let model_id_base = self.model as u32 * 1000000;
+            let suit_id = self.suit_id as u32 * 10000;
+            let model_id = model_id_base + suit_id + i as u32;
+            let model_location = format!(
+                "{}/model/character/{:0>10}.lgo",
+                project_dir.to_str().unwrap(),
+                model_id
+            );
+            model_locations.push(model_location);
+        }
+
+        let models: Vec<model::CharacterGeometricModel> = model_locations
+            .iter()
+            .map(|location| model::CharacterGeometricModel::from_file(PathBuf::from(location)))
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let animation =
+            super::animation::character::LwBoneFile::from_file(PathBuf::from(format!(
+                "{}/animation/{:0>4}.lab",
+                project_dir.to_str().unwrap(),
+                self.model
+            )))?;
+
+        // Calculate metadata
+        let bone_count = animation.header.bone_num;
+        let frame_count = animation.header.frame_num;
+        let dummy_count = animation.header.dummy_num;
+
+        let mut total_vertices = 0u32;
+        let mut total_triangles = 0u32;
+        let mut total_materials = 0u32;
+        let mut total_bspheres = 0u32;
+        let mut total_bboxes = 0u32;
+
+        for model in &models {
+            if let Some(ref mesh_info) = model.mesh_info {
+                total_vertices += mesh_info.header.vertex_num;
+                // Calculate triangles based on indices
+                total_triangles += mesh_info.header.index_num / 3;
+            }
+
+            if let Some(ref material_seq) = model.material_seq {
+                total_materials += material_seq.len() as u32;
+            }
+
+            if let Some(ref helper_data) = model.helper_data {
+                total_bspheres += helper_data.bsphere_num;
+                total_bboxes += helper_data.bbox_num;
+            }
+        }
+
+        let model_parts: Vec<u16> = parts.iter().map(|p| p.parse::<u16>().unwrap_or(0)).collect();
+
+        Ok(CharacterMetadata {
+            character_id: self.id,
+            character_name: self.name.clone(),
+            model_id: self.model,
+            animation_id: self.model, // Animation ID is the same as model ID
+            bone_count,
+            frame_count,
+            dummy_count,
+            vertex_count: total_vertices,
+            triangle_count: total_triangles,
+            material_count: total_materials,
+            model_parts,
+            bounding_spheres: total_bspheres,
+            bounding_boxes: total_bboxes,
+        })
     }
 
     pub fn get_gltf_json(&self, project_dir: &Path) -> anyhow::Result<String> {
@@ -265,6 +356,19 @@ pub fn get_character_gltf_json(
 
     let gltf_json = character.get_gltf_json(project_dir)?;
     Ok(gltf_json)
+}
+
+pub fn get_character_metadata(
+    project_id: uuid::Uuid,
+    character_id: u32,
+) -> anyhow::Result<CharacterMetadata> {
+    let project = projects::project::Project::get_project(project_id)?;
+    let character = get_character(project_id, character_id)?;
+
+    let project_dir = project.project_directory.as_ref();
+
+    let metadata = character.get_metadata(project_dir)?;
+    Ok(metadata)
 }
 
 #[cfg(test)]

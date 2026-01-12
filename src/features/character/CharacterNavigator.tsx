@@ -7,8 +7,8 @@ import { SidebarContent, SidebarHeader } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { invoke } from "@tauri-apps/api/core";
 import { Character } from "@/types/character";
-import { getCharacterList } from "@/commands/character";
-import { characterGltfJsonAtom, characterLoadingStatusAtom, selectedCharacterAtom } from "@/store/character";
+import { getCharacterList, getCharacterMetadata } from "@/commands/character";
+import { characterGltfJsonAtom, characterLoadingStatusAtom, selectedCharacterAtom, characterMetadataAtom } from "@/store/character";
 import { Input } from "@/components/ui/input";
 import { Label } from "@radix-ui/react-dropdown-menu";
 import { listen } from '@tauri-apps/api/event';
@@ -23,6 +23,7 @@ export default function CharacterNavigator() {
   const currentProject = useAtomValue(currentProjectAtom);
   const [, setSelectedCharacter] = useAtom(selectedCharacterAtom);
   const [, setCharacterLoadingStatus] = useAtom(characterLoadingStatusAtom);
+  const [, setCharacterMetadata] = useAtom(characterMetadataAtom);
   useEffect(() => {
     async function fetchAnimationFiles() {
       if (currentProject) {
@@ -66,12 +67,22 @@ export default function CharacterNavigator() {
         subActionTotalSteps: modelLoadingUpdate[3] as number,
       });
     });
-    const character_gltf_json = await invoke<string>("load_character", {
-      projectId: currentProject?.id,
-      characterId: character.id,
-    });
+    
+    // Fetch character glTF and metadata in parallel
+    try {
+      const [character_gltf_json, metadata] = await Promise.all([
+        invoke<string>("load_character", {
+          projectId: currentProject?.id,
+          characterId: character.id,
+        }),
+        getCharacterMetadata(currentProject?.id || "", character.id)
+      ]);
 
-    setCharacterGltfJson(character_gltf_json);
+      setCharacterGltfJson(character_gltf_json);
+      setCharacterMetadata(metadata);
+    } catch (error) {
+      console.error('Error loading character:', error);
+    }
   }
 
   return (

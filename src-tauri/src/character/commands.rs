@@ -5,7 +5,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::{broadcast::get_broadcaster, AppState};
 
-use super::{get_character_gltf_json, info::get_all_characters, Character};
+use super::{get_character_gltf_json, get_character_metadata, info::get_all_characters, Character, CharacterMetadata};
 
 #[tauri::command]
 pub async fn get_character_list(project_id: String) -> Result<Vec<Character>, String> {
@@ -152,4 +152,18 @@ pub async fn import_character_from_gltf(
 
 
     Err("Invalid project id".to_string())
+}
+
+#[tauri::command]
+pub async fn get_character_metadata_cmd(
+    project_id: String,
+    character_id: u32,
+) -> Result<CharacterMetadata, String> {
+    let project_id = uuid::Uuid::from_str(&project_id)
+        .map_err(|_| "Invalid project id".to_string())?;
+
+    let metadata = get_character_metadata(project_id, character_id)
+        .map_err(|e| e.to_string())?;
+
+    Ok(metadata)
 }

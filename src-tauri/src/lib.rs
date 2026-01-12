@@ -62,6 +62,7 @@ pub fn run() {
             character::commands::load_character,
             character::commands::export_to_gltf,
             character::commands::import_character_from_gltf,
+            character::commands::get_character_metadata_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

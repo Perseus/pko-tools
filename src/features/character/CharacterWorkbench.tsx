@@ -1,4 +1,4 @@
-import { characterGltfJsonAtom } from "@/store/character";
+import { characterGltfJsonAtom, characterMetadataAtom } from "@/store/character";
 import {  useAtomValue } from "jotai";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useGLTF, OrbitControls,  CameraControls,  Environment, useAnimations } from '@react-three/drei';
@@ -7,6 +7,7 @@ import * as THREE from 'three';
 import { useControls, Leva } from 'leva';
 import { extractBoundingSpheres, BoundingSphereIndicators } from './BoundingSphereIndicators';
 import { SkeletonDebugHelpers } from './SkeletonDebugHelpers';
+import { CharacterMetadataPanel } from './CharacterMetadataPanel';
 
 function jsonToDataURI(json: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -219,9 +220,11 @@ function Character() {
 }
 
 export default function CharacterWorkbench() {
+  const characterMetadata = useAtomValue(characterMetadataAtom);
 
-  return <div className="h-full w-full">
+  return <div className="h-full w-full relative">
     <Leva collapsed={false} />
+    <CharacterMetadataPanel metadata={characterMetadata} />
     <Canvas style={{ height: '100%', width: '100%' }} shadows camera={{ position: [10, 12, 12], fov: 25 }}>
       <ambientLight intensity={1} />
       <directionalLight position={[5, 5, 5]} castShadow />
