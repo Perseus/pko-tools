@@ -476,22 +476,301 @@ fn roundtrip_088_lgo() {
     println!("  ✓ All vertex normals match");
     
     // Compare indices
-    let mut mismatch_count = 0;
     for (i, (orig_idx, new_idx)) in orig_mesh.index_seq.iter().zip(new_mesh.index_seq.iter()).enumerate() {
-        if orig_idx != new_idx {
-            if mismatch_count < 10 {  // Only print first 10 mismatches
-                println!("    Index {} mismatch: orig={}, new={}", i, orig_idx, new_idx);
+        assert_eq!(orig_idx, new_idx, "Index {} mismatch", i);
+    }
+    println!("  ✓ All indices match");
+    
+    // Compare bone index sequence
+    // Note: The order may differ after round-trip, but the set of bones should be the same
+    println!("  Original bone_index_seq ({} bones): {:?}", orig_mesh.bone_index_seq.len(), orig_mesh.bone_index_seq);
+    println!("  New bone_index_seq ({} bones): {:?}", new_mesh.bone_index_seq.len(), new_mesh.bone_index_seq);
+    assert_eq!(orig_mesh.bone_index_seq.len(), new_mesh.bone_index_seq.len(), "Bone index sequence length mismatch");
+    
+    let orig_bones_set: std::collections::HashSet<_> = orig_mesh.bone_index_seq.iter().collect();
+    let new_bones_set: std::collections::HashSet<_> = new_mesh.bone_index_seq.iter().collect();
+    assert_eq!(orig_bones_set, new_bones_set, "Bone index sets don't match");
+    println!("  ✓ Bone index sequences contain same bones (order may differ)");
+    
+    // Compare bone weights and joint assignments
+    // Note: We need to compare the actual LAB bone IDs, not the indices into bone_index_seq,
+    // since bone_index_seq ordering may differ after round-trip
+    assert_eq!(orig_mesh.blend_seq.len(), new_mesh.blend_seq.len(), "Blend sequence length mismatch");
+    println!("  ✓ Blend sequence count matches: {}", orig_mesh.blend_seq.len());
+    
+    for (i, (orig_blend, new_blend)) in orig_mesh.blend_seq.iter().zip(new_mesh.blend_seq.iter()).enumerate() {
+        // Decode the joint indices (u8 values packed in u32)
+        let orig_joints = orig_blend.indexd.to_le_bytes();
+        let new_joints = new_blend.indexd.to_le_bytes();
+        
+        // Convert indices to LAB bone IDs for comparison
+        // Only check bones that have non-zero weight (zero-weight bones can point anywhere)
+        for j in 0..4 {
+            let weight_diff = (orig_blend.weight[j] - new_blend.weight[j]).abs();
+            assert!(weight_diff < 0.001, "Vertex {} weight {} differs by {}", i, j, weight_diff);
+            
+            // Only verify bone IDs for joints with non-zero weight
+            if orig_blend.weight[j] > 0.0001 {
+                let orig_bone_id = orig_mesh.bone_index_seq[orig_joints[j] as usize];
+                let new_bone_id = new_mesh.bone_index_seq[new_joints[j] as usize];
+                assert_eq!(orig_bone_id, new_bone_id, "Vertex {} joint {} bone ID mismatch (weight={})", i, j, orig_blend.weight[j]);
             }
-            mismatch_count += 1;
+        }
+    }
+    println!("  ✓ All vertex weights and joint assignments match (LAB bone IDs)");
+    
+    // Compare bounding spheres
+    if let (Some(orig_helper), Some(new_helper)) = (&original_lgo.helper_data, &new_lgo.helper_data) {
+        assert_eq!(orig_helper.bsphere_seq.len(), new_helper.bsphere_seq.len(), "Bounding sphere count mismatch");
+        println!("  ✓ Bounding sphere count matches: {}", orig_helper.bsphere_seq.len());
+        
+        for (i, (orig_sphere, new_sphere)) in orig_helper.bsphere_seq.iter().zip(new_helper.bsphere_seq.iter()).enumerate() {
+            assert_eq!(orig_sphere.id, new_sphere.id, "Bounding sphere {} id mismatch", i);
+            
+            // Compare sphere center
+            let center_diff = ((orig_sphere.sphere.c.0.x - new_sphere.sphere.c.0.x).abs() +
+                              (orig_sphere.sphere.c.0.y - new_sphere.sphere.c.0.y).abs() +
+                              (orig_sphere.sphere.c.0.z - new_sphere.sphere.c.0.z).abs()) / 3.0;
+            assert!(center_diff < 0.001, "Bounding sphere {} center differs by {}", i, center_diff);
+            
+            // Compare sphere radius
+            let radius_diff = (orig_sphere.sphere.r - new_sphere.sphere.r).abs();
+            assert!(radius_diff < 0.001, "Bounding sphere {} radius differs by {}", i, radius_diff);
+            
+            // Compare sphere transform matrix
+            for row in 0..4 {
+                for col in 0..4 {
+                    let mat_diff = (orig_sphere.mat.0[row][col] - new_sphere.mat.0[row][col]).abs();
+                    assert!(mat_diff < 0.001, "Bounding sphere {} matrix[{}][{}] differs by {}", i, row, col, mat_diff);
+                }
+            }
+        }
+        println!("  ✓ All bounding spheres match (including transform matrices)");
+    }
+    
+    // Compare texture coordinates
+    assert_eq!(orig_mesh.texcoord_seq[0].len(), new_mesh.texcoord_seq[0].len(), "Texcoord count mismatch");
+    for (i, (orig_uv, new_uv)) in orig_mesh.texcoord_seq[0].iter().zip(new_mesh.texcoord_seq[0].iter()).enumerate() {
+        let diff = ((orig_uv.0.x - new_uv.0.x).abs() + (orig_uv.0.y - new_uv.0.y).abs()) / 2.0;
+        assert!(diff < 0.001, "Texcoord {} differs by {}", i, diff);
+    }
+    println!("  ✓ All texture coordinates match: {}", orig_mesh.texcoord_seq[0].len());
+    
+    // Compare mesh header values
+    assert_eq!(orig_mesh.header.fvf, new_mesh.header.fvf, "FVF mismatch");
+    assert_eq!(orig_mesh.header.pt_type, new_mesh.header.pt_type, "Primitive type mismatch");
+    assert_eq!(orig_mesh.header.subset_num, new_mesh.header.subset_num, "Subset count mismatch");
+    println!("  ✓ Mesh header values match (fvf={}, pt_type={:?}, subsets={})", 
+        orig_mesh.header.fvf, orig_mesh.header.pt_type, orig_mesh.header.subset_num);
+    
+    // Compare subset info
+    assert_eq!(orig_mesh.subset_seq.len(), new_mesh.subset_seq.len(), "Subset sequence length mismatch");
+    for (i, (orig_subset, new_subset)) in orig_mesh.subset_seq.iter().zip(new_mesh.subset_seq.iter()).enumerate() {
+        assert_eq!(orig_subset.primitive_num, new_subset.primitive_num, "Subset {} primitive_num mismatch", i);
+        assert_eq!(orig_subset.start_index, new_subset.start_index, "Subset {} start_index mismatch", i);
+        assert_eq!(orig_subset.vertex_num, new_subset.vertex_num, "Subset {} vertex_num mismatch", i);
+        assert_eq!(orig_subset.min_index, new_subset.min_index, "Subset {} min_index mismatch", i);
+    }
+    println!("  ✓ All subsets match: {}", orig_mesh.subset_seq.len());
+    
+    // Compare vertex colors (if present)
+    if !orig_mesh.vercol_seq.is_empty() {
+        assert_eq!(orig_mesh.vercol_seq.len(), new_mesh.vercol_seq.len(), "Vertex color count mismatch");
+        for (i, (orig_col, new_col)) in orig_mesh.vercol_seq.iter().zip(new_mesh.vercol_seq.iter()).enumerate() {
+            assert_eq!(orig_col, new_col, "Vertex color {} mismatch", i);
+        }
+        println!("  ✓ All vertex colors match: {}", orig_mesh.vercol_seq.len());
+    } else {
+        println!("  - No vertex colors in this model");
+    }
+    
+    // Compare additional texture coordinate sets (if present)
+    for tex_idx in 1..4 {
+        if !orig_mesh.texcoord_seq[tex_idx].is_empty() {
+            assert_eq!(orig_mesh.texcoord_seq[tex_idx].len(), new_mesh.texcoord_seq[tex_idx].len(), 
+                "Texcoord[{}] count mismatch", tex_idx);
+            for (i, (orig_uv, new_uv)) in orig_mesh.texcoord_seq[tex_idx].iter().zip(new_mesh.texcoord_seq[tex_idx].iter()).enumerate() {
+                let diff = ((orig_uv.0.x - new_uv.0.x).abs() + (orig_uv.0.y - new_uv.0.y).abs()) / 2.0;
+                assert!(diff < 0.001, "Texcoord[{}] {} differs by {}", tex_idx, i, diff);
+            }
+            println!("  ✓ Texcoord[{}] matches: {} entries", tex_idx, orig_mesh.texcoord_seq[tex_idx].len());
         }
     }
     
-    if mismatch_count > 0 {
-        println!("  ⚠️  {} index mismatches found (this might be OK if vertices are reordered consistently)", mismatch_count);
-        // For now, let's skip the strict index check and just verify the count matches
-        // TODO: Implement proper mesh equivalence check that handles vertex reordering
-    } else {
-        println!("  ✓ All indices match");
+    // Compare mesh header bone-related fields
+    assert_eq!(orig_mesh.header.bone_index_num, new_mesh.header.bone_index_num, "bone_index_num mismatch");
+    assert_eq!(orig_mesh.header.bone_infl_factor, new_mesh.header.bone_infl_factor, "bone_infl_factor mismatch");
+    println!("  ✓ Mesh header bone fields match (bone_index_num={}, bone_infl_factor={})",
+        orig_mesh.header.bone_index_num, orig_mesh.header.bone_infl_factor);
+    
+    // Compare vertex element sequence
+    assert_eq!(orig_mesh.vertex_element_seq.len(), new_mesh.vertex_element_seq.len(), "Vertex element count mismatch");
+    for (i, (orig_ve, new_ve)) in orig_mesh.vertex_element_seq.iter().zip(new_mesh.vertex_element_seq.iter()).enumerate() {
+        assert_eq!(orig_ve.stream, new_ve.stream, "vertex_element_seq[{}].stream mismatch", i);
+        assert_eq!(orig_ve.offset, new_ve.offset, "vertex_element_seq[{}].offset mismatch", i);
+        assert_eq!(orig_ve._type, new_ve._type, "vertex_element_seq[{}]._type mismatch", i);
+        assert_eq!(orig_ve.method, new_ve.method, "vertex_element_seq[{}].method mismatch", i);
+        assert_eq!(orig_ve.usage, new_ve.usage, "vertex_element_seq[{}].usage mismatch", i);
+        assert_eq!(orig_ve.usage_index, new_ve.usage_index, "vertex_element_seq[{}].usage_index mismatch", i);
+    }
+    println!("  ✓ Vertex element sequence matches: {} elements", orig_mesh.vertex_element_seq.len());
+    
+    // Compare mesh header render state settings
+    for (i, (orig_rs, new_rs)) in orig_mesh.header.rs_set.iter().zip(new_mesh.header.rs_set.iter()).enumerate() {
+        assert_eq!(orig_rs.state, new_rs.state, "Mesh header rs_set[{}].state mismatch", i);
+        assert_eq!(orig_rs.value0, new_rs.value0, "Mesh header rs_set[{}].value0 mismatch", i);
+        assert_eq!(orig_rs.value1, new_rs.value1, "Mesh header rs_set[{}].value1 mismatch", i);
+    }
+    println!("  ✓ Mesh header render state settings match");
+    
+    // Compare material properties
+    for (i, (orig_mat, new_mat)) in orig_materials.iter().zip(new_materials.iter()).enumerate() {
+        let opacity_diff = (orig_mat.opacity - new_mat.opacity).abs();
+        assert!(opacity_diff < 0.001, "Material {} opacity differs by {}", i, opacity_diff);
+        assert_eq!(orig_mat.transp_type, new_mat.transp_type, "Material {} transp_type mismatch", i);
+        
+        // Compare material D3D properties (diffuse)
+        let dif_diff = (orig_mat.material.dif.r - new_mat.material.dif.r).abs() +
+                       (orig_mat.material.dif.g - new_mat.material.dif.g).abs() +
+                       (orig_mat.material.dif.b - new_mat.material.dif.b).abs() +
+                       (orig_mat.material.dif.a - new_mat.material.dif.a).abs();
+        assert!(dif_diff < 0.01, "Material {} diffuse differs by {}", i, dif_diff);
+        
+        // Compare ambient
+        let amb_diff = (orig_mat.material.amb.r - new_mat.material.amb.r).abs() +
+                       (orig_mat.material.amb.g - new_mat.material.amb.g).abs() +
+                       (orig_mat.material.amb.b - new_mat.material.amb.b).abs() +
+                       (orig_mat.material.amb.a - new_mat.material.amb.a).abs();
+        assert!(amb_diff < 0.01, "Material {} ambient differs by {}", i, amb_diff);
+        
+        // Compare specular (if present)
+        match (&orig_mat.material.spe, &new_mat.material.spe) {
+            (Some(orig_spe), Some(new_spe)) => {
+                let spe_diff = (orig_spe.r - new_spe.r).abs() +
+                               (orig_spe.g - new_spe.g).abs() +
+                               (orig_spe.b - new_spe.b).abs() +
+                               (orig_spe.a - new_spe.a).abs();
+                assert!(spe_diff < 0.01, "Material {} specular differs by {}", i, spe_diff);
+            }
+            (None, None) => {}
+            _ => panic!("Material {} specular presence mismatch", i),
+        }
+        
+        // Compare emissive (if present)
+        match (&orig_mat.material.emi, &new_mat.material.emi) {
+            (Some(orig_emi), Some(new_emi)) => {
+                let emi_diff = (orig_emi.r - new_emi.r).abs() +
+                               (orig_emi.g - new_emi.g).abs() +
+                               (orig_emi.b - new_emi.b).abs() +
+                               (orig_emi.a - new_emi.a).abs();
+                assert!(emi_diff < 0.01, "Material {} emissive differs by {}", i, emi_diff);
+            }
+            (None, None) => {}
+            _ => panic!("Material {} emissive presence mismatch", i),
+        }
+        
+        let power_diff = (orig_mat.material.power - new_mat.material.power).abs();
+        assert!(power_diff < 0.001, "Material {} power differs by {}", i, power_diff);
+        
+        // Compare material render state settings
+        for (j, (orig_rs, new_rs)) in orig_mat.rs_set.iter().zip(new_mat.rs_set.iter()).enumerate() {
+            assert_eq!(orig_rs.state, new_rs.state, "Material {} rs_set[{}].state mismatch", i, j);
+            assert_eq!(orig_rs.value0, new_rs.value0, "Material {} rs_set[{}].value0 mismatch", i, j);
+            assert_eq!(orig_rs.value1, new_rs.value1, "Material {} rs_set[{}].value1 mismatch", i, j);
+        }
+        
+        // Compare texture info
+        for (j, (orig_tex, new_tex)) in orig_mat.tex_seq.iter().zip(new_mat.tex_seq.iter()).enumerate() {
+            assert_eq!(orig_tex.stage, new_tex.stage, "Material {} tex_seq[{}].stage mismatch", i, j);
+            assert_eq!(orig_tex.level, new_tex.level, "Material {} tex_seq[{}].level mismatch", i, j);
+            assert_eq!(orig_tex.usage, new_tex.usage, "Material {} tex_seq[{}].usage mismatch", i, j);
+            assert_eq!(orig_tex.d3d_format, new_tex.d3d_format, "Material {} tex_seq[{}].d3d_format mismatch", i, j);
+            assert_eq!(orig_tex.d3d_pool, new_tex.d3d_pool, "Material {} tex_seq[{}].d3d_pool mismatch", i, j);
+            assert_eq!(orig_tex.byte_alignment_flag, new_tex.byte_alignment_flag, "Material {} tex_seq[{}].byte_alignment_flag mismatch", i, j);
+            assert_eq!(orig_tex._type, new_tex._type, "Material {} tex_seq[{}]._type mismatch", i, j);
+            assert_eq!(orig_tex.colorkey_type, new_tex.colorkey_type, "Material {} tex_seq[{}].colorkey_type mismatch", i, j);
+            assert_eq!(orig_tex.colorkey.to_color(), new_tex.colorkey.to_color(), "Material {} tex_seq[{}].colorkey mismatch", i, j);
+            assert_eq!(orig_tex.data, new_tex.data, "Material {} tex_seq[{}].data mismatch", i, j);
+            // Note: file_name may differ due to model_id in import, so skip that check
+            
+            // Compare texture stage state (tss_set)
+            for (k, (orig_tss, new_tss)) in orig_tex.tss_set.iter().zip(new_tex.tss_set.iter()).enumerate() {
+                assert_eq!(orig_tss.state, new_tss.state, "Material {} tex_seq[{}].tss_set[{}].state mismatch", i, j, k);
+                assert_eq!(orig_tss.value0, new_tss.value0, "Material {} tex_seq[{}].tss_set[{}].value0 mismatch", i, j, k);
+                assert_eq!(orig_tss.value1, new_tss.value1, "Material {} tex_seq[{}].tss_set[{}].value1 mismatch", i, j, k);
+            }
+        }
+    }
+    println!("  ✓ All material properties match (including all texture info fields)");
+    
+    // Compare helper data (bounding boxes, dummy nodes, etc.)
+    if let (Some(orig_helper), Some(new_helper)) = (&original_lgo.helper_data, &new_lgo.helper_data) {
+        // Compare helper type flags
+        assert_eq!(orig_helper._type, new_helper._type, "Helper _type mismatch");
+        println!("  ✓ Helper type flags match: {:#x}", orig_helper._type);
+        
+        // Dummy nodes - compare all fields if present
+        assert_eq!(orig_helper.dummy_seq.len(), new_helper.dummy_seq.len(), "Dummy node count mismatch");
+        for (i, (orig_dummy, new_dummy)) in orig_helper.dummy_seq.iter().zip(new_helper.dummy_seq.iter()).enumerate() {
+            assert_eq!(orig_dummy.id, new_dummy.id, "Dummy {} id mismatch", i);
+            assert_eq!(orig_dummy.parent_type, new_dummy.parent_type, "Dummy {} parent_type mismatch", i);
+            assert_eq!(orig_dummy.parent_id, new_dummy.parent_id, "Dummy {} parent_id mismatch", i);
+            // Compare matrices
+            for row in 0..4 {
+                for col in 0..4 {
+                    let mat_diff = (orig_dummy.mat.0[row][col] - new_dummy.mat.0[row][col]).abs();
+                    assert!(mat_diff < 0.001, "Dummy {} mat[{}][{}] differs by {}", i, row, col, mat_diff);
+                    let mat_local_diff = (orig_dummy.mat_local.0[row][col] - new_dummy.mat_local.0[row][col]).abs();
+                    assert!(mat_local_diff < 0.001, "Dummy {} mat_local[{}][{}] differs by {}", i, row, col, mat_local_diff);
+                }
+            }
+        }
+        if !orig_helper.dummy_seq.is_empty() {
+            println!("  ✓ All {} dummy nodes match (including matrices)", orig_helper.dummy_seq.len());
+        }
+        
+        // Bounding boxes (box_seq)
+        assert_eq!(orig_helper.box_seq.len(), new_helper.box_seq.len(), "Box count mismatch");
+        for (i, (orig_box, new_box)) in orig_helper.box_seq.iter().zip(new_helper.box_seq.iter()).enumerate() {
+            assert_eq!(orig_box.id, new_box.id, "Box {} id mismatch", i);
+            assert_eq!(orig_box._type, new_box._type, "Box {} _type mismatch", i);
+            assert_eq!(orig_box.state, new_box.state, "Box {} state mismatch", i);
+            assert_eq!(orig_box.name, new_box.name, "Box {} name mismatch", i);
+        }
+        if !orig_helper.box_seq.is_empty() {
+            println!("  ✓ All {} boxes match", orig_helper.box_seq.len());
+        }
+        
+        // Mesh helpers
+        assert_eq!(orig_helper.mesh_seq.len(), new_helper.mesh_seq.len(), "Mesh helper count mismatch");
+        for (i, (orig_mesh_helper, new_mesh_helper)) in orig_helper.mesh_seq.iter().zip(new_helper.mesh_seq.iter()).enumerate() {
+            assert_eq!(orig_mesh_helper.id, new_mesh_helper.id, "Mesh helper {} id mismatch", i);
+            assert_eq!(orig_mesh_helper._type, new_mesh_helper._type, "Mesh helper {} _type mismatch", i);
+            assert_eq!(orig_mesh_helper.sub_type, new_mesh_helper.sub_type, "Mesh helper {} sub_type mismatch", i);
+            assert_eq!(orig_mesh_helper.state, new_mesh_helper.state, "Mesh helper {} state mismatch", i);
+            assert_eq!(orig_mesh_helper.name, new_mesh_helper.name, "Mesh helper {} name mismatch", i);
+            assert_eq!(orig_mesh_helper.vertex_num, new_mesh_helper.vertex_num, "Mesh helper {} vertex_num mismatch", i);
+            assert_eq!(orig_mesh_helper.face_num, new_mesh_helper.face_num, "Mesh helper {} face_num mismatch", i);
+        }
+        if !orig_helper.mesh_seq.is_empty() {
+            println!("  ✓ All {} mesh helpers match", orig_helper.mesh_seq.len());
+        }
+        
+        // Bounding boxes (bbox_seq)
+        assert_eq!(orig_helper.bbox_seq.len(), new_helper.bbox_seq.len(), "BBox count mismatch");
+        for (i, (orig_bbox, new_bbox)) in orig_helper.bbox_seq.iter().zip(new_helper.bbox_seq.iter()).enumerate() {
+            assert_eq!(orig_bbox.id, new_bbox.id, "BBox {} id mismatch", i);
+            // Compare box bounds and matrix
+            for row in 0..4 {
+                for col in 0..4 {
+                    let mat_diff = (orig_bbox.mat.0[row][col] - new_bbox.mat.0[row][col]).abs();
+                    assert!(mat_diff < 0.001, "BBox {} mat[{}][{}] differs by {}", i, row, col, mat_diff);
+                }
+            }
+        }
+        if !orig_helper.bbox_seq.is_empty() {
+            println!("  ✓ All {} bboxes match", orig_helper.bbox_seq.len());
+        }
     }
     
     println!("\n✅ ROUND-TRIP TEST PASSED!");

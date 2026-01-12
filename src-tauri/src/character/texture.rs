@@ -38,7 +38,7 @@ pub enum MaterialTextureInfoTransparencyType {
 }
 
 #[repr(u32)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[binrw]
 #[br(repr = u32)]
 #[bw(repr = u32)]
@@ -65,7 +65,7 @@ impl ColorValue4F {
 }
 
 #[repr(u32)]
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[binrw]
 #[br(repr = u32)]
 #[bw(repr = u32)]
@@ -225,7 +225,9 @@ impl TextureInfo {
             d3d_format: D3DFormat::Unknown,
             d3d_pool: D3DPool::ForceDword,
             byte_alignment_flag: 0,
-            _type: TextureType::Invalid,
+            // Use InvalidMax (0xffffffff) to match original LGO file format
+            // for unused/uninitialized texture slots
+            _type: TextureType::InvalidMax,
             width: 0,
             height: 0,
             colorkey_type: ColorKeyType::None,
@@ -325,10 +327,10 @@ impl CharMaterialTextureInfo {
 
             material.tex_seq[0] = TextureInfo {
                 stage: 0,
-                level: 1,
+                level: u32::MAX, // LW_INVALID_INDEX - same as when reading from LGO file
                 usage: 0,
                 d3d_format: D3DFormat::Unknown,
-                d3d_pool: D3DPool::Default,
+                d3d_pool: D3DPool::Managed, // Same as when reading from LGO file
                 _type: TextureType::File,
                 colorkey: LwColorValue4b::from_color(0),
                 colorkey_type: ColorKeyType::None,

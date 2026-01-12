@@ -311,6 +311,7 @@ impl CharacterGeometricModel {
             radius: f32,
             id: u32,
             r#type: String,
+            center: [f32; 3],
         }
 
         for node in gltf.nodes() {
@@ -321,15 +322,27 @@ impl CharacterGeometricModel {
                     let extras_data = extras_data.unwrap();
                     match extras_data.r#type.as_str() {
                         "bounding_sphere" => {
-                            let translation = node.transform().decomposed().0;
+                            // Get the full transformation matrix from the node
+                            let mat_array: [[f32; 4]; 4] = node.transform().matrix();
+                            let mat = LwMatrix44(Matrix4::new(
+                                mat_array[0][0], mat_array[0][1], mat_array[0][2], mat_array[0][3],
+                                mat_array[1][0], mat_array[1][1], mat_array[1][2], mat_array[1][3],
+                                mat_array[2][0], mat_array[2][1], mat_array[2][2], mat_array[2][3],
+                                mat_array[3][0], mat_array[3][1], mat_array[3][2], mat_array[3][3],
+                            ));
+                            
                             helper_data.bsphere_num += 1;
                             helper_data.bsphere_seq.push(BoundingSphereInfo{
                                 id: extras_data.id,
                                 sphere: LwSphere{
-                                    c: LwVector3(Vector3::new(0.0, 0.0,0.0 )),
+                                    c: LwVector3(Vector3::new(
+                                        extras_data.center[0],
+                                        extras_data.center[1],
+                                        extras_data.center[2]
+                                    )),
                                     r: extras_data.radius,
                                 },
-                                mat: LwMatrix44(Matrix4::from_translation(Vector3::new(translation[0], translation[1], translation[2]))),
+                                mat,
                             });
                         },
                         "bounding_box" => {},

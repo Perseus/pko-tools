@@ -87,7 +87,7 @@ pub struct CharacterMeshSubsetInfo {
     pub min_index: u32,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 #[binrw]
 pub struct CharacterInfoMeshHeader {
     // the type of vertex data available (positions, normals, texture coordinates etc.)
@@ -115,6 +115,24 @@ pub struct CharacterInfoMeshHeader {
     // not sure what its used for yet
     // GLTF: extras
     pub rs_set: [RenderStateAtom; LW_MESH_RS_NUM],
+}
+
+impl Default for CharacterInfoMeshHeader {
+    fn default() -> Self {
+        Self {
+            fvf: 0,
+            pt_type: D3DPrimitiveType::TriangleList,
+            vertex_num: 0,
+            index_num: 0,
+            subset_num: 0,
+            bone_index_num: 0,
+            bone_infl_factor: 0,
+            vertex_element_num: 0,
+            // Use RenderStateAtom::new() which sets state to LW_INVALID_INDEX
+            // This indicates empty/unused render state slots
+            rs_set: [RenderStateAtom::new(); LW_MESH_RS_NUM],
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1165,7 +1183,7 @@ impl CharacterMeshInfo {
             vercol_seq: vec![],
         };
 
-        let mut joint_seq: Vec<u32> = vec![];
+        let mut joint_seq_u16: Vec<[u16; 4]> = vec![];  // LAB bone positions from glTF JOINTS_0
         let mut weight_seq: Vec<[f32; 4]> = vec![];
 
         for gltf_mesh in doc.meshes() {
@@ -1223,22 +1241,16 @@ impl CharacterMeshInfo {
                             let data = buffers.get(buffer.index()).unwrap().0.as_slice();
                             let data_as_slice = &data[data_idx..];
 
-                            fn encode_indexd(joints: [u8; 4]) -> u32 {
-                                let mut indexd = 0;
-                                for (i, joint) in joints.iter().enumerate() {
-                                    indexd |= (*joint as u32) << (i * 8);
-                                }
-                                indexd
-                            }
-
                             let mut reader = std::io::Cursor::new(data_as_slice);
                             for _ in 0..accessor.count() {
-                                let mut joints = [0u8; 4];
-                                joints.iter_mut().for_each(|j| {
-                                    *j = u8::read_options(&mut reader, binrw::Endian::Little, ())
+                                // Export writes u16 LAB bone positions (2 bytes each), so read 4 u16 values
+                                let mut joints_u16 = [0u16; 4];
+                                joints_u16.iter_mut().for_each(|j| {
+                                    *j = u16::read_options(&mut reader, binrw::Endian::Little, ())
                                         .unwrap();
                                 });
-                                joint_seq.push(encode_indexd(joints));
+                                // These are LAB bone array positions - we'll convert them to bone_index_seq indices later
+                                joint_seq_u16.push(joints_u16);
                             }
                         }
 
@@ -1320,77 +1332,54 @@ impl CharacterMeshInfo {
         // BUG #3 FIX: bone_index_seq must contain LAB bone array indices, not enumerate indices.
         // The game engine does: bone_rtm[bone_index_seq[i]], so bone_index_seq values must be
         // valid indices into the LAB bone array.
+        //
+        // CRITICAL: joint_seq_u16 (from JOINTS_0 accessor) contains LAB bone array positions (u16 values),
+        // NOT skin joint positions! This is because the export (line 748) writes:
+        //   joint_indices = indices.map(|idx| *self.bone_index_seq.get(idx as usize).unwrap() as u16)
+        // So we need to reverse that: convert LAB bone positions back to bone_index_seq indices.
         
-        // Step 1: Build mapping from glTF node index to LAB bone array position
-        let skin = doc.skins().nth(0).unwrap();
-        let mut gltf_node_idx_to_lab_bone_pos = HashMap::<u32, u32>::new();
-        for (lab_pos, bone) in bone_file.base_seq.iter().enumerate() {
-            gltf_node_idx_to_lab_bone_pos.insert(bone.original_node_index, lab_pos as u32);
-        }
-        
-        // Step 2: Build mapping from skin.joints() position to LAB bone array position
-        let mut skin_joint_pos_to_lab_bone_pos = HashMap::<u32, u32>::new();
-        for (skin_pos, joint) in skin.joints().enumerate() {
-            let gltf_node_idx = joint.index() as u32;
-            if let Some(lab_pos) = gltf_node_idx_to_lab_bone_pos.get(&gltf_node_idx) {
-                skin_joint_pos_to_lab_bone_pos.insert(skin_pos as u32, *lab_pos);
-            }
-        }
-        
-        // Step 3: Find which skin joints are actually used by the mesh (have weights)
-        let mut skin_joints_with_weight = HashMap::new();
-        joint_seq.iter().for_each(|joint_seq_item| {
-            let decomposed_seq_item = joint_seq_item.to_le_bytes();
-            decomposed_seq_item.iter().for_each(|skin_joint_pos| {
-                skin_joints_with_weight.insert(*skin_joint_pos, true);
-            });
-        });
-        
-        // Step 4: Build bone_index_seq with LAB bone array indices, in LAB order
-        // Only include bones that are actually used by the mesh
-        let mut skin_joint_pos_to_bone_seq_idx = HashMap::<u32, u32>::new();
-        let mut bone_index_seq = Vec::new();
-        for (skin_pos, joint) in skin.joints().enumerate() {
-            let skin_pos_u32 = skin_pos as u32;
-            
-            // Only include this bone if it's used by the mesh
-            if !skin_joints_with_weight.contains_key(&(skin_pos as u8)) {
-                continue;
-            }
-            
-            // Look up the LAB bone array position for this joint
-            if let Some(lab_bone_pos) = skin_joint_pos_to_lab_bone_pos.get(&skin_pos_u32) {
-                // Map: skin joint position -> position in bone_index_seq array
-                skin_joint_pos_to_bone_seq_idx.insert(skin_pos_u32, bone_index_seq.len() as u32);
-                // Store the LAB bone array index (this is what the game engine uses!)
-                bone_index_seq.push(*lab_bone_pos);
-            } else {
-                panic!("Skin joint at position {} (glTF node {}) has no corresponding LAB bone", 
-                       skin_pos, joint.index());
-            }
-        }
-
-        // Step 5: Remap joint_seq from skin joint positions to bone_index_seq positions
-        // joint_seq contains skin.joints() positions, but we need indices into bone_index_seq
-        joint_seq.iter_mut().for_each(|joint_seq_item| {
-            let mut decomposed_seq_item = joint_seq_item.to_le_bytes();
-            decomposed_seq_item.iter_mut().for_each(|skin_joint_pos| {
-                let bone_seq_idx = skin_joint_pos_to_bone_seq_idx.get(&(*skin_joint_pos as u32));
-                if let Some(idx) = bone_seq_idx {
-                    *skin_joint_pos = *idx as u8;
-                } else {
-                    panic!("Unable to find bone_index_seq position for skin joint {}", skin_joint_pos);
+        // Step 1: Find all unique LAB bone positions that are referenced by the mesh
+        // Include all bones that appear in joint data, even if their weight is 0
+        // (the game may still reference them)
+        let mut lab_bones_in_order = Vec::new();
+        let mut seen_bones = HashMap::new();
+        for joints in joint_seq_u16.iter() {
+            for &lab_bone_pos in joints.iter() {
+                if !seen_bones.contains_key(&lab_bone_pos) {
+                    lab_bones_in_order.push(lab_bone_pos as u32);
+                    seen_bones.insert(lab_bone_pos, true);
                 }
-            });
+            }
+        }
+        
+        // Step 2: bone_index_seq is already built in the order bones first appear
+        let bone_index_seq = lab_bones_in_order;
+        
+        // Build reverse mapping: LAB bone position -> bone_index_seq index
+        let mut lab_bone_pos_to_bone_seq_idx = HashMap::<u32, u32>::new();
+        for (bone_seq_idx, &lab_bone_pos) in bone_index_seq.iter().enumerate() {
+            lab_bone_pos_to_bone_seq_idx.insert(lab_bone_pos, bone_seq_idx as u32);
+        }
 
-            let new_joint_seq_item = u32::from_le_bytes(decomposed_seq_item);
-            *joint_seq_item = new_joint_seq_item;
-        });
-
-        for (i, joint) in joint_seq.iter().enumerate() {
+        // Step 3: Convert joint_seq_u16 from LAB bone positions to bone_index_seq indices
+        // and pack them into blend_seq
+        for (vert_idx, joints_u16) in joint_seq_u16.iter().enumerate() {
+            let mut joints_u8 = [0u8; 4];
+            for (joint_idx, &lab_bone_pos) in joints_u16.iter().enumerate() {
+                if let Some(&bone_seq_idx) = lab_bone_pos_to_bone_seq_idx.get(&(lab_bone_pos as u32)) {
+                    joints_u8[joint_idx] = bone_seq_idx as u8;
+                } else {
+                    // This happens when weight is 0.0 - just use 0
+                    joints_u8[joint_idx] = 0;
+                }
+            }
+            
+            // Pack 4 u8 indices into u32 (little-endian)
+            let indexd = u32::from_le_bytes(joints_u8);
+            
             mesh.blend_seq.push(CharacterMeshBlendInfo {
-                indexd: *joint,
-                weight: weight_seq[i],
+                indexd,
+                weight: weight_seq[vert_idx],
             });
         }
 
@@ -1416,7 +1405,86 @@ impl CharacterMeshInfo {
         mesh.header.index_num = mesh.index_seq.len() as u32;
         mesh.header.subset_num = 1;
         mesh.header.bone_infl_factor = 2;
-        mesh.header.vertex_element_num = 6;
+        
+        // Build vertex element sequence based on FVF and data present
+        // D3DDECLTYPE values: FLOAT1=0, FLOAT2=1, FLOAT3=2, FLOAT4=3, D3DCOLOR/UBYTE4=4
+        // D3DDECLUSAGE values: POSITION=0, BLENDWEIGHT=1, BLENDINDICES=2, NORMAL=3, TEXCOORD=5
+        let mut vertex_elements = vec![];
+        let mut offset: u16 = 0;
+        
+        // Position (always present): FLOAT3 at offset 0
+        vertex_elements.push(D3DVertexElement9 {
+            stream: 0,
+            offset,
+            _type: 2,  // D3DDECLTYPE_FLOAT3
+            method: 0,
+            usage: 0,  // D3DDECLUSAGE_POSITION
+            usage_index: 0,
+        });
+        offset += 12;  // 3 floats * 4 bytes
+        
+        // Blend weights (if skinned): FLOAT4 
+        if !mesh.blend_seq.is_empty() {
+            vertex_elements.push(D3DVertexElement9 {
+                stream: 0,
+                offset,
+                _type: 3,  // D3DDECLTYPE_FLOAT4
+                method: 0,
+                usage: 1,  // D3DDECLUSAGE_BLENDWEIGHT
+                usage_index: 0,
+            });
+            offset += 16;  // 4 floats * 4 bytes
+            
+            // Blend indices: UBYTE4
+            vertex_elements.push(D3DVertexElement9 {
+                stream: 0,
+                offset,
+                _type: 4,  // D3DDECLTYPE_UBYTE4 / D3DCOLOR
+                method: 0,
+                usage: 2,  // D3DDECLUSAGE_BLENDINDICES  
+                usage_index: 0,
+            });
+            offset += 4;  // 4 bytes
+        }
+        
+        // Normal (if present): FLOAT3
+        if !mesh.normal_seq.is_empty() {
+            vertex_elements.push(D3DVertexElement9 {
+                stream: 0,
+                offset,
+                _type: 2,  // D3DDECLTYPE_FLOAT3
+                method: 0,
+                usage: 3,  // D3DDECLUSAGE_NORMAL
+                usage_index: 0,
+            });
+            offset += 12;  // 3 floats * 4 bytes
+        }
+        
+        // Texcoord (if present): FLOAT2
+        if !mesh.texcoord_seq[0].is_empty() {
+            vertex_elements.push(D3DVertexElement9 {
+                stream: 0,
+                offset,
+                _type: 1,  // D3DDECLTYPE_FLOAT2
+                method: 0,
+                usage: 5,  // D3DDECLUSAGE_TEXCOORD
+                usage_index: 0,
+            });
+            // offset += 8;  // 2 floats * 4 bytes (not needed for last element before end marker)
+        }
+        
+        // End marker: stream=255 signals end of declaration
+        vertex_elements.push(D3DVertexElement9 {
+            stream: 255,
+            offset: 0,
+            _type: 0,  // D3DDECLTYPE_UNUSED / end marker
+            method: 0,
+            usage: 0,
+            usage_index: 0,
+        });
+        
+        mesh.vertex_element_seq = vertex_elements;
+        mesh.header.vertex_element_num = mesh.vertex_element_seq.len() as u32;
 
         Ok(mesh)
     }
