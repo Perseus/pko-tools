@@ -1296,8 +1296,21 @@ impl CharacterMeshInfo {
 
                 let mut index_seq: Vec<u32> = vec![];
 
-                for _ in 0..gltf_vi_accessor.count() {
-                    index_seq.push(u16::read_le(&mut vi_reader).unwrap() as u32);
+                // Read indices based on accessor component type
+                match gltf_vi_accessor.data_type() {
+                    gltf::accessor::DataType::U16 => {
+                        for _ in 0..gltf_vi_accessor.count() {
+                            index_seq.push(u16::read_le(&mut vi_reader).unwrap() as u32);
+                        }
+                    }
+                    gltf::accessor::DataType::U32 => {
+                        for _ in 0..gltf_vi_accessor.count() {
+                            index_seq.push(u32::read_le(&mut vi_reader).unwrap());
+                        }
+                    }
+                    _ => {
+                        return Err(anyhow::anyhow!("Unsupported index data type: {:?}", gltf_vi_accessor.data_type()));
+                    }
                 }
 
                 mesh.index_seq = index_seq;

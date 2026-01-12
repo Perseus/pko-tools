@@ -895,6 +895,12 @@ impl LwBoneFile {
             ..Default::default()
         });
 
+        // Store LAB file version info in skin extras for round-trip preservation
+        let skin_extras = RawValue::from_string(format!(
+            r#"{{"lab_version":{},"lab_old_version":{}}}"#,
+            self.version, self.old_version
+        )).unwrap();
+        
         let skin = Skin {
             inverse_bind_matrices: Some(Index::new(ibm_accessor_index as u32)),
             skeleton: root_nodes.first().cloned(),
@@ -903,7 +909,7 @@ impl LwBoneFile {
                 .collect(),
             name: Some("CharacterSkin".to_string()),
             extensions: None,
-            extras: Default::default(),
+            extras: Some(skin_extras),
         };
 
         (skin, gltf_nodes)
@@ -1393,12 +1399,24 @@ impl LwBoneFile {
         // This ensures LAB and LGO reference the same skeleton
         let skin = gltf.skins().nth(0)
             .ok_or(anyhow::anyhow!("No skin found in glTF file"))?;
+        
+        // Extract LAB version info from skin extras if available
+        let (lab_version, lab_old_version) = if let Some(extras) = skin.extras() {
+            let extras_str = extras.get();
+            let parsed: serde_json::Value = serde_json::from_str(extras_str).unwrap_or(serde_json::json!({}));
+            let version = parsed.get("lab_version").and_then(|v| v.as_u64()).unwrap_or(4101) as u32;
+            let old_version = parsed.get("lab_old_version").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            (version, old_version)
+        } else {
+            (4101, 0)  // Default values if not found
+        };
 
         let mut bones: Vec<LwBoneBaseInfo> = vec![];
         let mut bone_idx_to_vec_idx = HashMap::<u32, u32>::new();
         let mut node_index_to_bone_array_pos = HashMap::<u32, u32>::new();
         let mut dummies: Vec<LwBoneDummyInfo> = vec![];
         let mut dummy_idx_to_bone_idx = HashMap::<u32, u32>::new();
+        let mut dummy_node_indices: Vec<u32> = vec![];  // Track node index for each dummy
         let mut idx_to_node = HashMap::<u32, gltf::Node>::new();
         let mut dummy_num = 0;
 
@@ -1410,12 +1428,27 @@ impl LwBoneFile {
             if let Some(extras) = joint.extras() {
                 let extra = extras.get();
                 if extra.contains("dummy") {
+                    // Parse dummy ID and matrix from extras
+                    let parsed: serde_json::Value = serde_json::from_str(extra).unwrap_or(serde_json::json!({}));
+                    let dummy_id = parsed.get("id").and_then(|v| v.as_u64()).unwrap_or(joint.index() as u64) as u32;
+                    
+                    // Extract matrix from node transform
+                    let transform = joint.transform();
+                    let mat_array: [[f32; 4]; 4] = transform.matrix();
+                    let mat = LwMatrix44(Matrix4::new(
+                        mat_array[0][0], mat_array[0][1], mat_array[0][2], mat_array[0][3],
+                        mat_array[1][0], mat_array[1][1], mat_array[1][2], mat_array[1][3],
+                        mat_array[2][0], mat_array[2][1], mat_array[2][2], mat_array[2][3],
+                        mat_array[3][0], mat_array[3][1], mat_array[3][2], mat_array[3][3],
+                    ));
+                    
                     let dummy_info = LwBoneDummyInfo {
-                        id: joint.index() as u32,
+                        id: dummy_id,
                         parent_bone_id: LW_INVALID_INDEX,
-                        mat: LwMatrix44(Matrix4::<f32>::identity()),
+                        mat,
                     };
                     dummies.push(dummy_info);
+                    dummy_node_indices.push(joint.index() as u32);  // Store node index
                     dummy_idx_to_bone_idx.insert(joint.index() as u32, dummy_num);
                     dummy_num += 1;
                     continue;
@@ -1459,8 +1492,9 @@ impl LwBoneFile {
         }
 
         // Handle dummy parent relationships
-        for dummy in dummies.iter_mut() {
-            let dummy_node = idx_to_node.get(&dummy.id);
+        for (i, dummy) in dummies.iter_mut().enumerate() {
+            let dummy_node_idx = dummy_node_indices[i];
+            let dummy_node = idx_to_node.get(&dummy_node_idx);
             if let Some(node) = dummy_node {
                 let parent_joint = skin.joints().find(|j| {
                     j.children().any(|c| c.index() == node.index())
@@ -1731,7 +1765,7 @@ impl LwBoneFile {
 
         // === STEP 6: Build and return LwBoneFile ===
         Ok(LwBoneFile {
-            version: 4101,
+            version: lab_version,
             header: LwBoneInfoHeader {
                 bone_num: bone_num as u32,
                 dummy_num: dummy_num as u32,
@@ -1742,7 +1776,7 @@ impl LwBoneFile {
             invmat_seq: ibm_data,
             dummy_seq: dummies,
             key_seq: keyframe_vec,
-            old_version: 0,
+            old_version: lab_old_version,
         })
     }
 }
