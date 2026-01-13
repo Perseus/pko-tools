@@ -1,7 +1,25 @@
-import React, { useRef, useState } from 'react';
-import { useFrame, ThreeEvent } from '@react-three/fiber';
+import React, { useEffect, useState, useMemo } from 'react';
 import * as THREE from 'three';
 import { Html } from '@react-three/drei';
+
+// ============================================================================
+// HELPER SIZE CONFIGURATION
+// ============================================================================
+// These constants control the size of bone/dummy helpers relative to model size
+
+/** Bone helper size as percentage of model's largest dimension (0.015 = 1.5%) */
+export const BONE_HELPER_SCALE_PERCENT = 0.015;
+
+/** Dummy helper size multiplier relative to bone size (1.5 = 50% larger than bones) */
+export const DUMMY_HELPER_SCALE_MULTIPLIER = 1.5;
+
+/** Click target size multiplier relative to visual helper (2 = 2x larger for easier clicking) */
+export const CLICK_TARGET_SCALE_MULTIPLIER = 2;
+
+/** Fallback helper size when model bounds can't be determined */
+export const DEFAULT_HELPER_SIZE = 0.02;
+
+// ============================================================================
 
 interface ObjectInfo {
   object: THREE.Object3D;
@@ -14,24 +32,94 @@ interface SkeletonDebugHelpersProps {
   showDummies: boolean;
 }
 
+// Store helper meshes so we can clean them up
+const boneHelperMap = new WeakMap<THREE.Bone, THREE.Mesh>();
+const dummyHelperMap = new WeakMap<THREE.Object3D, THREE.Mesh>();
+
+// Materials (shared for performance)
+let boneMaterial: THREE.MeshBasicMaterial | null = null;
+let dummyMaterial: THREE.MeshBasicMaterial | null = null;
+let pinnedMaterial: THREE.MeshBasicMaterial | null = null;
+
+function getOrCreateMaterials() {
+  if (!boneMaterial) {
+    boneMaterial = new THREE.MeshBasicMaterial({ 
+      color: 0x00ff00, 
+      depthTest: false,
+      depthWrite: false,
+    });
+  }
+  if (!dummyMaterial) {
+    dummyMaterial = new THREE.MeshBasicMaterial({ 
+      color: 0xff00ff,
+      depthTest: false,
+      depthWrite: false,
+    });
+  }
+  if (!pinnedMaterial) {
+    pinnedMaterial = new THREE.MeshBasicMaterial({ 
+      color: 0xffff00,
+      depthTest: false,
+      depthWrite: false,
+    });
+  }
+  return { boneMaterial, dummyMaterial, pinnedMaterial };
+}
+
+// Unit geometries (will be scaled based on model size)
+let unitSphereGeometry: THREE.SphereGeometry | null = null;
+let unitBoxGeometry: THREE.BoxGeometry | null = null;
+
+function getOrCreateGeometries() {
+  if (!unitSphereGeometry) {
+    // Unit sphere with radius 1
+    unitSphereGeometry = new THREE.SphereGeometry(1, 8, 8);
+  }
+  if (!unitBoxGeometry) {
+    // Unit box with size 1
+    unitBoxGeometry = new THREE.BoxGeometry(1, 1, 1);
+  }
+  return { unitSphereGeometry, unitBoxGeometry };
+}
+
+/**
+ * Calculate appropriate helper size based on model bounding box.
+ * Returns a scale factor based on BONE_HELPER_SCALE_PERCENT of the model's largest dimension.
+ */
+function calculateHelperScale(scene: THREE.Group): number {
+  const box = new THREE.Box3().setFromObject(scene);
+  const size = new THREE.Vector3();
+  box.getSize(size);
+  
+  // Use the largest dimension
+  const maxDimension = Math.max(size.x, size.y, size.z);
+  
+  // If model is very small or invalid, use default
+  if (maxDimension < 0.001 || !isFinite(maxDimension)) {
+    return DEFAULT_HELPER_SIZE;
+  }
+  
+  return maxDimension * BONE_HELPER_SCALE_PERCENT;
+}
+
 export function SkeletonDebugHelpers({ scene, showBones, showDummies }: SkeletonDebugHelpersProps) {
   const [bones, setBones] = useState<THREE.Bone[]>([]);
   const [dummies, setDummies] = useState<THREE.Object3D[]>([]);
   const [hoveredObject, setHoveredObject] = useState<ObjectInfo | null>(null);
   const [pinnedObject, setPinnedObject] = useState<ObjectInfo | null>(null);
+  
+  // Calculate helper scale based on model size
+  const helperScale = useMemo(() => calculateHelperScale(scene), [scene]);
 
   // Extract bones and dummies once on mount
-  React.useEffect(() => {
+  useEffect(() => {
     const foundBones: THREE.Bone[] = [];
     const foundDummies: THREE.Object3D[] = [];
 
     scene.traverse((object) => {
-      // Check if it's a bone (but not a dummy)
       if (object.type === 'Bone' && !object.userData?.dummy) {
         foundBones.push(object as THREE.Bone);
       }
-
-      // Check if it's a dummy
       if (object.userData?.dummy === true) {
         foundDummies.push(object);
       }
@@ -40,6 +128,98 @@ export function SkeletonDebugHelpers({ scene, showBones, showDummies }: Skeleton
     setBones(foundBones);
     setDummies(foundDummies);
   }, [scene]);
+
+  // Add/remove bone helpers directly as children
+  useEffect(() => {
+    const { boneMaterial, pinnedMaterial } = getOrCreateMaterials();
+    const { unitSphereGeometry } = getOrCreateGeometries();
+
+    bones.forEach((bone) => {
+      let helper = boneHelperMap.get(bone);
+      const isPinned = pinnedObject?.object === bone;
+
+      if (showBones) {
+        if (!helper) {
+          helper = new THREE.Mesh(unitSphereGeometry, boneMaterial);
+          helper.name = `helper_bone_${bone.name}`;
+          helper.renderOrder = 1000;
+          helper.userData.isHelper = true;
+          helper.userData.helperType = 'bone';
+          helper.userData.targetObject = bone;
+          helper.scale.setScalar(helperScale);
+          bone.add(helper);
+          boneHelperMap.set(bone, helper);
+        }
+        helper.visible = true;
+        helper.material = isPinned ? pinnedMaterial! : boneMaterial!;
+        helper.scale.setScalar(helperScale); // Update scale in case model changed
+      } else if (helper) {
+        helper.visible = false;
+      }
+    });
+
+    // No cleanup here - we handle visibility toggle, cleanup happens when bones array changes
+  }, [bones, showBones, pinnedObject, helperScale]);
+  
+  // Separate cleanup effect that only runs when bones array changes or unmount
+  useEffect(() => {
+    return () => {
+      bones.forEach((bone) => {
+        const helper = boneHelperMap.get(bone);
+        if (helper) {
+          bone.remove(helper);
+          boneHelperMap.delete(bone);
+        }
+      });
+    };
+  }, [bones]);
+
+  // Add/remove dummy helpers directly as children
+  useEffect(() => {
+    const { dummyMaterial, pinnedMaterial } = getOrCreateMaterials();
+    const { unitBoxGeometry } = getOrCreateGeometries();
+
+    dummies.forEach((dummy) => {
+      let helper = dummyHelperMap.get(dummy);
+      const isPinned = pinnedObject?.object === dummy;
+
+      if (showDummies) {
+        if (!helper) {
+          helper = new THREE.Mesh(unitBoxGeometry, dummyMaterial);
+          helper.name = `helper_dummy_${dummy.name}`;
+          helper.renderOrder = 1000;
+          helper.userData.isHelper = true;
+          helper.userData.helperType = 'dummy';
+          helper.userData.targetObject = dummy;
+          helper.scale.setScalar(helperScale * DUMMY_HELPER_SCALE_MULTIPLIER);
+          dummy.add(helper);
+          dummyHelperMap.set(dummy, helper);
+        }
+        helper.visible = true;
+        helper.material = isPinned ? pinnedMaterial! : dummyMaterial!;
+        helper.scale.setScalar(helperScale * DUMMY_HELPER_SCALE_MULTIPLIER);
+      } else if (helper) {
+        helper.visible = false;
+      }
+    });
+
+    // No cleanup here - we handle visibility toggle, cleanup happens when dummies array changes
+  }, [dummies, showDummies, pinnedObject, helperScale]);
+  
+  // Separate cleanup effect that only runs when dummies array changes or unmount
+  useEffect(() => {
+    return () => {
+      dummies.forEach((dummy) => {
+        const helper = dummyHelperMap.get(dummy);
+        if (helper) {
+          dummy.remove(helper);
+          dummyHelperMap.delete(dummy);
+        }
+      });
+    };
+  }, [dummies]);
+
+
 
   const handleHover = (object: THREE.Object3D, type: 'bone' | 'dummy') => {
     if (!pinnedObject) {
@@ -55,11 +235,9 @@ export function SkeletonDebugHelpers({ scene, showBones, showDummies }: Skeleton
 
   const handleClick = (object: THREE.Object3D, type: 'bone' | 'dummy') => {
     if (pinnedObject?.object === object) {
-      // Unpin if clicking the same object
       setPinnedObject(null);
       setHoveredObject(null);
     } else {
-      // Pin the new object
       setPinnedObject({ object, type });
       setHoveredObject(null);
     }
@@ -72,26 +250,27 @@ export function SkeletonDebugHelpers({ scene, showBones, showDummies }: Skeleton
 
   const displayedObject = pinnedObject || hoveredObject;
 
+  // Render interactive overlays for click/hover detection
   return (
     <>
       {showBones && bones.map((bone, index) => (
-        <BoneHelper
-          key={`bone-${index}`}
+        <BoneClickTarget
+          key={`bone-click-${index}`}
           bone={bone}
+          scale={helperScale}
           onHover={() => handleHover(bone, 'bone')}
           onUnhover={handleUnhover}
           onClick={() => handleClick(bone, 'bone')}
-          isPinned={pinnedObject?.object === bone}
         />
       ))}
       {showDummies && dummies.map((dummy, index) => (
-        <DummyHelper
-          key={`dummy-${index}`}
+        <DummyClickTarget
+          key={`dummy-click-${index}`}
           dummy={dummy}
+          scale={helperScale}
           onHover={() => handleHover(dummy, 'dummy')}
           onUnhover={handleUnhover}
           onClick={() => handleClick(dummy, 'dummy')}
-          isPinned={pinnedObject?.object === dummy}
         />
       ))}
 
@@ -111,96 +290,81 @@ export function SkeletonDebugHelpers({ scene, showBones, showDummies }: Skeleton
   );
 }
 
-interface BoneHelperProps {
+// Invisible click targets that follow bone positions
+interface BoneClickTargetProps {
   bone: THREE.Bone;
+  scale: number;
   onHover: () => void;
   onUnhover: () => void;
   onClick: () => void;
-  isPinned: boolean;
 }
 
-function BoneHelper({ bone, onHover, onUnhover, onClick, isPinned }: BoneHelperProps) {
-  const meshRef = useRef<THREE.Mesh>(null);
+function BoneClickTarget({ bone, scale, onHover, onUnhover, onClick }: BoneClickTargetProps) {
+  const [position, setPosition] = useState<[number, number, number]>([0, 0, 0]);
 
-  useFrame(() => {
-    if (!meshRef.current) return;
+  useEffect(() => {
+    const updatePosition = () => {
+      bone.updateWorldMatrix(true, false);
+      const worldPos = new THREE.Vector3().setFromMatrixPosition(bone.matrixWorld);
+      setPosition([worldPos.x, worldPos.y, worldPos.z]);
+    };
 
-    // Update position to match bone's world position
-    bone.updateWorldMatrix(true, false);
-    meshRef.current.position.setFromMatrixPosition(bone.matrixWorld);
-  });
+    updatePosition();
+    const interval = setInterval(updatePosition, 16); // ~60fps
+    return () => clearInterval(interval);
+  }, [bone]);
 
-  const handleClick = (event: ThreeEvent<MouseEvent>) => {
-    event.stopPropagation();
-    onClick();
-  };
-
-  const handlePointerOver = (event: ThreeEvent<PointerEvent>) => {
-    event.stopPropagation();
-    onHover();
-  };
-
-  const handlePointerOut = (event: ThreeEvent<PointerEvent>) => {
-    event.stopPropagation();
-    onUnhover();
-  };
+  // Click target is larger than visual helper for easier clicking
+  const clickTargetSize = scale * CLICK_TARGET_SCALE_MULTIPLIER;
 
   return (
     <mesh
-      ref={meshRef}
-      onClick={handleClick}
-      onPointerOver={handlePointerOver}
-      onPointerOut={handlePointerOut}
+      position={position}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      onPointerOver={(e) => { e.stopPropagation(); onHover(); }}
+      onPointerOut={(e) => { e.stopPropagation(); onUnhover(); }}
     >
-      <sphereGeometry args={[0.02, 8, 8]} />
-      <meshBasicMaterial color={isPinned ? "#ffff00" : "#00ff00"} transparent opacity={0.7} />
+      <sphereGeometry args={[clickTargetSize, 8, 8]} />
+      <meshBasicMaterial transparent opacity={0} />
     </mesh>
   );
 }
 
-interface DummyHelperProps {
+interface DummyClickTargetProps {
   dummy: THREE.Object3D;
+  scale: number;
   onHover: () => void;
   onUnhover: () => void;
   onClick: () => void;
-  isPinned: boolean;
 }
 
-function DummyHelper({ dummy, onHover, onUnhover, onClick, isPinned }: DummyHelperProps) {
-  const meshRef = useRef<THREE.Mesh>(null);
+function DummyClickTarget({ dummy, scale, onHover, onUnhover, onClick }: DummyClickTargetProps) {
+  const [position, setPosition] = useState<[number, number, number]>([0, 0, 0]);
 
-  useFrame(() => {
-    if (!meshRef.current) return;
+  useEffect(() => {
+    const updatePosition = () => {
+      dummy.updateWorldMatrix(true, false);
+      const worldPos = new THREE.Vector3().setFromMatrixPosition(dummy.matrixWorld);
+      setPosition([worldPos.x, worldPos.y, worldPos.z]);
+    };
 
-    // Update position to match dummy's world position
-    dummy.updateWorldMatrix(true, false);
-    meshRef.current.position.setFromMatrixPosition(dummy.matrixWorld);
-  });
+    updatePosition();
+    const interval = setInterval(updatePosition, 16);
+    return () => clearInterval(interval);
+  }, [dummy]);
 
-  const handleClick = (event: ThreeEvent<MouseEvent>) => {
-    event.stopPropagation();
-    onClick();
-  };
-
-  const handlePointerOver = (event: ThreeEvent<PointerEvent>) => {
-    event.stopPropagation();
-    onHover();
-  };
-
-  const handlePointerOut = (event: ThreeEvent<PointerEvent>) => {
-    event.stopPropagation();
-    onUnhover();
-  };
+  // Click target is larger than visual helper for easier clicking
+  const clickTargetSize = scale * DUMMY_HELPER_SCALE_MULTIPLIER * CLICK_TARGET_SCALE_MULTIPLIER;
 
   return (
     <mesh
-      ref={meshRef}
-      onClick={handleClick}
-      onPointerOver={handlePointerOver}
-      onPointerOut={handlePointerOut}
+      position={position}
+      onClick={(e) => { e.stopPropagation(); onClick(); }}
+      onPointerOver={(e) => { e.stopPropagation(); onHover(); }}
+      onPointerOut={(e) => { e.stopPropagation(); onUnhover(); }}
     >
-      <boxGeometry args={[0.03, 0.03, 0.03]} />
-      <meshBasicMaterial color={isPinned ? "#ffff00" : "#ff00ff"} transparent opacity={0.7} />
+      <boxGeometry args={[clickTargetSize, clickTargetSize, clickTargetSize]} />
+      <meshBasicMaterial transparent opacity={0} />
     </mesh>
   );
 }
@@ -212,9 +376,19 @@ interface ObjectInfoOverlayProps {
 }
 
 function ObjectInfoOverlay({ object, type, isPinned }: ObjectInfoOverlayProps) {
-  object.updateWorldMatrix(true, false);
+  const [worldPos, setWorldPos] = useState(new THREE.Vector3());
 
-  const worldPos = new THREE.Vector3().setFromMatrixPosition(object.matrixWorld);
+  useEffect(() => {
+    const updatePosition = () => {
+      object.updateWorldMatrix(true, false);
+      setWorldPos(new THREE.Vector3().setFromMatrixPosition(object.matrixWorld));
+    };
+
+    updatePosition();
+    const interval = setInterval(updatePosition, 16);
+    return () => clearInterval(interval);
+  }, [object]);
+
   const name = object.name || 'Unnamed';
   const typeName = type === 'bone' ? 'Bone' : 'Dummy';
 
@@ -265,7 +439,7 @@ function ObjectInfoOverlay({ object, type, isPinned }: ObjectInfoOverlayProps) {
           <div style={{ wordWrap: 'break-word' }}>{object.parent?.name || 'None'}</div>
 
           <div style={{ color: '#888' }}>Children:</div>
-          <div style={{ wordWrap: 'break-word' }}>{object.children.length > 0 ? object.children.map(c => c.name || 'Unnamed').join(', ') : 'None'}</div>
+          <div style={{ wordWrap: 'break-word' }}>{object.children.filter(c => !c.userData?.isHelper).length > 0 ? object.children.filter(c => !c.userData?.isHelper).map(c => c.name || 'Unnamed').join(', ') : 'None'}</div>
         </div>
 
         {Object.keys(object.userData).length > 0 && (

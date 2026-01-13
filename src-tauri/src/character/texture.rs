@@ -373,6 +373,263 @@ impl CharMaterialTextureInfo {
         material_seq.push(material);
         Ok(material_seq)
     }
+    
+    /// Import material for a specific primitive from a glTF document
+    /// This is used for multi-part models where each primitive may have its own material
+    pub fn from_gltf_primitive(
+        gltf: &Document,
+        _buffers: &Vec<buffer::Data>,
+        images: &Vec<gltf::image::Data>,
+        model_id: u32,
+        primitive_index: usize,
+    ) -> anyhow::Result<Vec<Self>> {
+        let mut material_seq: Vec<Self> = vec![];
+        let mut material = Self::new();
+        material.transp_type = MaterialTextureInfoTransparencyType::Filter;
+        material.opacity = 1.0;
+
+        // Find the specific primitive and get its material
+        let mut current_idx = 0;
+        let mut found_material = None;
+        
+        for mesh in gltf.meshes() {
+            for primitive in mesh.primitives() {
+                if current_idx == primitive_index {
+                    found_material = Some(primitive.material());
+                    break;
+                }
+                current_idx += 1;
+            }
+            if found_material.is_some() {
+                break;
+            }
+        }
+        
+        // Generate file name based on model_id and primitive_index
+        // e.g., model 725, primitive 1 -> 0725000001.bmp
+        let file_id = format!("{:0>10}", model_id * 1000000 + primitive_index as u32);
+        
+        if let Some(gltf_mat) = found_material {
+            let roughness = gltf_mat.pbr_metallic_roughness();
+            
+            if let Some(base_color_texture) = roughness.base_color_texture() {
+                let base_color_factor = roughness.base_color_factor();
+                let emissive_factor = gltf_mat.emissive_factor();
+
+                let texture = base_color_texture.texture();
+                let image_data = images.get(texture.source().index()).unwrap();
+                if image_data.format != gltf::image::Format::R8G8B8 {
+                    return Err(anyhow::anyhow!("Unsupported image format, not R8G8B8"));
+                }
+
+                let img: image::ImageBuffer<Rgb<u8>, _> = image::ImageBuffer::from_raw(
+                    image_data.width,
+                    image_data.height,
+                    image_data.pixels.clone(),
+                )
+                .unwrap();
+
+                img.save_with_format(
+                    format!("./imports/character/texture/character/{}.bmp", file_id),
+                    ImageFormat::Bmp
+                )?;
+
+                let mut file_name: [u8; 64] = [0; 64];
+                for (i, char) in format!("{}.bmp", file_id).chars().enumerate() {
+                    file_name[i] = char as u8;
+                }
+
+                material.tex_seq[0] = TextureInfo {
+                    stage: 0,
+                    level: u32::MAX,
+                    usage: 0,
+                    d3d_format: D3DFormat::Unknown,
+                    d3d_pool: D3DPool::Managed,
+                    _type: TextureType::File,
+                    colorkey: LwColorValue4b::from_color(0),
+                    colorkey_type: ColorKeyType::None,
+                    data: 0,
+                    byte_alignment_flag: 0,
+                    file_name,
+                    width: 0,
+                    height: 0,
+                    tss_set: [RenderStateAtom::new(); 8],
+                };
+                material.material = CharMaterial {
+                    emi: Some(ColorValue4F {
+                        r: emissive_factor[0],
+                        g: emissive_factor[1],
+                        b: emissive_factor[2],
+                        a: 0.0,
+                    }),
+                    dif: ColorValue4F {
+                        r: base_color_factor[0],
+                        g: base_color_factor[1],
+                        b: base_color_factor[2],
+                        a: base_color_factor[3],
+                    },
+                    amb: ColorValue4F {
+                        r: 1.0,
+                        g: 1.0,
+                        b: 1.0,
+                        a: 1.0,
+                    },
+                    spe: Some(ColorValue4F {
+                        r: 1.0,
+                        g: 1.0,
+                        b: 1.0,
+                        a: 1.0,
+                    }),
+                    power: 0.0,
+                };
+            } else {
+                // No texture, use default material with file_id as texture name
+                let mut file_name: [u8; 64] = [0; 64];
+                for (i, char) in format!("{}.bmp", file_id).chars().enumerate() {
+                    file_name[i] = char as u8;
+                }
+                material.tex_seq[0].file_name = file_name;
+                material.tex_seq[0]._type = TextureType::File;
+                material.tex_seq[0].stage = 0;
+            }
+        } else {
+            // No material found, use default with file_id
+            let mut file_name: [u8; 64] = [0; 64];
+            for (i, char) in format!("{}.bmp", file_id).chars().enumerate() {
+                file_name[i] = char as u8;
+            }
+            material.tex_seq[0].file_name = file_name;
+            material.tex_seq[0]._type = TextureType::File;
+            material.tex_seq[0].stage = 0;
+        }
+
+        material_seq.push(material);
+        Ok(material_seq)
+    }
+    
+    /// Import material for a specific mesh from a glTF document
+    /// This is the preferred method - each mesh becomes a separate LGO file
+    /// Each mesh is expected to have exactly one primitive (idiomatic glTF structure)
+    pub fn from_gltf_mesh(
+        gltf: &Document,
+        _buffers: &Vec<buffer::Data>,
+        images: &Vec<gltf::image::Data>,
+        model_id: u32,
+        mesh_index: usize,
+    ) -> anyhow::Result<Vec<Self>> {
+        let mut material_seq: Vec<Self> = vec![];
+        let mut material = Self::new();
+        material.transp_type = MaterialTextureInfoTransparencyType::Filter;
+        material.opacity = 1.0;
+
+        // Get the mesh and its first primitive's material
+        let gltf_mesh = gltf.meshes().nth(mesh_index)
+            .ok_or_else(|| anyhow::anyhow!("Mesh index {} not found in glTF document", mesh_index))?;
+        
+        let found_material = gltf_mesh.primitives().next()
+            .map(|p| p.material());
+        
+        // Generate file name based on model_id and mesh_index
+        // e.g., model 725, mesh 1 -> 0725000001.bmp
+        let file_id = format!("{:0>10}", model_id * 1000000 + mesh_index as u32);
+        
+        if let Some(gltf_mat) = found_material {
+            let roughness = gltf_mat.pbr_metallic_roughness();
+            
+            if let Some(base_color_texture) = roughness.base_color_texture() {
+                let base_color_factor = roughness.base_color_factor();
+                let emissive_factor = gltf_mat.emissive_factor();
+
+                let texture = base_color_texture.texture();
+                let image_data = images.get(texture.source().index()).unwrap();
+                if image_data.format != gltf::image::Format::R8G8B8 {
+                    return Err(anyhow::anyhow!("Unsupported image format, not R8G8B8"));
+                }
+
+                let img: image::ImageBuffer<Rgb<u8>, _> = image::ImageBuffer::from_raw(
+                    image_data.width,
+                    image_data.height,
+                    image_data.pixels.clone(),
+                )
+                .unwrap();
+
+                img.save_with_format(
+                    format!("./imports/character/texture/character/{}.bmp", file_id),
+                    ImageFormat::Bmp
+                )?;
+
+                let mut file_name: [u8; 64] = [0; 64];
+                for (i, char) in format!("{}.bmp", file_id).chars().enumerate() {
+                    file_name[i] = char as u8;
+                }
+
+                material.tex_seq[0] = TextureInfo {
+                    stage: 0,
+                    level: u32::MAX,
+                    usage: 0,
+                    d3d_format: D3DFormat::Unknown,
+                    d3d_pool: D3DPool::Managed,
+                    _type: TextureType::File,
+                    colorkey: LwColorValue4b::from_color(0),
+                    colorkey_type: ColorKeyType::None,
+                    data: 0,
+                    byte_alignment_flag: 0,
+                    file_name,
+                    width: 0,
+                    height: 0,
+                    tss_set: [RenderStateAtom::new(); 8],
+                };
+                material.material = CharMaterial {
+                    emi: Some(ColorValue4F {
+                        r: emissive_factor[0],
+                        g: emissive_factor[1],
+                        b: emissive_factor[2],
+                        a: 0.0,
+                    }),
+                    dif: ColorValue4F {
+                        r: base_color_factor[0],
+                        g: base_color_factor[1],
+                        b: base_color_factor[2],
+                        a: base_color_factor[3],
+                    },
+                    amb: ColorValue4F {
+                        r: 1.0,
+                        g: 1.0,
+                        b: 1.0,
+                        a: 1.0,
+                    },
+                    spe: Some(ColorValue4F {
+                        r: 1.0,
+                        g: 1.0,
+                        b: 1.0,
+                        a: 1.0,
+                    }),
+                    power: 0.0,
+                };
+            } else {
+                // No texture, use default material with file_id as texture name
+                let mut file_name: [u8; 64] = [0; 64];
+                for (i, char) in format!("{}.bmp", file_id).chars().enumerate() {
+                    file_name[i] = char as u8;
+                }
+                material.tex_seq[0].file_name = file_name;
+                material.tex_seq[0]._type = TextureType::File;
+                material.tex_seq[0].stage = 0;
+            }
+        } else {
+            // No material found, use default with file_id
+            let mut file_name: [u8; 64] = [0; 64];
+            for (i, char) in format!("{}.bmp", file_id).chars().enumerate() {
+                file_name[i] = char as u8;
+            }
+            material.tex_seq[0].file_name = file_name;
+            material.tex_seq[0]._type = TextureType::File;
+            material.tex_seq[0].stage = 0;
+        }
+
+        material_seq.push(material);
+        Ok(material_seq)
+    }
 }
 
 impl BinRead for CharMaterialTextureInfo {

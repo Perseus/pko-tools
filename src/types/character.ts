@@ -17,7 +17,8 @@ export type CharacterMetadata = {
   vertex_count: number;
   triangle_count: number;
   material_count: number;
-  model_parts: number[];
+  /** LGO file IDs for each model part (e.g., ["0725000000", "0725000001"]) */
+  model_parts: string[];
   bounding_spheres: number;
   bounding_boxes: number;
 }

@@ -1,5 +1,6 @@
 import { CharacterMetadata } from "@/types/character";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getMeshColor } from "./BoundingSphereIndicators";
 
 interface CharacterMetadataPanelProps {
   metadata: CharacterMetadata | null;
@@ -95,8 +96,15 @@ export function CharacterMetadataPanel({ metadata, loading }: CharacterMetadataP
             <div className="font-medium text-xs mb-1">Model Parts</div>
             <div className="flex flex-wrap gap-1">
               {metadata.model_parts.map((part, idx) => (
-                <span key={idx} className="px-1.5 py-0.5 bg-secondary text-secondary-foreground rounded font-mono">
-                  {part}
+                <span 
+                  key={idx} 
+                  className="px-1.5 py-0.5 bg-secondary rounded font-mono text-xs flex items-center gap-1.5"
+                >
+                  <span 
+                    className="w-2 h-2 rounded-full flex-shrink-0" 
+                    style={{ backgroundColor: getMeshColor(idx) }}
+                  />
+                  <span className="text-secondary-foreground">{part}</span>
                 </span>
               ))}
             </div>

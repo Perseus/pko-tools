@@ -1489,6 +1489,631 @@ impl CharacterMeshInfo {
         Ok(mesh)
     }
 
+    /// Import a specific primitive from a glTF document
+    /// This is used for multi-part models where each primitive becomes a separate LGO file
+    pub fn from_gltf_primitive(
+        doc: &gltf::Document,
+        buffers: &Vec<gltf::buffer::Data>,
+        _images: &Vec<gltf::image::Data>,
+        _bone_file: &crate::animation::character::LwBoneFile,
+        primitive_index: usize,
+    ) -> anyhow::Result<Self> {
+        let mut mesh = CharacterMeshInfo {
+            blend_seq: vec![],
+            bone_index_seq: vec![],
+            header: CharacterInfoMeshHeader {
+                fvf: 4376,
+                pt_type: D3DPrimitiveType::TriangleList,
+                ..Default::default()
+            },
+            index_seq: vec![],
+            normal_seq: vec![],
+            subset_seq: vec![],
+            texcoord_seq: [vec![], vec![], vec![], vec![]],
+            vertex_element_seq: vec![],
+            vertex_seq: vec![],
+            vercol_seq: vec![],
+        };
+
+        let mut joint_seq_u16: Vec<[u16; 4]> = vec![];
+        let mut weight_seq: Vec<[f32; 4]> = vec![];
+
+        // Find the specific primitive
+        let mut current_primitive_idx = 0;
+        let mut found_primitive = None;
+        
+        for gltf_mesh in doc.meshes() {
+            for primitive in gltf_mesh.primitives() {
+                if current_primitive_idx == primitive_index {
+                    found_primitive = Some(primitive);
+                    break;
+                }
+                current_primitive_idx += 1;
+            }
+            if found_primitive.is_some() {
+                break;
+            }
+        }
+
+        let primitive = found_primitive.ok_or_else(|| {
+            anyhow::anyhow!("Primitive index {} not found in glTF document", primitive_index)
+        })?;
+
+        // Process the single primitive
+        for (semantic, accessor) in primitive.attributes() {
+            match semantic {
+                gltf::Semantic::Positions => {
+                    let view = accessor.view().unwrap();
+                    let buffer = view.buffer();
+                    let data_idx = accessor.offset() + view.offset();
+                    let data = buffers.get(buffer.index()).unwrap().0.as_slice();
+                    let data_as_slice = &data[data_idx..];
+
+                    let mut reader = std::io::Cursor::new(data_as_slice);
+                    for _ in 0..accessor.count() {
+                        let vertex = LwVector3::read_options(
+                            &mut reader,
+                            binrw::Endian::Little,
+                            (),
+                        )?;
+                        mesh.vertex_seq.push(vertex);
+                    }
+                }
+
+                gltf::Semantic::Normals => {
+                    let view = accessor.view().unwrap();
+                    let buffer = view.buffer();
+                    let data_idx = accessor.offset() + view.offset();
+                    let data = buffers.get(buffer.index()).unwrap().0.as_slice();
+                    let data_as_slice = &data[data_idx..];
+
+                    let mut reader = std::io::Cursor::new(data_as_slice);
+                    for _ in 0..accessor.count() {
+                        let vertex_normal = LwVector3::read_options(
+                            &mut reader,
+                            binrw::Endian::Little,
+                            (),
+                        )?;
+                        mesh.normal_seq.push(vertex_normal);
+                    }
+                }
+
+                gltf::Semantic::Colors(_) => {
+                    // TODO: implement color import if needed
+                }
+
+                gltf::Semantic::Joints(_) => {
+                    let view = accessor.view().unwrap();
+                    let buffer = view.buffer();
+                    let data_idx = accessor.offset() + view.offset();
+                    let data = buffers.get(buffer.index()).unwrap().0.as_slice();
+                    let data_as_slice = &data[data_idx..];
+
+                    let mut reader = std::io::Cursor::new(data_as_slice);
+                    for _ in 0..accessor.count() {
+                        let mut joints_u16 = [0u16; 4];
+                        joints_u16.iter_mut().for_each(|j| {
+                            *j = u16::read_options(&mut reader, binrw::Endian::Little, ())
+                                .unwrap();
+                        });
+                        joint_seq_u16.push(joints_u16);
+                    }
+                }
+
+                gltf::Semantic::Weights(_) => {
+                    let view = accessor.view().unwrap();
+                    let buffer = view.buffer();
+                    let data_idx = accessor.offset() + view.offset();
+                    let data = buffers.get(buffer.index()).unwrap().0.as_slice();
+                    let data_as_slice = &data[data_idx..];
+
+                    let mut reader = std::io::Cursor::new(data_as_slice);
+                    for _ in 0..accessor.count() {
+                        let mut weight = [0.0f32; 4];
+                        weight.iter_mut().for_each(|w| {
+                            *w = f32::read_options(&mut reader, binrw::Endian::Little, ())
+                                .unwrap();
+                        });
+                        weight_seq.push(weight);
+                    }
+                }
+
+                gltf::Semantic::TexCoords(_) => {
+                    let view = accessor.view().unwrap();
+                    let buffer = view.buffer();
+                    let data_idx = accessor.offset() + view.offset();
+                    let data = buffers.get(buffer.index()).unwrap().0.as_slice();
+                    let data_as_slice = &data[data_idx..];
+
+                    let mut reader = std::io::Cursor::new(data_as_slice);
+                    let mut texcoords: Vec<LwVector2> = vec![];
+
+                    for _ in 0..accessor.count() {
+                        texcoords.push(
+                            LwVector2::read_options(&mut reader, binrw::Endian::Little, ())
+                                .unwrap(),
+                        );
+                    }
+                    mesh.texcoord_seq[0] = texcoords;
+                }
+
+                _ => return Err(anyhow::anyhow!("Unsupported semantic: {:?}", semantic)),
+            };
+        }
+
+        // Process indices
+        let gltf_vi_accessor = primitive.indices().unwrap();
+        let gltf_vi_view = gltf_vi_accessor.view().unwrap();
+        let gltf_vi_buffer = gltf_vi_view.buffer();
+        let gltf_vi_data_idx = gltf_vi_accessor.offset() + gltf_vi_view.offset();
+        let gltf_vi_data = buffers.get(gltf_vi_buffer.index()).unwrap().0.as_slice();
+        let gltf_vi_data_as_slice = &gltf_vi_data[gltf_vi_data_idx..];
+        let mut vi_reader = std::io::Cursor::new(gltf_vi_data_as_slice);
+
+        let mut index_seq: Vec<u32> = vec![];
+        match gltf_vi_accessor.data_type() {
+            gltf::accessor::DataType::U16 => {
+                for _ in 0..gltf_vi_accessor.count() {
+                    index_seq.push(u16::read_le(&mut vi_reader).unwrap() as u32);
+                }
+            }
+            gltf::accessor::DataType::U32 => {
+                for _ in 0..gltf_vi_accessor.count() {
+                    index_seq.push(u32::read_le(&mut vi_reader).unwrap());
+                }
+            }
+            _ => {
+                return Err(anyhow::anyhow!("Unsupported index data type: {:?}", gltf_vi_accessor.data_type()));
+            }
+        }
+        mesh.index_seq = index_seq;
+
+        // Build bone_index_seq from joint data
+        let mut lab_bones_in_order = Vec::new();
+        let mut seen_bones = HashMap::new();
+        for joints in joint_seq_u16.iter() {
+            for &lab_bone_pos in joints.iter() {
+                if !seen_bones.contains_key(&lab_bone_pos) {
+                    lab_bones_in_order.push(lab_bone_pos as u32);
+                    seen_bones.insert(lab_bone_pos, true);
+                }
+            }
+        }
+        
+        let bone_index_seq = lab_bones_in_order;
+        
+        let mut lab_bone_pos_to_bone_seq_idx = HashMap::<u32, u32>::new();
+        for (bone_seq_idx, &lab_bone_pos) in bone_index_seq.iter().enumerate() {
+            lab_bone_pos_to_bone_seq_idx.insert(lab_bone_pos, bone_seq_idx as u32);
+        }
+
+        for (vert_idx, joints_u16) in joint_seq_u16.iter().enumerate() {
+            let mut joints_u8 = [0u8; 4];
+            for (joint_idx, &lab_bone_pos) in joints_u16.iter().enumerate() {
+                if let Some(&bone_seq_idx) = lab_bone_pos_to_bone_seq_idx.get(&(lab_bone_pos as u32)) {
+                    joints_u8[joint_idx] = bone_seq_idx as u8;
+                } else {
+                    joints_u8[joint_idx] = 0;
+                }
+            }
+            
+            let indexd = u32::from_le_bytes(joints_u8);
+            
+            mesh.blend_seq.push(CharacterMeshBlendInfo {
+                indexd,
+                weight: weight_seq[vert_idx],
+            });
+        }
+
+        mesh.bone_index_seq = bone_index_seq;
+
+        mesh.subset_seq.push(CharacterMeshSubsetInfo {
+            min_index: 0,
+            start_index: 0,
+            vertex_num: mesh.vertex_seq.len() as u32,
+            primitive_num: (mesh.index_seq.len() / 3) as u32,
+        });
+
+        mesh.header.bone_index_num = mesh.bone_index_seq.len() as u32;
+        mesh.header.vertex_num = mesh.vertex_seq.len() as u32;
+        mesh.header.index_num = mesh.index_seq.len() as u32;
+        mesh.header.subset_num = 1;
+        mesh.header.bone_infl_factor = 2;
+        
+        // Build vertex element sequence
+        let mut vertex_elements = vec![];
+        let mut offset: u16 = 0;
+        
+        vertex_elements.push(D3DVertexElement9 {
+            stream: 0,
+            offset,
+            _type: 2,
+            method: 0,
+            usage: 0,
+            usage_index: 0,
+        });
+        offset += 12;
+        
+        if !mesh.blend_seq.is_empty() {
+            vertex_elements.push(D3DVertexElement9 {
+                stream: 0,
+                offset,
+                _type: 3,
+                method: 0,
+                usage: 1,
+                usage_index: 0,
+            });
+            offset += 16;
+            
+            vertex_elements.push(D3DVertexElement9 {
+                stream: 0,
+                offset,
+                _type: 4,
+                method: 0,
+                usage: 2,
+                usage_index: 0,
+            });
+            offset += 4;
+        }
+        
+        if !mesh.normal_seq.is_empty() {
+            vertex_elements.push(D3DVertexElement9 {
+                stream: 0,
+                offset,
+                _type: 2,
+                method: 0,
+                usage: 3,
+                usage_index: 0,
+            });
+            offset += 12;
+        }
+        
+        if !mesh.texcoord_seq[0].is_empty() {
+            vertex_elements.push(D3DVertexElement9 {
+                stream: 0,
+                offset,
+                _type: 1,
+                method: 0,
+                usage: 5,
+                usage_index: 0,
+            });
+        }
+        
+        vertex_elements.push(D3DVertexElement9 {
+            stream: 255,
+            offset: 0,
+            _type: 0,
+            method: 0,
+            usage: 0,
+            usage_index: 0,
+        });
+        
+        mesh.vertex_element_seq = vertex_elements;
+        mesh.header.vertex_element_num = mesh.vertex_element_seq.len() as u32;
+
+        Ok(mesh)
+    }
+
+    /// Get the number of primitives in a glTF document (legacy - counts all primitives across all meshes)
+    pub fn get_primitive_count(doc: &gltf::Document) -> usize {
+        let mut count = 0;
+        for mesh in doc.meshes() {
+            count += mesh.primitives().count();
+        }
+        count
+    }
+    
+    /// Get the number of meshes in a glTF document
+    /// Each mesh becomes a separate LGO file (more idiomatic than counting primitives)
+    pub fn get_mesh_count(doc: &gltf::Document) -> usize {
+        doc.meshes().count()
+    }
+    
+    /// Import a specific mesh from a glTF document (by mesh index)
+    /// This is the preferred method - each mesh becomes a separate LGO file
+    /// Each mesh is expected to have exactly one primitive (idiomatic glTF structure)
+    pub fn from_gltf_mesh(
+        doc: &gltf::Document,
+        buffers: &Vec<gltf::buffer::Data>,
+        images: &Vec<gltf::image::Data>,
+        bone_file: &crate::animation::character::LwBoneFile,
+        mesh_index: usize,
+    ) -> anyhow::Result<Self> {
+        let gltf_mesh = doc.meshes().nth(mesh_index)
+            .ok_or_else(|| anyhow::anyhow!("Mesh index {} not found in glTF document", mesh_index))?;
+        
+        // Each mesh should have exactly one primitive in our idiomatic structure
+        // If there are multiple primitives, we use only the first one
+        let primitive = gltf_mesh.primitives().next()
+            .ok_or_else(|| anyhow::anyhow!("Mesh {} has no primitives", mesh_index))?;
+        
+        // Reuse the existing primitive import logic
+        Self::from_gltf_primitive_internal(doc, buffers, images, bone_file, primitive)
+    }
+    
+    /// Internal helper to import from a specific primitive
+    fn from_gltf_primitive_internal(
+        _doc: &gltf::Document,
+        buffers: &Vec<gltf::buffer::Data>,
+        _images: &Vec<gltf::image::Data>,
+        _bone_file: &crate::animation::character::LwBoneFile,
+        primitive: gltf::Primitive<'_>,
+    ) -> anyhow::Result<Self> {
+        let mut mesh = CharacterMeshInfo {
+            blend_seq: vec![],
+            bone_index_seq: vec![],
+            header: CharacterInfoMeshHeader {
+                fvf: 4376,
+                pt_type: D3DPrimitiveType::TriangleList,
+                ..Default::default()
+            },
+            index_seq: vec![],
+            normal_seq: vec![],
+            subset_seq: vec![],
+            texcoord_seq: [vec![], vec![], vec![], vec![]],
+            vertex_element_seq: vec![],
+            vertex_seq: vec![],
+            vercol_seq: vec![],
+        };
+
+        let mut joint_seq_u16: Vec<[u16; 4]> = vec![];
+        let mut weight_seq: Vec<[f32; 4]> = vec![];
+
+        // Process the primitive attributes
+        for (semantic, accessor) in primitive.attributes() {
+            match semantic {
+                gltf::Semantic::Positions => {
+                    let view = accessor.view().unwrap();
+                    let buffer = view.buffer();
+                    let data_idx = accessor.offset() + view.offset();
+                    let data = buffers.get(buffer.index()).unwrap().0.as_slice();
+                    let data_as_slice = &data[data_idx..];
+
+                    let mut reader = std::io::Cursor::new(data_as_slice);
+                    for _ in 0..accessor.count() {
+                        let vertex = LwVector3::read_options(
+                            &mut reader,
+                            binrw::Endian::Little,
+                            (),
+                        )?;
+                        mesh.vertex_seq.push(vertex);
+                    }
+                }
+
+                gltf::Semantic::Normals => {
+                    let view = accessor.view().unwrap();
+                    let buffer = view.buffer();
+                    let data_idx = accessor.offset() + view.offset();
+                    let data = buffers.get(buffer.index()).unwrap().0.as_slice();
+                    let data_as_slice = &data[data_idx..];
+
+                    let mut reader = std::io::Cursor::new(data_as_slice);
+                    for _ in 0..accessor.count() {
+                        let vertex_normal = LwVector3::read_options(
+                            &mut reader,
+                            binrw::Endian::Little,
+                            (),
+                        )?;
+                        mesh.normal_seq.push(vertex_normal);
+                    }
+                }
+
+                gltf::Semantic::Colors(_) => {
+                    // TODO: implement color import if needed
+                }
+
+                gltf::Semantic::Joints(_) => {
+                    let view = accessor.view().unwrap();
+                    let buffer = view.buffer();
+                    let data_idx = accessor.offset() + view.offset();
+                    let data = buffers.get(buffer.index()).unwrap().0.as_slice();
+                    let data_as_slice = &data[data_idx..];
+
+                    let mut reader = std::io::Cursor::new(data_as_slice);
+                    for _ in 0..accessor.count() {
+                        let mut joints_u16 = [0u16; 4];
+                        joints_u16.iter_mut().for_each(|j| {
+                            *j = u16::read_options(&mut reader, binrw::Endian::Little, ())
+                                .unwrap();
+                        });
+                        joint_seq_u16.push(joints_u16);
+                    }
+                }
+
+                gltf::Semantic::Weights(_) => {
+                    let view = accessor.view().unwrap();
+                    let buffer = view.buffer();
+                    let data_idx = accessor.offset() + view.offset();
+                    let data = buffers.get(buffer.index()).unwrap().0.as_slice();
+                    let data_as_slice = &data[data_idx..];
+
+                    let mut reader = std::io::Cursor::new(data_as_slice);
+                    for _ in 0..accessor.count() {
+                        let mut weight = [0.0f32; 4];
+                        weight.iter_mut().for_each(|w| {
+                            *w = f32::read_options(&mut reader, binrw::Endian::Little, ())
+                                .unwrap();
+                        });
+                        weight_seq.push(weight);
+                    }
+                }
+
+                gltf::Semantic::TexCoords(_) => {
+                    let view = accessor.view().unwrap();
+                    let buffer = view.buffer();
+                    let data_idx = accessor.offset() + view.offset();
+                    let data = buffers.get(buffer.index()).unwrap().0.as_slice();
+                    let data_as_slice = &data[data_idx..];
+
+                    let mut reader = std::io::Cursor::new(data_as_slice);
+                    let mut texcoords: Vec<LwVector2> = vec![];
+
+                    for _ in 0..accessor.count() {
+                        texcoords.push(
+                            LwVector2::read_options(&mut reader, binrw::Endian::Little, ())
+                                .unwrap(),
+                        );
+                    }
+                    mesh.texcoord_seq[0] = texcoords;
+                }
+
+                _ => return Err(anyhow::anyhow!("Unsupported semantic: {:?}", semantic)),
+            };
+        }
+
+        // Process indices
+        let gltf_vi_accessor = primitive.indices().unwrap();
+        let gltf_vi_view = gltf_vi_accessor.view().unwrap();
+        let gltf_vi_buffer = gltf_vi_view.buffer();
+        let gltf_vi_data_idx = gltf_vi_accessor.offset() + gltf_vi_view.offset();
+        let gltf_vi_data = buffers.get(gltf_vi_buffer.index()).unwrap().0.as_slice();
+        let gltf_vi_data_as_slice = &gltf_vi_data[gltf_vi_data_idx..];
+        let mut vi_reader = std::io::Cursor::new(gltf_vi_data_as_slice);
+
+        let mut index_seq: Vec<u32> = vec![];
+        match gltf_vi_accessor.data_type() {
+            gltf::accessor::DataType::U16 => {
+                for _ in 0..gltf_vi_accessor.count() {
+                    index_seq.push(u16::read_le(&mut vi_reader).unwrap() as u32);
+                }
+            }
+            gltf::accessor::DataType::U32 => {
+                for _ in 0..gltf_vi_accessor.count() {
+                    index_seq.push(u32::read_le(&mut vi_reader).unwrap());
+                }
+            }
+            _ => {
+                return Err(anyhow::anyhow!("Unsupported index data type: {:?}", gltf_vi_accessor.data_type()));
+            }
+        }
+        mesh.index_seq = index_seq;
+
+        // Build bone_index_seq from joint data
+        let mut lab_bones_in_order = Vec::new();
+        let mut seen_bones = HashMap::new();
+        for joints in joint_seq_u16.iter() {
+            for &lab_bone_pos in joints.iter() {
+                if !seen_bones.contains_key(&lab_bone_pos) {
+                    lab_bones_in_order.push(lab_bone_pos as u32);
+                    seen_bones.insert(lab_bone_pos, true);
+                }
+            }
+        }
+        
+        let bone_index_seq = lab_bones_in_order;
+        
+        let mut lab_bone_pos_to_bone_seq_idx = HashMap::<u32, u32>::new();
+        for (bone_seq_idx, &lab_bone_pos) in bone_index_seq.iter().enumerate() {
+            lab_bone_pos_to_bone_seq_idx.insert(lab_bone_pos, bone_seq_idx as u32);
+        }
+
+        for (vert_idx, joints_u16) in joint_seq_u16.iter().enumerate() {
+            let mut joints_u8 = [0u8; 4];
+            for (joint_idx, &lab_bone_pos) in joints_u16.iter().enumerate() {
+                if let Some(&bone_seq_idx) = lab_bone_pos_to_bone_seq_idx.get(&(lab_bone_pos as u32)) {
+                    joints_u8[joint_idx] = bone_seq_idx as u8;
+                } else {
+                    joints_u8[joint_idx] = 0;
+                }
+            }
+            
+            let indexd = u32::from_le_bytes(joints_u8);
+            
+            mesh.blend_seq.push(CharacterMeshBlendInfo {
+                indexd,
+                weight: weight_seq[vert_idx],
+            });
+        }
+
+        mesh.bone_index_seq = bone_index_seq;
+
+        mesh.subset_seq.push(CharacterMeshSubsetInfo {
+            min_index: 0,
+            start_index: 0,
+            vertex_num: mesh.vertex_seq.len() as u32,
+            primitive_num: (mesh.index_seq.len() / 3) as u32,
+        });
+
+        mesh.header.bone_index_num = mesh.bone_index_seq.len() as u32;
+        mesh.header.vertex_num = mesh.vertex_seq.len() as u32;
+        mesh.header.index_num = mesh.index_seq.len() as u32;
+        mesh.header.subset_num = 1;
+        mesh.header.bone_infl_factor = 2;
+        
+        // Build vertex element sequence
+        let mut vertex_elements = vec![];
+        let mut offset: u16 = 0;
+        
+        vertex_elements.push(D3DVertexElement9 {
+            stream: 0,
+            offset,
+            _type: 2,
+            method: 0,
+            usage: 0,
+            usage_index: 0,
+        });
+        offset += 12;
+        
+        if !mesh.blend_seq.is_empty() {
+            vertex_elements.push(D3DVertexElement9 {
+                stream: 0,
+                offset,
+                _type: 3,
+                method: 0,
+                usage: 1,
+                usage_index: 0,
+            });
+            offset += 16;
+            
+            vertex_elements.push(D3DVertexElement9 {
+                stream: 0,
+                offset,
+                _type: 4,
+                method: 0,
+                usage: 2,
+                usage_index: 0,
+            });
+            offset += 4;
+        }
+        
+        if !mesh.normal_seq.is_empty() {
+            vertex_elements.push(D3DVertexElement9 {
+                stream: 0,
+                offset,
+                _type: 2,
+                method: 0,
+                usage: 3,
+                usage_index: 0,
+            });
+            offset += 12;
+        }
+        
+        if !mesh.texcoord_seq[0].is_empty() {
+            vertex_elements.push(D3DVertexElement9 {
+                stream: 0,
+                offset,
+                _type: 1,
+                method: 0,
+                usage: 5,
+                usage_index: 0,
+            });
+        }
+        
+        vertex_elements.push(D3DVertexElement9 {
+            stream: 255,
+            offset: 0,
+            _type: 0,
+            method: 0,
+            usage: 0,
+            usage_index: 0,
+        });
+        
+        mesh.vertex_element_seq = vertex_elements;
+        mesh.header.vertex_element_num = mesh.vertex_element_seq.len() as u32;
+
+        Ok(mesh)
+    }
+
     pub fn get_size(&self) -> u32 {
         let mut size = 0;
 

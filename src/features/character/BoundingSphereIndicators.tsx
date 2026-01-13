@@ -2,11 +2,28 @@ import { useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 
+// Color palette for different meshes (easily distinguishable colors)
+export const MESH_COLORS = [
+  '#ffcc00', // yellow (mesh 0)
+  '#00ccff', // cyan (mesh 1)
+  '#ff6600', // orange (mesh 2)
+  '#cc00ff', // purple (mesh 3)
+  '#00ff66', // green (mesh 4)
+  '#ff0066', // pink (mesh 5)
+  '#6600ff', // blue (mesh 6)
+  '#66ff00', // lime (mesh 7)
+];
+
+export function getMeshColor(meshIndex: number): string {
+  return MESH_COLORS[meshIndex % MESH_COLORS.length];
+}
+
 export interface BoundingSphereData {
   node: THREE.Object3D;
   radius: number;
   center: THREE.Vector3;
   id: number;
+  meshIndex: number;
 }
 
 /**
@@ -18,7 +35,7 @@ export function extractBoundingSpheres(scene: THREE.Group): BoundingSphereData[]
 
   scene.traverse((object) => {
     if (object.name.startsWith('BoundingSphere') && object.userData) {
-      const { radius, center, id, type } = object.userData;
+      const { radius, center, id, type, mesh_index } = object.userData;
 
       if (type !== 'bounding_sphere') {
         console.warn(`BoundingSphere node "${object.name}" has wrong type: ${type}`);
@@ -34,7 +51,8 @@ export function extractBoundingSpheres(scene: THREE.Group): BoundingSphereData[]
         node: object,
         radius,
         center: new THREE.Vector3(center[0], center[1], center[2]),
-        id
+        id,
+        meshIndex: mesh_index ?? 0 // default to mesh 0 for legacy files
       });
     }
   });
@@ -46,13 +64,15 @@ interface BoundingSphereIndicatorsProps {
   spheres: BoundingSphereData[];
   visible: boolean;
   scene: THREE.Group;
+  visibleMeshIndices?: Set<number>; // Optional filter: only show spheres for these mesh indices
 }
 
 /**
  * Renders visual indicators for bounding spheres in the character model.
  * Spheres are rendered as wireframes and update with character animations.
+ * Color-coded by mesh index they belong to.
  */
-export function BoundingSphereIndicators({ spheres, visible, scene }: BoundingSphereIndicatorsProps) {
+export function BoundingSphereIndicators({ spheres, visible, scene, visibleMeshIndices }: BoundingSphereIndicatorsProps) {
   if (!visible || spheres.length === 0) {
     return null;
   }
@@ -73,15 +93,21 @@ export function BoundingSphereIndicators({ spheres, visible, scene }: BoundingSp
     }
   });
 
+  // Filter spheres by visible mesh indices if specified
+  const filteredSpheres = visibleMeshIndices 
+    ? spheres.filter(s => visibleMeshIndices.has(s.meshIndex))
+    : spheres;
+
   return (
     <>
-      {spheres.map(({ node, radius, center, id }) => (
+      {filteredSpheres.map(({ node, radius, center, id, meshIndex }) => (
         <BoundingSphere
           key={id}
           node={node}
           radius={radius}
           center={center}
           id={id}
+          meshIndex={meshIndex}
           skeleton={skeleton}
           dummiesById={dummiesById}
         />
@@ -95,6 +121,7 @@ interface BoundingSphereProps {
   radius: number;
   center: THREE.Vector3;
   id: number;
+  meshIndex: number;
   skeleton: THREE.Skeleton | null;
   dummiesById: Map<number, THREE.Object3D>;
 }
@@ -106,8 +133,10 @@ interface BoundingSphereProps {
  * 2. Get boneMatrix from skeleton.boneMatrices (already includes inverse bind)
  * 3. dummyWorld = dummyLocal * boneMatrix
  * 4. sphereWorld = dummyWorld * translate(sphere.center)
+ * 
+ * Color is determined by the mesh index the sphere belongs to.
  */
-function BoundingSphere({ node, radius, center, id, skeleton, dummiesById }: BoundingSphereProps) {
+function BoundingSphere({ node, radius, center, id, meshIndex, skeleton, dummiesById }: BoundingSphereProps) {
   const meshRef = useRef<THREE.Mesh>(null);
   const debugOnce = useRef(false);
 
@@ -196,11 +225,13 @@ function BoundingSphere({ node, radius, center, id, skeleton, dummiesById }: Bou
     meshRef.current.quaternion.setFromRotationMatrix(sphereWorld);
   });
 
+  const color = getMeshColor(meshIndex);
+
   return (
     <mesh ref={meshRef}>
       <sphereGeometry args={[radius, 16, 16]} />
       <meshBasicMaterial
-        color="#ffcc00"
+        color={color}
         wireframe
         opacity={0.6}
         transparent

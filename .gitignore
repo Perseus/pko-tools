@@ -33,12 +33,16 @@ state/*
 
 top-client
 client-src
+game-client
 
 # Skill binaries
 *.skill
 
 # Claude settings (personal preferences)
 .claude/settings.local.json
+
+# OpenCode plans (session-specific)
+.opencode/plan/
 
 # Python cache
 __pycache__/

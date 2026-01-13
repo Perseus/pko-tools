@@ -728,6 +728,17 @@ impl LwBoneFile {
         &self,
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
     ) -> (Skin, Vec<Node>) {
+        // Default to 1 mesh for backwards compatibility
+        self.to_gltf_skin_and_nodes_multi(fields_to_aggregate, 1)
+    }
+    
+    /// Create glTF skin and nodes with support for multiple meshes
+    /// Each mesh gets its own skinned mesh node referencing the shared skeleton
+    pub fn to_gltf_skin_and_nodes_multi(
+        &self,
+        fields_to_aggregate: &mut GLTFFieldsToAggregate,
+        mesh_count: usize,
+    ) -> (Skin, Vec<Node>) {
         let bone_num = self.header.bone_num as usize;
         let mut bone_id_to_node_index = HashMap::new();
         let mut gltf_nodes = Vec::with_capacity(bone_num);
@@ -888,12 +899,16 @@ impl LwBoneFile {
         fields_to_aggregate.buffer_view.push(ibm_buffer_view);
         fields_to_aggregate.accessor.push(ibm_accessor);
 
-        gltf_nodes.push(Node {
-            mesh: Some(Index::new(0)),
-            skin: Some(Index::new(0)),
-            name: Some("CharacterSkinnedMesh".to_string()),
-            ..Default::default()
-        });
+        // Create one skinned mesh node per mesh
+        // Each node references a different mesh but shares the same skin
+        for mesh_idx in 0..mesh_count {
+            gltf_nodes.push(Node {
+                mesh: Some(Index::new(mesh_idx as u32)),
+                skin: Some(Index::new(0)),
+                name: Some(format!("CharacterSkinnedMesh_{}", mesh_idx)),
+                ..Default::default()
+            });
+        }
 
         // Store LAB file version info in skin extras for round-trip preservation
         let skin_extras = RawValue::from_string(format!(
@@ -1213,9 +1228,31 @@ impl LwBoneFile {
         fields_to_aggregate.animation.push(animation);
     }
     pub fn from_file(file_path: PathBuf) -> anyhow::Result<Self> {
-        let file = File::open(file_path)?;
+        use std::io::{Seek, SeekFrom};
+        
+        let file = File::open(&file_path)
+            .map_err(|e| anyhow::anyhow!("Failed to open LAB file '{}': {}", file_path.display(), e))?;
+        
+        let file_size = file.metadata()
+            .map(|m| m.len())
+            .unwrap_or(0);
+        
         let mut reader = std::io::BufReader::new(file);
-        let anim: LwBoneFile = BinRead::read_options(&mut reader, binrw::Endian::Little, ())?;
+        
+        let anim: LwBoneFile = BinRead::read_options(&mut reader, binrw::Endian::Little, ())
+            .map_err(|e| {
+                let bytes_read = reader.stream_position().unwrap_or(0);
+                anyhow::anyhow!(
+                    "Failed to parse LAB file '{}': {}\n\
+                     File size: {} bytes, bytes read before error: {} bytes\n\
+                     This may indicate a corrupted or truncated file.",
+                    file_path.display(),
+                    e,
+                    file_size,
+                    bytes_read
+                )
+            })?;
+        
         Ok(anim)
     }
 
