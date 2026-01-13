@@ -99,7 +99,9 @@ pub fn init_directories() -> Result<(), String> {
         "./imports/character",
         "./imports/character/animation",
         "./imports/character/model",
+        "./imports/character/model/character",
         "./imports/character/texture",
+        "./imports/character/texture/character",
         "./exports/gltf",
     ];
 

@@ -29,5 +29,21 @@ src-tauri/test_artifacts/*
 test.gltf
 src-tauri/exports
 src-tauri/imports
+state/*
 
 top-client
+client-src
+game-client
+
+# Skill binaries
+*.skill
+
+# Claude settings (personal preferences)
+.claude/settings.local.json
+
+# OpenCode plans (session-specific)
+.opencode/plan/
+
+# Python cache
+__pycache__/
+*.pyc

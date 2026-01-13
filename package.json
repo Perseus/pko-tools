@@ -1,7 +1,7 @@
 {
   "name": "pko-tools",
   "private": true,
-  "version": "0.1.0-alpha.4",
+  "version": "0.1.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -22,10 +22,10 @@
     "@react-three/drei": "^9.121.3",
     "@react-three/fiber": "^8.17.12",
     "@tanstack/react-virtual": "^3.11.2",
-    "@tauri-apps/api": "^2",
-    "@tauri-apps/plugin-dialog": "~2",
-    "@tauri-apps/plugin-opener": "^2",
-    "@tauri-apps/plugin-sql": "~2",
+    "@tauri-apps/api": "^2.2.0",
+    "@tauri-apps/plugin-dialog": "~2.2.0",
+    "@tauri-apps/plugin-opener": "^2.2.3",
+    "@tauri-apps/plugin-sql": "~2.2.0",
     "@types/three": "^0.172.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -41,16 +41,16 @@
     "vaul": "^1.1.2"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2",
+    "@tauri-apps/cli": "^2.2.2",
     "@types/node": "^22.10.5",
-    "@types/react": "^18.3.1",
-    "@types/react-dom": "^18.3.1",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
-    "typescript": "~5.6.2",
-    "vite": "^6.0.3"
+    "typescript": "~5.6.3",
+    "vite": "^6.0.7"
   },
   "packageManager": "pnpm@9.15.2+sha512.93e57b0126f0df74ce6bff29680394c0ba54ec47246b9cf321f0121d8d9bb03f750a705f24edc3c1180853afd7c2c3b94196d0a3d53d3e069d9e2793ef11f321"
 }

@@ -1,12 +1,12 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
-mod animation;
+pub mod animation;
 mod broadcast;
-mod character;
+pub mod character;
 mod d3d;
 mod db;
 pub mod decompiler;
-mod math;
+pub mod math;
 mod preferences;
 mod projects;
 
@@ -62,6 +62,7 @@ pub fn run() {
             character::commands::load_character,
             character::commands::export_to_gltf,
             character::commands::import_character_from_gltf,
+            character::commands::get_character_metadata_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

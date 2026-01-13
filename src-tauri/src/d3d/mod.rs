@@ -244,14 +244,14 @@ pub enum D3DPrimitiveType {
 
  */
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[binrw]
 pub struct D3DVertexElement9 {
-    stream: u16,
-    offset: u16,
+    pub stream: u16,
+    pub offset: u16,
 
-    _type: u8,
-    method: u8,
-    usage: u8,
-    usage_index: u8,
+    pub _type: u8,
+    pub method: u8,
+    pub usage: u8,
+    pub usage_index: u8,
 }

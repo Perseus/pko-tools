@@ -1,4 +1,4 @@
-import { Character } from "@/types/character";
+import { Character, CharacterMetadata } from "@/types/character";
 import { atom } from "jotai";
 
 type CharacterLoadingStatus = {
@@ -11,3 +11,4 @@ type CharacterLoadingStatus = {
 export const selectedCharacterAtom = atom<Character| null>(null);
 export const characterGltfJsonAtom = atom<string| null>(null);
 export const characterLoadingStatusAtom = atom<CharacterLoadingStatus| null>(null);
+export const characterMetadataAtom = atom<CharacterMetadata| null>(null);

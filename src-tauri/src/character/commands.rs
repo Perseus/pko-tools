@@ -5,7 +5,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::{broadcast::get_broadcaster, AppState};
 
-use super::{get_character_gltf_json, info::get_all_characters, Character};
+use super::{get_character_gltf_json, get_character_metadata, info::get_all_characters, Character, CharacterMetadata};
 
 #[tauri::command]
 pub async fn get_character_list(project_id: String) -> Result<Vec<Character>, String> {
@@ -43,45 +43,61 @@ pub async fn load_character(
     Ok(char_gltf_json.unwrap())
 }
 
+#[derive(serde::Serialize)]
+pub struct ExportResult {
+    pub file_path: String,
+    pub folder_path: String,
+}
+
 #[tauri::command]
 pub async fn export_to_gltf(
     app: AppHandle,
     app_state: tauri::State<'_, AppState>,
     character_id: u32,
-) -> Result<String, String> {
+) -> Result<ExportResult, String> {
     let current_project = app_state.preferences.get_current_project();
     if current_project.is_none() {
         return Err("No project selected".to_string());
     }
-    let exports_dir = Path::new("./exports/gltf");
 
     let project_id = current_project.unwrap();
-    if let Ok(project_uuid) = uuid::Uuid::from_str(&project_id) {
-        let mut receiver = get_broadcaster().subscribe();
+    let project_uuid = uuid::Uuid::from_str(&project_id)
+        .map_err(|_| "Invalid project id".to_string())?;
 
-        tauri::async_runtime::spawn(async move {
-            while let Ok(message) = receiver.recv().await {
-                app.emit("export_to_gltf_update", message)
-                    .unwrap_or_else(|e| eprintln!("Error emitting export_to_gltf_update: {}", e));
-            }
-        });
+    // Get the project to access its directory
+    let project = crate::projects::project::Project::get_project(project_uuid)
+        .map_err(|e| format!("Failed to get project: {}", e))?;
 
-        let character = get_character_gltf_json(project_uuid, character_id);
-        if character.is_err() {
-            return Err(character.err().unwrap().to_string());
+    // Create exports directory in the game client folder
+    let exports_dir = project.project_directory.join("pko-tools").join("exports").join("gltf");
+    std::fs::create_dir_all(&exports_dir)
+        .map_err(|e| format!("Failed to create exports directory: {}", e))?;
+
+    let mut receiver = get_broadcaster().subscribe();
+
+    tauri::async_runtime::spawn(async move {
+        while let Ok(message) = receiver.recv().await {
+            app.emit("export_to_gltf_update", message)
+                .unwrap_or_else(|e| eprintln!("Error emitting export_to_gltf_update: {}", e));
         }
+    });
 
-        let gltf_json = character.unwrap();
-        let path = exports_dir.join(format!("{}.gltf", character_id));
-        let file = File::create(path.clone());
-        if let Ok(mut file) = file {
-            file.write_all(gltf_json.as_bytes()).unwrap();
-        }
-
-        return Ok(path.to_string_lossy().to_string());
+    let character = get_character_gltf_json(project_uuid, character_id);
+    if character.is_err() {
+        return Err(character.err().unwrap().to_string());
     }
 
-    Err("Invalid project id".to_string())
+    let gltf_json = character.unwrap();
+    let file_path = exports_dir.join(format!("{}.gltf", character_id));
+    let file = File::create(file_path.clone());
+    if let Ok(mut file) = file {
+        file.write_all(gltf_json.as_bytes()).unwrap();
+    }
+
+    Ok(ExportResult {
+        file_path: file_path.to_string_lossy().to_string(),
+        folder_path: exports_dir.to_string_lossy().to_string(),
+    })
 }
 
 #[tauri::command]
@@ -136,4 +152,18 @@ pub async fn import_character_from_gltf(
 
 
     Err("Invalid project id".to_string())
+}
+
+#[tauri::command]
+pub async fn get_character_metadata_cmd(
+    project_id: String,
+    character_id: u32,
+) -> Result<CharacterMetadata, String> {
+    let project_id = uuid::Uuid::from_str(&project_id)
+        .map_err(|_| "Invalid project id".to_string())?;
+
+    let metadata = get_character_metadata(project_id, character_id)
+        .map_err(|e| e.to_string())?;
+
+    Ok(metadata)
 }
