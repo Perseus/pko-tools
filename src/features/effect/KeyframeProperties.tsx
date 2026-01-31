@@ -1,5 +1,6 @@
+import { Input } from "@/components/ui/input";
 import { effectDataAtom, selectedFrameIndexAtom, selectedSubEffectIndexAtom } from "@/store/effect";
-import { useAtomValue } from "jotai";
+import { useAtom } from "jotai";
 import { useMemo } from "react";
 
 function formatVector(values: number[], precision = 2) {
@@ -7,9 +8,9 @@ function formatVector(values: number[], precision = 2) {
 }
 
 export default function KeyframeProperties() {
-  const effectData = useAtomValue(effectDataAtom);
-  const selectedSubEffectIndex = useAtomValue(selectedSubEffectIndexAtom);
-  const selectedFrameIndex = useAtomValue(selectedFrameIndexAtom);
+  const [effectData, setEffectData] = useAtom(effectDataAtom);
+  const [selectedSubEffectIndex] = useAtom(selectedSubEffectIndexAtom);
+  const [selectedFrameIndex] = useAtom(selectedFrameIndexAtom);
 
   const frameData = useMemo(() => {
     if (!effectData || selectedSubEffectIndex === null) {
@@ -36,6 +37,50 @@ export default function KeyframeProperties() {
     };
   }, [effectData, selectedSubEffectIndex, selectedFrameIndex]);
 
+  function updateFrameVector(
+    key: "frameSizes" | "frameAngles" | "framePositions" | "frameColors",
+    values: number[]
+  ) {
+    if (!effectData || selectedSubEffectIndex === null || !frameData) {
+      return;
+    }
+
+    const nextSubEffects = effectData.subEffects.map((subEffect, index) => {
+      if (index !== selectedSubEffectIndex) {
+        return subEffect;
+      }
+
+      const nextFrames = [...subEffect[key]];
+      nextFrames[frameData.frameIndex] = values as typeof nextFrames[number];
+
+      return {
+        ...subEffect,
+        [key]: nextFrames,
+      };
+    });
+
+    setEffectData({
+      ...effectData,
+      subEffects: nextSubEffects,
+    });
+  }
+
+  function handleVectorChange(
+    key: "frameSizes" | "frameAngles" | "framePositions" | "frameColors",
+    values: number[],
+    index: number,
+    nextValue: string
+  ) {
+    const parsed = Number(nextValue);
+    if (Number.isNaN(parsed)) {
+      return;
+    }
+
+    const nextValues = [...values];
+    nextValues[index] = key === "frameColors" ? Math.min(Math.max(parsed, 0), 1) : parsed;
+    updateFrameVector(key, nextValues);
+  }
+
   return (
     <div className="flex h-full flex-col gap-4 rounded-xl border border-border bg-background/70 p-4">
       <div>
@@ -46,21 +91,74 @@ export default function KeyframeProperties() {
       </div>
       {frameData ? (
         <div className="space-y-3 text-xs text-muted-foreground">
-          <div>
+          <div className="space-y-2">
             <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Position</div>
-            <div className="text-sm text-foreground">{formatVector(frameData.position)}</div>
+            <div className="grid grid-cols-3 gap-2">
+              {frameData.position.map((value, index) => (
+                <Input
+                  key={`pos-${index}`}
+                  type="number"
+                  step="0.01"
+                  value={value}
+                  onChange={(event) =>
+                    handleVectorChange("framePositions", frameData.position, index, event.target.value)
+                  }
+                />
+              ))}
+            </div>
           </div>
-          <div>
+          <div className="space-y-2">
             <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Rotation</div>
-            <div className="text-sm text-foreground">{formatVector(frameData.angle)}</div>
+            <div className="grid grid-cols-3 gap-2">
+              {frameData.angle.map((value, index) => (
+                <Input
+                  key={`rot-${index}`}
+                  type="number"
+                  step="0.01"
+                  value={value}
+                  onChange={(event) =>
+                    handleVectorChange("frameAngles", frameData.angle, index, event.target.value)
+                  }
+                />
+              ))}
+            </div>
           </div>
-          <div>
+          <div className="space-y-2">
             <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Scale</div>
-            <div className="text-sm text-foreground">{formatVector(frameData.size)}</div>
+            <div className="grid grid-cols-3 gap-2">
+              {frameData.size.map((value, index) => (
+                <Input
+                  key={`scale-${index}`}
+                  type="number"
+                  step="0.01"
+                  value={value}
+                  onChange={(event) =>
+                    handleVectorChange("frameSizes", frameData.size, index, event.target.value)
+                  }
+                />
+              ))}
+            </div>
           </div>
-          <div>
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Color</div>
-            <div className="text-sm text-foreground">{formatVector(frameData.color)}</div>
+          <div className="space-y-2">
+            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Color (RGBA)</div>
+            <div className="grid grid-cols-4 gap-2">
+              {frameData.color.map((value, index) => (
+                <Input
+                  key={`color-${index}`}
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  max={1}
+                  value={value}
+                  onChange={(event) =>
+                    handleVectorChange("frameColors", frameData.color, index, event.target.value)
+                  }
+                />
+              ))}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {formatVector(frameData.color)}
+            </div>
           </div>
         </div>
       ) : (
