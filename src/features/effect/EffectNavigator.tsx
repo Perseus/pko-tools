@@ -1,7 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { SidebarContent, SidebarHeader } from "@/components/ui/sidebar";
 import { listEffects, loadEffect } from "@/commands/effect";
-import { effectDataAtom, selectedEffectAtom } from "@/store/effect";
+import {
+  effectDataAtom,
+  selectedEffectAtom,
+  selectedFrameIndexAtom,
+  selectedSubEffectIndexAtom,
+} from "@/store/effect";
 import { currentProjectAtom } from "@/store/project";
 import { Input } from "@/components/ui/input";
 import { useAtom, useAtomValue } from "jotai";
@@ -11,6 +16,8 @@ export default function EffectNavigator() {
   const currentProject = useAtomValue(currentProjectAtom);
   const [, setSelectedEffect] = useAtom(selectedEffectAtom);
   const [, setEffectData] = useAtom(effectDataAtom);
+  const [, setSelectedSubEffect] = useAtom(selectedSubEffectIndexAtom);
+  const [, setSelectedFrame] = useAtom(selectedFrameIndexAtom);
   const [effectFiles, setEffectFiles] = useState<string[]>([]);
   const [query, setQuery] = useState("");
 
@@ -46,6 +53,8 @@ export default function EffectNavigator() {
     setSelectedEffect(effectName);
     const data = await loadEffect(currentProject.id, effectName);
     setEffectData(data);
+    setSelectedSubEffect(data.subEffects.length > 0 ? 0 : null);
+    setSelectedFrame(0);
   }
 
   return (

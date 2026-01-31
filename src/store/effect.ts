@@ -10,6 +10,8 @@ export type EffectPlaybackState = {
 
 export const selectedEffectAtom = atom<string | null>(null);
 export const effectDataAtom = atom<EffectFile | null>(null);
+export const selectedSubEffectIndexAtom = atom<number | null>(null);
+export const selectedFrameIndexAtom = atom<number>(0);
 export const effectPlaybackAtom = atom<EffectPlaybackState>({
   isPlaying: false,
   isLooping: true,
