@@ -103,4 +103,28 @@ describe("KeyframeTimeline", () => {
     expect(playback.currentTime).toBeCloseTo(0.2, 2);
     expect(store.get(selectedFrameIndexAtom)).toBe(1);
   });
+
+  it("renders frame texture labels", () => {
+    const store = createStore();
+    store.set(effectDataAtom, {
+      ...createEffectFixture(),
+      subEffects: [
+        {
+          ...createEffectFixture().subEffects[0],
+          frameTexNames: ["fx_a.png", "fx_b.png"],
+        },
+      ],
+    });
+    store.set(selectedSubEffectIndexAtom, 0);
+    store.set(selectedFrameIndexAtom, 0);
+
+    render(
+      <Provider store={store}>
+        <KeyframeTimeline />
+      </Provider>
+    );
+
+    expect(screen.getByText(/1: fx_a.png/i)).toBeInTheDocument();
+    expect(screen.getByText(/2: fx_b.png/i)).toBeInTheDocument();
+  });
 });

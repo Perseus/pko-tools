@@ -14,21 +14,25 @@ export default function KeyframeTimeline() {
   const [effectData] = useAtom(effectDataAtom);
   const [playback, setPlayback] = useAtom(effectPlaybackAtom);
 
-  const { frameCount, frameDurations } = useMemo(() => {
+  const { frameCount, frameDurations, frameTextures } = useMemo(() => {
     if (!effectData || selectedSubEffectIndex === null) {
-      return { frameCount: 0, frameDurations: [] as number[] };
+      return { frameCount: 0, frameDurations: [] as number[], frameTextures: [] as string[] };
     }
 
     const subEffect = effectData.subEffects[selectedSubEffectIndex];
     if (!subEffect) {
-      return { frameCount: 0, frameDurations: [] as number[] };
+      return { frameCount: 0, frameDurations: [] as number[], frameTextures: [] as string[] };
     }
 
     const durations = subEffect.frameTimes.length
       ? subEffect.frameTimes.map((time) => Math.max(time, 1 / 30))
       : Array.from({ length: subEffect.frameCount }, () => 1 / 30);
 
-    return { frameCount: subEffect.frameCount, frameDurations: durations };
+    return {
+      frameCount: subEffect.frameCount,
+      frameDurations: durations,
+      frameTextures: subEffect.frameTexNames,
+    };
   }, [effectData, selectedSubEffectIndex]);
 
   const safeFrame = Math.min(Math.max(selectedFrame, 0), Math.max(frameCount - 1, 0));
@@ -65,6 +69,38 @@ export default function KeyframeTimeline() {
           className="h-2 w-full cursor-pointer appearance-none rounded-full bg-muted accent-foreground"
         />
       </div>
+      {frameCount > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
+          {Array.from({ length: frameCount }).map((_, index) => {
+            const label = frameTextures[index] || "--";
+            const isActive = index === safeFrame;
+            return (
+              <button
+                key={`frame-${index}`}
+                type="button"
+                onClick={() => {
+                  setSelectedFrame(index);
+                  const time = frameDurations
+                    .slice(0, index)
+                    .reduce((sum, value) => sum + value, 0);
+                  setPlayback({
+                    ...playback,
+                    currentTime: time,
+                    isPlaying: false,
+                  });
+                }}
+                className={
+                  isActive
+                    ? "rounded-full border border-primary/40 bg-primary/10 px-2 py-1 text-primary"
+                    : "rounded-full border border-border bg-muted/40 px-2 py-1"
+                }
+              >
+                {index + 1}: {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
