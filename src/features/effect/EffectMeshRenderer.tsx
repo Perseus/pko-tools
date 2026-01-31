@@ -1,6 +1,7 @@
 /// <reference types="@react-three/fiber" />
 import {
   effectDataAtom,
+  effectTextureReloadAtom,
   effectTextureStatusAtom,
   selectedFrameIndexAtom,
   selectedSubEffectIndexAtom,
@@ -19,6 +20,7 @@ export default function EffectMeshRenderer() {
   const effectData = useAtomValue(effectDataAtom);
   const currentProject = useAtomValue(currentProjectAtom);
   const [, setTextureStatus] = useAtom(effectTextureStatusAtom);
+  const [reloadToken] = useAtom(effectTextureReloadAtom);
   const selectedSubEffectIndex = useAtomValue(selectedSubEffectIndexAtom);
   const selectedFrameIndex = useAtomValue(selectedFrameIndexAtom);
 
@@ -157,7 +159,7 @@ export default function EffectMeshRenderer() {
       isActive = false;
       textureRef.current?.dispose();
     };
-  }, [textureName, currentProject, setTextureStatus]);
+  }, [textureName, currentProject, reloadToken, setTextureStatus]);
 
   useFrame((state: { camera: THREE.Camera }) => {
     if (subEffect.billboard || subEffect.rotaBoard) {

@@ -27,3 +27,4 @@ export const effectTextureStatusAtom = atom<EffectTextureStatus>({
   status: "idle",
   textureName: null,
 });
+export const effectTextureReloadAtom = atom(0);
