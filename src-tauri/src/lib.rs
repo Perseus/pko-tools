@@ -3,6 +3,7 @@
 pub mod animation;
 mod broadcast;
 pub mod character;
+pub mod effect;
 mod d3d;
 mod db;
 pub mod decompiler;
@@ -63,6 +64,9 @@ pub fn run() {
             character::commands::export_to_gltf,
             character::commands::import_character_from_gltf,
             character::commands::get_character_metadata_cmd,
+            effect::commands::list_effects,
+            effect::commands::load_effect,
+            effect::commands::save_effect,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
