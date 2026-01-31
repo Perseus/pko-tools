@@ -5,6 +5,7 @@ import {
   selectedSubEffectIndexAtom,
 } from "@/store/effect";
 import { useAtom, useAtomValue } from "jotai";
+import React from "react";
 
 const EFFECT_TYPE_LABELS: Record<number, string> = {
   0: "None",

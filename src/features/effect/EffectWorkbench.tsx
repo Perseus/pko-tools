@@ -1,5 +1,14 @@
 import { saveEffect } from "@/commands/effect";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import {
   effectDataAtom,
@@ -10,7 +19,8 @@ import {
 import { currentProjectAtom } from "@/store/project";
 import { useAtom, useAtomValue } from "jotai";
 import { Save } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import React from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import EffectViewport from "@/features/effect/EffectViewport";
 import SubEffectList from "@/features/effect/SubEffectList";
 import KeyframeTimeline from "@/features/effect/KeyframeTimeline";
@@ -20,12 +30,21 @@ import SubEffectProperties from "@/features/effect/SubEffectProperties";
 
 export default function EffectWorkbench() {
   const [effectData, setEffectData] = useAtom(effectDataAtom);
-  const selectedEffect = useAtomValue(selectedEffectAtom);
+  const [selectedEffect, setSelectedEffect] = useAtom(selectedEffectAtom);
   const currentProject = useAtomValue(currentProjectAtom);
   const [isDirty, setDirty] = useAtom(effectDirtyAtom);
-  const [originalEffect] = useAtom(effectOriginalAtom);
+  const [originalEffect, setOriginalEffect] = useAtom(effectOriginalAtom);
   const [isSaving, setIsSaving] = useState(false);
+  const [isSaveAsOpen, setIsSaveAsOpen] = useState(false);
+  const [saveAsName, setSaveAsName] = useState("");
   const { toast } = useToast();
+
+  const normalizedSelectedName = useMemo(() => {
+    if (!selectedEffect) {
+      return "";
+    }
+    return selectedEffect.replace(/\.eff$/i, "");
+  }, [selectedEffect]);
 
   const handleSave = useCallback(async () => {
     if (!effectData || !currentProject || !selectedEffect) {
@@ -40,6 +59,7 @@ export default function EffectWorkbench() {
         description: selectedEffect,
       });
       setDirty(false);
+      setOriginalEffect(structuredClone(effectData));
     } catch (error) {
       toast({
         title: "Failed to save effect",
@@ -48,7 +68,7 @@ export default function EffectWorkbench() {
     } finally {
       setIsSaving(false);
     }
-  }, [currentProject, effectData, selectedEffect, setDirty, toast]);
+  }, [currentProject, effectData, selectedEffect, setDirty, setOriginalEffect, toast]);
 
   const handleDiscard = useCallback(() => {
     if (!originalEffect) {
@@ -62,6 +82,53 @@ export default function EffectWorkbench() {
       description: selectedEffect ?? "",
     });
   }, [originalEffect, selectedEffect, setDirty, setEffectData, toast]);
+
+  const handleSaveAs = useCallback(async () => {
+    if (!effectData || !currentProject) {
+      return;
+    }
+
+    const trimmed = saveAsName.trim();
+    if (!trimmed) {
+      toast({
+        title: "Enter a filename",
+        description: "Please provide a name for the new effect.",
+      });
+      return;
+    }
+
+    const fileName = trimmed.toLowerCase().endsWith(".eff") ? trimmed : `${trimmed}.eff`;
+
+    setIsSaving(true);
+    try {
+      await saveEffect(currentProject.id, fileName, effectData);
+      setSelectedEffect(fileName);
+      setEffectData(structuredClone(effectData));
+      setDirty(false);
+      setOriginalEffect(structuredClone(effectData));
+      toast({
+        title: "Effect saved",
+        description: fileName,
+      });
+      setIsSaveAsOpen(false);
+    } catch (error) {
+      toast({
+        title: "Failed to save effect",
+        description: String(error),
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  }, [
+    currentProject,
+    effectData,
+    saveAsName,
+    setDirty,
+    setEffectData,
+    setOriginalEffect,
+    setSelectedEffect,
+    toast,
+  ]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -83,6 +150,12 @@ export default function EffectWorkbench() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [handleSave, isDirty, isSaving, selectedEffect, toast]);
+
+  useEffect(() => {
+    if (isSaveAsOpen) {
+      setSaveAsName(normalizedSelectedName);
+    }
+  }, [isSaveAsOpen, normalizedSelectedName]);
 
   return (
     <div className="flex h-full w-full flex-col gap-4 p-4">
@@ -109,6 +182,14 @@ export default function EffectWorkbench() {
           </Button>
           <Button
             size="sm"
+            variant="outline"
+            disabled={!effectData || !currentProject || isSaving}
+            onClick={() => setIsSaveAsOpen(true)}
+          >
+            Save As
+          </Button>
+          <Button
+            size="sm"
             variant={isDirty ? "default" : "secondary"}
             disabled={!effectData || !selectedEffect || !currentProject || isSaving}
             onClick={handleSave}
@@ -130,6 +211,29 @@ export default function EffectWorkbench() {
           <PlaybackControls />
         </div>
       </div>
+      <Dialog open={isSaveAsOpen} onOpenChange={setIsSaveAsOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Save Effect As</DialogTitle>
+            <DialogDescription>
+              Create a new .eff file in the project effect folder.
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            value={saveAsName}
+            onChange={(event) => setSaveAsName(event.target.value)}
+            placeholder="new-effect-name"
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsSaveAsOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={handleSaveAs} disabled={isSaving}>
+              {isSaving ? "Saving" : "Save As"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

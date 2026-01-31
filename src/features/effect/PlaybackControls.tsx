@@ -2,6 +2,7 @@ import { Button } from "@/components/ui/button";
 import { effectPlaybackAtom } from "@/store/effect";
 import { Pause, Play, Repeat, Square } from "lucide-react";
 import { useAtom } from "jotai";
+import React from "react";
 
 export default function PlaybackControls() {
   const [playback, setPlayback] = useAtom(effectPlaybackAtom);
