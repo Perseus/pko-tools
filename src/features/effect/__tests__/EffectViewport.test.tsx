@@ -24,6 +24,7 @@ vi.mock("@react-three/drei", () => ({
 
 vi.mock("@tauri-apps/api/core", () => ({
   convertFileSrc: (path: string) => path,
+  isTauri: () => false,
 }));
 
 const effectFixture: EffectFile = {

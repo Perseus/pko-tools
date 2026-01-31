@@ -11,7 +11,7 @@ import { useAtom, useAtomValue } from "jotai";
 import React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { convertFileSrc, isTauri } from "@tauri-apps/api/core";
 import * as THREE from "three";
 import { DDSLoader } from "three/examples/jsm/loaders/DDSLoader.js";
 import { TGALoader } from "three/examples/jsm/loaders/TGALoader.js";
@@ -72,6 +72,12 @@ export default function EffectMeshRenderer() {
 
     const sanitized = textureName.trim();
     if (!sanitized) {
+      setTexture(null);
+      setTextureStatus({ status: "idle", textureName: null });
+      return;
+    }
+
+    if (!isTauri()) {
       setTexture(null);
       setTextureStatus({ status: "idle", textureName: null });
       return;
