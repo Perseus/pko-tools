@@ -102,6 +102,7 @@ describe("effect rendering helpers", () => {
     const candidates = resolveTextureCandidates("spark", "/project");
     expect(candidates).toContain("/project/texture/spark.png");
     expect(candidates).toContain("/project/texture/skill/spark.dds");
+    expect(candidates).toContain("/project/texture/lit/spark.tga");
   });
 
   it("uses frame times when available", () => {

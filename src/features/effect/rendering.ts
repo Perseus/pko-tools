@@ -80,7 +80,14 @@ export function resolveTextureCandidates(textureName: string, projectDirectory: 
   const nameCandidates = hasExtension
     ? [sanitized]
     : [sanitized, `${sanitized}.png`, `${sanitized}.dds`, `${sanitized}.tga`, `${sanitized}.bmp`];
-  const directories = ["texture", "texture/effect", "texture/skill", "effect"];
+  const directories = [
+    "texture",
+    "texture/effect",
+    "texture/skill",
+    "texture/lit",
+    "texture/sceneffect",
+    "effect",
+  ];
 
   return directories.flatMap((dir) =>
     nameCandidates.map((name) => `${projectDirectory}/${dir}/${name}`)
