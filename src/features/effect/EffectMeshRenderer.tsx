@@ -100,7 +100,7 @@ export default function EffectMeshRenderer() {
       }
 
       const candidate = candidates[index];
-      const url = convertFileSrc(candidate);
+      const url = convertFileSrc(candidate, "asset");
       const extension = candidate.split(".").pop()?.toLowerCase();
       const loaderForExtension =
         extension === "tga"
