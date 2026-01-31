@@ -45,6 +45,13 @@ pub async fn save_effect(
     Ok(())
 }
 
+#[tauri::command]
+pub async fn load_texture_bytes(path: String) -> Result<String, String> {
+    let bytes = std::fs::read(&path)
+        .map_err(|e| format!("Failed to read texture {}: {}", path, e))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
+}
+
 fn effect_file_path(project_dir: &std::path::Path, effect_name: &str) -> std::path::PathBuf {
     let file_name = if effect_name.ends_with(".eff") {
         effect_name.to_string()

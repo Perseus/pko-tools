@@ -11,7 +11,7 @@ import { useAtom, useAtomValue } from "jotai";
 import React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { invoke } from "@tauri-apps/api/core";
 import * as THREE from "three";
 import { DDSLoader } from "three/examples/jsm/loaders/DDSLoader.js";
 import { TGALoader } from "three/examples/jsm/loaders/TGALoader.js";
@@ -92,7 +92,7 @@ export default function EffectMeshRenderer() {
     const loader = new THREE.TextureLoader();
     setTextureStatus({ status: "loading", textureName: sanitized });
 
-    const tryLoad = (index: number) => {
+    const tryLoad = async (index: number) => {
       if (index >= candidates.length) {
         setTexture(null);
         setTextureStatus({ status: "error", textureName: sanitized });
@@ -100,38 +100,45 @@ export default function EffectMeshRenderer() {
       }
 
       const candidate = candidates[index];
-      const url = convertFileSrc(candidate, "asset");
       const extension = candidate.split(".").pop()?.toLowerCase();
-      const loaderForExtension =
-        extension === "tga"
-          ? new TGALoader()
-          : extension === "dds"
-          ? new DDSLoader()
-          : loader;
-
-      loaderForExtension.load(
-        url,
-        (loaded) => {
-          if (!isActive) {
-            loaded.dispose();
-            return;
-          }
-          textureRef.current?.dispose();
-          loaded.wrapS = THREE.RepeatWrapping;
-          loaded.wrapT = THREE.RepeatWrapping;
-          loaded.needsUpdate = true;
-          textureRef.current = loaded;
-          setTexture(loaded);
-          setTextureStatus({ status: "loaded", textureName: sanitized });
-        },
-        undefined,
-        () => {
-          tryLoad(index + 1);
+      try {
+        const base64 = await invoke<string>("load_texture_bytes", { path: candidate });
+        if (!isActive) {
+          return;
         }
-      );
+
+        const binary = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
+        let loaded: THREE.Texture | null = null;
+
+        if (extension === "tga") {
+          loaded = new TGALoader().parse(binary.buffer) as unknown as THREE.Texture;
+        } else if (extension === "dds") {
+          loaded = new DDSLoader().parse(binary.buffer, true) as unknown as THREE.Texture;
+        } else {
+          const mime = extension === "bmp" ? "image/bmp" : "image/png";
+          const url = `data:${mime};base64,${base64}`;
+          loaded = await new Promise((resolve, reject) => {
+            loader.load(url, resolve, undefined, reject);
+          });
+        }
+
+        if (!loaded) {
+          throw new Error("Failed to parse texture");
+        }
+
+        textureRef.current?.dispose();
+        loaded.wrapS = THREE.RepeatWrapping;
+        loaded.wrapT = THREE.RepeatWrapping;
+        loaded.needsUpdate = true;
+        textureRef.current = loaded;
+        setTexture(loaded);
+        setTextureStatus({ status: "loaded", textureName: sanitized });
+      } catch (error) {
+        tryLoad(index + 1);
+      }
     };
 
-    tryLoad(0);
+    void tryLoad(0);
 
     return () => {
       isActive = false;
