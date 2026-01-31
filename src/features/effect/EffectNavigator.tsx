@@ -4,6 +4,7 @@ import { listEffects, loadEffect } from "@/commands/effect";
 import {
   effectDataAtom,
   effectDirtyAtom,
+  effectOriginalAtom,
   selectedEffectAtom,
   selectedFrameIndexAtom,
   selectedSubEffectIndexAtom,
@@ -19,6 +20,7 @@ export default function EffectNavigator() {
   const [, setSelectedEffect] = useAtom(selectedEffectAtom);
   const [, setEffectData] = useAtom(effectDataAtom);
   const [isDirty, setDirty] = useAtom(effectDirtyAtom);
+  const [, setOriginalEffect] = useAtom(effectOriginalAtom);
   const [, setSelectedSubEffect] = useAtom(selectedSubEffectIndexAtom);
   const [, setSelectedFrame] = useAtom(selectedFrameIndexAtom);
   const [effectFiles, setEffectFiles] = useState<string[]>([]);
@@ -70,6 +72,7 @@ export default function EffectNavigator() {
     setSelectedEffect(effectName);
     const data = await loadEffect(currentProject.id, effectName);
     setEffectData(data);
+    setOriginalEffect(structuredClone(data));
     setSelectedSubEffect(data.subEffects.length > 0 ? 0 : null);
     setSelectedFrame(0);
     setDirty(false);

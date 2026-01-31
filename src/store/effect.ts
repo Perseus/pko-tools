@@ -29,3 +29,4 @@ export const effectTextureStatusAtom = atom<EffectTextureStatus>({
 });
 export const effectTextureReloadAtom = atom(0);
 export const effectDirtyAtom = atom(false);
+export const effectOriginalAtom = atom<EffectFile | null>(null);

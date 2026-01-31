@@ -1,7 +1,12 @@
 import { saveEffect } from "@/commands/effect";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { effectDataAtom, effectDirtyAtom, selectedEffectAtom } from "@/store/effect";
+import {
+  effectDataAtom,
+  effectDirtyAtom,
+  effectOriginalAtom,
+  selectedEffectAtom,
+} from "@/store/effect";
 import { currentProjectAtom } from "@/store/project";
 import { useAtom, useAtomValue } from "jotai";
 import { Save } from "lucide-react";
@@ -14,10 +19,11 @@ import PlaybackControls from "@/features/effect/PlaybackControls";
 import SubEffectProperties from "@/features/effect/SubEffectProperties";
 
 export default function EffectWorkbench() {
-  const effectData = useAtomValue(effectDataAtom);
+  const [effectData, setEffectData] = useAtom(effectDataAtom);
   const selectedEffect = useAtomValue(selectedEffectAtom);
   const currentProject = useAtomValue(currentProjectAtom);
   const [isDirty, setDirty] = useAtom(effectDirtyAtom);
+  const [originalEffect] = useAtom(effectOriginalAtom);
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
 
@@ -43,6 +49,19 @@ export default function EffectWorkbench() {
       setIsSaving(false);
     }
   }, [currentProject, effectData, selectedEffect, setDirty, toast]);
+
+  const handleDiscard = useCallback(() => {
+    if (!originalEffect) {
+      return;
+    }
+
+    setEffectData(structuredClone(originalEffect));
+    setDirty(false);
+    toast({
+      title: "Changes discarded",
+      description: selectedEffect ?? "",
+    });
+  }, [originalEffect, selectedEffect, setDirty, setEffectData, toast]);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -79,15 +98,25 @@ export default function EffectWorkbench() {
             <div className="mt-1 text-xs text-amber-500">Unsaved changes</div>
           )}
         </div>
-        <Button
-          size="sm"
-          variant={isDirty ? "default" : "secondary"}
-          disabled={!effectData || !selectedEffect || !currentProject || isSaving}
-          onClick={handleSave}
-        >
-          <Save />
-          {isSaving ? "Saving" : isDirty ? "Save Changes" : "Save"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!isDirty || !originalEffect || isSaving}
+            onClick={handleDiscard}
+          >
+            Discard
+          </Button>
+          <Button
+            size="sm"
+            variant={isDirty ? "default" : "secondary"}
+            disabled={!effectData || !selectedEffect || !currentProject || isSaving}
+            onClick={handleSave}
+          >
+            <Save />
+            {isSaving ? "Saving" : isDirty ? "Save Changes" : "Save"}
+          </Button>
+        </div>
       </div>
       <div className="grid flex-1 grid-cols-1 gap-4 xl:grid-cols-[280px_minmax(0,1fr)_320px]">
         <SubEffectList />

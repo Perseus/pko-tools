@@ -6,6 +6,7 @@ import KeyframeProperties from "@/features/effect/KeyframeProperties";
 import {
   effectDataAtom,
   effectDirtyAtom,
+  effectOriginalAtom,
   selectedFrameIndexAtom,
   selectedSubEffectIndexAtom,
 } from "@/store/effect";
@@ -84,6 +85,7 @@ describe("KeyframeProperties", () => {
     store.set(selectedSubEffectIndexAtom, 0);
     store.set(selectedFrameIndexAtom, 0);
     store.set(effectDirtyAtom, false);
+    store.set(effectOriginalAtom, createEffectFixture());
 
     render(
       <Provider store={store}>

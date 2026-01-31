@@ -3,7 +3,12 @@ import userEvent from "@testing-library/user-event";
 import { Provider, createStore } from "jotai";
 import React from "react";
 import SubEffectProperties from "@/features/effect/SubEffectProperties";
-import { effectDataAtom, effectDirtyAtom, selectedSubEffectIndexAtom } from "@/store/effect";
+import {
+  effectDataAtom,
+  effectDirtyAtom,
+  effectOriginalAtom,
+  selectedSubEffectIndexAtom,
+} from "@/store/effect";
 import { EffectFile } from "@/types/effect";
 import { describe, expect, it } from "vitest";
 
@@ -78,6 +83,7 @@ describe("SubEffectProperties", () => {
     store.set(effectDataAtom, createEffectFixture());
     store.set(selectedSubEffectIndexAtom, 0);
     store.set(effectDirtyAtom, false);
+    store.set(effectOriginalAtom, createEffectFixture());
 
     render(
       <Provider store={store}>

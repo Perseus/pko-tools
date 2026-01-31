@@ -8,6 +8,7 @@ import { currentProjectAtom } from "@/store/project";
 import {
   effectDataAtom,
   effectDirtyAtom,
+  effectOriginalAtom,
   selectedEffectAtom,
   selectedFrameIndexAtom,
   selectedSubEffectIndexAtom,
@@ -84,6 +85,7 @@ describe("EffectNavigator", () => {
       projectDirectory: "/tmp",
     });
     store.set(effectDirtyAtom, true);
+    store.set(effectOriginalAtom, effectFixture);
 
     render(
       <Provider store={store}>
@@ -105,6 +107,7 @@ describe("EffectNavigator", () => {
       projectDirectory: "/tmp",
     });
     store.set(effectDirtyAtom, true);
+    store.set(effectOriginalAtom, effectFixture);
 
     render(
       <Provider store={store}>
@@ -127,5 +130,6 @@ describe("EffectNavigator", () => {
     expect(store.get(selectedSubEffectIndexAtom)).toBe(0);
     expect(store.get(selectedFrameIndexAtom)).toBe(0);
     expect(store.get(effectDirtyAtom)).toBe(false);
+    expect(store.get(effectOriginalAtom)).toEqual(effectFixture);
   });
 });
