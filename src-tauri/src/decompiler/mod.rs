@@ -35,7 +35,7 @@ use std::path::Path;
 ///
 /// # Example
 /// ```no_run
-/// use pko_tools::decompiler::{decompile_to_tsv, GameVersion, StructureBuilder};
+/// use pko_tools_lib::decompiler::{decompile_to_tsv, GameVersion, StructureBuilder};
 ///
 /// let structure = StructureBuilder::new("CharacterInfo")
 ///     .pad(4)
@@ -152,7 +152,7 @@ pub fn decompile_to_tsv(
 ///
 /// # Example
 /// ```no_run
-/// use pko_tools::decompiler::{decompile_to_tsv_auto, create_character_info_v1};
+/// use pko_tools_lib::decompiler::{decompile_to_tsv_auto, create_character_info_v1};
 ///
 /// let structure = create_character_info_v1();
 /// decompile_to_tsv_auto(
