@@ -24,10 +24,12 @@
       "capabilities": [],
       "assetProtocol": {
         "enable": true,
-        "scope": [
-          "$HOME/**",
-          "/Users/anirudh/gamedev/pko-tools/**"
-        ]
+        "scope": {
+          "allow": [
+            "$HOME/**",
+            "/Users/anirudh/gamedev/pko-tools/**"
+          ]
+        }
       }
     }
   },
