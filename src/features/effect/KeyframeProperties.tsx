@@ -1,6 +1,7 @@
 import { Input } from "@/components/ui/input";
 import { effectDataAtom, selectedFrameIndexAtom, selectedSubEffectIndexAtom } from "@/store/effect";
 import { useAtom } from "jotai";
+import React from "react";
 import { useMemo } from "react";
 
 function formatVector(values: number[], precision = 2) {
@@ -99,6 +100,7 @@ export default function KeyframeProperties() {
                   key={`pos-${index}`}
                   type="number"
                   step="0.01"
+                  aria-label={`position-${index}`}
                   value={value}
                   onChange={(event) =>
                     handleVectorChange("framePositions", frameData.position, index, event.target.value)
@@ -115,6 +117,7 @@ export default function KeyframeProperties() {
                   key={`rot-${index}`}
                   type="number"
                   step="0.01"
+                  aria-label={`rotation-${index}`}
                   value={value}
                   onChange={(event) =>
                     handleVectorChange("frameAngles", frameData.angle, index, event.target.value)
@@ -131,6 +134,7 @@ export default function KeyframeProperties() {
                   key={`scale-${index}`}
                   type="number"
                   step="0.01"
+                  aria-label={`scale-${index}`}
                   value={value}
                   onChange={(event) =>
                     handleVectorChange("frameSizes", frameData.size, index, event.target.value)
@@ -149,6 +153,7 @@ export default function KeyframeProperties() {
                   step="0.01"
                   min={0}
                   max={1}
+                  aria-label={`color-${index}`}
                   value={value}
                   onChange={(event) =>
                     handleVectorChange("frameColors", frameData.color, index, event.target.value)

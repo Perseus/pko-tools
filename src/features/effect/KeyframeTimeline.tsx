@@ -5,6 +5,7 @@ import {
   selectedSubEffectIndexAtom,
 } from "@/store/effect";
 import { useAtom } from "jotai";
+import React from "react";
 import { useMemo } from "react";
 
 export default function KeyframeTimeline() {
@@ -49,6 +50,7 @@ export default function KeyframeTimeline() {
           min={0}
           max={Math.max(frameCount - 1, 0)}
           value={safeFrame}
+          aria-label="timeline-scrubber"
           onChange={(event) => {
             const nextFrame = Number(event.target.value);
             setSelectedFrame(nextFrame);
