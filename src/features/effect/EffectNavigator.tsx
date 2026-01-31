@@ -11,17 +11,19 @@ import {
 import { currentProjectAtom } from "@/store/project";
 import { Input } from "@/components/ui/input";
 import { useAtom, useAtomValue } from "jotai";
+import React from "react";
 import { useEffect, useMemo, useState } from "react";
 
 export default function EffectNavigator() {
   const currentProject = useAtomValue(currentProjectAtom);
   const [, setSelectedEffect] = useAtom(selectedEffectAtom);
   const [, setEffectData] = useAtom(effectDataAtom);
-  const [, setDirty] = useAtom(effectDirtyAtom);
+  const [isDirty, setDirty] = useAtom(effectDirtyAtom);
   const [, setSelectedSubEffect] = useAtom(selectedSubEffectIndexAtom);
   const [, setSelectedFrame] = useAtom(selectedFrameIndexAtom);
   const [effectFiles, setEffectFiles] = useState<string[]>([]);
   const [query, setQuery] = useState("");
+  const [pendingEffect, setPendingEffect] = useState<string | null>(null);
 
   useEffect(() => {
     async function fetchEffects() {
@@ -52,12 +54,38 @@ export default function EffectNavigator() {
       return;
     }
 
+    if (isDirty) {
+      setPendingEffect(effectName);
+      return;
+    }
+
+    await loadEffectData(effectName);
+  }
+
+  async function loadEffectData(effectName: string) {
+    if (!currentProject) {
+      return;
+    }
+
     setSelectedEffect(effectName);
     const data = await loadEffect(currentProject.id, effectName);
     setEffectData(data);
     setSelectedSubEffect(data.subEffects.length > 0 ? 0 : null);
     setSelectedFrame(0);
     setDirty(false);
+    setPendingEffect(null);
+  }
+
+  async function confirmDiscard() {
+    if (!pendingEffect) {
+      return;
+    }
+
+    await loadEffectData(pendingEffect);
+  }
+
+  function cancelDiscard() {
+    setPendingEffect(null);
   }
 
   return (
@@ -86,6 +114,22 @@ export default function EffectNavigator() {
             ))
           )}
         </div>
+        {pendingEffect && (
+          <div className="mt-3 rounded-lg border border-border bg-background/80 p-3 text-xs">
+            <div className="font-semibold text-foreground">Discard changes?</div>
+            <div className="mt-1 text-muted-foreground">
+              You have unsaved edits. Switch to {pendingEffect} anyway?
+            </div>
+            <div className="mt-3 flex gap-2">
+              <Button size="sm" variant="destructive" onClick={confirmDiscard}>
+                Discard
+              </Button>
+              <Button size="sm" variant="outline" onClick={cancelDiscard}>
+                Cancel
+              </Button>
+            </div>
+          </div>
+        )}
       </SidebarContent>
     </SidebarHeader>
   );

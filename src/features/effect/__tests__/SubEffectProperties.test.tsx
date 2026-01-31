@@ -111,4 +111,5 @@ describe("SubEffectProperties", () => {
     const updated = store.get(effectDataAtom);
     expect(updated?.subEffects[0].billboard).toBe(true);
   });
+
 });
