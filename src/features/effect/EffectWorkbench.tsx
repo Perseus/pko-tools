@@ -5,7 +5,7 @@ import { effectDataAtom, effectDirtyAtom, selectedEffectAtom } from "@/store/eff
 import { currentProjectAtom } from "@/store/project";
 import { useAtom, useAtomValue } from "jotai";
 import { Save } from "lucide-react";
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import EffectViewport from "@/features/effect/EffectViewport";
 import SubEffectList from "@/features/effect/SubEffectList";
 import KeyframeTimeline from "@/features/effect/KeyframeTimeline";
@@ -21,7 +21,7 @@ export default function EffectWorkbench() {
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
 
-  async function handleSave() {
+  const handleSave = useCallback(async () => {
     if (!effectData || !currentProject || !selectedEffect) {
       return;
     }
@@ -42,7 +42,28 @@ export default function EffectWorkbench() {
     } finally {
       setIsSaving(false);
     }
-  }
+  }, [currentProject, effectData, selectedEffect, setDirty, toast]);
+
+  useEffect(() => {
+    function onKeyDown(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        event.preventDefault();
+        if (!isDirty) {
+          toast({
+            title: "No changes to save",
+            description: selectedEffect ?? "",
+          });
+          return;
+        }
+        if (!isSaving) {
+          handleSave();
+        }
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [handleSave, isDirty, isSaving, selectedEffect, toast]);
 
   return (
     <div className="flex h-full w-full flex-col gap-4 p-4">
