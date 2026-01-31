@@ -1,15 +1,18 @@
 /// <reference types="@react-three/fiber" />
 import { effectDataAtom, selectedFrameIndexAtom, selectedSubEffectIndexAtom } from "@/store/effect";
+import { currentProjectAtom } from "@/store/project";
 import { useAtomValue } from "jotai";
 import React from "react";
-import { useMemo, useRef } from "react";
-import { useFrame, useThree } from "@react-three/fiber";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useFrame } from "@react-three/fiber";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import * as THREE from "three";
 
 const DEFAULT_COLOR = new THREE.Color("#f4f0e6");
 
 export default function EffectMeshRenderer() {
   const effectData = useAtomValue(effectDataAtom);
+  const currentProject = useAtomValue(currentProjectAtom);
   const selectedSubEffectIndex = useAtomValue(selectedSubEffectIndexAtom);
   const selectedFrameIndex = useAtomValue(selectedFrameIndexAtom);
 
@@ -45,7 +48,8 @@ export default function EffectMeshRenderer() {
   const materialColor = new THREE.Color(color[0], color[1], color[2]);
   const opacity = Math.min(Math.max(color[3], 0), 1);
   const meshRef = useRef<THREE.Mesh>(null);
-  const { camera } = useThree();
+  const [texture, setTexture] = useState<THREE.Texture | null>(null);
+  const textureRef = useRef<THREE.Texture | null>(null);
 
   const geometryType = (() => {
     switch (subEffect.effectType) {
@@ -72,9 +76,73 @@ export default function EffectMeshRenderer() {
     return THREE.NormalBlending;
   }, [subEffect.srcBlend, subEffect.destBlend]);
 
-  useFrame(() => {
+  const textureName = useMemo(() => {
+    if (subEffect.frameTexNames.length > 0) {
+      return subEffect.frameTexNames[selectedFrameIndex] ?? subEffect.frameTexNames[0];
+    }
+    return subEffect.texName;
+  }, [selectedFrameIndex, subEffect.frameTexNames, subEffect.texName]);
+
+  useEffect(() => {
+    if (!textureName || !currentProject) {
+      setTexture(null);
+      return;
+    }
+
+    const sanitized = textureName.trim();
+    if (!sanitized) {
+      setTexture(null);
+      return;
+    }
+
+    const candidates = [
+      `${currentProject.projectDirectory}/texture/${sanitized}`,
+      `${currentProject.projectDirectory}/texture/effect/${sanitized}`,
+      `${currentProject.projectDirectory}/effect/${sanitized}`,
+    ];
+
+    let isActive = true;
+    const loader = new THREE.TextureLoader();
+
+    const tryLoad = (index: number) => {
+      if (index >= candidates.length) {
+        setTexture(null);
+        return;
+      }
+
+      const url = convertFileSrc(candidates[index]);
+      loader.load(
+        url,
+        (loaded) => {
+          if (!isActive) {
+            loaded.dispose();
+            return;
+          }
+          textureRef.current?.dispose();
+          loaded.wrapS = THREE.RepeatWrapping;
+          loaded.wrapT = THREE.RepeatWrapping;
+          loaded.needsUpdate = true;
+          textureRef.current = loaded;
+          setTexture(loaded);
+        },
+        undefined,
+        () => {
+          tryLoad(index + 1);
+        }
+      );
+    };
+
+    tryLoad(0);
+
+    return () => {
+      isActive = false;
+      textureRef.current?.dispose();
+    };
+  }, [textureName, currentProject]);
+
+  useFrame((state: { camera: THREE.Camera }) => {
     if (subEffect.billboard || subEffect.rotaBoard) {
-      meshRef.current?.lookAt(camera.position);
+      meshRef.current?.lookAt(state.camera.position);
     }
   });
 
@@ -103,6 +171,8 @@ export default function EffectMeshRenderer() {
           roughness={0.35}
           blending={blendingMode}
           depthWrite={false}
+          map={texture ?? undefined}
+          alphaTest={0.1}
         />
       </mesh>
     </group>
