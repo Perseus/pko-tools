@@ -7,7 +7,7 @@ use crate::d3d::D3DBlend;
 
 const FIXED_NAME_LEN: usize = 32;
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EffFile {
     pub version: u32,
@@ -23,7 +23,7 @@ pub struct EffFile {
     pub sub_effects: Vec<SubEffect>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SubEffect {
     pub effect_name: String,
@@ -64,7 +64,7 @@ pub struct SubEffect {
     pub rota_board: bool,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CylinderParams {
     pub segments: i32,
@@ -201,7 +201,6 @@ impl SubEffect {
                 frame_tex_names.push(read_fixed_string(reader)?);
             }
             let frame_tex_time2 = read_f32(reader)?;
-            let _frame_tex_time_duplicate = read_f32(reader)?;
 
             (
                 frame_tex_count,
@@ -343,7 +342,6 @@ impl SubEffect {
             for name in &self.frame_tex_names {
                 write_fixed_string(writer, name)?;
             }
-            write_f32(writer, self.frame_tex_time2)?;
             write_f32(writer, self.frame_tex_time2)?;
         }
 

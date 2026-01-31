@@ -226,7 +226,7 @@ impl TryFrom<u32> for D3DBlend {
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
-            1 => Ok(D3DBlend::Zero),
+            0 | 1 => Ok(D3DBlend::Zero),
             2 => Ok(D3DBlend::One),
             3 => Ok(D3DBlend::SrcColor),
             4 => Ok(D3DBlend::InvSrcColor),
