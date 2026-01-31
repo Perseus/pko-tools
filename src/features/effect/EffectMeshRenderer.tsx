@@ -13,6 +13,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import * as THREE from "three";
+import {
+  resolveBlendMode,
+  resolveFrameData,
+  resolveGeometryType,
+  resolveTextureCandidates,
+  resolveTextureName,
+} from "@/features/effect/rendering";
 
 const DEFAULT_COLOR = new THREE.Color("#f4f0e6");
 
@@ -24,29 +31,10 @@ export default function EffectMeshRenderer() {
   const selectedSubEffectIndex = useAtomValue(selectedSubEffectIndexAtom);
   const selectedFrameIndex = useAtomValue(selectedFrameIndexAtom);
 
-  const frameData = useMemo(() => {
-    if (!effectData || selectedSubEffectIndex === null) {
-      return null;
-    }
-
-    const subEffect = effectData.subEffects[selectedSubEffectIndex];
-    if (!subEffect) {
-      return null;
-    }
-
-    const frameIndex = Math.min(
-      Math.max(selectedFrameIndex, 0),
-      Math.max(subEffect.frameCount - 1, 0)
-    );
-
-    return {
-      subEffect,
-      size: subEffect.frameSizes[frameIndex] ?? [1, 1, 1],
-      angle: subEffect.frameAngles[frameIndex] ?? [0, 0, 0],
-      position: subEffect.framePositions[frameIndex] ?? [0, 0, 0],
-      color: subEffect.frameColors[frameIndex] ?? [1, 1, 1, 1],
-    };
-  }, [effectData, selectedSubEffectIndex, selectedFrameIndex]);
+  const frameData = useMemo(
+    () => resolveFrameData(effectData, selectedSubEffectIndex, selectedFrameIndex),
+    [effectData, selectedSubEffectIndex, selectedFrameIndex]
+  );
 
   if (!frameData) {
     return null;
@@ -59,37 +47,18 @@ export default function EffectMeshRenderer() {
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
   const textureRef = useRef<THREE.Texture | null>(null);
 
-  const geometryType = (() => {
-    switch (subEffect.effectType) {
-      case 1:
-        return "plane";
-      case 2:
-        return "ring";
-      case 3:
-        return "box";
-      case 4:
-        return "model";
-      default:
-        return "spark";
-    }
-  })();
+  const geometryType = resolveGeometryType(subEffect.effectType);
 
   const blendingMode = useMemo(() => {
-    if (subEffect.srcBlend === 5 && subEffect.destBlend === 6) {
-      return THREE.NormalBlending;
-    }
-    if (subEffect.srcBlend === 2 || subEffect.destBlend === 2) {
-      return THREE.AdditiveBlending;
-    }
-    return THREE.NormalBlending;
+    return resolveBlendMode(subEffect.srcBlend, subEffect.destBlend) === "additive"
+      ? THREE.AdditiveBlending
+      : THREE.NormalBlending;
   }, [subEffect.srcBlend, subEffect.destBlend]);
 
-  const textureName = useMemo(() => {
-    if (subEffect.frameTexNames.length > 0) {
-      return subEffect.frameTexNames[selectedFrameIndex] ?? subEffect.frameTexNames[0];
-    }
-    return subEffect.texName;
-  }, [selectedFrameIndex, subEffect.frameTexNames, subEffect.texName]);
+  const textureName = useMemo(
+    () => resolveTextureName(subEffect, selectedFrameIndex),
+    [selectedFrameIndex, subEffect]
+  );
 
   useEffect(() => {
     if (!textureName || !currentProject) {
@@ -105,19 +74,7 @@ export default function EffectMeshRenderer() {
       return;
     }
 
-    const hasExtension = sanitized.includes(".");
-    const nameCandidates = hasExtension
-      ? [sanitized]
-      : [sanitized, `${sanitized}.png`, `${sanitized}.dds`, `${sanitized}.tga`, `${sanitized}.bmp`];
-    const directories = [
-      "texture",
-      "texture/effect",
-      "texture/skill",
-      "effect",
-    ];
-    const candidates = directories.flatMap((dir) =>
-      nameCandidates.map((name) => `${currentProject.projectDirectory}/${dir}/${name}`)
-    );
+    const candidates = resolveTextureCandidates(sanitized, currentProject.projectDirectory);
 
     let isActive = true;
     const loader = new THREE.TextureLoader();
