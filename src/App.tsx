@@ -13,6 +13,7 @@ import { currentProjectAtom, projectListAtom } from "./store/project";
 import { useEffect } from "react";
 import StatusBar from "./components/StatusBar/StatusBar";
 import CharacterPage from "./pages/characters";
+import EffectsPage from "./pages/effects";
 import WorkspaceNavigator from "./components/WorkspaceNavigator/WorkspaceNavigator";
 import ProjectCreator from "./pages/project-creator/ProjectCreator";
 import { Toaster } from "./components/ui/toaster";
@@ -49,6 +50,7 @@ function App() {
             <Route path="/" element={<div />} />
             <Route path="/project-creator" element={<ProjectCreator />} />
             <Route path="/characters" element={<CharacterPage/>} />
+            <Route path="/effects" element={<EffectsPage />} />
           </Routes>
           <WorkspaceNavigator />
         </main>

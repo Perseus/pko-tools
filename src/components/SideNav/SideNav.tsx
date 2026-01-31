@@ -43,6 +43,11 @@ export default function SideNav() {
             url: "/characters",
             isActive: pathname.startsWith("/characters"),
           },
+          {
+            title: "Effects",
+            url: "/effects",
+            isActive: pathname.startsWith("/effects"),
+          },
         ],
       },
     ],
