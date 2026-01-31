@@ -35,30 +35,31 @@ export default function EffectMeshRenderer() {
     () => resolveFrameData(effectData, selectedSubEffectIndex, selectedFrameIndex),
     [effectData, selectedSubEffectIndex, selectedFrameIndex]
   );
-
-  if (!frameData) {
-    return null;
-  }
-
-  const { subEffect, size, angle, position, color } = frameData;
-  const materialColor = new THREE.Color(color[0], color[1], color[2]);
-  const opacity = Math.min(Math.max(color[3], 0), 1);
   const meshRef = useRef<THREE.Mesh>(null);
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
   const textureRef = useRef<THREE.Texture | null>(null);
 
-  const geometryType = resolveGeometryType(subEffect.effectType);
+  const subEffect = frameData?.subEffect ?? null;
+
+  const geometryType = subEffect ? resolveGeometryType(subEffect.effectType) : "spark";
 
   const blendingMode = useMemo(() => {
+    if (!subEffect) {
+      return THREE.NormalBlending;
+    }
+
     return resolveBlendMode(subEffect.srcBlend, subEffect.destBlend) === "additive"
       ? THREE.AdditiveBlending
       : THREE.NormalBlending;
-  }, [subEffect.srcBlend, subEffect.destBlend]);
+  }, [subEffect]);
 
-  const textureName = useMemo(
-    () => resolveTextureName(subEffect, selectedFrameIndex),
-    [selectedFrameIndex, subEffect]
-  );
+  const textureName = useMemo(() => {
+    if (!subEffect) {
+      return "";
+    }
+
+    return resolveTextureName(subEffect, selectedFrameIndex);
+  }, [selectedFrameIndex, subEffect]);
 
   useEffect(() => {
     if (!textureName || !currentProject) {
@@ -119,10 +120,18 @@ export default function EffectMeshRenderer() {
   }, [textureName, currentProject, reloadToken, setTextureStatus]);
 
   useFrame((state: { camera: THREE.Camera }) => {
-    if (subEffect.billboard || subEffect.rotaBoard) {
+    if (subEffect?.billboard || subEffect?.rotaBoard) {
       meshRef.current?.lookAt(state.camera.position);
     }
   });
+
+  if (!frameData || !subEffect) {
+    return null;
+  }
+
+  const { size, angle, position, color } = frameData;
+  const materialColor = new THREE.Color(color[0], color[1], color[2]);
+  const opacity = Math.min(Math.max(color[3], 0), 1);
 
   return (
     <group>
