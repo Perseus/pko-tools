@@ -1,7 +1,12 @@
 /// <reference types="@react-three/fiber" />
-import { effectDataAtom, selectedFrameIndexAtom, selectedSubEffectIndexAtom } from "@/store/effect";
+import {
+  effectDataAtom,
+  effectTextureStatusAtom,
+  selectedFrameIndexAtom,
+  selectedSubEffectIndexAtom,
+} from "@/store/effect";
 import { currentProjectAtom } from "@/store/project";
-import { useAtomValue } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
@@ -13,6 +18,7 @@ const DEFAULT_COLOR = new THREE.Color("#f4f0e6");
 export default function EffectMeshRenderer() {
   const effectData = useAtomValue(effectDataAtom);
   const currentProject = useAtomValue(currentProjectAtom);
+  const [, setTextureStatus] = useAtom(effectTextureStatusAtom);
   const selectedSubEffectIndex = useAtomValue(selectedSubEffectIndexAtom);
   const selectedFrameIndex = useAtomValue(selectedFrameIndexAtom);
 
@@ -86,27 +92,39 @@ export default function EffectMeshRenderer() {
   useEffect(() => {
     if (!textureName || !currentProject) {
       setTexture(null);
+      setTextureStatus({ status: "idle", textureName: null });
       return;
     }
 
     const sanitized = textureName.trim();
     if (!sanitized) {
       setTexture(null);
+      setTextureStatus({ status: "idle", textureName: null });
       return;
     }
 
-    const candidates = [
-      `${currentProject.projectDirectory}/texture/${sanitized}`,
-      `${currentProject.projectDirectory}/texture/effect/${sanitized}`,
-      `${currentProject.projectDirectory}/effect/${sanitized}`,
+    const hasExtension = sanitized.includes(".");
+    const nameCandidates = hasExtension
+      ? [sanitized]
+      : [sanitized, `${sanitized}.png`, `${sanitized}.dds`, `${sanitized}.tga`, `${sanitized}.bmp`];
+    const directories = [
+      "texture",
+      "texture/effect",
+      "texture/skill",
+      "effect",
     ];
+    const candidates = directories.flatMap((dir) =>
+      nameCandidates.map((name) => `${currentProject.projectDirectory}/${dir}/${name}`)
+    );
 
     let isActive = true;
     const loader = new THREE.TextureLoader();
+    setTextureStatus({ status: "loading", textureName: sanitized });
 
     const tryLoad = (index: number) => {
       if (index >= candidates.length) {
         setTexture(null);
+        setTextureStatus({ status: "error", textureName: sanitized });
         return;
       }
 
@@ -124,6 +142,7 @@ export default function EffectMeshRenderer() {
           loaded.needsUpdate = true;
           textureRef.current = loaded;
           setTexture(loaded);
+          setTextureStatus({ status: "loaded", textureName: sanitized });
         },
         undefined,
         () => {
@@ -138,7 +157,7 @@ export default function EffectMeshRenderer() {
       isActive = false;
       textureRef.current?.dispose();
     };
-  }, [textureName, currentProject]);
+  }, [textureName, currentProject, setTextureStatus]);
 
   useFrame((state: { camera: THREE.Camera }) => {
     if (subEffect.billboard || subEffect.rotaBoard) {

@@ -3,11 +3,12 @@ import { OrbitControls } from "@react-three/drei";
 import React from "react";
 import EffectMeshRenderer from "@/features/effect/EffectMeshRenderer";
 import EffectPlaybackDriver from "@/features/effect/EffectPlaybackDriver";
-import { effectDataAtom } from "@/store/effect";
+import { effectDataAtom, effectTextureStatusAtom } from "@/store/effect";
 import { useAtomValue } from "jotai";
 
 export default function EffectViewport() {
   const effectData = useAtomValue(effectDataAtom);
+  const textureStatus = useAtomValue(effectTextureStatusAtom);
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-xl border border-border bg-muted/40">
@@ -22,6 +23,11 @@ export default function EffectViewport() {
       {!effectData && (
         <div className="absolute inset-0 flex items-center justify-center bg-background/70 text-sm text-muted-foreground">
           Load an effect to preview it here.
+        </div>
+      )}
+      {textureStatus.status === "error" && textureStatus.textureName && (
+        <div className="absolute right-3 top-3 rounded-full border border-destructive/40 bg-destructive/10 px-3 py-1 text-xs text-destructive">
+          Missing texture: {textureStatus.textureName}
         </div>
       )}
     </div>
