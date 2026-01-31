@@ -11,6 +11,7 @@ export default function WorkspaceNavigator() {
           <Route path="/" element={<div></div>} />
           <Route path="/characters" element={<CharacterNavigator/>} />
           <Route path="/effects" element={<EffectNavigator />} />
+          <Route path="*" element={<div />} />
         </Routes>
       </SidebarContent>
     </Sidebar>

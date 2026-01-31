@@ -51,6 +51,7 @@ function App() {
             <Route path="/project-creator" element={<ProjectCreator />} />
             <Route path="/characters" element={<CharacterPage/>} />
             <Route path="/effects" element={<EffectsPage />} />
+            <Route path="*" element={<div />} />
           </Routes>
           <WorkspaceNavigator />
         </main>
