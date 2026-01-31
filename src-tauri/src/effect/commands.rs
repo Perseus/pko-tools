@@ -1,5 +1,7 @@
 use std::str::FromStr;
 
+use base64::Engine;
+
 use crate::projects::project::Project;
 
 use super::{model::EffFile, scan_effects_directory};
@@ -43,6 +45,13 @@ pub async fn save_effect(
         .map_err(|e| format!("Failed to write effect file {}: {}", effect_path.display(), e))?;
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn load_texture_bytes(path: String) -> Result<String, String> {
+    let bytes = std::fs::read(&path)
+        .map_err(|e| format!("Failed to read texture {}: {}", path, e))?;
+    Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
 fn effect_file_path(project_dir: &std::path::Path, effect_name: &str) -> std::path::PathBuf {
