@@ -108,19 +108,31 @@ export default function EffectMeshRenderer() {
         }
 
         const binary = Uint8Array.from(atob(base64), (char) => char.charCodeAt(0));
-        const mime = extension === "png" ? "image/png" : extension === "bmp" ? "image/bmp" : "application/octet-stream";
-        const blobUrl = URL.createObjectURL(new Blob([binary], { type: mime }));
-        const loaderForExtension =
-          extension === "tga"
-            ? new TGALoader()
-            : extension === "dds"
-            ? new DDSLoader()
-            : loader;
+        const arrayBuffer = binary.buffer.slice(binary.byteOffset, binary.byteOffset + binary.byteLength);
+        let loaded: THREE.Texture;
 
-        const loaded = await new Promise<THREE.Texture>((resolve, reject) => {
-          loaderForExtension.load(blobUrl, resolve, undefined, reject);
-        });
-        URL.revokeObjectURL(blobUrl);
+        if (extension === "tga") {
+          loaded = new TGALoader().parse(arrayBuffer) as unknown as THREE.Texture;
+        } else if (extension === "dds") {
+          const dds = new DDSLoader().parse(arrayBuffer, true);
+          const texture = new THREE.CompressedTexture(
+            dds.mipmaps,
+            dds.width,
+            dds.height,
+            dds.format as THREE.CompressedPixelFormat
+          );
+          texture.mipmaps = dds.mipmaps;
+          texture.generateMipmaps = false;
+          texture.needsUpdate = true;
+          texture.minFilter = dds.mipmaps.length > 1 ? THREE.LinearMipmapLinearFilter : THREE.LinearFilter;
+          loaded = texture;
+        } else {
+          const mime = extension === "bmp" ? "image/bmp" : "image/png";
+          const url = `data:${mime};base64,${base64}`;
+          loaded = await new Promise<THREE.Texture>((resolve, reject) => {
+            loader.load(url, resolve, undefined, reject);
+          });
+        }
 
         textureRef.current?.dispose();
         loaded.wrapS = THREE.RepeatWrapping;
