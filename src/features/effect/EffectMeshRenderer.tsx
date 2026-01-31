@@ -13,6 +13,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import * as THREE from "three";
+import { DDSLoader } from "three/examples/jsm/loaders/DDSLoader.js";
+import { TGALoader } from "three/examples/jsm/loaders/TGALoader.js";
 import {
   resolveBlendMode,
   resolveFrameData,
@@ -88,8 +90,17 @@ export default function EffectMeshRenderer() {
         return;
       }
 
-      const url = convertFileSrc(candidates[index]);
-      loader.load(
+      const candidate = candidates[index];
+      const url = convertFileSrc(candidate);
+      const extension = candidate.split(".").pop()?.toLowerCase();
+      const loaderForExtension =
+        extension === "tga"
+          ? new TGALoader()
+          : extension === "dds"
+          ? new DDSLoader()
+          : loader;
+
+      loaderForExtension.load(
         url,
         (loaded) => {
           if (!isActive) {
