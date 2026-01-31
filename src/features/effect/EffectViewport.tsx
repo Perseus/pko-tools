@@ -1,5 +1,6 @@
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
+import React from "react";
 import EffectMeshRenderer from "@/features/effect/EffectMeshRenderer";
 import EffectPlaybackDriver from "@/features/effect/EffectPlaybackDriver";
 import { effectDataAtom } from "@/store/effect";

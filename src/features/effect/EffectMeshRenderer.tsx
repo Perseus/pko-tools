@@ -1,6 +1,9 @@
+/// <reference types="@react-three/fiber" />
 import { effectDataAtom, selectedFrameIndexAtom, selectedSubEffectIndexAtom } from "@/store/effect";
 import { useAtomValue } from "jotai";
-import { useMemo } from "react";
+import React from "react";
+import { useMemo, useRef } from "react";
+import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
 
 const DEFAULT_COLOR = new THREE.Color("#f4f0e6");
@@ -40,7 +43,9 @@ export default function EffectMeshRenderer() {
 
   const { subEffect, size, angle, position, color } = frameData;
   const materialColor = new THREE.Color(color[0], color[1], color[2]);
-  const opacity = color[3];
+  const opacity = Math.min(Math.max(color[3], 0), 1);
+  const meshRef = useRef<THREE.Mesh>(null);
+  const { camera } = useThree();
 
   const geometryType = (() => {
     switch (subEffect.effectType) {
@@ -57,14 +62,33 @@ export default function EffectMeshRenderer() {
     }
   })();
 
+  const blendingMode = useMemo(() => {
+    if (subEffect.srcBlend === 5 && subEffect.destBlend === 6) {
+      return THREE.NormalBlending;
+    }
+    if (subEffect.srcBlend === 2 || subEffect.destBlend === 2) {
+      return THREE.AdditiveBlending;
+    }
+    return THREE.NormalBlending;
+  }, [subEffect.srcBlend, subEffect.destBlend]);
+
+  useFrame(() => {
+    if (subEffect.billboard || subEffect.rotaBoard) {
+      meshRef.current?.lookAt(camera.position);
+    }
+  });
+
   return (
     <group>
       <mesh
+        ref={meshRef}
         position={position}
         rotation={[angle[0], angle[1], angle[2]]}
         scale={[size[0] || 1, size[1] || 1, size[2] || 1]}
       >
-        {geometryType === "plane" && <planeGeometry args={[1.4, 1.4]} />}
+        {(geometryType === "plane" || subEffect.billboard || subEffect.rotaBoard) && (
+          <planeGeometry args={[1.4, 1.4]} />
+        )}
         {geometryType === "ring" && <ringGeometry args={[0.3, 0.8, 32]} />}
         {geometryType === "box" && <boxGeometry args={[1, 1, 1]} />}
         {geometryType === "model" && <cylinderGeometry args={[0.6, 0.3, 1.4, 24]} />}
@@ -72,11 +96,13 @@ export default function EffectMeshRenderer() {
         <meshStandardMaterial
           color={materialColor}
           emissive={DEFAULT_COLOR}
-          emissiveIntensity={0.2}
+          emissiveIntensity={0.3}
           transparent
           opacity={opacity}
-          metalness={0.1}
-          roughness={0.4}
+          metalness={0.05}
+          roughness={0.35}
+          blending={blendingMode}
+          depthWrite={false}
         />
       </mesh>
     </group>
