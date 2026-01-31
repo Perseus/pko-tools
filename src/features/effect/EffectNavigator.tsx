@@ -3,6 +3,7 @@ import { SidebarContent, SidebarHeader } from "@/components/ui/sidebar";
 import { listEffects, loadEffect } from "@/commands/effect";
 import {
   effectDataAtom,
+  effectDirtyAtom,
   selectedEffectAtom,
   selectedFrameIndexAtom,
   selectedSubEffectIndexAtom,
@@ -16,6 +17,7 @@ export default function EffectNavigator() {
   const currentProject = useAtomValue(currentProjectAtom);
   const [, setSelectedEffect] = useAtom(selectedEffectAtom);
   const [, setEffectData] = useAtom(effectDataAtom);
+  const [, setDirty] = useAtom(effectDirtyAtom);
   const [, setSelectedSubEffect] = useAtom(selectedSubEffectIndexAtom);
   const [, setSelectedFrame] = useAtom(selectedFrameIndexAtom);
   const [effectFiles, setEffectFiles] = useState<string[]>([]);
@@ -55,6 +57,7 @@ export default function EffectNavigator() {
     setEffectData(data);
     setSelectedSubEffect(data.subEffects.length > 0 ? 0 : null);
     setSelectedFrame(0);
+    setDirty(false);
   }
 
   return (

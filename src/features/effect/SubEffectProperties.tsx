@@ -1,5 +1,5 @@
 import { Input } from "@/components/ui/input";
-import { effectDataAtom, selectedSubEffectIndexAtom } from "@/store/effect";
+import { effectDataAtom, effectDirtyAtom, selectedSubEffectIndexAtom } from "@/store/effect";
 import { SubEffect } from "@/types/effect";
 import { useAtom } from "jotai";
 import React from "react";
@@ -16,6 +16,7 @@ const EFFECT_TYPE_LABELS: Record<number, string> = {
 export default function SubEffectProperties() {
   const [effectData, setEffectData] = useAtom(effectDataAtom);
   const [selectedSubEffectIndex] = useAtom(selectedSubEffectIndexAtom);
+  const [, setDirty] = useAtom(effectDirtyAtom);
 
   const subEffect = useMemo(() => {
     if (!effectData || selectedSubEffectIndex === null) {
@@ -40,6 +41,7 @@ export default function SubEffectProperties() {
       ...effectData,
       subEffects: nextSubEffects,
     });
+    setDirty(true);
   }
 
   function handleNumberChange(key: keyof SubEffect, value: string) {

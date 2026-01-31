@@ -1,9 +1,9 @@
 import { saveEffect } from "@/commands/effect";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { effectDataAtom, selectedEffectAtom } from "@/store/effect";
+import { effectDataAtom, effectDirtyAtom, selectedEffectAtom } from "@/store/effect";
 import { currentProjectAtom } from "@/store/project";
-import { useAtomValue } from "jotai";
+import { useAtom, useAtomValue } from "jotai";
 import { Save } from "lucide-react";
 import { useState } from "react";
 import EffectViewport from "@/features/effect/EffectViewport";
@@ -17,6 +17,7 @@ export default function EffectWorkbench() {
   const effectData = useAtomValue(effectDataAtom);
   const selectedEffect = useAtomValue(selectedEffectAtom);
   const currentProject = useAtomValue(currentProjectAtom);
+  const [isDirty, setDirty] = useAtom(effectDirtyAtom);
   const [isSaving, setIsSaving] = useState(false);
   const { toast } = useToast();
 
@@ -32,6 +33,7 @@ export default function EffectWorkbench() {
         title: "Effect saved",
         description: selectedEffect,
       });
+      setDirty(false);
     } catch (error) {
       toast({
         title: "Failed to save effect",
@@ -52,15 +54,18 @@ export default function EffectWorkbench() {
               ? `${effectData.subEffects.length} sub-effects loaded`
               : "Select an effect file to begin."}
           </div>
+          {isDirty && (
+            <div className="mt-1 text-xs text-amber-500">Unsaved changes</div>
+          )}
         </div>
         <Button
           size="sm"
-          variant="secondary"
+          variant={isDirty ? "default" : "secondary"}
           disabled={!effectData || !selectedEffect || !currentProject || isSaving}
           onClick={handleSave}
         >
           <Save />
-          {isSaving ? "Saving" : "Save"}
+          {isSaving ? "Saving" : isDirty ? "Save Changes" : "Save"}
         </Button>
       </div>
       <div className="grid flex-1 grid-cols-1 gap-4 xl:grid-cols-[280px_minmax(0,1fr)_320px]">

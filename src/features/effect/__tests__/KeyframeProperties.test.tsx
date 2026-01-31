@@ -5,6 +5,7 @@ import React from "react";
 import KeyframeProperties from "@/features/effect/KeyframeProperties";
 import {
   effectDataAtom,
+  effectDirtyAtom,
   selectedFrameIndexAtom,
   selectedSubEffectIndexAtom,
 } from "@/store/effect";
@@ -82,6 +83,7 @@ describe("KeyframeProperties", () => {
     store.set(effectDataAtom, createEffectFixture());
     store.set(selectedSubEffectIndexAtom, 0);
     store.set(selectedFrameIndexAtom, 0);
+    store.set(effectDirtyAtom, false);
 
     render(
       <Provider store={store}>
@@ -95,6 +97,7 @@ describe("KeyframeProperties", () => {
 
     const updated = store.get(effectDataAtom);
     expect(updated?.subEffects[0].framePositions[0][0]).toBeCloseTo(5.5, 2);
+    expect(store.get(effectDirtyAtom)).toBe(true);
   });
 
   it("clamps color values between 0 and 1", async () => {

@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { Provider, createStore } from "jotai";
 import React from "react";
 import SubEffectProperties from "@/features/effect/SubEffectProperties";
-import { effectDataAtom, selectedSubEffectIndexAtom } from "@/store/effect";
+import { effectDataAtom, effectDirtyAtom, selectedSubEffectIndexAtom } from "@/store/effect";
 import { EffectFile } from "@/types/effect";
 import { describe, expect, it } from "vitest";
 
@@ -77,6 +77,7 @@ describe("SubEffectProperties", () => {
     const store = createStore();
     store.set(effectDataAtom, createEffectFixture());
     store.set(selectedSubEffectIndexAtom, 0);
+    store.set(effectDirtyAtom, false);
 
     render(
       <Provider store={store}>
@@ -90,6 +91,7 @@ describe("SubEffectProperties", () => {
 
     const updated = store.get(effectDataAtom);
     expect(updated?.subEffects[0].effectName).toBe("Glow");
+    expect(store.get(effectDirtyAtom)).toBe(true);
   });
 
   it("toggles billboard flag", async () => {

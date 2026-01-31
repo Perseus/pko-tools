@@ -1,5 +1,10 @@
 import { Input } from "@/components/ui/input";
-import { effectDataAtom, selectedFrameIndexAtom, selectedSubEffectIndexAtom } from "@/store/effect";
+import {
+  effectDataAtom,
+  effectDirtyAtom,
+  selectedFrameIndexAtom,
+  selectedSubEffectIndexAtom,
+} from "@/store/effect";
 import { useAtom } from "jotai";
 import React from "react";
 import { useMemo } from "react";
@@ -10,6 +15,7 @@ function formatVector(values: number[], precision = 2) {
 
 export default function KeyframeProperties() {
   const [effectData, setEffectData] = useAtom(effectDataAtom);
+  const [, setDirty] = useAtom(effectDirtyAtom);
   const [selectedSubEffectIndex] = useAtom(selectedSubEffectIndexAtom);
   const [selectedFrameIndex] = useAtom(selectedFrameIndexAtom);
 
@@ -64,6 +70,7 @@ export default function KeyframeProperties() {
       ...effectData,
       subEffects: nextSubEffects,
     });
+    setDirty(true);
   }
 
   function handleVectorChange(
