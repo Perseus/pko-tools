@@ -400,10 +400,15 @@ fn write_coord_list<W: Write>(
     ver_count: u16,
 ) -> Result<()> {
     for frame_index in 0..count as usize {
-        let frame = coord_list.get(frame_index).unwrap_or(&Vec::new());
-        for vert_index in 0..ver_count as usize {
-            let coord = frame.get(vert_index).copied().unwrap_or([0.0, 0.0]);
-            write_vec2(writer, coord)?;
+        if let Some(frame) = coord_list.get(frame_index) {
+            for vert_index in 0..ver_count as usize {
+                let coord = frame.get(vert_index).copied().unwrap_or([0.0, 0.0]);
+                write_vec2(writer, coord)?;
+            }
+        } else {
+            for _ in 0..ver_count {
+                write_vec2(writer, [0.0, 0.0])?;
+            }
         }
     }
 
