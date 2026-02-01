@@ -1,0 +1,474 @@
+{
+  "version": 4,
+  "idxTech": 0,
+  "usePath": false,
+  "pathName": "",
+  "useSound": false,
+  "soundName": "",
+  "rotating": false,
+  "rotaVec": [
+    0.0,
+    0.0,
+    0.0
+  ],
+  "rotaVel": 1.0,
+  "effNum": 3,
+  "subEffects": [
+    {
+      "effectName": "501.eff",
+      "effectType": 4,
+      "srcBlend": 5,
+      "destBlend": 7,
+      "length": 5.0,
+      "frameCount": 3,
+      "frameTimes": [
+        0.06,
+        0.11,
+        0.21
+      ],
+      "frameSizes": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          2.0,
+          2.0,
+          2.0
+        ]
+      ],
+      "frameAngles": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "framePositions": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "frameColors": [
+        [
+          1.0,
+          1.0,
+          1.0,
+          0.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0,
+          0.0
+        ]
+      ],
+      "verCount": 4,
+      "coordCount": 1,
+      "coordFrameTime": 3.0,
+      "coordList": [
+        [
+          [
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            1.0
+          ]
+        ]
+      ],
+      "texCount": 1,
+      "texFrameTime": 0.1,
+      "texName": "eff0083",
+      "texList": [
+        [
+          [
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            1.0
+          ]
+        ]
+      ],
+      "modelName": "RectPlane",
+      "billboard": true,
+      "vsIndex": 1,
+      "segments": 589833,
+      "height": 7.35046e-40,
+      "topRadius": 6.6932385e-31,
+      "botRadius": 6.693182e-31,
+      "frameTexCount": 0,
+      "frameTexTime": 0.1,
+      "frameTexNames": [],
+      "frameTexTime2": 0.1,
+      "useParam": 0,
+      "perFrameCylinder": [],
+      "rotaLoop": false,
+      "rotaLoopVec": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "alpha": false,
+      "rotaBoard": false
+    },
+    {
+      "effectName": "new effect",
+      "effectType": 4,
+      "srcBlend": 5,
+      "destBlend": 7,
+      "length": 5.0,
+      "frameCount": 3,
+      "frameTimes": [
+        0.06,
+        0.11,
+        0.21
+      ],
+      "frameSizes": [
+        [
+          4.0,
+          4.0,
+          4.0
+        ],
+        [
+          2.0,
+          2.0,
+          2.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "frameAngles": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "framePositions": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "frameColors": [
+        [
+          1.0,
+          1.0,
+          1.0,
+          0.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0,
+          0.0
+        ]
+      ],
+      "verCount": 4,
+      "coordCount": 1,
+      "coordFrameTime": 3.0,
+      "coordList": [
+        [
+          [
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            1.0
+          ]
+        ]
+      ],
+      "texCount": 1,
+      "texFrameTime": 0.1,
+      "texName": "eff0036",
+      "texList": [
+        [
+          [
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            1.0
+          ]
+        ]
+      ],
+      "modelName": "RectPlane",
+      "billboard": true,
+      "vsIndex": 1,
+      "segments": 589833,
+      "height": 7.35046e-40,
+      "topRadius": 6.6932385e-31,
+      "botRadius": 6.693182e-31,
+      "frameTexCount": 0,
+      "frameTexTime": 0.1,
+      "frameTexNames": [],
+      "frameTexTime2": 0.1,
+      "useParam": 0,
+      "perFrameCylinder": [],
+      "rotaLoop": false,
+      "rotaLoopVec": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "alpha": false,
+      "rotaBoard": false
+    },
+    {
+      "effectName": "new effect",
+      "effectType": 4,
+      "srcBlend": 5,
+      "destBlend": 7,
+      "length": 5.0,
+      "frameCount": 3,
+      "frameTimes": [
+        0.06,
+        0.11,
+        0.21
+      ],
+      "frameSizes": [
+        [
+          6.0,
+          6.0,
+          6.0
+        ],
+        [
+          3.0,
+          3.0,
+          3.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "frameAngles": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "framePositions": [
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ],
+        [
+          0.0,
+          0.0,
+          0.0
+        ]
+      ],
+      "frameColors": [
+        [
+          1.0,
+          1.0,
+          1.0,
+          0.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0,
+          1.0
+        ],
+        [
+          1.0,
+          1.0,
+          1.0,
+          0.0
+        ]
+      ],
+      "verCount": 4,
+      "coordCount": 1,
+      "coordFrameTime": 3.0,
+      "coordList": [
+        [
+          [
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            1.0
+          ]
+        ]
+      ],
+      "texCount": 1,
+      "texFrameTime": 0.1,
+      "texName": "eff0036",
+      "texList": [
+        [
+          [
+            0.0,
+            1.0
+          ],
+          [
+            0.0,
+            0.0
+          ],
+          [
+            1.0,
+            0.0
+          ],
+          [
+            1.0,
+            1.0
+          ]
+        ]
+      ],
+      "modelName": "RectPlane",
+      "billboard": true,
+      "vsIndex": 1,
+      "segments": 589833,
+      "height": 7.35046e-40,
+      "topRadius": 6.6932385e-31,
+      "botRadius": 6.693182e-31,
+      "frameTexCount": 0,
+      "frameTexTime": 0.1,
+      "frameTexNames": [],
+      "frameTexTime2": 0.1,
+      "useParam": 0,
+      "perFrameCylinder": [],
+      "rotaLoop": false,
+      "rotaLoopVec": [
+        0.0,
+        0.0,
+        0.0,
+        0.0
+      ],
+      "alpha": false,
+      "rotaBoard": false
+    }
+  ]
+}

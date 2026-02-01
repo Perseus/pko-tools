@@ -1,4 +1,4 @@
-import { saveEffect } from "@/commands/effect";
+import { saveEffect, saveParticles, loadParticles } from "@/commands/effect";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -18,15 +18,32 @@ import {
 } from "@/store/effect";
 import { currentProjectAtom } from "@/store/project";
 import { useAtom, useAtomValue } from "jotai";
-import { Save } from "lucide-react";
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
+import { Redo2, Save, Undo2, Video } from "lucide-react";
 import React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import EffectViewport from "@/features/effect/EffectViewport";
 import SubEffectList from "@/features/effect/SubEffectList";
 import KeyframeTimeline from "@/features/effect/KeyframeTimeline";
 import KeyframeProperties from "@/features/effect/KeyframeProperties";
-import PlaybackControls from "@/features/effect/PlaybackControls";
 import SubEffectProperties from "@/features/effect/SubEffectProperties";
+import EffectProperties from "@/features/effect/EffectProperties";
+import ParticleSystemEditor from "@/features/effect/particle/ParticleSystemEditor";
+import CharacterBinder from "@/features/effect/CharacterBinder";
+import StripEffectEditor from "@/features/effect/StripEffectEditor";
+import PathEditor from "@/features/effect/PathEditor";
+import EffectLibrary from "@/features/effect/EffectLibrary";
+import CurveEditor from "@/features/effect/CurveEditor";
+import TextureBrowser from "@/features/effect/TextureBrowser";
+import ExportDialog from "@/features/effect/ExportDialog";
+import { useEffectHistory } from "@/features/effect/useEffectHistory";
+import { particleDataAtom, particleOriginalAtom } from "@/store/particle";
+import type { ParticleController } from "@/types/particle";
 
 export default function EffectWorkbench() {
   const [effectData, setEffectData] = useAtom(effectDataAtom);
@@ -37,7 +54,11 @@ export default function EffectWorkbench() {
   const [isSaving, setIsSaving] = useState(false);
   const [isSaveAsOpen, setIsSaveAsOpen] = useState(false);
   const [saveAsName, setSaveAsName] = useState("");
+  const [isExportOpen, setIsExportOpen] = useState(false);
   const { toast } = useToast();
+  const { undo, redo, canUndo, canRedo } = useEffectHistory();
+  const [particleData, setParticleData] = useAtom(particleDataAtom);
+  const [particleOriginal, setParticleOriginal] = useAtom(particleOriginalAtom);
 
   const normalizedSelectedName = useMemo(() => {
     if (!selectedEffect) {
@@ -54,6 +75,10 @@ export default function EffectWorkbench() {
     setIsSaving(true);
     try {
       await saveEffect(currentProject.id, selectedEffect, effectData);
+      if (particleData) {
+        await saveParticles(currentProject.id, selectedEffect, particleData);
+        setParticleOriginal(structuredClone(particleData));
+      }
       toast({
         title: "Effect saved",
         description: selectedEffect,
@@ -68,7 +93,7 @@ export default function EffectWorkbench() {
     } finally {
       setIsSaving(false);
     }
-  }, [currentProject, effectData, selectedEffect, setDirty, setOriginalEffect, toast]);
+  }, [currentProject, effectData, particleData, selectedEffect, setDirty, setOriginalEffect, setParticleOriginal, toast]);
 
   const handleDiscard = useCallback(() => {
     if (!originalEffect) {
@@ -76,12 +101,17 @@ export default function EffectWorkbench() {
     }
 
     setEffectData(structuredClone(originalEffect));
+    if (particleOriginal) {
+      setParticleData(structuredClone(particleOriginal));
+    } else {
+      setParticleData(null);
+    }
     setDirty(false);
     toast({
       title: "Changes discarded",
       description: selectedEffect ?? "",
     });
-  }, [originalEffect, selectedEffect, setDirty, setEffectData, toast]);
+  }, [originalEffect, particleOriginal, selectedEffect, setDirty, setEffectData, setParticleData, toast]);
 
   const handleSaveAs = useCallback(async () => {
     if (!effectData || !currentProject) {
@@ -132,7 +162,8 @@ export default function EffectWorkbench() {
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+      const mod = event.metaKey || event.ctrlKey;
+      if (mod && event.key.toLowerCase() === "s") {
         event.preventDefault();
         if (!isDirty) {
           toast({
@@ -145,11 +176,40 @@ export default function EffectWorkbench() {
           handleSave();
         }
       }
+      if (mod && event.key.toLowerCase() === "z" && !event.shiftKey) {
+        event.preventDefault();
+        undo();
+      }
+      if (mod && event.key.toLowerCase() === "z" && event.shiftKey) {
+        event.preventDefault();
+        redo();
+      }
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [handleSave, isDirty, isSaving, selectedEffect, toast]);
+  }, [handleSave, isDirty, isSaving, selectedEffect, toast, undo, redo]);
+
+  // Load particles sidecar when effect changes
+  useEffect(() => {
+    if (!selectedEffect || !currentProject) {
+      return;
+    }
+
+    let cancelled = false;
+    loadParticles(currentProject.id, selectedEffect).then((result) => {
+      if (cancelled) return;
+      if (result) {
+        const data = result as ParticleController;
+        setParticleData(data);
+        setParticleOriginal(structuredClone(data));
+      }
+    }).catch(() => {
+      // Silently ignore — particles file may not exist
+    });
+
+    return () => { cancelled = true; };
+  }, [selectedEffect, currentProject, setParticleData, setParticleOriginal]);
 
   useEffect(() => {
     if (isSaveAsOpen) {
@@ -174,9 +234,28 @@ export default function EffectWorkbench() {
         <div className="flex items-center gap-2">
           <Button
             size="sm"
+            variant="ghost"
+            disabled={!canUndo}
+            onClick={undo}
+            title="Undo (Cmd+Z)"
+          >
+            <Undo2 className="h-4 w-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={!canRedo}
+            onClick={redo}
+            title="Redo (Cmd+Shift+Z)"
+          >
+            <Redo2 className="h-4 w-4" />
+          </Button>
+          <Button
+            size="sm"
             variant="outline"
             disabled={!isDirty || !originalEffect || isSaving}
             onClick={handleDiscard}
+            title="Revert all changes to the last saved state"
           >
             Discard
           </Button>
@@ -185,6 +264,7 @@ export default function EffectWorkbench() {
             variant="outline"
             disabled={!effectData || !currentProject || isSaving}
             onClick={() => setIsSaveAsOpen(true)}
+            title="Save a copy with a new filename"
           >
             Save As
           </Button>
@@ -197,20 +277,55 @@ export default function EffectWorkbench() {
             <Save />
             {isSaving ? "Saving" : isDirty ? "Save Changes" : "Save"}
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={!effectData}
+            onClick={() => setIsExportOpen(true)}
+            title="Record effect preview to video"
+          >
+            <Video className="h-4 w-4" />
+          </Button>
         </div>
       </div>
-      <div className="grid flex-1 grid-cols-1 gap-4 xl:grid-cols-[280px_minmax(0,1fr)_320px]">
+      <div className="grid flex-1 grid-cols-1 gap-4 xl:grid-cols-[220px_minmax(0,1fr)_320px]">
         <SubEffectList />
         <div className="flex min-h-[400px] flex-col gap-4">
           <EffectViewport />
           <KeyframeTimeline />
+          <CurveEditor />
         </div>
-        <div className="flex flex-col gap-4">
-          <SubEffectProperties />
-          <KeyframeProperties />
-          <PlaybackControls />
-        </div>
+        <Tabs defaultValue="sub-effect" className="flex flex-col overflow-hidden">
+          <TabsList className="w-full shrink-0">
+            <TabsTrigger value="sub-effect" title="Edit properties of the selected sub-effect layer">Sub-Effect</TabsTrigger>
+            <TabsTrigger value="keyframe" title="Edit position, rotation, scale, and color for the current keyframe">Keyframe</TabsTrigger>
+            <TabsTrigger value="effect" title="Global effect settings: technique, path, sound, rotation">Effect</TabsTrigger>
+            <TabsTrigger value="tools" title="Particle systems, strip effects, skeleton binding, library">Tools</TabsTrigger>
+          </TabsList>
+          <TabsContent value="sub-effect" className="flex-1 overflow-y-auto mt-0">
+            <SubEffectProperties />
+          </TabsContent>
+          <TabsContent value="keyframe" className="flex-1 overflow-y-auto mt-0">
+            <KeyframeProperties />
+          </TabsContent>
+          <TabsContent value="effect" className="flex-1 overflow-y-auto mt-0 space-y-4">
+            <EffectProperties />
+            <PathEditor />
+          </TabsContent>
+          <TabsContent value="tools" className="flex-1 overflow-y-auto mt-0 space-y-4">
+            <ParticleSystemEditor />
+            <StripEffectEditor />
+            <TextureBrowser />
+            <CharacterBinder />
+            <EffectLibrary />
+          </TabsContent>
+        </Tabs>
       </div>
+      <ExportDialog
+        open={isExportOpen}
+        onOpenChange={setIsExportOpen}
+        duration={effectData?.subEffects[0]?.length ?? 2}
+      />
       <Dialog open={isSaveAsOpen} onOpenChange={setIsSaveAsOpen}>
         <DialogContent>
           <DialogHeader>

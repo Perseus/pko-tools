@@ -2114,6 +2114,53 @@ impl CharacterMeshInfo {
         Ok(mesh)
     }
 
+    /// Build a glTF primitive with only POSITION, NORMAL, TEXCOORD_0 and indices.
+    /// No joints/weights/materials — used for effect model geometry where only the
+    /// mesh shape is needed (textures come from the effect system, not the .lgo).
+    pub fn get_geometry_only_primitive(
+        &self,
+        fields_to_aggregate: &mut GLTFFieldsToAggregate,
+    ) -> gltf::json::mesh::Primitive {
+        let pos_idx = self.get_vertex_position_accessor(fields_to_aggregate);
+        let norm_idx = self.get_vertex_normal_accessor(fields_to_aggregate);
+        let idx_idx = self.get_vertex_index_accessor(fields_to_aggregate);
+
+        let mut attributes = BTreeMap::from([
+            (
+                Checked::Valid(Semantic::Positions),
+                Index::new(pos_idx as u32),
+            ),
+            (
+                Checked::Valid(Semantic::Normals),
+                Index::new(norm_idx as u32),
+            ),
+        ]);
+
+        if !self.texcoord_seq[0].is_empty() {
+            let tc_idx = self.get_vertex_texcoord_accessor(fields_to_aggregate, 0);
+            attributes.insert(
+                Checked::Valid(Semantic::TexCoords(0)),
+                Index::new(tc_idx as u32),
+            );
+        }
+
+        let mode = match &self.header.pt_type {
+            D3DPrimitiveType::TriangleList => gltf::mesh::Mode::Triangles,
+            D3DPrimitiveType::TriangleStrip => gltf::mesh::Mode::TriangleStrip,
+            _ => gltf::mesh::Mode::Triangles,
+        };
+
+        gltf::json::mesh::Primitive {
+            attributes,
+            indices: Some(Index::new(idx_idx as u32)),
+            material: None,
+            mode: Checked::Valid(mode),
+            targets: None,
+            extensions: None,
+            extras: None,
+        }
+    }
+
     pub fn get_size(&self) -> u32 {
         let mut size = 0;
 

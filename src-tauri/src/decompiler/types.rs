@@ -16,7 +16,10 @@ pub enum GameVersion {
 impl GameVersion {
     /// Returns true if this version uses encryption
     pub fn uses_encryption(&self) -> bool {
-        matches!(self, GameVersion::V4 | GameVersion::V5 | GameVersion::V6 | GameVersion::V7 | GameVersion::V8)
+        matches!(
+            self,
+            GameVersion::V4 | GameVersion::V5 | GameVersion::V6 | GameVersion::V7 | GameVersion::V8
+        )
     }
 }
 
@@ -109,7 +112,10 @@ mod tests {
         assert_eq!(FieldValue::Long(-123).to_tsv_string(), "-123");
         assert_eq!(FieldValue::Float(3.14).to_tsv_string(), "3.14");
         assert_eq!(FieldValue::Float(5.0).to_tsv_string(), "5.0");
-        assert_eq!(FieldValue::String("test".to_string()).to_tsv_string(), "test");
+        assert_eq!(
+            FieldValue::String("test".to_string()).to_tsv_string(),
+            "test"
+        );
         assert_eq!(FieldValue::Skip.to_tsv_string(), "");
 
         // Test multiple values

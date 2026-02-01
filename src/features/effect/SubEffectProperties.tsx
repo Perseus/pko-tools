@@ -4,6 +4,11 @@ import { SubEffect } from "@/types/effect";
 import { useAtom } from "jotai";
 import React from "react";
 import { useMemo } from "react";
+import BlendModeEditor from "@/features/effect/BlendModeEditor";
+import CylinderMeshEditor from "@/features/effect/CylinderMeshEditor";
+import FrameTexEditor from "@/features/effect/FrameTexEditor";
+import UVCoordEditor from "@/features/effect/UVCoordEditor";
+import { CheckboxWithHelp, FieldLabel } from "@/features/effect/HelpTip";
 
 const EFFECT_TYPE_LABELS: Record<number, string> = {
   0: "None",
@@ -67,10 +72,11 @@ export default function SubEffectProperties() {
         <div className="text-xs text-muted-foreground">
           {EFFECT_TYPE_LABELS[subEffect.effectType] ?? "Unknown"}
         </div>
+        <div className="text-[9px] text-muted-foreground">Properties for the selected sub-effect layer.</div>
       </div>
       <div className="space-y-3 text-xs">
         <div className="space-y-1">
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Name</div>
+          <FieldLabel help="Internal name for this sub-effect layer. Used for identification in the sub-effect list.">Name</FieldLabel>
           <Input
             aria-label="subeffect-name"
             value={subEffect.effectName}
@@ -78,36 +84,27 @@ export default function SubEffectProperties() {
           />
         </div>
         <div className="space-y-1">
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Effect Type</div>
-          <Input
+          <FieldLabel help="Determines how this sub-effect renders. Each type enables different editing options below.">Effect Type</FieldLabel>
+          <select
             aria-label="subeffect-type"
-            type="number"
             value={subEffect.effectType}
             onChange={(event) => handleNumberChange("effectType", event.target.value)}
-          />
+            className="h-7 w-full rounded border border-input bg-background px-2 text-xs"
+          >
+            <option value={0}>0 - None</option>
+            <option value={1}>1 - Frame Texture (flipbook animation)</option>
+            <option value={2}>2 - Model UV (animated UV coordinates)</option>
+            <option value={3}>3 - Model Texture (3D model with texture)</option>
+            <option value={4}>4 - Model (3D model only)</option>
+          </select>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Src Blend</div>
-            <Input
-              aria-label="subeffect-src-blend"
-              type="number"
-              value={subEffect.srcBlend}
-              onChange={(event) => handleNumberChange("srcBlend", event.target.value)}
-            />
-          </div>
-          <div className="space-y-1">
-            <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Dest Blend</div>
-            <Input
-              aria-label="subeffect-dest-blend"
-              type="number"
-              value={subEffect.destBlend}
-              onChange={(event) => handleNumberChange("destBlend", event.target.value)}
-            />
-          </div>
-        </div>
+        <BlendModeEditor
+          srcBlend={subEffect.srcBlend}
+          destBlend={subEffect.destBlend}
+          onChange={(src, dest) => updateSubEffect({ srcBlend: src, destBlend: dest })}
+        />
         <div className="space-y-1">
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Duration</div>
+          <FieldLabel help="Total playback length of this sub-effect in seconds. All keyframes play within this duration.">Duration</FieldLabel>
           <Input
             aria-label="subeffect-length"
             type="number"
@@ -117,50 +114,49 @@ export default function SubEffectProperties() {
           />
         </div>
         <div className="space-y-1">
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Texture Name</div>
+          <FieldLabel help="Texture filename without path. Loaded from texture/effect/ directory. Example: jb06y, fire01. Extension (.tga/.dds) is auto-detected.">Texture Name</FieldLabel>
           <Input
             aria-label="subeffect-texture"
             value={subEffect.texName}
+            placeholder="e.g. jb06y"
             onChange={(event) => updateSubEffect({ texName: event.target.value })}
           />
         </div>
         <div className="space-y-1">
-          <div className="text-[11px] uppercase tracking-wide text-muted-foreground">Model Name</div>
+          <FieldLabel help="Use 'Cylinder', 'Cone', or 'Sphere' for built-in primitives (shows mesh params below). Or enter a .lgo model filename.">Model Name</FieldLabel>
           <Input
             aria-label="subeffect-model"
             value={subEffect.modelName}
+            placeholder="Cylinder, Cone, Sphere, or filename"
             onChange={(event) => updateSubEffect({ modelName: event.target.value })}
           />
         </div>
-        <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-          <label className="flex items-center gap-2">
-            <input
-              aria-label="subeffect-billboard"
-              type="checkbox"
-              checked={subEffect.billboard}
-              onChange={(event) => updateSubEffect({ billboard: event.target.checked })}
-            />
-            Billboard
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              aria-label="subeffect-alpha"
-              type="checkbox"
-              checked={subEffect.alpha}
-              onChange={(event) => updateSubEffect({ alpha: event.target.checked })}
-            />
-            Alpha
-          </label>
-          <label className="flex items-center gap-2">
-            <input
-              aria-label="subeffect-rotaboard"
-              type="checkbox"
-              checked={subEffect.rotaBoard}
-              onChange={(event) => updateSubEffect({ rotaBoard: event.target.checked })}
-            />
-            RotaBoard
-          </label>
+        <div className="flex flex-wrap gap-3">
+          <CheckboxWithHelp
+            label="Billboard"
+            help="Always face the camera regardless of rotation."
+            checked={subEffect.billboard}
+            onChange={(checked) => updateSubEffect({ billboard: checked })}
+            ariaLabel="subeffect-billboard"
+          />
+          <CheckboxWithHelp
+            label="Alpha"
+            help="Enable alpha testing. Pixels below threshold become invisible."
+            checked={subEffect.alpha}
+            onChange={(checked) => updateSubEffect({ alpha: checked })}
+            ariaLabel="subeffect-alpha"
+          />
+          <CheckboxWithHelp
+            label="RotaBoard"
+            help="Billboard + continuous rotation. Effect faces camera while spinning."
+            checked={subEffect.rotaBoard}
+            onChange={(checked) => updateSubEffect({ rotaBoard: checked })}
+            ariaLabel="subeffect-rotaboard"
+          />
         </div>
+        <CylinderMeshEditor />
+        <FrameTexEditor />
+        <UVCoordEditor />
       </div>
     </div>
   );

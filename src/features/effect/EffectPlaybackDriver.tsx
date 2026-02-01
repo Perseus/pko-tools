@@ -1,8 +1,6 @@
 import {
   effectDataAtom,
   effectPlaybackAtom,
-  selectedFrameIndexAtom,
-  selectedSubEffectIndexAtom,
 } from "@/store/effect";
 import { useFrame } from "@react-three/fiber";
 import { useAtom } from "jotai";
@@ -13,29 +11,29 @@ const DEFAULT_FRAME_DURATION = 1 / 30;
 export default function EffectPlaybackDriver() {
   const [effectData] = useAtom(effectDataAtom);
   const [playback, setPlayback] = useAtom(effectPlaybackAtom);
-  const [selectedSubEffectIndex] = useAtom(selectedSubEffectIndexAtom);
-  const [, setSelectedFrame] = useAtom(selectedFrameIndexAtom);
 
-  const { frameDurations, totalDuration } = useMemo(() => {
-    if (!effectData || selectedSubEffectIndex === null) {
-      return { frameDurations: [], totalDuration: 0 };
+  // Compute total duration as the MAX across all sub-effects (PKO plays them all simultaneously)
+  const totalDuration = useMemo(() => {
+    if (!effectData || effectData.subEffects.length === 0) {
+      return 0;
     }
 
-    const subEffect = effectData.subEffects[selectedSubEffectIndex];
-    if (!subEffect) {
-      return { frameDurations: [], totalDuration: 0 };
+    let maxDuration = 0;
+    for (const subEffect of effectData.subEffects) {
+      const durations = subEffect.frameTimes.length
+        ? subEffect.frameTimes.map((time) => Math.max(time, DEFAULT_FRAME_DURATION))
+        : Array.from({ length: subEffect.frameCount }, () => DEFAULT_FRAME_DURATION);
+      const subTotal = durations.reduce((sum, value) => sum + value, 0);
+      if (subTotal > maxDuration) {
+        maxDuration = subTotal;
+      }
     }
 
-    const durations = subEffect.frameTimes.length
-      ? subEffect.frameTimes.map((time) => Math.max(time, DEFAULT_FRAME_DURATION))
-      : Array.from({ length: subEffect.frameCount }, () => DEFAULT_FRAME_DURATION);
-
-    const total = durations.reduce((sum, value) => sum + value, 0);
-    return { frameDurations: durations, totalDuration: total };
-  }, [effectData, selectedSubEffectIndex]);
+    return maxDuration;
+  }, [effectData]);
 
   useFrame((_state, delta) => {
-    if (!playback.isPlaying || frameDurations.length === 0 || totalDuration === 0) {
+    if (!playback.isPlaying || totalDuration === 0) {
       return;
     }
 
@@ -50,17 +48,6 @@ export default function EffectPlaybackDriver() {
       }
     }
 
-    let accumulator = 0;
-    let frameIndex = frameDurations.length - 1;
-    for (let i = 0; i < frameDurations.length; i += 1) {
-      accumulator += frameDurations[i];
-      if (nextTime <= accumulator) {
-        frameIndex = i;
-        break;
-      }
-    }
-
-    setSelectedFrame(frameIndex);
     setPlayback((prev) => ({
       ...prev,
       currentTime: nextTime,

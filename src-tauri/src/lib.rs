@@ -68,6 +68,12 @@ pub fn run() {
             effect::commands::load_effect,
             effect::commands::save_effect,
             effect::commands::load_texture_bytes,
+            effect::commands::decode_texture,
+            effect::commands::save_particles,
+            effect::commands::load_particles,
+            effect::commands::list_texture_files,
+            effect::commands::load_path_file,
+            effect::commands::load_effect_model,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -282,7 +282,9 @@ mod tests {
 
     #[test]
     fn test_parse_char() {
-        let data = vec![b'H', b'e', b'l', b'l', b'o', 0x00, b'W', b'o', b'r', b'l', b'd', 0x00];
+        let data = vec![
+            b'H', b'e', b'l', b'l', b'o', 0x00, b'W', b'o', b'r', b'l', b'd', 0x00,
+        ];
         let mut state = ParserState::new(Cursor::new(data));
 
         assert_eq!(state.parse_char().unwrap(), "Hello");
@@ -302,7 +304,9 @@ mod tests {
 
     #[test]
     fn test_parse_char_fixed() {
-        let data = vec![b'H', b'e', b'l', b'l', b'o', 0x00, b'X', b'X', b'W', b'o', b'r', b'l'];
+        let data = vec![
+            b'H', b'e', b'l', b'l', b'o', 0x00, b'X', b'X', b'W', b'o', b'r', b'l',
+        ];
         let mut state = ParserState::new(Cursor::new(data));
 
         // Read 8 bytes, but stop at null

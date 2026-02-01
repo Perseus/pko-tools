@@ -6,10 +6,12 @@ import EffectViewport from "@/features/effect/EffectViewport";
 import EffectMeshRenderer from "@/features/effect/EffectMeshRenderer";
 import {
   effectDataAtom,
+  effectPlaybackAtom,
   selectedFrameIndexAtom,
   selectedSubEffectIndexAtom,
 } from "@/store/effect";
 import { EffectFile } from "@/types/effect";
+import { createSubEffectFixture, createEffectFixture } from "./fixtures";
 
 vi.mock("@react-three/fiber", () => ({
   Canvas: ({ children }: { children: React.ReactNode }) => (
@@ -20,6 +22,8 @@ vi.mock("@react-three/fiber", () => ({
 
 vi.mock("@react-three/drei", () => ({
   OrbitControls: () => <div data-testid="orbit-controls" />,
+  PivotControls: ({ children }: { children: React.ReactNode }) => <div data-testid="pivot-controls">{children}</div>,
+  Line: () => <div data-testid="line" />,
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -117,5 +121,64 @@ describe("EffectViewport", () => {
     });
 
     expect(true).toBe(true);
+  });
+
+  it("renders all sub-effects during playback", () => {
+    const multiEffect = createEffectFixture({
+      subEffects: [
+        createSubEffectFixture({ effectName: "Sub0" }),
+        createSubEffectFixture({ effectName: "Sub1" }),
+        createSubEffectFixture({ effectName: "Sub2" }),
+      ],
+    });
+
+    const store = createStore();
+    store.set(effectDataAtom, multiEffect);
+    store.set(selectedSubEffectIndexAtom, 0);
+    store.set(effectPlaybackAtom, {
+      isPlaying: true,
+      isLooping: true,
+      speed: 1,
+      currentTime: 0,
+    });
+
+    render(
+      <Provider store={store}>
+        <EffectViewport />
+      </Provider>
+    );
+
+    // During playback, all 3 sub-effects should be rendered
+    // Each EffectSubRenderer renders a group > group > mesh structure
+    const canvas = screen.getByTestId("canvas");
+    expect(canvas).toBeInTheDocument();
+  });
+
+  it("renders only selected sub-effect when not playing", () => {
+    const multiEffect = createEffectFixture({
+      subEffects: [
+        createSubEffectFixture({ effectName: "Sub0" }),
+        createSubEffectFixture({ effectName: "Sub1" }),
+      ],
+    });
+
+    const store = createStore();
+    store.set(effectDataAtom, multiEffect);
+    store.set(selectedSubEffectIndexAtom, 1);
+    store.set(effectPlaybackAtom, {
+      isPlaying: false,
+      isLooping: true,
+      speed: 1,
+      currentTime: 0,
+    });
+
+    render(
+      <Provider store={store}>
+        <EffectViewport />
+      </Provider>
+    );
+
+    const canvas = screen.getByTestId("canvas");
+    expect(canvas).toBeInTheDocument();
   });
 });

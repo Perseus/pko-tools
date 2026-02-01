@@ -138,7 +138,10 @@ impl Structure {
     }
 
     /// Parse a complete record using this structure
-    pub fn parse_record<R: Read + Seek>(&self, state: &mut ParserState<R>) -> Result<Vec<FieldValue>> {
+    pub fn parse_record<R: Read + Seek>(
+        &self,
+        state: &mut ParserState<R>,
+    ) -> Result<Vec<FieldValue>> {
         let mut values = Vec::new();
 
         for field in &self.fields {
@@ -244,31 +247,44 @@ impl StructureBuilder {
 
     /// Skip N bytes (padding)
     pub fn pad(mut self, count: usize) -> Self {
-        self.fields
-            .push(FieldDef::new(format!("_pad{}", self.fields.len()), ParserType::Pad(count)));
+        self.fields.push(FieldDef::new(
+            format!("_pad{}", self.fields.len()),
+            ParserType::Pad(count),
+        ));
         self
     }
 
     /// Save current position to stack
     pub fn save_pos(mut self) -> Self {
-        self.fields
-            .push(FieldDef::new(format!("_save{}", self.fields.len()), ParserType::SavePos));
+        self.fields.push(FieldDef::new(
+            format!("_save{}", self.fields.len()),
+            ParserType::SavePos,
+        ));
         self
     }
 
     /// Load saved position from stack
     pub fn load_pos(mut self) -> Self {
-        self.fields
-            .push(FieldDef::new(format!("_load{}", self.fields.len()), ParserType::LoadPos));
+        self.fields.push(FieldDef::new(
+            format!("_load{}", self.fields.len()),
+            ParserType::LoadPos,
+        ));
         self
     }
 
     // === Combinators ===
 
     /// Add a field that repeats a parser N times
-    pub fn field_repeat(mut self, name: impl Into<String>, parser: ParserType, count: usize) -> Self {
-        self.fields
-            .push(FieldDef::new(name, ParserType::Repeat(Box::new(parser), count)));
+    pub fn field_repeat(
+        mut self,
+        name: impl Into<String>,
+        parser: ParserType,
+        count: usize,
+    ) -> Self {
+        self.fields.push(FieldDef::new(
+            name,
+            ParserType::Repeat(Box::new(parser), count),
+        ));
         self
     }
 
@@ -471,10 +487,7 @@ mod tests {
 
     #[test]
     fn test_sequence_parser() {
-        let sequence = ParserType::Sequence(vec![
-            ParserType::Pad(2),
-            ParserType::UShort,
-        ]);
+        let sequence = ParserType::Sequence(vec![ParserType::Pad(2), ParserType::UShort]);
 
         let structure = StructureBuilder::new("Test")
             .field_custom("value", sequence)

@@ -17,6 +17,10 @@ const saveEffectMock = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@/commands/effect", () => ({
   saveEffect: (...args: unknown[]) => saveEffectMock(...args),
+  saveParticles: vi.fn().mockResolvedValue(undefined),
+  loadParticles: vi.fn().mockResolvedValue(null),
+  listTextureFiles: vi.fn().mockResolvedValue([]),
+  loadPathFile: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock("@/hooks/use-toast", () => ({

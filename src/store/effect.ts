@@ -30,3 +30,34 @@ export const effectTextureStatusAtom = atom<EffectTextureStatus>({
 export const effectTextureReloadAtom = atom(0);
 export const effectDirtyAtom = atom(false);
 export const effectOriginalAtom = atom<EffectFile | null>(null);
+
+/** Character skeleton binding state for effect preview. */
+export type EffectBindingMode = "all" | "bones" | "dummies";
+
+export type EffectBindingState = {
+  /** Character ID loaded for binding. */
+  characterId: number | null;
+  /** glTF JSON data URI for rendering the character model. */
+  gltfDataUri: string | null;
+  /** Name of the bone/dummy the effect is bound to (null = unbound). */
+  boundBoneName: string | null;
+  /** Filter mode for the bone tree display. */
+  mode: EffectBindingMode;
+  /** Loading status. */
+  status: "idle" | "loading" | "loaded" | "error";
+};
+
+export const effectBindingAtom = atom<EffectBindingState>({
+  characterId: null,
+  gltfDataUri: null,
+  boundBoneName: null,
+  mode: "all",
+  status: "idle",
+});
+
+/**
+ * The bound bone's world matrix (written by CharacterPreview, read by EffectMeshRenderer).
+ * null when no bone is bound or character not loaded.
+ * Stored as a flat 16-element Float32Array (column-major, matching THREE.Matrix4.elements).
+ */
+export const boundBoneMatrixAtom = atom<Float32Array | null>(null);

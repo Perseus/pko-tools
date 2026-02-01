@@ -1,3 +1,4 @@
+import { Button } from "@/components/ui/button";
 import {
   effectDataAtom,
   effectPlaybackAtom,
@@ -5,6 +6,7 @@ import {
   selectedSubEffectIndexAtom,
 } from "@/store/effect";
 import { useAtom } from "jotai";
+import { Pause, Play, Repeat, Square } from "lucide-react";
 import React from "react";
 import { useMemo } from "react";
 
@@ -39,16 +41,49 @@ export default function KeyframeTimeline() {
 
   return (
     <div className="rounded-xl border border-border bg-background/70 p-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="text-sm font-semibold">Timeline</div>
-          <div className="text-xs text-muted-foreground">
-            {frameCount > 0 ? `${frameCount} frames` : "Select a sub-effect"}
-          </div>
+      <div className="flex items-center gap-2">
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7"
+          title={playback.isPlaying ? "Pause playback" : "Play animation"}
+          onClick={() => setPlayback({ ...playback, isPlaying: !playback.isPlaying })}
+        >
+          {playback.isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+        </Button>
+        <Button
+          size="icon"
+          variant="ghost"
+          className="h-7 w-7"
+          title="Stop and reset to frame 0"
+          onClick={() => setPlayback({ ...playback, isPlaying: false, currentTime: 0 })}
+        >
+          <Square className="h-3.5 w-3.5" />
+        </Button>
+        <Button
+          size="icon"
+          variant={playback.isLooping ? "secondary" : "ghost"}
+          className="h-7 w-7"
+          title={playback.isLooping ? "Looping enabled - click to disable" : "Enable loop playback"}
+          onClick={() => setPlayback({ ...playback, isLooping: !playback.isLooping })}
+        >
+          <Repeat className="h-3.5 w-3.5" />
+        </Button>
+        <div className="flex items-center gap-0.5 border-l border-border pl-2" role="group" aria-label="playback-speed">
+          {[0.25, 0.5, 1, 2].map((speed) => (
+            <Button
+              key={speed}
+              size="sm"
+              variant={playback.speed === speed ? "secondary" : "ghost"}
+              className="h-6 px-1.5 text-[10px]"
+              title={`Set playback speed to ${speed}x`}
+              aria-label={`speed-${speed}`}
+              onClick={() => setPlayback({ ...playback, speed })}
+            >
+              {speed}x
+            </Button>
+          ))}
         </div>
-        <div className="text-xs text-muted-foreground">Frame {frameCount ? safeFrame + 1 : 0}</div>
-      </div>
-      <div className="mt-3">
         <input
           type="range"
           min={0}
@@ -66,8 +101,11 @@ export default function KeyframeTimeline() {
             });
           }}
           disabled={frameCount === 0}
-          className="h-2 w-full cursor-pointer appearance-none rounded-full bg-muted accent-foreground"
+          className="h-2 flex-1 cursor-pointer appearance-none rounded-full bg-muted accent-foreground"
         />
+        <span className="text-xs text-muted-foreground whitespace-nowrap">
+          Frame {frameCount ? safeFrame + 1 : 0}/{frameCount}
+        </span>
       </div>
       {frameCount > 0 && (
         <div className="mt-3 flex flex-wrap gap-2 text-xs text-muted-foreground">
