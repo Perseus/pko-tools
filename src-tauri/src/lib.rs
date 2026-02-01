@@ -4,6 +4,7 @@ pub mod animation;
 mod broadcast;
 pub mod character;
 pub mod effect;
+pub mod item;
 mod d3d;
 mod db;
 pub mod decompiler;
@@ -74,6 +75,14 @@ pub fn run() {
             effect::commands::list_texture_files,
             effect::commands::load_path_file,
             effect::commands::load_effect_model,
+            item::commands::get_item_list,
+            item::commands::load_item_model,
+            item::commands::get_item_lit_info,
+            item::commands::load_lit_texture_bytes,
+            item::commands::get_refine_effects,
+            item::commands::get_item_metadata,
+            item::commands::export_item_to_gltf,
+            item::commands::get_forge_effect_preview,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -4,7 +4,7 @@ pub mod helper;
 mod info;
 pub mod mesh;
 pub mod model;
-mod texture;
+pub mod texture;
 
 use std::{
     fs::File,
