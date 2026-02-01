@@ -21,7 +21,16 @@
     ],
     "security": {
       "csp": null,
-      "capabilities": []
+      "capabilities": [],
+      "assetProtocol": {
+        "enable": true,
+        "scope": {
+          "allow": [
+            "$HOME/**",
+            "/Users/anirudh/gamedev/pko-tools/**"
+          ]
+        }
+      }
     }
   },
   "bundle": {

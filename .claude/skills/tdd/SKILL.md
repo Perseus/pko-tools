@@ -364,6 +364,12 @@ describe('createBoneHelpers', () => {
 });
 ```
 
+**Also required for R3F/Canvas components:**
+
+- **Render-stability test**: mount with `null` data, then swap to real data and back to `null` to catch hook-order issues (`Rendered more hooks` errors).
+- **Mock Canvas + drei controls** in tests to avoid WebGL context errors and DOM warnings.
+- **Extract render decisions into pure helpers** (geometry type, blend mode, texture candidates) and unit test those helpers.
+
 #### 5. Test User Interactions
 
 ```typescript

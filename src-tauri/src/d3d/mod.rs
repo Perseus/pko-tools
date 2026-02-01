@@ -1,4 +1,5 @@
 use binrw::{binrw, BinRead};
+use serde::{Deserialize, Serialize};
 
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -192,7 +193,8 @@ pub enum D3DCmpFunc {
 }
 
 #[repr(u32)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(into = "u32", try_from = "u32")]
 #[binrw]
 #[br(repr = u32)]
 #[bw(repr = u32)]
@@ -211,6 +213,36 @@ pub enum D3DBlend {
     BothSrcAlpha = 12,
     BothInvSrcAlpha = 13,
     ForceDword = 0x7fffffff,
+}
+
+impl From<D3DBlend> for u32 {
+    fn from(value: D3DBlend) -> Self {
+        value as u32
+    }
+}
+
+impl TryFrom<u32> for D3DBlend {
+    type Error = String;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            0 | 1 => Ok(D3DBlend::Zero),
+            2 => Ok(D3DBlend::One),
+            3 => Ok(D3DBlend::SrcColor),
+            4 => Ok(D3DBlend::InvSrcColor),
+            5 => Ok(D3DBlend::SrcAlpha),
+            6 => Ok(D3DBlend::InvSrcAlpha),
+            7 => Ok(D3DBlend::DestAlpha),
+            8 => Ok(D3DBlend::InvDestAlpha),
+            9 => Ok(D3DBlend::DestColor),
+            10 => Ok(D3DBlend::InvDestColor),
+            11 => Ok(D3DBlend::SrcAlphaSat),
+            12 => Ok(D3DBlend::BothSrcAlpha),
+            13 => Ok(D3DBlend::BothInvSrcAlpha),
+            0x7fffffff => Ok(D3DBlend::ForceDword),
+            _ => Err(format!("Unknown D3DBlend value: {}", value)),
+        }
+    }
 }
 
 #[repr(u32)]

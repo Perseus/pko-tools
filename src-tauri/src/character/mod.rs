@@ -473,6 +473,7 @@ mod test {
     use super::*;
 
     #[test]
+    #[ignore = "relies on local test_artifacts/test.gltf"]
     fn is_able_to_parse_gltf() {
         let (gltf, buffers, images) =
             import(PathBuf::from("./test_artifacts/test.gltf")).unwrap();
@@ -481,6 +482,7 @@ mod test {
     }
 
     #[test]
+    #[ignore = "relies on external EA 1.0.1 path"]
     fn is_able_to_convert_lab_back_to_gltf() {
         let character = Character {
             id: 958,

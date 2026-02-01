@@ -95,7 +95,10 @@ fn is_valid_name_field(name_bytes: &[u8]) -> bool {
     }
 
     // Find the null terminator
-    let name_end = name_bytes.iter().position(|&b| b == 0).unwrap_or(name_bytes.len());
+    let name_end = name_bytes
+        .iter()
+        .position(|&b| b == 0)
+        .unwrap_or(name_bytes.len());
 
     if name_end == 0 {
         return true; // Empty name is valid
@@ -105,7 +108,10 @@ fn is_valid_name_field(name_bytes: &[u8]) -> bool {
     let name_part = &name_bytes[0..name_end];
 
     // Count printable ASCII characters (space through ~)
-    let printable_count = name_part.iter().filter(|&&b| b >= 0x20 && b <= 0x7E).count();
+    let printable_count = name_part
+        .iter()
+        .filter(|&&b| b >= 0x20 && b <= 0x7E)
+        .count();
 
     // At least 80% should be printable ASCII, and at least one character
     name_part.len() > 0 && (printable_count as f32 / name_part.len() as f32) >= 0.8
@@ -223,7 +229,10 @@ mod tests {
         }
 
         let data = vec![
-            4, 0, 0, 0, // size = 4
+            4,
+            0,
+            0,
+            0, // size = 4
             encrypted_data[0],
             encrypted_data[1],
             encrypted_data[2],

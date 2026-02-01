@@ -35,7 +35,7 @@ use std::path::Path;
 ///
 /// # Example
 /// ```no_run
-/// use pko_tools::decompiler::{decompile_to_tsv, GameVersion, StructureBuilder};
+/// use pko_tools_lib::decompiler::{decompile_to_tsv, GameVersion, StructureBuilder};
 ///
 /// let structure = StructureBuilder::new("CharacterInfo")
 ///     .pad(4)
@@ -121,10 +121,7 @@ pub fn decompile_to_tsv(
                 println!("  Record size: {} bytes", record.len());
                 if error_count < 3 {
                     // Show first few bytes of failed records
-                    println!(
-                        "  First 16 bytes: {:02X?}",
-                        &record[..record.len().min(16)]
-                    );
+                    println!("  First 16 bytes: {:02X?}", &record[..record.len().min(16)]);
                 }
                 println!("  Continuing with remaining records...");
                 error_count += 1;
@@ -155,7 +152,7 @@ pub fn decompile_to_tsv(
 ///
 /// # Example
 /// ```no_run
-/// use pko_tools::decompiler::{decompile_to_tsv_auto, create_character_info_v1};
+/// use pko_tools_lib::decompiler::{decompile_to_tsv_auto, create_character_info_v1};
 ///
 /// let structure = create_character_info_v1();
 /// decompile_to_tsv_auto(
@@ -208,6 +205,20 @@ fn write_tsv(path: impl AsRef<Path>, rows: &[Vec<String>]) -> Result<()> {
 mod tests {
     use super::*;
     use std::io::Read;
+    use std::path::PathBuf;
+
+    fn unique_temp_path(prefix: &str, extension: &str) -> PathBuf {
+        let mut path = std::env::temp_dir();
+        let thread_id = format!("{:?}", std::thread::current().id());
+        path.push(format!(
+            "{}_{}_{}.{}",
+            prefix,
+            std::process::id(),
+            thread_id,
+            extension
+        ));
+        path
+    }
 
     #[test]
     fn test_write_tsv() {
@@ -217,8 +228,7 @@ mod tests {
             vec!["2".to_string(), "Item B".to_string(), "200".to_string()],
         ];
 
-        let temp_dir = std::env::temp_dir();
-        let temp_path = temp_dir.join("test_output.tsv");
+        let temp_path = unique_temp_path("test_output", "tsv");
         write_tsv(&temp_path, &rows).unwrap();
 
         let content = std::fs::read_to_string(&temp_path).unwrap();
@@ -249,9 +259,8 @@ mod tests {
         data.extend_from_slice(&200u16.to_le_bytes()); // value
         data.push(0); // padding
 
-        let temp_dir = std::env::temp_dir();
-        let input_path = temp_dir.join("test_input.bin");
-        let output_path = temp_dir.join("test_output.tsv");
+        let input_path = unique_temp_path("test_input", "bin");
+        let output_path = unique_temp_path("test_output", "tsv");
 
         std::fs::write(&input_path, &data).unwrap();
 
@@ -284,9 +293,8 @@ mod tests {
         data.extend_from_slice(b"Test\0"); // name (5 bytes including null)
         data.extend_from_slice(&[0, 0, 0]); // padding to reach 9 bytes (8 bytes for name field)
 
-        let temp_dir = std::env::temp_dir();
-        let input_path = temp_dir.join("test_string.bin");
-        let output_path = temp_dir.join("test_string.tsv");
+        let input_path = unique_temp_path("test_string", "bin");
+        let output_path = unique_temp_path("test_string", "tsv");
 
         std::fs::write(&input_path, &data).unwrap();
 
@@ -360,7 +368,11 @@ mod tests {
 
             // Try V4 (encrypted) if V1 fails
             let result_v4 = decompile_to_tsv(&test_file, &output_file, GameVersion::V4, &structure);
-            assert!(result_v4.is_ok(), "Decompilation failed for both V1 and V4: {:?}", e);
+            assert!(
+                result_v4.is_ok(),
+                "Decompilation failed for both V1 and V4: {:?}",
+                e
+            );
         } else {
             assert!(result.is_ok());
         }
@@ -402,7 +414,8 @@ mod tests {
 
             for (i, (exp, out)) in expected_lines.iter().zip(output_lines.iter()).enumerate() {
                 assert_eq!(
-                    exp, out,
+                    exp,
+                    out,
                     "Line {} differs:\nExpected: {}\nGot:      {}",
                     i + 1,
                     exp,
