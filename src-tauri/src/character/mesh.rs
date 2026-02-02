@@ -4,6 +4,7 @@ use std::{
 };
 
 use crate::{
+    animation::character::LW_INVALID_INDEX,
     character::Character,
     d3d::{D3DPrimitiveType, D3DVertexElement9},
     math::{LwVector2, LwVector3},
@@ -29,8 +30,9 @@ use serde_json::json;
 
 use super::{
     model::{
-        EXP_OBJ_VERSION, EXP_OBJ_VERSION_0_0_0_0, EXP_OBJ_VERSION_1_0_0_3, EXP_OBJ_VERSION_1_0_0_4,
-        LW_MAX_TEXTURESTAGE_NUM,
+        EXP_OBJ_VERSION, EXP_OBJ_VERSION_0_0_0_0, EXP_OBJ_VERSION_1_0_0_0,
+        EXP_OBJ_VERSION_1_0_0_3, EXP_OBJ_VERSION_1_0_0_4, LW_MAX_TEXTURESTAGE_NUM,
+        MESH_VERSION0000, MESH_VERSION0001, RenderStateSetTemplate, RenderStateValue,
     },
     texture::{
         CharMaterialTextureInfo, MaterialTextureInfoTransparencyType, RenderStateAtom, TextureInfo,
@@ -192,7 +194,7 @@ impl BinRead for CharacterMeshInfo {
             version = old_version;
         }
 
-        let mut header;
+        let header;
         let mut vertex_element_seq: Vec<D3DVertexElement9> = vec![];
         let mut vertex_seq: Vec<LwVector3> = vec![];
         let mut normal_seq: Vec<LwVector3> = vec![];
@@ -204,8 +206,89 @@ impl BinRead for CharacterMeshInfo {
         let mut index_seq: Vec<u32> = vec![];
         let mut subset_seq: Vec<CharacterMeshSubsetInfo> = vec![];
 
+        // --- Parse header based on version ---
+        // Matches lwMeshInfo_Load header parsing branches in lwExpObj.cpp
         if version >= EXP_OBJ_VERSION_1_0_0_4 {
             header = CharacterInfoMeshHeader::read_options(reader, endian, ())?;
+        } else if (version >= EXP_OBJ_VERSION_1_0_0_0) || (version == MESH_VERSION0001) {
+            // lwMeshInfo_0003::lwMeshInfoHeader (6 fields, no rs_set)
+            let fvf = u32::read_options(reader, endian, ())?;
+            let pt_type = D3DPrimitiveType::read_options(reader, endian, ())?;
+            let vertex_num = u32::read_options(reader, endian, ())?;
+            let index_num = u32::read_options(reader, endian, ())?;
+            let subset_num = u32::read_options(reader, endian, ())?;
+            let bone_index_num = u32::read_options(reader, endian, ())?;
+
+            header = CharacterInfoMeshHeader {
+                fvf,
+                pt_type,
+                vertex_num,
+                index_num,
+                subset_num,
+                bone_index_num,
+                bone_infl_factor: if bone_index_num > 0 { 2 } else { 0 },
+                vertex_element_num: 0,
+                rs_set: [RenderStateAtom::new(); LW_MESH_RS_NUM],
+            };
+        } else if version == MESH_VERSION0000 {
+            // lwMeshInfo_0000::lwMeshInfoHeader (6 fields + lwRenderStateSetMesh2)
+            let fvf = u32::read_options(reader, endian, ())?;
+            let pt_type = D3DPrimitiveType::read_options(reader, endian, ())?;
+            let vertex_num = u32::read_options(reader, endian, ())?;
+            let index_num = u32::read_options(reader, endian, ())?;
+            let subset_num = u32::read_options(reader, endian, ())?;
+            let bone_index_num = u32::read_options(reader, endian, ())?;
+
+            // lwRenderStateSetMesh2 = lwRenderStateSetTemplate<2, LW_MESH_RS_NUM>
+            type RenderStateSetMesh2 = RenderStateSetTemplate<2, LW_MESH_RS_NUM>;
+            let rs_set_mesh = RenderStateSetMesh2::read_options(reader, endian, ())?;
+
+            // Convert lwRenderStateSetMesh2 → [RenderStateAtom; 8]
+            // D3DRS_AMBIENTMATERIALSOURCE = 147, D3DMCS_COLOR2 = 2
+            const D3DRS_AMBIENTMATERIALSOURCE: u32 = 147;
+            const D3DMCS_COLOR2: u32 = 2;
+
+            let mut rs_set = [RenderStateAtom::new(); LW_MESH_RS_NUM];
+            for j in 0..LW_MESH_RS_NUM {
+                let rsv = &rs_set_mesh.rsv_seq[0][j];
+                if rsv.state == LW_INVALID_INDEX {
+                    break;
+                }
+
+                let v = match rsv.state {
+                    D3DRS_AMBIENTMATERIALSOURCE => D3DMCS_COLOR2,
+                    _ => rsv.value,
+                };
+
+                rs_set[j] = RenderStateAtom {
+                    state: rsv.state,
+                    value0: v,
+                    value1: v,
+                };
+            }
+
+            header = CharacterInfoMeshHeader {
+                fvf,
+                pt_type,
+                vertex_num,
+                index_num,
+                subset_num,
+                bone_index_num,
+                bone_infl_factor: if bone_index_num > 0 { 2 } else { 0 },
+                vertex_element_num: 0,
+                rs_set,
+            };
+        } else {
+            return Err(binrw::Error::AssertFail {
+                pos: 0,
+                message: format!("Mesh decoding not implemented for version {}", version),
+            });
+        }
+
+        // --- Parse mesh data based on version ---
+        if version >= EXP_OBJ_VERSION_1_0_0_4 {
+            // Version 1.0.0.4+: vertex elements, vertices, normals, texcoords,
+            // vercol, blend+bones, indices, subsets
             if header.vertex_element_num > 0 {
                 for _ in 0..header.vertex_element_num {
                     vertex_element_seq.push(D3DVertexElement9::read_options(reader, endian, ())?);
@@ -225,56 +308,36 @@ impl BinRead for CharacterMeshInfo {
             }
 
             if (header.fvf & D3DFVF_TEX1) > 0 {
-                texcoord_seq[0] = vec![];
-
                 for _ in 0..header.vertex_num {
                     texcoord_seq[0].push(LwVector2::read_options(reader, endian, ())?);
                 }
             } else if (header.fvf & D3DFVF_TEX2) > 0 {
-                texcoord_seq[0] = vec![];
-                texcoord_seq[1] = vec![];
-
                 for _ in 0..header.vertex_num {
                     texcoord_seq[0].push(LwVector2::read_options(reader, endian, ())?);
                 }
-
                 for _ in 0..header.vertex_num {
                     texcoord_seq[1].push(LwVector2::read_options(reader, endian, ())?);
                 }
             } else if (header.fvf & D3DFVF_TEX3) > 0 {
-                texcoord_seq[0] = vec![];
-                texcoord_seq[1] = vec![];
-                texcoord_seq[2] = vec![];
-
                 for _ in 0..header.vertex_num {
                     texcoord_seq[0].push(LwVector2::read_options(reader, endian, ())?);
                 }
-
                 for _ in 0..header.vertex_num {
                     texcoord_seq[1].push(LwVector2::read_options(reader, endian, ())?);
                 }
-
                 for _ in 0..header.vertex_num {
                     texcoord_seq[2].push(LwVector2::read_options(reader, endian, ())?);
                 }
             } else if (header.fvf & D3DFVF_TEX4) > 0 {
-                texcoord_seq[0] = vec![];
-                texcoord_seq[1] = vec![];
-                texcoord_seq[2] = vec![];
-                texcoord_seq[3] = vec![];
-
                 for _ in 0..header.vertex_num {
                     texcoord_seq[0].push(LwVector2::read_options(reader, endian, ())?);
                 }
-
                 for _ in 0..header.vertex_num {
                     texcoord_seq[1].push(LwVector2::read_options(reader, endian, ())?);
                 }
-
                 for _ in 0..header.vertex_num {
                     texcoord_seq[2].push(LwVector2::read_options(reader, endian, ())?);
                 }
-
                 for _ in 0..header.vertex_num {
                     texcoord_seq[3].push(LwVector2::read_options(reader, endian, ())?);
                 }
@@ -290,7 +353,6 @@ impl BinRead for CharacterMeshInfo {
                 for _ in 0..header.vertex_num {
                     blend_seq.push(CharacterMeshBlendInfo::read_options(reader, endian, ())?);
                 }
-
                 for _ in 0..header.bone_index_num {
                     bone_index_seq.push(u32::read_options(reader, endian, ())?);
                 }
@@ -307,25 +369,101 @@ impl BinRead for CharacterMeshInfo {
                     subset_seq.push(CharacterMeshSubsetInfo::read_options(reader, endian, ())?);
                 }
             }
-
-            Ok(CharacterMeshInfo {
-                header,
-                vertex_seq,
-                normal_seq,
-                texcoord_seq,
-                vercol_seq,
-                index_seq,
-                bone_index_seq,
-                blend_seq,
-                subset_seq,
-                vertex_element_seq,
-            })
         } else {
-            Err(binrw::Error::AssertFail {
-                pos: 0,
-                message: format!("Mesh decoding not implemented for version {}", version),
-            })
+            // Older versions (< 1.0.0.4): different data order
+            // subsets FIRST, then vertices, normals, texcoords, vercol, blend+bones, indices
+
+            if header.subset_num > 0 {
+                for _ in 0..header.subset_num {
+                    subset_seq.push(CharacterMeshSubsetInfo::read_options(reader, endian, ())?);
+                }
+            }
+
+            if header.vertex_num > 0 {
+                for _ in 0..header.vertex_num {
+                    vertex_seq.push(LwVector3::read_options(reader, endian, ())?);
+                }
+            }
+
+            if (header.fvf & D3DFVF_NORMAL) > 0 {
+                for _ in 0..header.vertex_num {
+                    normal_seq.push(LwVector3::read_options(reader, endian, ())?);
+                }
+            }
+
+            if (header.fvf & D3DFVF_TEX1) > 0 {
+                for _ in 0..header.vertex_num {
+                    texcoord_seq[0].push(LwVector2::read_options(reader, endian, ())?);
+                }
+            } else if (header.fvf & D3DFVF_TEX2) > 0 {
+                for _ in 0..header.vertex_num {
+                    texcoord_seq[0].push(LwVector2::read_options(reader, endian, ())?);
+                }
+                for _ in 0..header.vertex_num {
+                    texcoord_seq[1].push(LwVector2::read_options(reader, endian, ())?);
+                }
+            } else if (header.fvf & D3DFVF_TEX3) > 0 {
+                for _ in 0..header.vertex_num {
+                    texcoord_seq[0].push(LwVector2::read_options(reader, endian, ())?);
+                }
+                for _ in 0..header.vertex_num {
+                    texcoord_seq[1].push(LwVector2::read_options(reader, endian, ())?);
+                }
+                for _ in 0..header.vertex_num {
+                    texcoord_seq[2].push(LwVector2::read_options(reader, endian, ())?);
+                }
+            } else if (header.fvf & D3DFVF_TEX4) > 0 {
+                for _ in 0..header.vertex_num {
+                    texcoord_seq[0].push(LwVector2::read_options(reader, endian, ())?);
+                }
+                for _ in 0..header.vertex_num {
+                    texcoord_seq[1].push(LwVector2::read_options(reader, endian, ())?);
+                }
+                for _ in 0..header.vertex_num {
+                    texcoord_seq[2].push(LwVector2::read_options(reader, endian, ())?);
+                }
+                for _ in 0..header.vertex_num {
+                    texcoord_seq[3].push(LwVector2::read_options(reader, endian, ())?);
+                }
+            }
+
+            if (header.fvf & D3DFVF_DIFFUSE) > 0 {
+                for _ in 0..header.vertex_num {
+                    vercol_seq.push(u32::read_options(reader, endian, ())?);
+                }
+            }
+
+            // Old versions use D3DFVF_LASTBETA_UBYTE4 flag and BYTE bone indices
+            if (header.fvf & D3DFVF_LASTBETA_UBYTE4) > 0 {
+                for _ in 0..header.vertex_num {
+                    blend_seq.push(CharacterMeshBlendInfo::read_options(reader, endian, ())?);
+                }
+                // Bone indices stored as BYTE (u8), convert to u32
+                for _ in 0..header.bone_index_num {
+                    let byte_idx = u8::read_options(reader, endian, ())?;
+                    bone_index_seq.push(byte_idx as u32);
+                }
+            }
+
+            if header.index_num > 0 {
+                for _ in 0..header.index_num {
+                    index_seq.push(u32::read_options(reader, endian, ())?);
+                }
+            }
         }
+
+        Ok(CharacterMeshInfo {
+            header,
+            vertex_seq,
+            normal_seq,
+            texcoord_seq,
+            vercol_seq,
+            index_seq,
+            bone_index_seq,
+            blend_seq,
+            subset_seq,
+            vertex_element_seq,
+        })
     }
 }
 
@@ -382,7 +520,7 @@ impl BinWrite for CharacterMeshInfo {
 }
 
 impl CharacterMeshInfo {
-    fn get_vertex_position_accessor(
+    pub fn get_vertex_position_accessor(
         &self,
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
     ) -> usize {
@@ -483,7 +621,7 @@ impl CharacterMeshInfo {
         accessor_index
     }
 
-    fn get_vertex_normal_accessor(&self, fields_to_aggregate: &mut GLTFFieldsToAggregate) -> usize {
+    pub fn get_vertex_normal_accessor(&self, fields_to_aggregate: &mut GLTFFieldsToAggregate) -> usize {
         let mut vertex_normal_buffer_data = vec![];
 
         let buffer_index = fields_to_aggregate.buffer.len();
@@ -548,7 +686,7 @@ impl CharacterMeshInfo {
         accessor_index
     }
 
-    fn get_vertex_texcoord_accessor(
+    pub fn get_vertex_texcoord_accessor(
         &self,
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
         texcoord_index: usize,
@@ -614,7 +752,7 @@ impl CharacterMeshInfo {
         accessor_index
     }
 
-    fn get_vertex_index_accessor(&self, fields_to_aggregate: &mut GLTFFieldsToAggregate) -> usize {
+    pub fn get_vertex_index_accessor(&self, fields_to_aggregate: &mut GLTFFieldsToAggregate) -> usize {
         let mut indices_buffer_data = vec![];
         let buffer_index = fields_to_aggregate.buffer.len();
         let buffer_view_index = fields_to_aggregate.buffer_view.len();
@@ -921,10 +1059,22 @@ impl CharacterMeshInfo {
             file_name += core::str::from_utf8(&[texture_info.file_name[i]]).unwrap();
         }
 
-        let mut image_file = project_dir
-            .join("texture/character/")
-            .join(&file_name)
-            .with_extension("bmp");
+        let texture_dirs = [
+            "texture/character",
+            "texture",
+        ];
+        let mut image_file = None;
+        for dir in &texture_dirs {
+            let candidate = project_dir.join(dir).join(&file_name).with_extension("bmp");
+            if candidate.exists() {
+                image_file = Some(candidate);
+                break;
+            }
+        }
+        let mut image_file = image_file.unwrap_or_else(|| {
+            // Fallback to character path for error message
+            project_dir.join("texture/character/").join(&file_name).with_extension("bmp")
+        });
         let original_image_reader = ImageReader::open(image_file.clone());
         if original_image_reader.is_err() {
             panic!("Error opening image file: {:?}, error: {:?}", image_file.to_str(),original_image_reader.err().unwrap());

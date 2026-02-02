@@ -80,23 +80,18 @@ pub struct RenderStateValue {
     pub value: u32,
 }
 
+/// Matches lwRenderStateSetTemplate in the client source.
+/// SET_SIZE and SEQUENCE_SIZE are compile-time constants in C++ (not stored in the binary).
 #[derive(Debug, Clone)]
 #[binrw]
 pub struct RenderStateSetTemplate<const SET_SIZE: usize, const SEQ_SIZE: usize> {
-    pub seq_size: u32,
-    pub set_size: u32,
-
     pub rsv_seq: [[RenderStateValue; SEQ_SIZE]; SET_SIZE],
 }
 
 impl<const SET_SIZE: usize, const SEQ_SIZE: usize> RenderStateSetTemplate<SET_SIZE, SEQ_SIZE> {
     pub fn new() -> Self {
         let rsv_seq = [[RenderStateValue::default(); SEQ_SIZE]; SET_SIZE];
-        Self {
-            rsv_seq,
-            seq_size: SEQ_SIZE as u32,
-            set_size: SET_SIZE as u32,
-        }
+        Self { rsv_seq }
     }
 }
 
@@ -220,7 +215,7 @@ impl CharacterGeometricModel {
         Ok(primitive)
     }
 
-    /// Get glTF helper nodes (bounding spheres, etc.)
+    /// Get glTF helper nodes (dummy points, bounding spheres, etc.)
     /// The mesh_index parameter associates these helpers with a specific mesh for round-trip support
     pub fn get_gltf_helper_nodes_for_mesh(&self, mesh_index: usize) -> Vec<gltf::Node> {
         if self.helper_data.is_none() {
@@ -229,6 +224,33 @@ impl CharacterGeometricModel {
 
         let helper_data = self.helper_data.as_ref().unwrap();
         let mut nodes = vec![];
+
+        // Dummy points (attachment points for effects, items, etc.)
+        for dummy in helper_data.dummy_seq.iter() {
+            let node = gltf::Node {
+                camera: None,
+                children: None,
+                extensions: None,
+                matrix: Some(dummy.mat.to_slice()),
+                mesh: None,
+                name: Some(format!("Dummy{}", dummy.id)),
+                rotation: None,
+                scale: None,
+                skin: None,
+                translation: None,
+                weights: None,
+                extras: Some(
+                    RawValue::from_string(format!(
+                        r#"{{"type":"dummy","id":{},"parent_type":{},"parent_id":{},"mesh_index":{}}}"#,
+                        dummy.id, dummy.parent_type, dummy.parent_id, mesh_index
+                    ))
+                    .unwrap(),
+                ),
+            };
+            nodes.push(node);
+        }
+
+        // Bounding spheres
         for bsphere in helper_data.bsphere_seq.iter() {
             let node = gltf::Node{
                 camera: None,

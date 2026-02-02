@@ -14,6 +14,7 @@ import { useEffect } from "react";
 import StatusBar from "./components/StatusBar/StatusBar";
 import CharacterPage from "./pages/characters";
 import EffectsPage from "./pages/effects";
+import ItemsPage from "./pages/items";
 import WorkspaceNavigator from "./components/WorkspaceNavigator/WorkspaceNavigator";
 import ProjectCreator from "./pages/project-creator/ProjectCreator";
 import { Toaster } from "./components/ui/toaster";
@@ -51,6 +52,7 @@ function App() {
             <Route path="/project-creator" element={<ProjectCreator />} />
             <Route path="/characters" element={<CharacterPage/>} />
             <Route path="/effects" element={<EffectsPage />} />
+            <Route path="/items" element={<ItemsPage />} />
             <Route path="*" element={<div />} />
           </Routes>
           <WorkspaceNavigator />

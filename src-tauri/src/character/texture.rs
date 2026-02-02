@@ -239,6 +239,20 @@ impl TextureInfo {
     }
 }
 
+/// Matches lwTexInfo_0000 in the client source.
+/// Used for MTLTEX_VERSION0000 files (version 0 item models).
+#[derive(Debug, Clone)]
+#[binrw]
+pub struct TextureInfo0000 {
+    pub stage: u32,
+    pub colorkey_type: ColorKeyType,
+    pub colorkey: LwColorValue4b,
+    pub format: D3DFormat,
+    pub file_name: [u8; 64],
+    pub tss_set: TextureStageStateTexture2,
+}
+
+/// Matches lwTexInfo_0001 in the client source.
 #[derive(Debug, Clone)]
 #[binrw]
 pub struct TextureInfo0001 {
@@ -670,12 +684,13 @@ impl BinRead for CharMaterialTextureInfo {
             material = CharMaterial::read_options(reader, endian, ())?;
 
             let rsm = RenderStateSetMaterial2::read_options(reader, endian, ())?;
-            let mut tex_info_0001: Vec<TextureInfo0001> =
-                vec![
-                    TextureInfo0001::read_options(reader, endian, ())?;
-                    LW_MAX_TEXTURESTAGE_NUM as usize
-                ];
-            tex_info_0001.push(TextureInfo0001::read_options(reader, endian, ())?);
+            // Read 4 TextureInfo0001 individually (vec![expr?; N] only evaluates once then clones)
+            let tex_info_0001: [TextureInfo0001; LW_MAX_TEXTURESTAGE_NUM as usize] = [
+                TextureInfo0001::read_options(reader, endian, ())?,
+                TextureInfo0001::read_options(reader, endian, ())?,
+                TextureInfo0001::read_options(reader, endian, ())?,
+                TextureInfo0001::read_options(reader, endian, ())?,
+            ];
 
             rs_set.iter_mut().enumerate().for_each(|(i, rs)| {
                 let rsv = rsm.rsv_seq[0][i];
@@ -712,7 +727,7 @@ impl BinRead for CharMaterialTextureInfo {
                 ts.byte_alignment_flag = 0;
                 ts.file_name = p.file_name;
 
-                for j in 0..p.tss_set.seq_size {
+                for j in 0..p.tss_set.rsv_seq[0].len() as u32 {
                     let rsv = p.tss_set.rsv_seq[0][j as usize];
                     if rsv.state == LW_INVALID_INDEX {
                         break;
@@ -724,17 +739,20 @@ impl BinRead for CharMaterialTextureInfo {
                 }
             });
         } else if version == MTLTEX_VERSION0000 {
+            // Version 0 format: no opacity/transp_type fields,
+            // uses lwTexInfo_0000 (smaller struct) instead of lwTexInfo_0001
             material = CharMaterial::read_options(reader, endian, ())?;
 
             let render_state_mtl_2 = RenderStateSetMaterial2::read_options(reader, endian, ())?;
-            let mut texture_info_0000: Vec<TextureInfo0001> =
-                vec![
-                    TextureInfo0001::read_options(reader, endian, ())?;
-                    LW_MAX_TEXTURESTAGE_NUM as usize
-                ];
-            texture_info_0000.push(TextureInfo0001::read_options(reader, endian, ())?);
+            // Read 4 TextureInfo0000 individually
+            let texture_info_0000: [TextureInfo0000; LW_MAX_TEXTURESTAGE_NUM as usize] = [
+                TextureInfo0000::read_options(reader, endian, ())?,
+                TextureInfo0000::read_options(reader, endian, ())?,
+                TextureInfo0000::read_options(reader, endian, ())?,
+                TextureInfo0000::read_options(reader, endian, ())?,
+            ];
 
-            for i in 0..render_state_mtl_2.seq_size {
+            for i in 0..render_state_mtl_2.rsv_seq[0].len() {
                 let rsv = render_state_mtl_2.rsv_seq[0][i as usize];
                 if rsv.state == LW_INVALID_INDEX {
                     break;
@@ -773,7 +791,7 @@ impl BinRead for CharMaterialTextureInfo {
                 tex.byte_alignment_flag = 0;
                 tex.file_name = p.file_name;
 
-                for j in 0..p.tss_set.seq_size {
+                for j in 0..p.tss_set.rsv_seq[0].len() as u32 {
                     let rsv = p.tss_set.rsv_seq[0][j as usize];
                     if rsv.state == LW_INVALID_INDEX {
                         break;
