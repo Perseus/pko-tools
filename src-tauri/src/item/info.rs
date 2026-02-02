@@ -4,6 +4,24 @@ use crate::projects;
 
 use super::Item;
 
+/// Read a field from a ByteRecord as a lossy UTF-8 string.
+/// ItemInfo.txt contains non-UTF-8 text (GBK-encoded Chinese/Korean) in
+/// the name and description fields, so we must use lossy conversion to
+/// avoid skipping entire rows.
+fn byte_field(record: &csv::ByteRecord, index: usize) -> String {
+    match record.get(index) {
+        Some(bytes) => String::from_utf8_lossy(bytes).to_string(),
+        None => String::new(),
+    }
+}
+
+fn byte_field_or(record: &csv::ByteRecord, index: usize, default: &str) -> String {
+    match record.get(index) {
+        Some(bytes) if !bytes.is_empty() => String::from_utf8_lossy(bytes).to_string(),
+        _ => default.to_string(),
+    }
+}
+
 fn parse_item_info(path: PathBuf) -> anyhow::Result<Vec<Item>> {
     let mut reader = csv::ReaderBuilder::new()
         .delimiter(b'\t')
@@ -14,31 +32,40 @@ fn parse_item_info(path: PathBuf) -> anyhow::Result<Vec<Item>> {
 
     let mut items = vec![];
 
-    for result in reader.records() {
+    for result in reader.byte_records() {
         match result {
             Ok(record) => {
                 // Skip empty rows (rows with all empty fields)
-                if record.len() < 10 || record.get(0).unwrap_or("").trim().is_empty() {
+                if record.len() < 10 {
                     continue;
                 }
 
-                let id = match record.get(0).unwrap_or("0").trim().parse::<u32>() {
+                let id_str = byte_field(&record, 0);
+                let id_str = id_str.trim();
+                if id_str.is_empty() {
+                    continue;
+                }
+
+                let id = match id_str.parse::<u32>() {
                     Ok(id) => id,
                     Err(_) => continue,
                 };
 
-                let name = record.get(1).unwrap_or("").to_string();
-                let icon_name = record.get(2).unwrap_or("").to_string();
-                let model_ground = record.get(3).unwrap_or("0").to_string();
-                let model_lance = record.get(4).unwrap_or("0").to_string();
-                let model_carsise = record.get(5).unwrap_or("0").to_string();
-                let model_phyllis = record.get(6).unwrap_or("0").to_string();
-                let model_ami = record.get(7).unwrap_or("0").to_string();
-                let item_type = record.get(10).unwrap_or("0").trim().parse::<u32>().unwrap_or(0);
-                let display_effect = record.get(87).unwrap_or("0").to_string();
-                let bind_effect = record.get(88).unwrap_or("0").to_string();
-                let bind_effect_2 = record.get(89).unwrap_or("0").to_string();
-                let description = record.get(93).unwrap_or("").to_string();
+                let name = byte_field(&record, 1);
+                let icon_name = byte_field(&record, 2);
+                let model_ground = byte_field_or(&record, 3, "0");
+                let model_lance = byte_field_or(&record, 4, "0");
+                let model_carsise = byte_field_or(&record, 5, "0");
+                let model_phyllis = byte_field_or(&record, 6, "0");
+                let model_ami = byte_field_or(&record, 7, "0");
+                let item_type = byte_field_or(&record, 10, "0")
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(0);
+                let display_effect = byte_field_or(&record, 87, "0");
+                let bind_effect = byte_field_or(&record, 88, "0");
+                let bind_effect_2 = byte_field_or(&record, 89, "0");
+                let description = byte_field(&record, 93);
 
                 items.push(Item {
                     id,

@@ -99,12 +99,30 @@ pub async fn decode_texture(path: String) -> Result<DecodedTexture, String> {
         return Ok(DecodedTexture { width: w, height: h, data });
     }
 
-    // Fallback: PKO non-standard TGA format
-    // Structure: 48-byte header + raw pixel data (BGRA 4bpp or BGR 3bpp)
-    // Header: 26 zero/junk bytes + "TRUEVISION-XFILE.\0" (18 bytes) + 4 bytes padding
-    const PKO_TGA_HEADER_SIZE: usize = 48;
-    if bytes.len() > PKO_TGA_HEADER_SIZE {
-        if let Some(result) = try_decode_pko_tga(&bytes[PKO_TGA_HEADER_SIZE..]) {
+    // Fallback: PKO non-standard TGA formats.
+    //
+    // Variant 1 (ARGB with TGA footer):
+    //   Raw ARGB pixel data followed by a 48-byte footer containing a standard TGA
+    //   header fragment. Detected by checking if the last 48 bytes start with a valid
+    //   TGA header (color_map_type <= 1 and image_type == 2).
+    //
+    // Variant 2 (BGRA with header):
+    //   48-byte header (junk + "TRUEVISION-XFILE.\0" + padding) followed by BGRA pixels.
+    const PKO_TGA_FOOTER_SIZE: usize = 48;
+    if bytes.len() > PKO_TGA_FOOTER_SIZE {
+        let footer_start = bytes.len() - PKO_TGA_FOOTER_SIZE;
+        let has_tga_footer = bytes[footer_start + 1] <= 1
+            && bytes[footer_start + 2] == 2;
+
+        if has_tga_footer {
+            // Variant 1: pixel data is bytes 0..footer_start in ARGB format
+            if let Some(result) = try_decode_pko_tga_argb(&bytes[..footer_start]) {
+                return Ok(result);
+            }
+        }
+
+        // Variant 2: skip 48-byte header, pixel data in BGRA format
+        if let Some(result) = try_decode_pko_tga(&bytes[PKO_TGA_FOOTER_SIZE..]) {
             return Ok(result);
         }
     }
@@ -163,6 +181,69 @@ fn try_decode_pko_tga(pixel_data: &[u8]) -> Option<DecodedTexture> {
             rgba.push(chunk[2]); // R
             rgba.push(chunk[1]); // G
             rgba.push(chunk[0]); // B
+            rgba.push(255);      // A
+        }
+    }
+
+    let data = base64::engine::general_purpose::STANDARD.encode(&rgba);
+    Some(DecodedTexture {
+        width: w as u32,
+        height: h as u32,
+        data,
+    })
+}
+
+/// Try decoding raw PKO pixel data stored in ARGB format (variant 1).
+/// Used when the file has pixel data followed by a TGA header footer.
+fn try_decode_pko_tga_argb(pixel_data: &[u8]) -> Option<DecodedTexture> {
+    let len = pixel_data.len();
+
+    let score = |w: usize, h: usize| -> u32 {
+        let w_pow2 = w.is_power_of_two() && w >= 16;
+        let h_pow2 = h.is_power_of_two() && h >= 16;
+        let ratio = if w >= h { w / h.max(1) } else { h / w.max(1) };
+        let mut s: u32 = 0;
+        if w_pow2 { s += 10; }
+        if h_pow2 { s += 10; }
+        if ratio <= 2 { s += 5; }
+        else if ratio <= 4 { s += 3; }
+        else if ratio <= 8 { s += 1; }
+        s
+    };
+
+    let mut best: Option<(u32, usize, usize, u8)> = None;
+
+    for bpp in [4u8, 3u8] {
+        let bpp_usize = bpp as usize;
+        if len % bpp_usize != 0 {
+            continue;
+        }
+        let pixel_count = len / bpp_usize;
+        if let Some((w, h)) = guess_texture_dimensions(pixel_count) {
+            let s = score(w, h);
+            if best.is_none() || s > best.unwrap().0 {
+                best = Some((s, w, h, bpp));
+            }
+        }
+    }
+
+    let (_, w, h, bpp) = best?;
+    let mut rgba = Vec::with_capacity(w * h * 4);
+
+    if bpp == 4 {
+        // ARGB → RGBA
+        for chunk in pixel_data.chunks_exact(4) {
+            rgba.push(chunk[1]); // R
+            rgba.push(chunk[2]); // G
+            rgba.push(chunk[3]); // B
+            rgba.push(chunk[0]); // A
+        }
+    } else {
+        // 3bpp: treat as RGB (no alpha byte present)
+        for chunk in pixel_data.chunks_exact(3) {
+            rgba.push(chunk[0]); // R
+            rgba.push(chunk[1]); // G
+            rgba.push(chunk[2]); // B
             rgba.push(255);      // A
         }
     }

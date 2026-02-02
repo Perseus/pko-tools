@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { ItemLitEntry } from "@/types/item";
-import { loadLitTextureBytes } from "@/commands/item";
 import { invoke } from "@tauri-apps/api/core";
 
 /**
@@ -137,104 +136,93 @@ interface ItemLitRendererProps {
   litEntry: ItemLitEntry;
   glowMesh: THREE.Mesh;
   refineLevel: number;
-  projectId: string;
-  /** Override alpha from forge preview (if provided, replaces computed refine alpha) */
-  alpha?: number;
+  projectDir: string;
 }
 
 export function ItemLitRenderer({
   litEntry,
   glowMesh,
   refineLevel,
-  projectId,
-  alpha,
+  projectDir,
 }: ItemLitRendererProps) {
   const materialRef = useRef<THREE.ShaderMaterial>(null);
   const [glowTexture, setGlowTexture] = useState<THREE.Texture | null>(null);
 
   // Load glow texture from backend
+  // Lit textures are typically in texture/item/ (e.g. red.tga, blue.tga),
+  // but may also be in texture/lit/ or texture/. Try multiple directories.
   useEffect(() => {
-    if (!litEntry?.file || !projectId) return;
+    // Clear old texture immediately so stale glow doesn't persist
+    setGlowTexture(null);
+
+    if (!litEntry?.file || !projectDir) return;
 
     let cancelled = false;
 
     async function loadTexture() {
-      try {
-        // Use decode_texture to get RGBA pixel data
-        const decoded = await invoke<{
-          width: number;
-          height: number;
-          data: string;
-        }>("decode_texture", {
-          path: `${projectId}/texture/lit/${litEntry.file}`,
-        });
+      const searchDirs = ["texture/item", "texture/lit", "texture"];
+      let decoded: { width: number; height: number; data: string } | null = null;
 
-        if (cancelled) return;
-
-        // Decode base64 RGBA data into texture
-        const binaryStr = atob(decoded.data);
-        const bytes = new Uint8Array(binaryStr.length);
-        for (let i = 0; i < binaryStr.length; i++) {
-          bytes[i] = binaryStr.charCodeAt(i);
-        }
-
-        const tex = new THREE.DataTexture(
-          bytes,
-          decoded.width,
-          decoded.height,
-          THREE.RGBAFormat
-        );
-        tex.wrapS = THREE.RepeatWrapping;
-        tex.wrapT = THREE.RepeatWrapping;
-        tex.needsUpdate = true;
-
-        setGlowTexture(tex);
-      } catch {
-        // Try loading raw bytes and using loadLitTextureBytes as fallback
+      for (const dir of searchDirs) {
+        const texPath = `${projectDir}/${dir}/${litEntry.file}`;
         try {
-          const base64 = await loadLitTextureBytes(projectId, litEntry.file);
-
-          if (cancelled) return;
-
-          const binaryStr = atob(base64);
-          const bytes = new Uint8Array(binaryStr.length);
-          for (let i = 0; i < binaryStr.length; i++) {
-            bytes[i] = binaryStr.charCodeAt(i);
-          }
-
-          const blob = new Blob([bytes]);
-          const url = URL.createObjectURL(blob);
-          const loader = new THREE.TextureLoader();
-          loader.load(url, (tex) => {
-            if (cancelled) return;
-            tex.wrapS = THREE.RepeatWrapping;
-            tex.wrapT = THREE.RepeatWrapping;
-            setGlowTexture(tex);
-            URL.revokeObjectURL(url);
-          });
-        } catch (e2) {
-          console.error("Failed to load lit texture:", e2);
+          decoded = await invoke<{
+            width: number;
+            height: number;
+            data: string;
+          }>("decode_texture", { path: texPath });
+          break;
+        } catch {
+          // Try next directory
         }
       }
+
+      if (cancelled || !decoded) return;
+
+      // Decode base64 RGBA data into texture
+      const binaryStr = atob(decoded.data);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+
+      const tex = new THREE.DataTexture(
+        bytes,
+        decoded.width,
+        decoded.height,
+        THREE.RGBAFormat
+      );
+      tex.wrapS = THREE.RepeatWrapping;
+      tex.wrapT = THREE.RepeatWrapping;
+      tex.needsUpdate = true;
+
+      setGlowTexture(tex);
     }
 
     loadTexture();
     return () => {
       cancelled = true;
     };
-  }, [litEntry?.file, projectId]);
+  }, [litEntry?.file, projectDir]);
 
-  // Calculate glow opacity based on refine level and lit entry opacity
+  // Calculate glow opacity from refineLevel directly (no async dependency).
+  // This ensures the slider is instantly responsive — no waiting for API.
   const glowOpacity = useMemo(() => {
     const baseOpacity = litEntry?.opacity ?? 0.5;
-    const refineAlpha = alpha ?? getRefineAlpha(refineLevel);
-    return baseOpacity * refineAlpha;
-  }, [litEntry?.opacity, refineLevel, alpha]);
+    return baseOpacity * getRefineAlpha(refineLevel);
+  }, [litEntry?.opacity, refineLevel]);
 
-  // Animate the shader time uniform
+  // Keep all shader uniforms in sync every frame.
+  // R3F doesn't deep-update uniform values on re-render, so we must
+  // push new values via the ref.
   useFrame((_, delta) => {
     if (materialRef.current) {
       materialRef.current.uniforms.time.value += delta;
+      materialRef.current.uniforms.opacity.value = glowOpacity;
+      materialRef.current.uniforms.animType.value = litEntry.anim_type;
+      if (glowTexture) {
+        materialRef.current.uniforms.glowMap.value = glowTexture;
+      }
     }
   });
 
@@ -254,6 +242,7 @@ export function ItemLitRenderer({
       scale={glowMesh.scale}
     >
       <shaderMaterial
+        key={`${litEntry.transp_type}`}
         ref={materialRef}
         vertexShader={glowVertexShader}
         fragmentShader={glowFragmentShader}

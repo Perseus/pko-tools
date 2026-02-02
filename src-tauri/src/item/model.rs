@@ -388,7 +388,7 @@ fn build_single_material(
     let mut texture_loaded = false;
     if let Some(ref tex_name) = texture_file_name {
         if !tex_name.is_empty() {
-            let dirs = ["texture/item", "texture"];
+            let dirs = ["texture/item", "texture/character", "texture"];
             let exts = ["bmp", "tga", "dds", "png"];
 
             'search: for dir in &dirs {

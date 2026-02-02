@@ -99,4 +99,44 @@ export const ITEM_TYPE_NAMES: Record<number, string> = {
   46: "Ship Hull",
 };
 
+export type CategorySummary = {
+  category: number;
+  available: boolean;
+  lit_id: number;
+  has_particles: boolean;
+};
+
+export type ItemCategoryAvailability = {
+  item_id: number;
+  categories: CategorySummary[];
+};
+
+export const LIT_COLOR_NAMES: Record<number, string> = {
+  0: "None",
+  1: "Red",
+  2: "Blue",
+  3: "Yellow",
+  4: "Green",
+};
+
+export const ANIM_TYPE_NAMES: Record<number, string> = {
+  0: "Static",
+  1: "Z-Rotation",
+  3: "U-Scroll",
+  4: "V-Scroll",
+  5: "UV-Scroll",
+  6: "Rotate+V",
+  7: "Rotate+U",
+  8: "Fast Z-Rotation",
+};
+
+export const BLEND_MODE_NAMES: Record<number, string> = {
+  0: "Normal",
+  1: "Additive",
+  2: "Src Color+One",
+  3: "Soft Blend",
+  4: "Alpha Blend",
+  5: "Subtractive",
+};
+
 export type ModelVariant = "ground" | "lance" | "carsise" | "phyllis" | "ami";

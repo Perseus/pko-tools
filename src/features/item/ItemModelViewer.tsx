@@ -50,12 +50,14 @@ function ItemModel({
   litInfo,
   effectConfig,
   projectId,
+  projectDir,
   forgePreview,
 }: {
   gltfDataURI: string;
   litInfo: ItemLitInfo | null;
   effectConfig: ItemEffectConfig;
   projectId: string;
+  projectDir: string;
   forgePreview: ForgeEffectPreview | null;
 }) {
   const { scene } = useGLTF(gltfDataURI);
@@ -64,6 +66,10 @@ function ItemModel({
   // The glow overlay is a separate node named "glow_overlay" with
   // userData.glowOverlay === true (set via glTF node extras).
   const { glowMesh, weaponMesh, dummyPoints } = useMemo(() => {
+    // Ensure world matrices are computed before extracting transforms.
+    // GLTFLoader sets node.matrix but does NOT compute matrixWorld.
+    scene.updateMatrixWorld(true);
+
     let glow: THREE.Mesh | null = null;
     let weapon: THREE.Mesh | null = null;
     const dummies: { id: number; matrix: THREE.Matrix4; name: string }[] = [];
@@ -103,10 +109,13 @@ function ItemModel({
     return { glowMesh: glow as THREE.Mesh | null, weaponMesh: weapon as THREE.Mesh | null, dummyPoints: dummies };
   }, [scene]);
 
-  // Determine which lit entry to use based on forge preview or refine level
+  // Determine which lit entry to use based on forge preview or refine level.
+  // When a forge preview is active (non-null), its lit_entry is authoritative —
+  // if the preview says no glow (lit_entry: null), we respect that instead of
+  // falling through to litInfo.
   const activeLitEntry = useMemo(() => {
-    if (forgePreview?.lit_entry) {
-      return forgePreview.lit_entry;
+    if (forgePreview) {
+      return forgePreview.lit_entry ?? null;
     }
     if (!litInfo || litInfo.lits.length === 0) return null;
     // Select lit entry by refine tier: levels 1-4 → tier 0, 5-8 → tier 1, 9-12 → tier 2, etc.
@@ -114,7 +123,7 @@ function ItemModel({
       ? Math.min(Math.floor((effectConfig.refineLevel - 1) / 4), litInfo.lits.length - 1)
       : 0;
     return litInfo.lits[tier] ?? litInfo.lits[0];
-  }, [litInfo, forgePreview?.lit_entry, effectConfig.refineLevel]);
+  }, [litInfo, forgePreview, effectConfig.refineLevel]);
 
   // Use glow overlay geometry if available, otherwise fall back to weapon mesh
   const glowGeometryMesh = glowMesh ?? weaponMesh;
@@ -128,8 +137,7 @@ function ItemModel({
             litEntry={activeLitEntry}
             glowMesh={glowGeometryMesh}
             refineLevel={effectConfig.refineLevel}
-            projectId={projectId}
-            alpha={forgePreview?.alpha}
+            projectDir={projectDir}
           />
         )}
         {effectConfig.showParticles && forgePreview && forgePreview.particles.length > 0 && (
@@ -145,6 +153,8 @@ function ItemModel({
             particles={forgePreview.particles}
             dummyPoints={dummyPoints}
             projectId={projectId}
+            projectDir={projectDir}
+            forgeAlpha={forgePreview.alpha}
           />
         )}
       </group>
@@ -157,12 +167,14 @@ export default function ItemModelViewer({
   litInfo,
   effectConfig,
   projectId,
+  projectDir,
   forgePreview,
 }: {
   gltfJson: string | null;
   litInfo: ItemLitInfo | null;
   effectConfig: ItemEffectConfig;
   projectId: string;
+  projectDir: string;
   forgePreview: ForgeEffectPreview | null;
 }) {
   const [gltfDataURI, setGltfDataURI] = useState<string | null>(null);
@@ -189,6 +201,7 @@ export default function ItemModelViewer({
       litInfo={litInfo}
       effectConfig={effectConfig}
       projectId={projectId}
+      projectDir={projectDir}
       forgePreview={forgePreview ?? null}
     />
   );

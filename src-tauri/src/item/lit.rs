@@ -323,4 +323,52 @@ mod tests {
         let buf = [0u8; 10];
         assert!(read_fixed_string(&buf, 5, 64).is_err());
     }
+
+    #[test]
+    fn test_parse_real_item_lit() {
+        let path = std::path::PathBuf::from("../top-client/scripts/txt/item.lit");
+        if !path.exists() {
+            eprintln!("item.lit not found at {:?}, skipping", path);
+            return;
+        }
+
+        let data = std::fs::read(&path).unwrap();
+        eprintln!("item.lit file size: {} bytes", data.len());
+
+        let items = parse_item_lit(&data).unwrap();
+        eprintln!("Parsed {} item lit entries", items.len());
+
+        for item in &items {
+            eprintln!(
+                "  ItemLit[{}]: descriptor='{}', file='{}', {} lits",
+                item.item_id, item.descriptor, item.file, item.lits.len()
+            );
+            for lit in &item.lits {
+                eprintln!(
+                    "    Lit[{}]: file='{}', anim_type={}, transp_type={}, opacity={}",
+                    lit.id, lit.file, lit.anim_type, lit.transp_type, lit.opacity
+                );
+            }
+        }
+
+        assert!(!items.is_empty(), "Expected at least one item lit entry");
+
+        // Verify entry at index 1 (light_id=1 in forge chain)
+        if items.len() > 1 {
+            let entry1 = &items[1];
+            eprintln!("\nEntry at index 1 (light_id=1):");
+            eprintln!("  descriptor: '{}'", entry1.descriptor);
+            eprintln!("  file: '{}'", entry1.file);
+            assert!(!entry1.lits.is_empty(), "Entry 1 should have lit entries");
+            for lit in &entry1.lits {
+                eprintln!("  lit file: '{}', anim={}, transp={}, opacity={}", lit.file, lit.anim_type, lit.transp_type, lit.opacity);
+                // Verify the lit texture file is a .tga
+                assert!(
+                    lit.file.to_lowercase().ends_with(".tga") || lit.file.to_lowercase().ends_with(".dds") || lit.file.to_lowercase().ends_with(".bmp"),
+                    "Lit texture file should be a valid texture format: '{}'",
+                    lit.file
+                );
+            }
+        }
+    }
 }

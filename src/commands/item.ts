@@ -1,4 +1,4 @@
-import { Item, ItemLitInfo, ItemMetadata, RefineEffectTable, ForgeEffectPreview } from "@/types/item";
+import { Item, ItemLitInfo, ItemMetadata, RefineEffectTable, ForgeEffectPreview, ItemCategoryAvailability } from "@/types/item";
 import { invoke } from "@tauri-apps/api/core";
 
 export const getItemList = async (
@@ -42,16 +42,23 @@ export const getItemMetadata = async (
   return invoke("get_item_metadata", { projectId, itemId, modelId });
 };
 
+export const getItemCategoryAvailability = async (
+  projectId: string,
+  itemId: number
+): Promise<ItemCategoryAvailability> => {
+  return invoke("get_item_category_availability", { projectId, itemId });
+};
+
 export const getForgeEffectPreview = async (
   projectId: string,
-  itemType: number,
+  itemId: number,
   refineLevel: number,
   charType: number,
   effectCategory: number
 ): Promise<ForgeEffectPreview> => {
   return invoke("get_forge_effect_preview", {
     projectId,
-    itemType,
+    itemId,
     refineLevel,
     charType,
     effectCategory,

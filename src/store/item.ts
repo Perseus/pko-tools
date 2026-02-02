@@ -1,4 +1,4 @@
-import { Item, ItemLitInfo, ItemMetadata, ModelVariant, ForgeEffectPreview } from "@/types/item";
+import { Item, ItemLitInfo, ItemMetadata, ModelVariant, ForgeEffectPreview, ItemCategoryAvailability } from "@/types/item";
 import { atom } from "jotai";
 
 export const selectedItemAtom = atom<Item | null>(null);
@@ -25,3 +25,4 @@ export const itemEffectConfigAtom = atom<ItemEffectConfig>({
 export const forgeEffectPreviewAtom = atom<ForgeEffectPreview | null>(null);
 export const itemCharTypeAtom = atom<number>(0);
 export const itemEffectCategoryAtom = atom<number>(0);
+export const itemCategoryAvailabilityAtom = atom<ItemCategoryAvailability | null>(null);

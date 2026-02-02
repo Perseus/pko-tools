@@ -7,6 +7,7 @@ import {
   forgeEffectPreviewAtom,
   itemCharTypeAtom,
   itemEffectCategoryAtom,
+  itemCategoryAvailabilityAtom,
 } from "@/store/item";
 import { currentProjectAtom } from "@/store/project";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
@@ -17,31 +18,18 @@ import * as THREE from "three";
 import { useControls, Leva } from "leva";
 import ItemModelViewer from "./ItemModelViewer";
 import { ItemMetadataPanel } from "./ItemMetadataPanel";
-import { getForgeEffectPreview } from "@/commands/item";
+import { ForgeCategorySelector } from "./ForgeCategorySelector";
+import { ForgeEffectInfoPanel } from "./ForgeEffectInfoPanel";
+import {
+  getForgeEffectPreview,
+  getItemCategoryAvailability,
+} from "@/commands/item";
 
 const CHAR_TYPE_OPTIONS: Record<string, number> = {
   Lance: 0,
   Carsise: 1,
   Phyllis: 2,
   Ami: 3,
-};
-
-const EFFECT_CATEGORY_OPTIONS: Record<string, number> = {
-  None: 0,
-  "Category 1": 1,
-  "Category 2": 2,
-  "Category 3": 3,
-  "Category 4": 4,
-  "Category 5": 5,
-  "Category 6": 6,
-  "Category 7": 7,
-  "Category 8": 8,
-  "Category 9": 9,
-  "Category 10": 10,
-  "Category 11": 11,
-  "Category 12": 12,
-  "Category 13": 13,
-  "Category 14": 14,
 };
 
 export default function ItemWorkbench() {
@@ -55,6 +43,9 @@ export default function ItemWorkbench() {
   const [effectCategory, setEffectCategory] = useAtom(itemEffectCategoryAtom);
   const setForgePreview = useSetAtom(forgeEffectPreviewAtom);
   const forgePreview = useAtomValue(forgeEffectPreviewAtom);
+  const [categoryAvailability, setCategoryAvailability] = useAtom(
+    itemCategoryAvailabilityAtom
+  );
 
   // Track a request counter to avoid stale responses
   const requestIdRef = useRef(0);
@@ -91,40 +82,62 @@ export default function ItemWorkbench() {
 
   useControls("Forge Preview", {
     charType: {
-      value: Object.keys(CHAR_TYPE_OPTIONS).find(
-        (k) => CHAR_TYPE_OPTIONS[k] === charType
-      ) ?? "Lance",
+      value:
+        Object.keys(CHAR_TYPE_OPTIONS).find(
+          (k) => CHAR_TYPE_OPTIONS[k] === charType
+        ) ?? "Lance",
       options: Object.keys(CHAR_TYPE_OPTIONS),
       label: "Character",
       onChange: (v: string) => setCharType(CHAR_TYPE_OPTIONS[v] ?? 0),
     },
-    effectCategory: {
-      value: Object.keys(EFFECT_CATEGORY_OPTIONS).find(
-        (k) => EFFECT_CATEGORY_OPTIONS[k] === effectCategory
-      ) ?? "None",
-      options: Object.keys(EFFECT_CATEGORY_OPTIONS),
-      label: "Effect Category",
-      onChange: (v: string) =>
-        setEffectCategory(EFFECT_CATEGORY_OPTIONS[v] ?? 0),
-    },
   });
 
-  // Load forge effect preview when parameters change
+  // Load category availability when item changes
   useEffect(() => {
     const projectId = currentProject?.id;
-    const itemType = selectedItem?.item_type;
+    const itemId = selectedItem?.id;
+
+    // Reset category selection and availability on item change
+    setEffectCategory(0);
+    setCategoryAvailability(null);
+
+    if (!projectId || itemId == null) return;
+
+    let cancelled = false;
+
+    getItemCategoryAvailability(projectId, itemId)
+      .then((result) => {
+        if (!cancelled) setCategoryAvailability(result);
+      })
+      .catch(() => {
+        if (!cancelled) setCategoryAvailability(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentProject?.id, selectedItem?.id, setEffectCategory, setCategoryAvailability]);
+
+  // Load forge effect preview when parameters change.
+  // Clear stale preview immediately so rendering uses fresh data.
+  useEffect(() => {
+    const projectId = currentProject?.id;
+    const itemId = selectedItem?.id;
     const refineLevel = effectConfig.refineLevel;
 
-    if (!projectId || itemType == null || refineLevel === 0) {
+    if (!projectId || itemId == null || refineLevel === 0) {
       setForgePreview(null);
       return;
     }
+
+    // Clear old preview so stale lit_entry/particles don't linger
+    setForgePreview(null);
 
     const reqId = ++requestIdRef.current;
 
     getForgeEffectPreview(
       projectId,
-      itemType,
+      itemId,
       refineLevel,
       charType,
       effectCategory
@@ -141,7 +154,7 @@ export default function ItemWorkbench() {
       });
   }, [
     currentProject?.id,
-    selectedItem?.item_type,
+    selectedItem?.id,
     effectConfig.refineLevel,
     charType,
     effectCategory,
@@ -152,6 +165,16 @@ export default function ItemWorkbench() {
     <div className="h-full w-full relative">
       <Leva collapsed={false} />
       <ItemMetadataPanel metadata={itemMetadata} />
+      <ForgeCategorySelector
+        categories={categoryAvailability?.categories ?? null}
+        selected={effectCategory}
+        onSelect={setEffectCategory}
+      />
+      <ForgeEffectInfoPanel
+        preview={forgePreview}
+        effectConfig={effectConfig}
+        effectCategory={effectCategory}
+      />
       <Canvas
         style={{ height: "100%", width: "100%" }}
         shadows
@@ -171,6 +194,7 @@ export default function ItemWorkbench() {
             litInfo={litInfo}
             effectConfig={effectConfig}
             projectId={currentProject?.id ?? ""}
+            projectDir={currentProject?.projectDirectory ?? ""}
             forgePreview={forgePreview}
           />
         </Suspense>

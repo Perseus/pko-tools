@@ -161,6 +161,81 @@ pub async fn export_item_to_gltf(
 }
 
 // ============================================================================
+// Category availability
+// ============================================================================
+
+#[derive(Serialize)]
+pub struct CategorySummary {
+    pub category: u32,
+    pub available: bool,
+    pub lit_id: i32,
+    pub has_particles: bool,
+}
+
+#[derive(Serialize)]
+pub struct ItemCategoryAvailability {
+    pub item_id: u32,
+    pub categories: Vec<CategorySummary>,
+}
+
+#[tauri::command]
+pub async fn get_item_category_availability(
+    project_id: String,
+    item_id: u32,
+) -> Result<ItemCategoryAvailability, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+    let project_dir = project.project_directory.as_ref();
+
+    let refine_info_table =
+        refine::load_item_refine_info(project_dir).map_err(|e| e.to_string())?;
+    let refine_effect_table =
+        refine::load_refine_effects(project_dir).map_err(|e| e.to_string())?;
+
+    let refine_info = refine_info_table.entries.get(&(item_id as i32));
+
+    let mut categories = Vec::with_capacity(14);
+
+    for idx in 0..14u32 {
+        let refine_effect_id = refine_info
+            .and_then(|info| info.values.get(idx as usize).copied())
+            .unwrap_or(0);
+
+        let available = refine_effect_id != 0;
+
+        let (lit_id, has_particles) = if available {
+            let effect_entry = refine_effect_table
+                .entries
+                .iter()
+                .find(|e| e.id == refine_effect_id as i32);
+
+            match effect_entry {
+                Some(entry) => {
+                    let has_particles = entry.effect_ids.iter().any(|&eid| eid != 0);
+                    (entry.light_id, has_particles)
+                }
+                None => (0, false),
+            }
+        } else {
+            (0, false)
+        };
+
+        categories.push(CategorySummary {
+            category: idx + 1,
+            available,
+            lit_id,
+            has_particles,
+        });
+    }
+
+    Ok(ItemCategoryAvailability {
+        item_id,
+        categories,
+    })
+}
+
+// ============================================================================
 // Forge effect preview
 // ============================================================================
 
@@ -207,17 +282,21 @@ pub(crate) fn compute_forge_alpha(total_level: u32) -> f32 {
 
 /// Resolve the full forge effect chain for a given item.
 ///
-/// Chain: item_type → ItemRefineInfo → ItemRefineEffectInfo → sceneffectinfo → resolved filenames
+/// Chain: item_id → ItemRefineInfo → ItemRefineEffectInfo → sceneffectinfo → resolved filenames
+///
+/// The game's C++ code calls `GetItemRefineInfo(nItemID)` where `nItemID` is the item's
+/// database ID (e.g. 5001 for "Sword of Azure Flame"), NOT the item_type.
+/// The CRawDataSet performs a direct array lookup: `_RawDataArray[nID - _nIDStart]`.
 ///
 /// Parameters:
-/// - `item_type`: The item's type ID (used to look up ItemRefineInfo)
+/// - `item_id`: The item's database ID (nID from ItemInfo.txt column 0)
 /// - `refine_level`: Total stone level sum (0-12), determines effect tier and alpha
 /// - `char_type`: Character class (0=Lance, 1=Carsise, 2=Phyllis, 3=Ami)
 /// - `effect_category`: Stone combination category (0-13, from Item_Stoneeffect)
 #[tauri::command]
 pub async fn get_forge_effect_preview(
     project_id: String,
-    item_type: u32,
+    item_id: u32,
     refine_level: u32,
     char_type: u32,
     effect_category: u32,
@@ -261,10 +340,10 @@ pub async fn get_forge_effect_preview(
         });
     }
 
-    // Step 1: Look up ItemRefineInfo by item_type
+    // Step 1: Look up ItemRefineInfo by item_id (the item's database ID)
     let refine_info_table =
         refine::load_item_refine_info(project_dir).map_err(|e| e.to_string())?;
-    let refine_info = match refine_info_table.entries.get(&(item_type as i32)) {
+    let refine_info = match refine_info_table.entries.get(&(item_id as i32)) {
         Some(info) => info,
         None => {
             return Ok(ForgeEffectPreview {
@@ -342,9 +421,11 @@ pub async fn get_forge_effect_preview(
 
     let mut particles = Vec::new();
 
-    // sEffectID is [cha_type][tier] flattened as [c0t0, c0t1, c0t2, c0t3, c1t0, ...]
-    // For a given char_type, iterate over tiers 0..effect_num
-    // The game uses: nEffectID = sEffectID[nCharID][i] * 10 + Level
+    // The game iterates ALL tiers (0..GetEffectNum) regardless of refine level.
+    // sEffectID[nCharID][tier] * 10 + Level gives the scene_effect_id.
+    // The progressive reveal comes from sceneffectinfo: at lower levels, some
+    // scene_effect_ids don't exist in the table, so those tiers silently don't render.
+    // At higher levels more entries exist → more tiers appear.
     for tier in 0..4 {
         let flat_idx = char_idx * 4 + tier;
         let base_id = effect_entry
@@ -354,11 +435,6 @@ pub async fn get_forge_effect_preview(
             .unwrap_or(0);
         if base_id == 0 {
             continue;
-        }
-
-        // Only include effects up to the current effect level
-        if tier > effect_level as usize {
-            break;
         }
 
         let scene_effect_id = (base_id as i32) * 10 + (effect_level as i32);
@@ -455,6 +531,127 @@ mod tests {
             let cur = compute_forge_alpha(level);
             assert!(cur >= prev, "alpha should increase: level {} ({}) >= level {} ({})", level, cur, level - 1, prev);
             prev = cur;
+        }
+    }
+
+    #[test]
+    fn particle_chain_resolves_for_real_data() {
+        use std::path::PathBuf;
+
+        let project_dir = PathBuf::from("../top-client");
+        if !project_dir.join("scripts/table/ItemRefineInfo.bin").exists() {
+            return;
+        }
+
+        // Item 5001, category 7, refine 12, Lance
+        let item_id: i32 = 5001;
+        let effect_category: u32 = 7;
+        let refine_level: u32 = 12;
+        let char_type: u32 = 0;
+
+        let effect_level = ((refine_level - 1) / 4).min(3);
+        let effect_idx = (effect_category - 1) as usize;
+
+        let refine_info_table = refine::load_item_refine_info(&project_dir).unwrap();
+        let refine_info = refine_info_table.entries.get(&item_id).unwrap();
+        let refine_effect_id = refine_info.values[effect_idx];
+        assert!(refine_effect_id > 0, "category should be available");
+
+        let refine_effect_table = refine::load_refine_effects(&project_dir).unwrap();
+        let effect_entry = refine_effect_table
+            .entries
+            .iter()
+            .find(|e| e.id == refine_effect_id as i32)
+            .unwrap();
+
+        let scene_effects = sceneffect::load_scene_effect_info(&project_dir).unwrap();
+        assert!(scene_effects.len() > 100, "sceneffectinfo.bin should load");
+
+        let char_idx = char_type as usize;
+        let base_id = effect_entry.effect_ids[char_idx * 4];
+        assert!(base_id > 0, "should have particle effect for tier 0");
+
+        let scene_effect_id = (base_id as u32) * 10 + effect_level;
+        let resolved = scene_effects.get(&scene_effect_id);
+        assert!(resolved.is_some(), "scene effect {} should exist", scene_effect_id);
+        assert!(resolved.unwrap().filename.ends_with(".par"));
+    }
+
+    #[test]
+    fn eff_file_parses_for_forge_effect() {
+        use crate::effect::model::EffFile;
+        use std::path::PathBuf;
+
+        let project_dir = PathBuf::from("../top-client");
+        let eff_path = project_dir.join("effect/jjyb03.eff");
+        if !eff_path.exists() {
+            return;
+        }
+
+        let bytes = std::fs::read(&eff_path).unwrap();
+        let eff = EffFile::from_bytes(&bytes).unwrap();
+        assert!(eff.sub_effects.len() > 0, "should have sub-effects");
+        // Verify texName contains actual texture names (not effectName labels)
+        assert!(!eff.sub_effects[0].tex_name.is_empty());
+        // Verify colors are in 0-1 range
+        let color = &eff.sub_effects[0].frame_colors[0];
+        assert!(color[0] <= 1.0 && color[1] <= 1.0 && color[2] <= 1.0 && color[3] <= 1.0);
+
+        // Verify rotation fields are present and serializable
+        // The .eff file should have rotating = true for forge effects (swirly animation)
+        let json = serde_json::to_value(&eff).unwrap();
+        assert!(json.get("rotating").is_some(), "rotating field should serialize");
+        assert!(json.get("rotaVec").is_some(), "rotaVec field should serialize");
+        assert!(json.get("rotaVel").is_some(), "rotaVel field should serialize");
+
+        // Check sub-effect rotation fields
+        let sub_json = &json["subEffects"][0];
+        assert!(sub_json.get("rotaLoop").is_some(), "rotaLoop field should serialize");
+        assert!(sub_json.get("rotaLoopVec").is_some(), "rotaLoopVec field should serialize");
+
+        // Dump full sub-effect keyframe data for debugging
+        eprintln!("eff rotating={}, rotaVec={:?}, rotaVel={}, subEffects={}",
+            eff.rotating, eff.rota_vec, eff.rota_vel, eff.sub_effects.len());
+        for (i, sub) in eff.sub_effects.iter().enumerate() {
+            eprintln!("  sub[{}]: model='{}' tex='{}' type={} bb={} rb={} rl={}",
+                i, sub.model_name, sub.tex_name, sub.effect_type,
+                sub.billboard, sub.rota_board, sub.rota_loop);
+            if sub.frame_count > 0 {
+                eprintln!("    pos[0]={:?} scale[0]={:?} angle[0]={:?} color[0]={:?}",
+                    sub.frame_positions[0], sub.frame_sizes[0],
+                    sub.frame_angles[0], sub.frame_colors[0]);
+            }
+            if sub.rota_loop {
+                eprintln!("    rotaLoopVec={:?}", sub.rota_loop_vec);
+            }
+            eprintln!("    cylinder: segs={} h={:.2} topR={:.2} botR={:.2}",
+                sub.segments, sub.height, sub.top_radius, sub.bot_radius);
+        }
+    }
+
+    #[test]
+    fn weapon_model_dummy_points() {
+        use crate::character::model::CharacterGeometricModel;
+        use std::path::PathBuf;
+
+        // Item 5001 uses Lance model 01010027
+        let project_dir = PathBuf::from("../top-client");
+        let model_path = project_dir.join("model/item/01010027.lgo");
+        if !model_path.exists() {
+            return;
+        }
+
+        let geom = CharacterGeometricModel::from_file(model_path).unwrap();
+        let helper = geom.helper_data.as_ref().expect("should have helper data");
+
+        eprintln!("Dummy points for item model 01010027:");
+        for dummy in &helper.dummy_seq {
+            let m = &dummy.mat;
+            eprintln!("  Dummy {}: parent_type={} parent_id={}", dummy.id, dummy.parent_type, dummy.parent_id);
+            eprintln!("    mat row0: [{:.3}, {:.3}, {:.3}, {:.3}]", m.0.x.x, m.0.x.y, m.0.x.z, m.0.x.w);
+            eprintln!("    mat row1: [{:.3}, {:.3}, {:.3}, {:.3}]", m.0.y.x, m.0.y.y, m.0.y.z, m.0.y.w);
+            eprintln!("    mat row2: [{:.3}, {:.3}, {:.3}, {:.3}]", m.0.z.x, m.0.z.y, m.0.z.z, m.0.z.w);
+            eprintln!("    mat row3: [{:.3}, {:.3}, {:.3}, {:.3}]", m.0.w.x, m.0.w.y, m.0.w.z, m.0.w.w);
         }
     }
 }

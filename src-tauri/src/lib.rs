@@ -83,6 +83,7 @@ pub fn run() {
             item::commands::get_item_metadata,
             item::commands::export_item_to_gltf,
             item::commands::get_forge_effect_preview,
+            item::commands::get_item_category_availability,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
