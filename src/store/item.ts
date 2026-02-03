@@ -22,6 +22,20 @@ export const itemEffectConfigAtom = atom<ItemEffectConfig>({
   refineLevel: 0,
 });
 
+export type ItemDebugConfig = {
+  showBoundingSpheres: boolean;
+  showWireframe: boolean;
+  showDummies: boolean;
+  showGlowOverlay: boolean;
+};
+
+export const itemDebugConfigAtom = atom<ItemDebugConfig>({
+  showBoundingSpheres: false,
+  showWireframe: false,
+  showDummies: false,
+  showGlowOverlay: false,
+});
+
 export const forgeEffectPreviewAtom = atom<ForgeEffectPreview | null>(null);
 export const itemCharTypeAtom = atom<number>(0);
 export const itemEffectCategoryAtom = atom<number>(0);

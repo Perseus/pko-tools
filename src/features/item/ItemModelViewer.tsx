@@ -2,11 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { ItemLitInfo } from "@/types/item";
-import { ItemEffectConfig } from "@/store/item";
+import { ItemEffectConfig, ItemDebugConfig } from "@/store/item";
 import { ItemLitRenderer } from "./ItemLitRenderer";
 import { ForgeEffectPreview } from "@/types/item";
 import { ItemParticleRenderer } from "./ItemParticleRenderer";
 import { ItemEffectRenderer } from "./ItemEffectRenderer";
+import {
+  extractItemBoundingSpheres,
+  extractItemMeshes,
+  ItemBoundingSphereIndicators,
+  ItemMeshHighlights,
+  ItemDummyHelpers,
+} from "./ItemDebugOverlays";
 
 function jsonToDataURI(json: string): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -49,6 +56,7 @@ function ItemModel({
   gltfDataURI,
   litInfo,
   effectConfig,
+  debugConfig,
   projectId,
   projectDir,
   forgePreview,
@@ -56,6 +64,7 @@ function ItemModel({
   gltfDataURI: string;
   litInfo: ItemLitInfo | null;
   effectConfig: ItemEffectConfig;
+  debugConfig: ItemDebugConfig;
   projectId: string;
   projectDir: string;
   forgePreview: ForgeEffectPreview | null;
@@ -65,14 +74,21 @@ function ItemModel({
   // Find the glow overlay mesh and the main weapon mesh.
   // The glow overlay is a separate node named "glow_overlay" with
   // userData.glowOverlay === true (set via glTF node extras).
-  const { glowMesh, weaponMesh, dummyPoints } = useMemo(() => {
+  const { glowMesh, glowNode, weaponMesh, dummyPoints } = useMemo(() => {
     // Ensure world matrices are computed before extracting transforms.
     // GLTFLoader sets node.matrix but does NOT compute matrixWorld.
     scene.updateMatrixWorld(true);
 
     let glow: THREE.Mesh | null = null;
+    let glowParent: THREE.Object3D | null = null;
     let weapon: THREE.Mesh | null = null;
     const dummies: { id: number; matrix: THREE.Matrix4; name: string }[] = [];
+
+    // Compute the scene's inverse world matrix so we can express dummy
+    // transforms relative to the scene root.  Effects/particles are siblings
+    // of <primitive object={scene}> inside the rotated group, so using world
+    // matrices would double-apply the group rotation.
+    const sceneWorldInverse = new THREE.Matrix4().copy(scene.matrixWorld).invert();
 
     scene.traverse((child) => {
       // Check for glow overlay by node name or userData (both for reliability)
@@ -83,6 +99,7 @@ function ItemModel({
       if (isGlowOverlay) {
         // Hide the glow overlay group/mesh — the glow shader renders on top
         child.visible = false;
+        if (!glowParent) glowParent = child;
         // Find the actual mesh inside (the node may be a Group containing a Mesh)
         if (child instanceof THREE.Mesh && !glow) {
           glow = child;
@@ -100,14 +117,65 @@ function ItemModel({
       if (child.userData?.type === "dummy") {
         dummies.push({
           id: child.userData.id ?? 0,
-          matrix: child.matrixWorld.clone(),
+          matrix: new THREE.Matrix4().multiplyMatrices(
+            sceneWorldInverse,
+            child.matrixWorld
+          ),
           name: child.name,
         });
       }
     });
 
-    return { glowMesh: glow as THREE.Mesh | null, weaponMesh: weapon as THREE.Mesh | null, dummyPoints: dummies };
+    return {
+      glowMesh: glow as THREE.Mesh | null,
+      glowNode: glowParent as THREE.Object3D | null,
+      weaponMesh: weapon as THREE.Mesh | null,
+      dummyPoints: dummies,
+    };
   }, [scene]);
+
+  // Extract debug data
+  const boundingSpheres = useMemo(
+    () => extractItemBoundingSpheres(scene),
+    [scene]
+  );
+  const itemMeshes = useMemo(() => extractItemMeshes(scene), [scene]);
+
+  // Toggle glow overlay visibility for debug
+  useEffect(() => {
+    if (!glowNode) return;
+
+    if (debugConfig.showGlowOverlay) {
+      glowNode.visible = true;
+      // Apply semi-transparent green debug material to glow meshes
+      glowNode.traverse((child) => {
+        if (child instanceof THREE.Mesh) {
+          if (!child.userData._originalMaterial) {
+            child.userData._originalMaterial = child.material;
+          }
+          child.material = new THREE.MeshBasicMaterial({
+            color: 0x00ff00,
+            transparent: true,
+            opacity: 0.4,
+            wireframe: false,
+            depthWrite: false,
+            side: THREE.DoubleSide,
+          });
+        }
+      });
+    } else {
+      glowNode.visible = false;
+      // Restore original materials
+      glowNode.traverse((child) => {
+        if (
+          child instanceof THREE.Mesh &&
+          child.userData._originalMaterial
+        ) {
+          child.material = child.userData._originalMaterial;
+        }
+      });
+    }
+  }, [glowNode, debugConfig.showGlowOverlay]);
 
   // Determine which lit entry to use based on forge preview or refine level.
   // When a forge preview is active (non-null), its lit_entry is authoritative —
@@ -136,7 +204,6 @@ function ItemModel({
           <ItemLitRenderer
             litEntry={activeLitEntry}
             glowMesh={glowGeometryMesh}
-            refineLevel={effectConfig.refineLevel}
             projectDir={projectDir}
           />
         )}
@@ -157,6 +224,18 @@ function ItemModel({
             forgeAlpha={forgePreview.alpha}
           />
         )}
+        <ItemBoundingSphereIndicators
+          spheres={boundingSpheres}
+          visible={debugConfig.showBoundingSpheres}
+        />
+        <ItemMeshHighlights
+          meshes={itemMeshes}
+          visible={debugConfig.showWireframe}
+        />
+        <ItemDummyHelpers
+          scene={scene}
+          showDummies={debugConfig.showDummies}
+        />
       </group>
     </>
   );
@@ -166,6 +245,7 @@ export default function ItemModelViewer({
   gltfJson,
   litInfo,
   effectConfig,
+  debugConfig,
   projectId,
   projectDir,
   forgePreview,
@@ -173,6 +253,7 @@ export default function ItemModelViewer({
   gltfJson: string | null;
   litInfo: ItemLitInfo | null;
   effectConfig: ItemEffectConfig;
+  debugConfig: ItemDebugConfig;
   projectId: string;
   projectDir: string;
   forgePreview: ForgeEffectPreview | null;
@@ -200,6 +281,7 @@ export default function ItemModelViewer({
       gltfDataURI={gltfDataURI}
       litInfo={litInfo}
       effectConfig={effectConfig}
+      debugConfig={debugConfig}
       projectId={projectId}
       projectDir={projectDir}
       forgePreview={forgePreview ?? null}

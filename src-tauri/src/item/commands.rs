@@ -2,11 +2,12 @@ use std::str::FromStr;
 
 use serde::Serialize;
 
-use crate::{preferences, projects::project::Project, AppState};
+use crate::{projects::project::Project, AppState};
 
 use super::{
     info::{get_all_items, get_item},
     lit,
+    model,
     refine,
     sceneffect,
     Item, ItemMetadata,
@@ -157,6 +158,55 @@ pub async fn export_item_to_gltf(
     Ok(ItemExportResult {
         file_path: file_path.to_string_lossy().to_string(),
         folder_path: exports_dir.to_string_lossy().to_string(),
+    })
+}
+
+#[derive(Serialize)]
+pub struct ItemImportResult {
+    pub lgo_file: String,
+    pub texture_files: Vec<String>,
+    pub import_dir: String,
+}
+
+#[tauri::command]
+pub async fn import_item_from_gltf(
+    app_state: tauri::State<'_, AppState>,
+    model_id: String,
+    file_path: String,
+) -> Result<ItemImportResult, String> {
+    let current_project = app_state.preferences.get_current_project();
+    if current_project.is_none() {
+        return Err("No project selected".to_string());
+    }
+
+    let project_id = current_project.unwrap();
+    let project_uuid =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project =
+        Project::get_project(project_uuid).map_err(|e| format!("Failed to get project: {}", e))?;
+
+    let import_dir = project
+        .project_directory
+        .join("pko-tools")
+        .join("imports")
+        .join("item");
+
+    let gltf_path = std::path::Path::new(&file_path);
+    if !gltf_path.exists() {
+        return Err(format!("File not found: {}", file_path));
+    }
+
+    let result = model::import_item_from_gltf(gltf_path, &model_id, &import_dir)
+        .map_err(|e| format!("Import failed: {}", e))?;
+
+    Ok(ItemImportResult {
+        lgo_file: result.lgo_file.to_string_lossy().to_string(),
+        texture_files: result
+            .texture_files
+            .iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect(),
+        import_dir: import_dir.to_string_lossy().to_string(),
     })
 }
 

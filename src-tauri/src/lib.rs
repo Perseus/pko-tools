@@ -82,6 +82,7 @@ pub fn run() {
             item::commands::get_refine_effects,
             item::commands::get_item_metadata,
             item::commands::export_item_to_gltf,
+            item::commands::import_item_from_gltf,
             item::commands::get_forge_effect_preview,
             item::commands::get_item_category_availability,
         ])

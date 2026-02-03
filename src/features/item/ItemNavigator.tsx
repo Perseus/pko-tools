@@ -16,17 +16,22 @@ import {
   selectedModelVariantAtom,
 } from "@/store/item";
 import { Input } from "@/components/ui/input";
+import { ExportItemToGltf } from "./ExportItemToGltf";
+import { ImportItemFromGltf } from "./ImportItemFromGltf";
+import { Download, Upload } from "lucide-react";
 
 export default function ItemNavigator() {
   const [items, setItems] = useState<Item[]>([]);
   const [filteredItems, setFilteredItems] = useState<Item[]>([]);
-  const [, setItemGltfJson] = useAtom(itemGltfJsonAtom);
+  const [showExport, setShowExport] = useState(false);
+  const [showImport, setShowImport] = useState(false);
+  const [itemGltfJson, setItemGltfJson] = useAtom(itemGltfJsonAtom);
   const [, setItemLitInfo] = useAtom(itemLitInfoAtom);
   const [, setItemMetadata] = useAtom(itemMetadataAtom);
   const [, setItemLoading] = useAtom(itemLoadingAtom);
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
-  const [modelVariant, setModelVariant] = useAtom(selectedModelVariantAtom);
+  const modelVariant = useAtomValue(selectedModelVariantAtom);
 
   const currentProject = useAtomValue(currentProjectAtom);
   const [selectedItem, setSelectedItem] = useAtom(selectedItemAtom);
@@ -151,19 +156,6 @@ export default function ItemNavigator() {
             ))}
           </select>
 
-          <label className="text-xs text-muted-foreground">Model Variant</label>
-          <select
-            className="h-8 text-xs rounded-md border border-input bg-background px-2"
-            value={modelVariant}
-            onChange={(e) => setModelVariant(e.target.value as ModelVariant)}
-          >
-            <option value="ground">Ground</option>
-            <option value="lance">Lance</option>
-            <option value="carsise">Carsise</option>
-            <option value="phyllis">Phyllis</option>
-            <option value="ami">Ami</option>
-          </select>
-
           <div className="text-xs text-muted-foreground">
             {filteredItems.length} items
           </div>
@@ -204,8 +196,31 @@ export default function ItemNavigator() {
               ))}
             </div>
           </ScrollAreaVirtualizable>
+
+          <div className="flex gap-2 pt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1"
+              disabled={!selectedItem || !itemGltfJson}
+              onClick={() => setShowExport(true)}
+            >
+              <Download className="h-3 w-3 mr-1" /> Export
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1"
+              onClick={() => setShowImport(true)}
+            >
+              <Upload className="h-3 w-3 mr-1" /> Import
+            </Button>
+          </div>
         </SidebarContent>
       </SidebarHeader>
+
+      <ExportItemToGltf open={showExport} onOpenChange={setShowExport} />
+      <ImportItemFromGltf open={showImport} onOpenChange={setShowImport} />
     </>
   );
 }

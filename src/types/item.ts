@@ -140,3 +140,9 @@ export const BLEND_MODE_NAMES: Record<number, string> = {
 };
 
 export type ModelVariant = "ground" | "lance" | "carsise" | "phyllis" | "ami";
+
+export type ItemImportResult = {
+  lgo_file: string;
+  texture_files: string[];
+  import_dir: string;
+};

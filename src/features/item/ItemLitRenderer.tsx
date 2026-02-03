@@ -1,21 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { ItemLitEntry } from "@/types/item";
 import { invoke } from "@tauri-apps/api/core";
-
-/**
- * Refine level to glow alpha mapping (matching game formula).
- * Level 0 = no glow, levels 1-4 = tier 0 (0.31-0.55),
- * levels 5-8 = tier 1 (0.55-0.78), levels 9-12 = tier 2 (0.78-1.0).
- */
-function getRefineAlpha(refineLevel: number): number {
-  if (refineLevel <= 0) return 0;
-  if (refineLevel <= 4) return 0.31 + ((refineLevel - 1) / 3) * 0.24;
-  if (refineLevel <= 8) return 0.55 + ((refineLevel - 5) / 3) * 0.23;
-  if (refineLevel <= 12) return 0.78 + ((refineLevel - 9) / 3) * 0.22;
-  return 1.0;
-}
 
 /** Vertex shader for glow overlay - passes through UVs for fragment animation */
 const glowVertexShader = `
@@ -28,14 +15,29 @@ const glowVertexShader = `
 
 /**
  * Fragment shader for glow overlay.
- * Supports 8 animation types via UV transformation:
- * - Type 1: Z-rotation (120 frames)
- * - Type 3: U scrolling (360 frames)
- * - Type 4: V scrolling (360 frames)
- * - Type 5: UV scrolling (360 frames)
- * - Type 6: Position + rotation combined
- * - Type 7: Position + rotation combined (variant)
- * - Type 8: Fast Z-rotation (720 frames)
+ *
+ * The game renders the glow as subset 1 (a separate mesh) with its own
+ * blend mode and opacity.  We replicate this: the shader outputs
+ * vec4(lit.rgb, lit.a * opacity) and the material's blending (set per
+ * transp_type) controls how it composites with the framebuffer.
+ *
+ * Animation types match the game's ANIM_CTRL_TYPE_TEXCOORD keyframe
+ * system (ItemLitAnim.cpp).  The game runs at 30 fps; durations below
+ * are derived from frame counts: 120f = 4s, 360f = 12s, 720f = 24s.
+ *
+ * UV rotation uses the D3D9 texture-coordinate transform convention:
+ * rotation around the UV origin (0,0) with RepeatWrapping handling
+ * any coordinates outside [0,1].
+ *
+ * Types (from __lit_proc array):
+ *   1 — 120f Z-rotation (0 → 2π)
+ *   2 — 120f position scroll (0,0) → (1,1)
+ *   3 — 360f V scroll  (position.y 0 → 1)
+ *   4 — 360f U scroll  (position.x 0 → 1)
+ *   5 — 360f UV scroll (0,0) → (1,1)
+ *   6 — 360f UV scroll + Z-rotation (forward)
+ *   7 — 360f UV scroll + Z-rotation (reverse)
+ *   8 — 720f Z-rotation (0 → 2π, half speed of type 1)
  */
 const glowFragmentShader = `
   uniform sampler2D glowMap;
@@ -44,43 +46,56 @@ const glowFragmentShader = `
   uniform int animType;
   varying vec2 vUv;
 
+  // Durations in seconds (frame count / 30 fps)
+  #define DUR_120 4.0
+  #define DUR_360 12.0
+  #define DUR_720 24.0
+  #define TWO_PI 6.28318530718
+
+  // Rotate UV around origin (0,0) matching D3D9 row-vector convention.
+  // RepeatWrapping on the texture handles coordinates outside [0,1].
   vec2 rotateUV(vec2 uv, float angle) {
     float s = sin(angle);
     float c = cos(angle);
-    mat2 rot = mat2(c, -s, s, c);
-    return rot * (uv - 0.5) + 0.5;
+    return vec2(c * uv.x - s * uv.y, s * uv.x + c * uv.y);
   }
 
   void main() {
     vec2 animUv = vUv;
 
     if (animType == 1) {
-      // Z-rotation, 120 frame cycle
-      float angle = time * 3.14159 * 2.0 / 4.0; // ~1.5s cycle
+      // 120f rotation: full rotation over 4 seconds
+      float angle = time * TWO_PI / DUR_120;
       animUv = rotateUV(vUv, angle);
+    } else if (animType == 2) {
+      // 120f position: scroll UV (0,0)→(1,1) over 4 seconds
+      float rate = 1.0 / DUR_120;
+      animUv = vUv + vec2(rate * time, rate * time);
     } else if (animType == 3) {
-      // U scrolling
-      animUv.x = fract(vUv.x + time * 0.5);
+      // 360f V scroll: position.y 0→1 over 12 seconds
+      animUv.y = vUv.y + time / DUR_360;
     } else if (animType == 4) {
-      // V scrolling
-      animUv.y = fract(vUv.y + time * 0.5);
+      // 360f U scroll: position.x 0→1 over 12 seconds
+      animUv.x = vUv.x + time / DUR_360;
     } else if (animType == 5) {
-      // UV scrolling (both)
-      animUv.x = fract(vUv.x + time * 0.3);
-      animUv.y = fract(vUv.y + time * 0.3);
+      // 360f UV scroll: (0,0)→(1,1) over 12 seconds
+      float rate = 1.0 / DUR_360;
+      animUv = vUv + vec2(rate * time, rate * time);
     } else if (animType == 6) {
-      // Combined position + rotation
-      float angle = time * 3.14159 * 2.0 / 6.0;
+      // 360f position + rotation (forward): both over 12 seconds
+      float angle = time * TWO_PI / DUR_360;
       animUv = rotateUV(vUv, angle);
-      animUv.y = fract(animUv.y + time * 0.2);
+      float rate = 1.0 / DUR_360;
+      animUv += vec2(rate * time, rate * time);
     } else if (animType == 7) {
-      // Combined position + rotation (variant)
-      float angle = time * 3.14159 * 2.0 / 8.0;
+      // 360f position + rotation (reverse): rotation goes 2π→0
+      float angle = -time * TWO_PI / DUR_360;
       animUv = rotateUV(vUv, angle);
-      animUv.x = fract(animUv.x + time * 0.15);
+      float rate = 1.0 / DUR_360;
+      animUv += vec2(rate * time, rate * time);
     } else if (animType == 8) {
-      // Fast Z-rotation, 720 frame cycle
-      float angle = time * 3.14159 * 2.0 / 2.0; // ~1s cycle
+      // 720f rotation: full rotation over 24 seconds (half speed of type 1)
+      float angle = time * TWO_PI / DUR_720;
       animUv = rotateUV(vUv, angle);
     }
 
@@ -91,7 +106,19 @@ const glowFragmentShader = `
 
 /**
  * Map PKO transp_type values to Three.js blending configurations.
- * From the game engine's D3D render state mappings.
+ *
+ * From the game engine's lwResourceMgr.cpp SetTranspTypeBlendMode:
+ *   0 = MTLTEX_TRANSP_FILTER      → SrcAlpha + InvSrcAlpha (standard alpha)
+ *   1 = MTLTEX_TRANSP_ADDITIVE    → One + One  (with opacity: SrcAlpha + One)
+ *   2 = MTLTEX_TRANSP_ADDITIVE1   → SrcColor + One
+ *   3 = MTLTEX_TRANSP_ADDITIVE2   → SrcColor + InvSrcColor
+ *   4 = MTLTEX_TRANSP_ADDITIVE3   → SrcAlpha + DstAlpha
+ *   5 = MTLTEX_TRANSP_SUBTRACTIVE → Zero + InvSrcColor
+ *
+ * The game renders the glow overlay as a separate subset with its own blend
+ * mode.  When opacity < 1.0 the ADDITIVE type switches from ONE+ONE to
+ * SRCALPHA+ONE.  Since our shader always outputs alpha = litAlpha * opacity,
+ * Three.js AdditiveBlending (SrcAlpha + One) handles both cases correctly.
  */
 function getBlendingForTranspType(transpType: number): {
   blending: THREE.Blending;
@@ -100,19 +127,20 @@ function getBlendingForTranspType(transpType: number): {
 } {
   switch (transpType) {
     case 0:
+      // FILTER: standard alpha blending (SrcAlpha + InvSrcAlpha)
       return { blending: THREE.NormalBlending };
     case 1:
-      // Additive: ONE + ONE
+      // Additive: SrcAlpha + One (Three.js AdditiveBlending)
       return { blending: THREE.AdditiveBlending };
     case 2:
-      // SrcColor + One (custom additive with src color modulation)
+      // SrcColor + One
       return {
         blending: THREE.CustomBlending,
         blendSrc: THREE.SrcColorFactor as unknown as THREE.BlendingDstFactor,
         blendDst: THREE.OneFactor as unknown as THREE.BlendingDstFactor,
       };
     case 3:
-      // SrcColor + InvSrcColor (soft blend)
+      // SrcColor + InvSrcColor
       return {
         blending: THREE.CustomBlending,
         blendSrc: THREE.SrcColorFactor as unknown as THREE.BlendingDstFactor,
@@ -126,6 +154,7 @@ function getBlendingForTranspType(transpType: number): {
         blendDst: THREE.DstAlphaFactor as unknown as THREE.BlendingDstFactor,
       };
     case 5:
+      // Subtractive: Zero + InvSrcColor
       return { blending: THREE.SubtractiveBlending };
     default:
       return { blending: THREE.AdditiveBlending };
@@ -135,14 +164,12 @@ function getBlendingForTranspType(transpType: number): {
 interface ItemLitRendererProps {
   litEntry: ItemLitEntry;
   glowMesh: THREE.Mesh;
-  refineLevel: number;
   projectDir: string;
 }
 
 export function ItemLitRenderer({
   litEntry,
   glowMesh,
-  refineLevel,
   projectDir,
 }: ItemLitRendererProps) {
   const materialRef = useRef<THREE.ShaderMaterial>(null);
@@ -205,12 +232,11 @@ export function ItemLitRenderer({
     };
   }, [litEntry?.file, projectDir]);
 
-  // Calculate glow opacity from refineLevel directly (no async dependency).
-  // This ensures the slider is instantly responsive — no waiting for API.
-  const glowOpacity = useMemo(() => {
-    const baseOpacity = litEntry?.opacity ?? 0.5;
-    return baseOpacity * getRefineAlpha(refineLevel);
-  }, [litEntry?.opacity, refineLevel]);
+  // Use the lit entry's opacity directly.  In the game, each lit tier has its
+  // own opacity value in the lit data (set via LitResetTexture → SetOpacity).
+  // The refine level selects which lit entry to use; we don't multiply by an
+  // additional refine alpha — that factor only applies to .eff/.par effects.
+  const glowOpacity = litEntry?.opacity ?? 0.5;
 
   // Keep all shader uniforms in sync every frame.
   // R3F doesn't deep-update uniform values on re-render, so we must
