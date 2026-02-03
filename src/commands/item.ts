@@ -1,4 +1,4 @@
-import { Item, ItemLitInfo, ItemMetadata, RefineEffectTable, ForgeEffectPreview, ItemCategoryAvailability } from "@/types/item";
+import { Item, ItemImportResult, ItemLitInfo, ItemMetadata, RefineEffectTable, ForgeEffectPreview, ItemCategoryAvailability } from "@/types/item";
 import { invoke } from "@tauri-apps/api/core";
 
 export const getItemList = async (
@@ -63,4 +63,11 @@ export const getForgeEffectPreview = async (
     charType,
     effectCategory,
   });
+};
+
+export const importItemFromGltf = async (
+  modelId: string,
+  filePath: string
+): Promise<ItemImportResult> => {
+  return invoke("import_item_from_gltf", { modelId, filePath });
 };

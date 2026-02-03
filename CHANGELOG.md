@@ -1,5 +1,77 @@
 # Changelog
 
+## [0.1.3] - 2025-02-03
+
+### Features & Improvements
+
+#### Effect Editor
+
+**Full Effect Editing Workspace:**
+- New effects workspace with 3D viewport, timeline, and property panels
+- Edit sub-effect keyframe properties (position, rotation, scale, color)
+- Edit sub-effect blend modes, billboard settings, and texture assignments
+- Per-frame texture animation (EFFECT_FRAMETEX) and UV animation (EFFECT_MODELUV, EFFECT_MODELTEXTURE) preview
+- Texture loading with TGA/DDS/BMP support and extension fallback
+- Save/discard workflow with dirty state tracking and unsaved-changes prompt
+- Save As dialog for exporting to new files
+
+<video width="320" height="240" controls>
+    <source src="changelog-assets/effect-editor.mov" type="video/mp4">
+</video>
+
+#### Item Viewer Overhaul
+
+**New Toolbar UI:**
+- Replaced floating Leva debug panel with a fixed toolbar at the top of the item viewer
+- Model variant selector (Ground/Lance/Carsise/Phyllis/Ami) moved from sidebar to toolbar as segmented tabs
+- Debug toggles (Wireframe, Bounding Spheres, Dummies, Glow Overlay) grouped with labeled sections
+- Effect controls (Refine Level slider, Glow/Effects/Particles toggles, Character Type selector) integrated into toolbar
+
+**Debug Overlays (Character Viewer Parity):**
+- Bounding sphere wireframe indicators at static positions
+- Wireframe mesh highlights using EdgesGeometry overlays
+- Dummy point helpers with hover/click info tooltips showing position, rotation, and userData
+- Glow overlay visualization toggle with semi-transparent green debug material
+
+**Item Import from glTF:**
+- New Import button in the item navigator sidebar
+- Import glTF files to reconstruct .lgo model and .bmp texture files
+- Glow overlay mesh (subset 1) correctly merged back into the .lgo format
+- PKO texture encoding/decoding for round-trip compatibility
+
+#### Forge Effect Rendering Fixes
+
+**Lit Glow Rendering (Game-Accurate):**
+- Rewrote UV animation shader to match game engine's ItemLitAnim.cpp keyframe data exactly
+- Fixed UV rotation center: now rotates around UV origin (0,0) matching D3D9 texture-coordinate transform convention, instead of (0.5, 0.5)
+- Fixed animation types 3/4 axis swap: type 3 now correctly scrolls V (not U), type 4 scrolls U (not V)
+- Added missing animation type 2 (120-frame UV position scroll)
+- Fixed all animation speeds to match 30fps game timing (120f=4s, 360f=12s, 720f=24s) — previous speeds were 3-12x too fast
+- Fixed type 7 reverse rotation direction
+- Fixed opacity: use lit entry's opacity directly instead of multiplying by refine alpha (the game only applies refine alpha to .eff/.par effects, not the lit glow)
+- Fixed blend mode: transp_type 0 (FILTER) now correctly uses NormalBlending (SrcAlpha + InvSrcAlpha), not AdditiveBlending
+
+**Effect Rendering:**
+- Fixed D3D9-to-Three.js blend factor mapping — 6 of 10 D3DBLEND enum values were mapped incorrectly
+- Fixed effect texture wrapping to RepeatWrapping matching game's D3DTADDRESS_WRAP
+- Added texture-ready guard: effects with unloaded textures render as invisible instead of solid white/colored shapes
+- Frame texture (EFFECT_FRAMETEX) now resolves initial texture from frameTexNames[0]
+
+**Transform Fixes:**
+- Fixed double-rotation bug affecting dummy click targets, info overlays, and effect/particle positions — world matrices now computed relative to scene root to avoid applying the Y-up rotation group twice
+
+#### Item Workspace
+
+**Forge Effect Preview:**
+- Category-based forge effect selection with per-item availability checking
+- Lit glow, 3D effect (.eff), and particle (.par) preview with forge alpha control
+- Refine level slider (0-12) with tier-based lit entry selection
+- Character type selector for character-specific effect variants
+
+![Sword of Azure Flame (with glow)](changelog-assets/azure-sword-glow.png)
+![Staff of Evanescence (with glow)](changelog-assets/eva-staff-glow.png)
+---
+
 ## [0.1.2] - 2025-01-13
 
 ### Features & Improvements

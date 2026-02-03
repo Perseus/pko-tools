@@ -106,7 +106,7 @@ pub struct RenderCtrlCreateInfo {
     // RENDERCTRL_VS_VERTEXBLEND_DX9 = 3
     // RENDERCTRL_VS_USER = 0x100 (from 256 - 512)
     // RENDERCTRL_VS_INVALID = 0xffffffff
-    ctrl_id: u32,
+    pub ctrl_id: u32,
 
     // vertex declaration ID. FILE: lwPrimitive.cpp, FN: ExtractGeomObjInfo
     // vertex declarations are the format of a vertex in memory
@@ -120,13 +120,13 @@ pub struct RenderCtrlCreateInfo {
     // the declaration would be something like "position, normal, texcoord"
     // and the shader would know that the first 12 bytes are the position
     // the next 12 bytes are the normal and the last 8 bytes are the texcoord
-    decl_id: u32,
+    pub decl_id: u32,
 
     // vertex shader ID. TODO: understand how this is used in the rendering process. FILE: lwPrimitive.cpp, FN: ExtractGeomObjInfo
-    vs_id: u32,
+    pub vs_id: u32,
 
     // does not seem to be used for anything, it is set to INVALID_INDEX. FILE: lwlTypes.h, FN: lwRenderCtrlCreateInfo_Construct
-    ps_id: u32,
+    pub ps_id: u32,
 }
 
 #[binrw]
@@ -140,17 +140,17 @@ pub struct StateCtrl {
     // STATE_TRANSPARENT       - 4           -     0/1     -     Used to determine if the object is transparent or not
     // STATE_FRAMECULLING      - 5           -     0/1     -     Used to determine if an object should be culled (not rendered) if it is outside the player's camera view
     // STATE_INVALID           - 6           -     0/1     -     Invalid/uninitialized state
-    _state_seq: [u8; 8],
+    pub _state_seq: [u8; 8],
 }
 
 #[binrw]
 pub struct CharGeoModelInfoHeader {
-    id: u32,
-    parent_id: u32,
-    _type: u32,
-    mat_local: LwMatrix44,
-    rcci: RenderCtrlCreateInfo,
-    state_ctrl: StateCtrl,
+    pub id: u32,
+    pub parent_id: u32,
+    pub _type: u32,
+    pub mat_local: LwMatrix44,
+    pub rcci: RenderCtrlCreateInfo,
+    pub state_ctrl: StateCtrl,
 
     // total memory size occupied by the material textures (mtl_sql) associated with the object
     // a material is a set of properties that determine how an object is rendered
@@ -159,35 +159,35 @@ pub struct CharGeoModelInfoHeader {
     // eg. a texture for the color, a texture for the normal map, a texture for the specular map etc.
     // the material textures are stored in a separate file and are loaded into memory when the object is loaded
     // FILE: lwExpObj.cpp, struct: LwGeomObjInfo
-    mtl_size: u32,
+    pub mtl_size: u32,
 
     // total memory of the geometric mesh data associated with the object
     // it would include things like vertex data (positions, normals, uvs), index data (how the vertices are connected to form triangles), bone weights etc.
     // calculation done by a->Mesh_size = lwMeshInfo_GetDataSize(&a->mesh) - FILE: lwExpObj.cpp, FN: lwMeshInfo_GetDataSize
     // FILE: lwExpObj.cpp, struct: LwGeomObjInfo
-    mesh_size: u32,
+    pub mesh_size: u32,
 
     // total memory of helper data like dummy_seq, box_seq, mesh_seq, bbox_seq, bsphere_seq
     // struct of helper data can be found in lwExpObj.h, struct: lwHelperInfo
-    helper_size: u32,
+    pub helper_size: u32,
 
     // total memory of animation data (bones, keyframes, matrices etc.)
-    anim_size: u32,
+    pub anim_size: u32,
 }
 
 // the LGO model structure
 // FILE: lwExpObj.cpp, FN: lwGeomObjInfo::Load
 #[binrw]
 pub struct CharacterGeometricModel {
-    version: u32,
-    header: CharGeoModelInfoHeader,
+    pub version: u32,
+    pub header: CharGeoModelInfoHeader,
 
     #[br(if(version == EXP_OBJ_VERSION_0_0_0_0))]
     #[bw(if(*version == EXP_OBJ_VERSION_0_0_0_0))]
-    old_version: u32,
+    pub old_version: u32,
 
     #[br(if(header.mesh_size > 0))]
-    material_num: u32,
+    pub material_num: u32,
 
     #[br(if(header.mtl_size > 0))]
     #[br(count = material_num, args{

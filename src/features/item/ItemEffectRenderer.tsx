@@ -75,14 +75,24 @@ interface KeyFrame {
 
 const TEX_EXTENSIONS = [".tga", ".TGA", ".bmp", ".BMP", ".dds", ".png"];
 
+/**
+ * Map D3DBlend enum values (serialized as u32 from the backend) to Three.js
+ * blend factors.  The backend D3DBlend enum matches D3D9 numbering:
+ *   Zero=1, One=2, SrcColor=3, InvSrcColor=4, SrcAlpha=5, InvSrcAlpha=6,
+ *   DestAlpha=7, InvDestAlpha=8, DestColor=9, InvDestColor=10, SrcAlphaSat=11
+ */
 function d3dBlendToThree(blend: number): THREE.BlendingDstFactor {
   switch (blend) {
-    case 2: return THREE.OneFactor as unknown as THREE.BlendingDstFactor;
-    case 3: return THREE.ZeroFactor as unknown as THREE.BlendingDstFactor;
-    case 5: return THREE.SrcAlphaFactor as unknown as THREE.BlendingDstFactor;
-    case 6: return THREE.OneMinusSrcAlphaFactor as unknown as THREE.BlendingDstFactor;
-    case 7: return THREE.DstAlphaFactor as unknown as THREE.BlendingDstFactor;
-    case 9: return THREE.SrcColorFactor as unknown as THREE.BlendingDstFactor;
+    case 1:  return THREE.ZeroFactor as unknown as THREE.BlendingDstFactor;
+    case 2:  return THREE.OneFactor as unknown as THREE.BlendingDstFactor;
+    case 3:  return THREE.SrcColorFactor as unknown as THREE.BlendingDstFactor;
+    case 4:  return THREE.OneMinusSrcColorFactor as unknown as THREE.BlendingDstFactor;
+    case 5:  return THREE.SrcAlphaFactor as unknown as THREE.BlendingDstFactor;
+    case 6:  return THREE.OneMinusSrcAlphaFactor as unknown as THREE.BlendingDstFactor;
+    case 7:  return THREE.DstAlphaFactor as unknown as THREE.BlendingDstFactor;
+    case 8:  return THREE.OneMinusDstAlphaFactor as unknown as THREE.BlendingDstFactor;
+    case 9:  return THREE.DstColorFactor as unknown as THREE.BlendingDstFactor;
+    case 10: return THREE.OneMinusDstColorFactor as unknown as THREE.BlendingDstFactor;
     default: return THREE.OneFactor as unknown as THREE.BlendingDstFactor;
   }
 }
@@ -246,11 +256,25 @@ function SingleSubEffect({ sub, keyFrames, textures, forgeAlpha }: SingleEffectP
   // Rz * Rx * Ry in D3D row-vector convention → Three.js Euler order 'YXZ'
   const _euler = useMemo(() => new THREE.Euler(0, 0, 0, "YXZ"), []);
 
-  // Resolve main texture from map
-  const mainTexture = textures.get(sub.texName) ?? null;
+  // Resolve main texture from map.
+  // For EFFECT_FRAMETEX the initial texture comes from frameTexNames[0], not texName.
+  const mainTexture = sub.effectType === EFFECT_FRAMETEX
+    ? (textures.get(sub.frameTexNames?.[0]) ?? textures.get(sub.texName) ?? null)
+    : (textures.get(sub.texName) ?? null);
+
+  // Don't render until the required texture is loaded — the game engine
+  // skips drawing effects whose resources haven't been resolved yet.
+  // Without a texture, the geometry renders as a solid white/colored shape
+  // with whatever blending is set, producing visible artifacts (grid patterns
+  // from overlapping planes, solid dark cylinders, etc.).
+  const needsTexture =
+    (sub.texName && sub.texName.length > 0) ||
+    (sub.effectType === EFFECT_FRAMETEX && sub.frameTexCount > 0);
+
+  const textureReady = !needsTexture || !!mainTexture;
 
   useFrame((state, delta) => {
-    if (!meshRef.current || totalFrames === 0) return;
+    if (!meshRef.current || totalFrames === 0 || !textureReady) return;
 
     // --- Keyframe timing: per-frame durations from frameTimes[] ---
     // Game accumulates time, advances frame when time exceeds current frame's duration.
@@ -387,6 +411,13 @@ function SingleSubEffect({ sub, keyFrames, textures, forgeAlpha }: SingleEffectP
   });
 
   const geometry = useMemo(() => createGeometry(sub), [sub]);
+
+  if (!textureReady) {
+    // Keep the mesh in the tree (hooks must stay stable) but invisible
+    return <mesh ref={meshRef} visible={false} geometry={geometry}>
+      <meshBasicMaterial transparent opacity={0} />
+    </mesh>;
+  }
 
   return (
     <mesh ref={meshRef} geometry={geometry}>
