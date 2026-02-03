@@ -15,9 +15,10 @@
 - Save/discard workflow with dirty state tracking and unsaved-changes prompt
 - Save As dialog for exporting to new files
 
-<video width="320" height="240" controls>
-    <source src="changelog-assets/effect-editor.mov" type="video/mp4">
-</video>
+
+
+https://github.com/user-attachments/assets/c69ac8f9-3317-4aef-8cfc-56ee08d06cea
+
 
 #### Item Viewer Overhaul
 
@@ -70,6 +71,12 @@
 
 ![Sword of Azure Flame (with glow)](changelog-assets/azure-sword-glow.png)
 ![Staff of Evanescence (with glow)](changelog-assets/eva-staff-glow.png)
+
+
+
+https://github.com/user-attachments/assets/2a33c180-cabe-4281-bd2b-186fbb5bf8ef
+
+
 ---
 
 ## [0.1.2] - 2025-01-13
