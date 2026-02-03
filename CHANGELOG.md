@@ -15,6 +15,10 @@
 - Save/discard workflow with dirty state tracking and unsaved-changes prompt
 - Save As dialog for exporting to new files
 
+<video width="320" height="240" controls>
+    <source src="changelog-assets/effect-editor.mov" type="video/mp4">
+</video>
+
 #### Item Viewer Overhaul
 
 **New Toolbar UI:**
@@ -64,6 +68,8 @@
 - Refine level slider (0-12) with tier-based lit entry selection
 - Character type selector for character-specific effect variants
 
+![Sword of Azure Flame (with glow)](changelog-assets/azure-sword-glow.png)
+![Staff of Evanescence (with glow)](changelog-assets/eva-staff-glow.png)
 ---
 
 ## [0.1.2] - 2025-01-13
