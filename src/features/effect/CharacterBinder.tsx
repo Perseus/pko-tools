@@ -240,9 +240,14 @@ export default function CharacterBinder() {
                 </div>
               </div>
               {binding.boundBoneName && (
-                <div className="rounded border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[10px] text-blue-400">
-                  Bound to: {binding.boundBoneName}
-                </div>
+                <>
+                  <div className="rounded border border-blue-500/30 bg-blue-500/10 px-2 py-1 text-[10px] text-blue-400">
+                    Bound to: {binding.boundBoneName}
+                  </div>
+                  <div className="rounded border border-amber-500/30 bg-amber-500/10 px-2 py-1.5 text-[10px] leading-relaxed text-amber-400">
+                    Effect transforms are relative to the bound bone. To adjust the base transform, modify the model's scale/position.
+                  </div>
+                </>
               )}
               <div className="flex items-center gap-1">
                 {(["all", "bones", "dummies"] as const).map((m) => (

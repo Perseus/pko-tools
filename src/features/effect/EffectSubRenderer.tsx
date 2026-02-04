@@ -19,6 +19,7 @@ import { PivotControls } from "@react-three/drei";
 import { invoke } from "@tauri-apps/api/core";
 import * as THREE from "three";
 import {
+  createEffectTexture,
   createRectGeometry,
   createRectZGeometry,
   createTriangleGeometry,
@@ -178,22 +179,9 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
         }
 
         const binary = Uint8Array.from(atob(decoded.data), (char) => char.charCodeAt(0));
-
-        const loaded = new THREE.DataTexture(
-          binary,
-          decoded.width,
-          decoded.height,
-          THREE.RGBAFormat
-        );
-        loaded.colorSpace = THREE.SRGBColorSpace;
-        loaded.flipY = true;
-        loaded.magFilter = THREE.LinearFilter;
-        loaded.minFilter = THREE.LinearFilter;
+        const loaded = createEffectTexture(binary, decoded.width, decoded.height);
 
         textureRef.current?.dispose();
-        loaded.wrapS = THREE.RepeatWrapping;
-        loaded.wrapT = THREE.RepeatWrapping;
-        loaded.needsUpdate = true;
         textureRef.current = loaded;
         setTexture(loaded);
         setTextureStatus({ status: "loaded", textureName: sanitized });
@@ -249,22 +237,9 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
         if (!isActive) return;
 
         const binary = Uint8Array.from(atob(decoded.data), (char) => char.charCodeAt(0));
-
-        const loaded = new THREE.DataTexture(
-          binary,
-          decoded.width,
-          decoded.height,
-          THREE.RGBAFormat
-        );
-        loaded.colorSpace = THREE.SRGBColorSpace;
-        loaded.flipY = true;
-        loaded.magFilter = THREE.LinearFilter;
-        loaded.minFilter = THREE.LinearFilter;
+        const loaded = createEffectTexture(binary, decoded.width, decoded.height);
 
         textureRef.current?.dispose();
-        loaded.wrapS = THREE.RepeatWrapping;
-        loaded.wrapT = THREE.RepeatWrapping;
-        loaded.needsUpdate = true;
         textureRef.current = loaded;
         setTexture(loaded);
       } catch {
@@ -533,7 +508,6 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
         depthWrite={!useAlpha}
         map={texture}
         side={THREE.DoubleSide}
-        alphaTest={0.01}
       />
     </mesh>
   );

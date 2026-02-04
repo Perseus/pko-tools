@@ -61,3 +61,6 @@ export const effectBindingAtom = atom<EffectBindingState>({
  * Stored as a flat 16-element Float32Array (column-major, matching THREE.Matrix4.elements).
  */
 export const boundBoneMatrixAtom = atom<Float32Array | null>(null);
+
+/** When true, render all sub-effects even when playback is stopped (composite preview). */
+export const compositePreviewAtom = atom(false);

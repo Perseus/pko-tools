@@ -12,11 +12,15 @@ pub mod math;
 mod preferences;
 mod projects;
 
+use std::collections::HashMap;
+use std::sync::Mutex;
 use tauri::Manager;
 
-struct AppState {
+pub struct AppState {
     current_project: Option<projects::project::Project>,
     preferences: preferences::Preferences,
+    /// Cache of glTF JSON strings keyed by (project_id, character_id).
+    pub character_gltf_cache: Mutex<HashMap<(uuid::Uuid, u32), String>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -38,6 +42,7 @@ pub fn run() {
             let mut state = AppState {
                 current_project: None,
                 preferences,
+                character_gltf_cache: Mutex::new(HashMap::new()),
             };
 
             if let Some(current_project_id) = &state.preferences.get_current_project() {
@@ -65,6 +70,7 @@ pub fn run() {
             character::commands::export_to_gltf,
             character::commands::import_character_from_gltf,
             character::commands::get_character_metadata_cmd,
+            character::commands::invalidate_character_cache,
             effect::commands::list_effects,
             effect::commands::load_effect,
             effect::commands::save_effect,

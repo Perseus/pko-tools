@@ -318,7 +318,7 @@ impl Character {
             ..Default::default()
         };
 
-        let gltf_as_string = serde_json::to_string_pretty(&gltf)?;
+        let gltf_as_string = serde_json::to_string(&gltf)?;
         Ok(gltf_as_string)
     }
 

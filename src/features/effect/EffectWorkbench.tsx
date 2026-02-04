@@ -273,6 +273,7 @@ export default function EffectWorkbench() {
             variant={isDirty ? "default" : "secondary"}
             disabled={!effectData || !selectedEffect || !currentProject || isSaving}
             onClick={handleSave}
+            title="Save effect (.eff) and particle data (.par JSON)"
           >
             <Save />
             {isSaving ? "Saving" : isDirty ? "Save Changes" : "Save"}
@@ -332,6 +333,9 @@ export default function EffectWorkbench() {
             <DialogTitle>Save Effect As</DialogTitle>
             <DialogDescription>
               Create a new .eff file in the project effect folder.
+              <span className="mt-1 block text-xs text-muted-foreground/70">
+                .eff files contain effect definitions (keyframes, blend modes, geometry). Particle data (.par) is saved separately as a JSON sidecar.
+              </span>
             </DialogDescription>
           </DialogHeader>
           <Input

@@ -1,5 +1,5 @@
-import { characterGltfJsonAtom, characterMetadataAtom } from "@/store/character";
-import {  useAtomValue } from "jotai";
+import { characterGltfJsonAtom, characterMetadataAtom, dummyEditModeAtom } from "@/store/character";
+import { useAtomValue, useSetAtom } from "jotai";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useGLTF, OrbitControls,  CameraControls,  Environment, useAnimations } from '@react-three/drei';
 import { Canvas, useFrame} from '@react-three/fiber';
@@ -37,6 +37,7 @@ function jsonToDataURI(json: string): Promise<string> {
 function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
   const { scene, animations } = useGLTF(gltfDataURI);
   const { actions, mixer } = useAnimations(animations, scene);
+  const setDummyEditMode = useSetAtom(dummyEditModeAtom);
   const animationDuration = animations?.[0]?.duration || 1;
   const fps = 30;
   const totalKeyframes = Math.floor(animationDuration * fps);
@@ -80,7 +81,7 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
     }
   }));
 
-  const { showBoundingSpheres, showMeshHighlights, showBones, showDummies } = useControls('Debug', {
+  const { showBoundingSpheres, showMeshHighlights, showBones, showDummies, editDummies } = useControls('Debug', {
     showBoundingSpheres: {
       value: false,
       label: 'Show Bounding Spheres',
@@ -97,7 +98,17 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
       value: false,
       label: 'Show Dummies',
     },
+    editDummies: {
+      value: false,
+      label: 'Edit Dummies',
+    },
   });
+
+  // Sync editDummies leva control with the jotai atom; reset on unmount (model switch)
+  useEffect(() => {
+    setDummyEditMode((showDummies as boolean) && (editDummies as boolean));
+    return () => setDummyEditMode(false);
+  }, [showDummies, editDummies, setDummyEditMode]);
   
   // Dynamic mesh visibility controls - create toggle for each mesh
   const meshVisibilityConfig = useMemo(() => {
@@ -169,9 +180,20 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
     }
 
     return () => {
-      mixer.stopAllAction();
-      animations.forEach(clip => mixer.uncacheClip(clip));
-      mixer.uncacheRoot(scene);
+      // Remove debug helper meshes from the scene tree before uncaching,
+      // otherwise Three.js binding paths don't match and uncacheRoot crashes.
+      scene.traverse((obj: THREE.Object3D) => {
+        const helpers = obj.children.filter(c => c.userData?.isHelper);
+        helpers.forEach(h => obj.remove(h));
+      });
+
+      try {
+        mixer.stopAllAction();
+        animations.forEach(clip => mixer.uncacheClip(clip));
+        mixer.uncacheRoot(scene);
+      } catch {
+        // Non-fatal: scene is being discarded, binding errors are harmless
+      }
       setAnimationControls({
         play: false,
         keyframe: 0
@@ -206,16 +228,29 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
 function Character() {
   const characterGltfJson = useAtomValue(characterGltfJsonAtom);
   const [gltfDataURI, setGltfDataURI] = useState<string | null>(null);
+  const prevUriRef = useRef<string | null>(null);
+
   useEffect(() => {
+    let cancelled = false;
     (async () => {
       if (!characterGltfJson) {
         return;
       }
 
+      // Clear the drei GLTF cache for the previous URI so stale scene
+      // objects (with debug helpers still attached) aren't reused.
+      if (prevUriRef.current) {
+        useGLTF.clear(prevUriRef.current);
+      }
+
       setGltfDataURI(null);
-      const gltfDataURI = await jsonToDataURI(characterGltfJson || '');
-      setGltfDataURI(gltfDataURI);
+      const uri = await jsonToDataURI(characterGltfJson || '');
+      if (!cancelled) {
+        prevUriRef.current = uri;
+        setGltfDataURI(uri);
+      }
     })();
+    return () => { cancelled = true; };
   }, [characterGltfJson]);
 
   if (!gltfDataURI) {
