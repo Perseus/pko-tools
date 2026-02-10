@@ -1,4 +1,4 @@
-import { Item, ItemImportResult, ItemLitInfo, ItemMetadata, RefineEffectTable, ForgeEffectPreview, ItemCategoryAvailability } from "@/types/item";
+import { Item, ItemImportResult, ItemLitInfo, ItemMetadata, RefineEffectTable, ForgeEffectPreview, ItemCategoryAvailability, DecompileResult, WorkbenchState, WorkbenchSummary, WorkbenchDummy, ItemInfoPreview } from "@/types/item";
 import { invoke } from "@tauri-apps/api/core";
 
 export const getItemList = async (
@@ -67,7 +67,151 @@ export const getForgeEffectPreview = async (
 
 export const importItemFromGltf = async (
   modelId: string,
-  filePath: string
+  filePath: string,
+  scaleFactor?: number
 ): Promise<ItemImportResult> => {
-  return invoke("import_item_from_gltf", { modelId, filePath });
+  return invoke("import_item_from_gltf", { modelId, filePath, scaleFactor });
+};
+
+export const decompileItemRefineInfo = async (
+  projectId: string
+): Promise<DecompileResult> => {
+  return invoke("decompile_item_refine_info", { projectId });
+};
+
+export const decompileItemRefineEffectInfo = async (
+  projectId: string
+): Promise<DecompileResult> => {
+  return invoke("decompile_item_refine_effect_info", { projectId });
+};
+
+export const decompileSceneEffectInfo = async (
+  projectId: string
+): Promise<DecompileResult> => {
+  return invoke("decompile_scene_effect_info", { projectId });
+};
+
+export const decompileStoneInfo = async (
+  projectId: string
+): Promise<DecompileResult> => {
+  return invoke("decompile_stone_info", { projectId });
+};
+
+// ============================================================================
+// Workbench Commands
+// ============================================================================
+
+export const addGlowOverlay = async (
+  lgoPath: string
+): Promise<string> => {
+  return invoke("add_glow_overlay", { lgoPath });
+};
+
+export type ExportResult = {
+  lgoPath: string;
+  texturePaths: string[];
+  targetModelId: string;
+};
+
+export const exportItem = async (
+  projectId: string,
+  lgoPath: string,
+  targetModelId: string
+): Promise<ExportResult> => {
+  return invoke("export_item", { projectId, lgoPath, targetModelId });
+};
+
+export const rotateItem = async (
+  lgoPath: string,
+  xDeg: number,
+  yDeg: number,
+  zDeg: number
+): Promise<string> => {
+  return invoke("rotate_item", { lgoPath, xDeg, yDeg, zDeg });
+};
+
+export const rescaleItem = async (
+  projectId: string,
+  modelId: string,
+  lgoPath: string,
+  factor: number
+): Promise<string> => {
+  return invoke("rescale_item", { projectId, modelId, lgoPath, factor });
+};
+
+export const createWorkbench = async (
+  projectId: string,
+  modelId: string,
+  itemName: string,
+  itemType: number,
+  sourceFile: string | null,
+  scaleFactor: number,
+  lgoPath: string
+): Promise<void> => {
+  return invoke("create_workbench", {
+    projectId,
+    modelId,
+    itemName,
+    itemType,
+    sourceFile,
+    scaleFactor,
+    lgoPath,
+  });
+};
+
+export const loadWorkbench = async (
+  projectId: string,
+  modelId: string
+): Promise<WorkbenchState> => {
+  return invoke("load_workbench", { projectId, modelId });
+};
+
+export const saveWorkbench = async (
+  projectId: string,
+  state: WorkbenchState
+): Promise<void> => {
+  return invoke("save_workbench", { projectId, state });
+};
+
+export const listWorkbenches = async (
+  projectId: string
+): Promise<WorkbenchSummary[]> => {
+  return invoke("list_workbenches", { projectId });
+};
+
+export const deleteWorkbench = async (
+  projectId: string,
+  modelId: string
+): Promise<void> => {
+  return invoke("delete_workbench", { projectId, modelId });
+};
+
+export const updateDummies = async (
+  projectId: string,
+  modelId: string,
+  lgoPath: string,
+  dummies: WorkbenchDummy[]
+): Promise<string> => {
+  return invoke("update_dummies", { projectId, modelId, lgoPath, dummies });
+};
+
+export const generateItemInfoEntry = async (
+  projectId: string,
+  modelId: string,
+  requestedId?: number | null
+): Promise<ItemInfoPreview> => {
+  return invoke("generate_item_info_entry", {
+    projectId,
+    modelId,
+    requestedId: requestedId ?? null,
+  });
+};
+
+export const registerItem = async (
+  projectId: string,
+  modelId: string,
+  tsvLine: string,
+  assignedId: number
+): Promise<void> => {
+  return invoke("register_item", { projectId, modelId, tsvLine, assignedId });
 };

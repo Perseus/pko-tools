@@ -5,7 +5,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::{broadcast::get_broadcaster, AppState};
 
-use super::{get_character_gltf_json, get_character_metadata, info::get_all_characters, Character, CharacterMetadata};
+use super::{get_character_gltf_json, get_character_gltf_json_with_options, get_character_metadata, info::get_all_characters, Character, CharacterMetadata};
 
 #[tauri::command]
 pub async fn get_character_list(project_id: String) -> Result<Vec<Character>, String> {
@@ -71,7 +71,9 @@ pub async fn export_to_gltf(
     app: AppHandle,
     app_state: tauri::State<'_, AppState>,
     character_id: u32,
+    y_up: Option<bool>,
 ) -> Result<ExportResult, String> {
+    let y_up = y_up.unwrap_or(false);
     let current_project = app_state.preferences.get_current_project();
     if current_project.is_none() {
         return Err("No project selected".to_string());
@@ -99,7 +101,7 @@ pub async fn export_to_gltf(
         }
     });
 
-    let character = get_character_gltf_json(project_uuid, character_id);
+    let character = get_character_gltf_json_with_options(project_uuid, character_id, y_up);
     if character.is_err() {
         return Err(character.err().unwrap().to_string());
     }

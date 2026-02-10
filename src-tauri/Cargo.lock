@@ -3804,6 +3804,7 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-opener",
  "tauri-plugin-sql",
+ "tempfile",
  "tokio",
  "uuid",
 ]

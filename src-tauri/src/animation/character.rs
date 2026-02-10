@@ -33,7 +33,7 @@ struct MinimalBone {
 use binrw::{binrw, BinRead, BinResult, BinWrite, VecArgs};
 use std::io::{Read, Seek};
 
-use crate::{broadcast::BroadcastMessage, character::GLTFFieldsToAggregate, math::{matrix4_to_quaternion, LwMatrix43, LwMatrix44, LwQuaternion, LwVector3}};
+use crate::{broadcast::BroadcastMessage, character::GLTFFieldsToAggregate, math::{self, matrix4_to_quaternion, LwMatrix43, LwMatrix44, LwQuaternion, LwVector3}};
 
 // Constants
 pub const LW_MAX_NAME: usize = 64;
@@ -729,7 +729,7 @@ impl LwBoneFile {
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
     ) -> (Skin, Vec<Node>) {
         // Default to 1 mesh for backwards compatibility
-        self.to_gltf_skin_and_nodes_multi(fields_to_aggregate, 1)
+        self.to_gltf_skin_and_nodes_multi(fields_to_aggregate, 1, false)
     }
     
     /// Create glTF skin and nodes with support for multiple meshes
@@ -738,6 +738,7 @@ impl LwBoneFile {
         &self,
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
         mesh_count: usize,
+        y_up: bool,
     ) -> (Skin, Vec<Node>) {
         let bone_num = self.header.bone_num as usize;
         let mut bone_id_to_node_index = HashMap::new();
@@ -751,14 +752,16 @@ impl LwBoneFile {
             bone_id_to_node_index.insert(base_info.id, node_index);
             let (rotation, translation, scale) = self.get_node_rot_and_translation_and_scale(node_index, 0).unwrap();
             let rot = LwQuaternion(rotation.0.normalize());
+            let rot_slice = if y_up { math::z_up_to_y_up_quat(rot.to_slice()) } else { rot.to_slice() };
+            let trans_slice = if y_up { math::z_up_to_y_up_vec3(translation.to_slice()) } else { translation.to_slice() };
             let bone_extras = RawValue::from_string(format!(r#"{{"bone_id":{}}}"#, base_info.id)).unwrap();
             let node = Node {
                 camera: None,
                 children: None,
                 matrix: None,
-                rotation: Some(UnitQuaternion(rot.to_slice())),
+                rotation: Some(UnitQuaternion(rot_slice)),
                 scale: Some(scale.to_slice()),
-                translation: Some(translation.to_slice()),
+                translation: Some(trans_slice),
                 skin: None,
                 mesh: None,
                 name: Some(base_info.name.clone()),
@@ -781,10 +784,11 @@ impl LwBoneFile {
                 format!(r#"{{"dummy":true,"id":{},"parent_bone_id":{}}}"#, dummy_info.id, dummy_info.parent_bone_id)
             ).unwrap();
 
+            let mat = if y_up { math::z_up_to_y_up_mat4(dummy_info.mat.to_slice()) } else { dummy_info.mat.to_slice() };
             let node = Node {
                 camera: None,
                 children: None,
-                matrix: Some(dummy_info.mat.to_slice()),
+                matrix: Some(mat),
                 rotation: None,
                 scale: None,
                 translation: None,
@@ -841,15 +845,17 @@ impl LwBoneFile {
         let mut buffer_data: Vec<u8> = Vec::with_capacity(ibm_byte_count);
 
         for i in 0..bone_num {
-            let mat = &mut self.invmat_seq[i].to_slice();
-            let mat_bytes = bytemuck::cast_slice(mat);
+            let mut mat = self.invmat_seq[i].to_slice();
+            if y_up { mat = math::z_up_to_y_up_mat4(mat); }
+            let mat_bytes = bytemuck::cast_slice(&mat);
 
             buffer_data.extend_from_slice(mat_bytes);
         }
 
         for i in 0..dummy_num {
-            let mat = &mut self.dummy_seq[i].mat.to_slice();
-            let mat_bytes = bytemuck::cast_slice(mat);
+            let mut mat = self.dummy_seq[i].mat.to_slice();
+            if y_up { mat = math::z_up_to_y_up_mat4(mat); }
+            let mat_bytes = bytemuck::cast_slice(&mat);
 
             buffer_data.extend_from_slice(mat_bytes);
         }
@@ -944,7 +950,7 @@ impl LwBoneFile {
             .collect()
     }
 
-    pub fn to_gltf_animations_and_sampler(&self, fields_to_aggregate: &mut GLTFFieldsToAggregate) {
+    pub fn to_gltf_animations_and_sampler(&self, fields_to_aggregate: &mut GLTFFieldsToAggregate, y_up: bool) {
         let mut channels: Vec<Channel> = Vec::new();
         let mut samplers: Vec<Sampler> = Vec::new();
 
@@ -1049,20 +1055,18 @@ impl LwBoneFile {
                 let frame_translation = translation.get(j as usize).unwrap();
                 let frame_rotation = rotation.get(j as usize).unwrap();
 
-                keyframe_translation_buffer_data
-                    .extend_from_slice(&frame_translation.0.x.to_le_bytes());
-                keyframe_translation_buffer_data
-                    .extend_from_slice(&frame_translation.0.y.to_le_bytes());
-                keyframe_translation_buffer_data
-                    .extend_from_slice(&frame_translation.0.z.to_le_bytes());
+                let t = [frame_translation.0.x, frame_translation.0.y, frame_translation.0.z];
+                let t = if y_up { math::z_up_to_y_up_vec3(t) } else { t };
+                keyframe_translation_buffer_data.extend_from_slice(&t[0].to_le_bytes());
+                keyframe_translation_buffer_data.extend_from_slice(&t[1].to_le_bytes());
+                keyframe_translation_buffer_data.extend_from_slice(&t[2].to_le_bytes());
 
-                keyframe_rotation_buffer_data
-                    .extend_from_slice(&frame_rotation.0.v.x.to_le_bytes());
-                keyframe_rotation_buffer_data
-                    .extend_from_slice(&frame_rotation.0.v.y.to_le_bytes());
-                keyframe_rotation_buffer_data
-                    .extend_from_slice(&frame_rotation.0.v.z.to_le_bytes());
-                keyframe_rotation_buffer_data.extend_from_slice(&frame_rotation.0.s.to_le_bytes());
+                let r = [frame_rotation.0.v.x, frame_rotation.0.v.y, frame_rotation.0.v.z, frame_rotation.0.s];
+                let r = if y_up { math::z_up_to_y_up_quat(r) } else { r };
+                keyframe_rotation_buffer_data.extend_from_slice(&r[0].to_le_bytes());
+                keyframe_rotation_buffer_data.extend_from_slice(&r[1].to_le_bytes());
+                keyframe_rotation_buffer_data.extend_from_slice(&r[2].to_le_bytes());
+                keyframe_rotation_buffer_data.extend_from_slice(&r[3].to_le_bytes());
             }
 
             let keyframe_translation_buffer_index = fields_to_aggregate.buffer.len();

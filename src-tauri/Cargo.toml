@@ -51,3 +51,6 @@ ptree = "0.5.2"
 image = "0.25.5"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 sentry = { version = "0.36.0", features = ["anyhow"] }
+
+[dev-dependencies]
+tempfile = "3"

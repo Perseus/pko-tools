@@ -6,6 +6,10 @@ use binrw::{binrw, BinRead, BinWrite, Error};
 use gltf::{buffer, Document, Texture};
 use image::Rgb;
 
+use serde::{Deserialize, Serialize};
+
+use crate::texture_pipeline::converter::{self, TextureConvertOptions};
+
 use crate::{
     animation::character::{LW_INVALID_INDEX, LW_MAX_NAME},
     d3d::{D3DBlend, D3DCmpFunc, D3DFormat, D3DPool, D3DRenderStateType},
@@ -20,7 +24,8 @@ use super::model::{
 type RenderStateSetMaterial2 = RenderStateSetTemplate<2, 8>;
 type TextureStageStateTexture2 = RenderStateSetTemplate<2, 8>;
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(into = "u32", try_from = "u32")]
 #[binrw]
 #[br(repr = u32)]
 #[bw(repr = u32)]
@@ -37,6 +42,30 @@ pub enum MaterialTextureInfoTransparencyType {
     Subtractive3 = 8,
 }
 
+impl From<MaterialTextureInfoTransparencyType> for u32 {
+    fn from(v: MaterialTextureInfoTransparencyType) -> u32 {
+        v as u32
+    }
+}
+
+impl TryFrom<u32> for MaterialTextureInfoTransparencyType {
+    type Error = String;
+    fn try_from(v: u32) -> Result<Self, Self::Error> {
+        match v {
+            0 => Ok(Self::Filter),
+            1 => Ok(Self::Additive),
+            2 => Ok(Self::Additive1),
+            3 => Ok(Self::Additive2),
+            4 => Ok(Self::Additive3),
+            5 => Ok(Self::Subtractive),
+            6 => Ok(Self::Subtractive1),
+            7 => Ok(Self::Subtractive2),
+            8 => Ok(Self::Subtractive3),
+            _ => Err(format!("Invalid MaterialTextureInfoTransparencyType: {}", v)),
+        }
+    }
+}
+
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 #[binrw]
@@ -50,6 +79,7 @@ pub enum ColorKeyType {
     InvalidMax = 0xffffffff,
 }
 
+#[derive(Serialize, Deserialize, Clone, Copy)]
 #[binrw]
 pub struct ColorValue4F {
     pub r: f32,
@@ -61,6 +91,15 @@ pub struct ColorValue4F {
 impl ColorValue4F {
     pub fn to_slice(&self) -> [f32; 4] {
         [self.r, self.g, self.b, self.a]
+    }
+
+    pub fn from_slice(s: &[f32; 4]) -> Self {
+        Self {
+            r: s[0],
+            g: s[1],
+            b: s[2],
+            a: s[3],
+        }
     }
 }
 
@@ -78,6 +117,7 @@ pub enum TextureType {
     InvalidMax = 0xffffffff,
 }
 
+#[derive(Clone)]
 #[binrw]
 pub struct CharMaterial {
     // diffuse
@@ -126,7 +166,7 @@ impl CharMaterial {
 }
 
 // render states? dont know what this does yet
-#[derive(Default, Copy, Clone, Debug)]
+#[derive(Default, Copy, Clone, Debug, Serialize, Deserialize)]
 #[binrw]
 pub struct RenderStateAtom {
     pub state: u32,
@@ -274,6 +314,7 @@ pub struct TextureInfo0001 {
     tss_set: TextureStageStateTexture2,
 }
 
+#[derive(Clone)]
 pub struct CharMaterialTextureInfo {
     pub opacity: f32,
     pub transp_type: MaterialTextureInfoTransparencyType,
@@ -321,18 +362,12 @@ impl CharMaterialTextureInfo {
 
             let texture = base_color_texture.texture();
             let image_data = images.get(texture.source().index()).unwrap();
-            if image_data.format != gltf::image::Format::R8G8B8 {
-                return Err(anyhow::anyhow!("Unsupported image format, not R8G8B8"));
-            }
-
-            let img: image::ImageBuffer<Rgb<u8>, _> = image::ImageBuffer::from_raw(
-                image_data.width,
-                image_data.height,
-                image_data.pixels.clone(),
-            )
-            .unwrap();
-
-            img.save_with_format(format!("./imports/character/texture/character/{}.bmp", model_id), ImageFormat::Bmp)?;
+            let output_path = std::path::PathBuf::from(format!("./imports/character/texture/character/{}.bmp", model_id));
+            converter::convert_gltf_image_to_bmp(
+                image_data,
+                &output_path,
+                &TextureConvertOptions::default(),
+            )?;
 
             let mut file_name: [u8; 64] = [0; 64];
             for (i, char) in format!("{}.bmp", model_id).chars().enumerate() {
@@ -432,20 +467,13 @@ impl CharMaterialTextureInfo {
 
                 let texture = base_color_texture.texture();
                 let image_data = images.get(texture.source().index()).unwrap();
-                if image_data.format != gltf::image::Format::R8G8B8 {
-                    return Err(anyhow::anyhow!("Unsupported image format, not R8G8B8"));
-                }
-
-                let img: image::ImageBuffer<Rgb<u8>, _> = image::ImageBuffer::from_raw(
-                    image_data.width,
-                    image_data.height,
-                    image_data.pixels.clone(),
-                )
-                .unwrap();
-
-                img.save_with_format(
-                    format!("./imports/character/texture/character/{}.bmp", file_id),
-                    ImageFormat::Bmp
+                let output_path = std::path::PathBuf::from(
+                    format!("./imports/character/texture/character/{}.bmp", file_id)
+                );
+                converter::convert_gltf_image_to_bmp(
+                    image_data,
+                    &output_path,
+                    &TextureConvertOptions::default(),
                 )?;
 
                 let mut file_name: [u8; 64] = [0; 64];
@@ -520,7 +548,7 @@ impl CharMaterialTextureInfo {
         material_seq.push(material);
         Ok(material_seq)
     }
-    
+
     /// Import material for a specific mesh from a glTF document
     /// This is the preferred method - each mesh becomes a separate LGO file
     /// Each mesh is expected to have exactly one primitive (idiomatic glTF structure)
@@ -556,20 +584,13 @@ impl CharMaterialTextureInfo {
 
                 let texture = base_color_texture.texture();
                 let image_data = images.get(texture.source().index()).unwrap();
-                if image_data.format != gltf::image::Format::R8G8B8 {
-                    return Err(anyhow::anyhow!("Unsupported image format, not R8G8B8"));
-                }
-
-                let img: image::ImageBuffer<Rgb<u8>, _> = image::ImageBuffer::from_raw(
-                    image_data.width,
-                    image_data.height,
-                    image_data.pixels.clone(),
-                )
-                .unwrap();
-
-                img.save_with_format(
-                    format!("./imports/character/texture/character/{}.bmp", file_id),
-                    ImageFormat::Bmp
+                let output_path = std::path::PathBuf::from(
+                    format!("./imports/character/texture/character/{}.bmp", file_id)
+                );
+                converter::convert_gltf_image_to_bmp(
+                    image_data,
+                    &output_path,
+                    &TextureConvertOptions::default(),
                 )?;
 
                 let mut file_name: [u8; 64] = [0; 64];

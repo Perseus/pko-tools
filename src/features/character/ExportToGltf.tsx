@@ -17,6 +17,7 @@ interface ExportResult {
 export default function ExportToGltf({ onOpenChange, open, onExportFinished }: { onOpenChange: (open: boolean) => void, open: boolean, onExportFinished: () => void }) {
   const selectedCharacter = useAtomValue(selectedCharacterAtom);
   const [isExporting, setIsExporting] = useState(false);
+  const [yUp, setYUp] = useState(false);
   const { toast } = useToast();
 
   let fileName = selectedCharacter?.id;
@@ -38,7 +39,8 @@ export default function ExportToGltf({ onOpenChange, open, onExportFinished }: {
 
     try {
       const response = await invoke<ExportResult>('export_to_gltf', {
-        characterId: selectedCharacter.id
+        characterId: selectedCharacter.id,
+        yUp,
       });
       toast({
         title: "Exported to glTF",
@@ -74,6 +76,18 @@ export default function ExportToGltf({ onOpenChange, open, onExportFinished }: {
         This will create a glTF file called <strong>{fileName}.gltf</strong> in the <strong>pko-tools/exports/gltf</strong> folder
         inside your game client directory.
       </DialogDescription>
+      <div className="flex items-center gap-2 py-2">
+        <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={yUp}
+            onChange={(e) => setYUp(e.target.checked)}
+            className="h-4 w-4 rounded border-zinc-600 accent-blue-500"
+          />
+          <span>Convert to Y-up coordinate system</span>
+        </label>
+        <span className="text-xs text-zinc-500">(recommended for Blender)</span>
+      </div>
       <DialogFooter>
         <Button variant="default" onClick={exportGltf} disabled={isExporting}>
           {isExporting ? <><Loader2 className="animate-spin" /> Exporting...</> : 'Export'}

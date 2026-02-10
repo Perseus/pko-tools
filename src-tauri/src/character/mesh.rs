@@ -7,7 +7,7 @@ use crate::{
     animation::character::LW_INVALID_INDEX,
     character::Character,
     d3d::{D3DPrimitiveType, D3DVertexElement9},
-    math::{LwVector2, LwVector3},
+    math::{self, LwVector2, LwVector3},
 };
 use ::gltf::{
     buffer,
@@ -523,6 +523,7 @@ impl CharacterMeshInfo {
     pub fn get_vertex_position_accessor(
         &self,
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
+        y_up: bool,
     ) -> usize {
         let mut vertex_position_buffer_data = vec![];
 
@@ -531,9 +532,11 @@ impl CharacterMeshInfo {
         let accessor_index = fields_to_aggregate.accessor.len();
 
         for vertex in &self.vertex_seq {
-            vertex_position_buffer_data.extend_from_slice(&vertex.0.x.to_le_bytes());
-            vertex_position_buffer_data.extend_from_slice(&vertex.0.y.to_le_bytes());
-            vertex_position_buffer_data.extend_from_slice(&vertex.0.z.to_le_bytes());
+            let pos = [vertex.0.x, vertex.0.y, vertex.0.z];
+            let pos = if y_up { math::z_up_to_y_up_vec3(pos) } else { pos };
+            vertex_position_buffer_data.extend_from_slice(&pos[0].to_le_bytes());
+            vertex_position_buffer_data.extend_from_slice(&pos[1].to_le_bytes());
+            vertex_position_buffer_data.extend_from_slice(&pos[2].to_le_bytes());
         }
 
         let vertex_position_buffer = gltf::json::Buffer {
@@ -556,29 +559,15 @@ impl CharacterMeshInfo {
         let mut max_z = f32::MIN;
 
         for vertex in &self.vertex_seq {
-            if vertex.0.x < min_x {
-                min_x = vertex.0.x;
-            }
+            let v = [vertex.0.x, vertex.0.y, vertex.0.z];
+            let v = if y_up { math::z_up_to_y_up_vec3(v) } else { v };
 
-            if vertex.0.y < min_y {
-                min_y = vertex.0.y;
-            }
-
-            if vertex.0.z < min_z {
-                min_z = vertex.0.z;
-            }
-
-            if vertex.0.x > max_x {
-                max_x = vertex.0.x;
-            }
-
-            if vertex.0.y > max_y {
-                max_y = vertex.0.y;
-            }
-
-            if vertex.0.z > max_z {
-                max_z = vertex.0.z;
-            }
+            if v[0] < min_x { min_x = v[0]; }
+            if v[1] < min_y { min_y = v[1]; }
+            if v[2] < min_z { min_z = v[2]; }
+            if v[0] > max_x { max_x = v[0]; }
+            if v[1] > max_y { max_y = v[1]; }
+            if v[2] > max_z { max_z = v[2]; }
         }
 
         fields_to_aggregate.buffer.push(vertex_position_buffer);
@@ -621,7 +610,7 @@ impl CharacterMeshInfo {
         accessor_index
     }
 
-    pub fn get_vertex_normal_accessor(&self, fields_to_aggregate: &mut GLTFFieldsToAggregate) -> usize {
+    pub fn get_vertex_normal_accessor(&self, fields_to_aggregate: &mut GLTFFieldsToAggregate, y_up: bool) -> usize {
         let mut vertex_normal_buffer_data = vec![];
 
         let buffer_index = fields_to_aggregate.buffer.len();
@@ -629,9 +618,11 @@ impl CharacterMeshInfo {
         let accessor_index = fields_to_aggregate.accessor.len();
 
         for normal in &self.normal_seq {
-            vertex_normal_buffer_data.extend_from_slice(&normal.0.x.to_le_bytes());
-            vertex_normal_buffer_data.extend_from_slice(&normal.0.y.to_le_bytes());
-            vertex_normal_buffer_data.extend_from_slice(&normal.0.z.to_le_bytes());
+            let n = [normal.0.x, normal.0.y, normal.0.z];
+            let n = if y_up { math::z_up_to_y_up_vec3(n) } else { n };
+            vertex_normal_buffer_data.extend_from_slice(&n[0].to_le_bytes());
+            vertex_normal_buffer_data.extend_from_slice(&n[1].to_le_bytes());
+            vertex_normal_buffer_data.extend_from_slice(&n[2].to_le_bytes());
         }
 
         let vertex_normal_buffer = gltf::json::Buffer {
@@ -812,7 +803,7 @@ impl CharacterMeshInfo {
         accessor_index
     }
 
-    fn get_vertex_color_accessor(&self, fields_to_aggregate: &mut GLTFFieldsToAggregate) -> usize {
+    pub fn get_vertex_color_accessor(&self, fields_to_aggregate: &mut GLTFFieldsToAggregate) -> usize {
         let mut vertex_color_buffer_data = vec![];
         let buffer_index = fields_to_aggregate.buffer.len();
         let buffer_view_index = fields_to_aggregate.buffer_view.len();
@@ -1179,9 +1170,10 @@ impl CharacterMeshInfo {
         project_dir: &Path,
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
         materials: &Option<Vec<CharMaterialTextureInfo>>,
+        y_up: bool,
     ) -> gltf::json::mesh::Primitive {
-        let vertex_position_accessor_index = self.get_vertex_position_accessor(fields_to_aggregate);
-        let vertex_normal_accessor_index = self.get_vertex_normal_accessor(fields_to_aggregate);
+        let vertex_position_accessor_index = self.get_vertex_position_accessor(fields_to_aggregate, y_up);
+        let vertex_normal_accessor_index = self.get_vertex_normal_accessor(fields_to_aggregate, y_up);
         let vertex_indices_accessor_index = self.get_vertex_index_accessor(fields_to_aggregate);
 
         let material_index =
@@ -1255,8 +1247,9 @@ impl CharacterMeshInfo {
         project_dir: &Path,
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
         materials: &Option<Vec<CharMaterialTextureInfo>>,
+        y_up: bool,
     ) -> gltf::json::mesh::Primitive {
-        self.get_primitive(project_dir, fields_to_aggregate, materials)
+        self.get_primitive(project_dir, fields_to_aggregate, materials, y_up)
     }
 
     fn add_node_to_hierarchy(
@@ -1376,12 +1369,24 @@ impl CharacterMeshInfo {
                             }
                         }
 
-                        // TODO
                         gltf::Semantic::Colors(_) => {
                             let view = accessor.view().unwrap();
                             let buffer = view.buffer();
                             let data_idx = accessor.offset() + view.offset();
                             let data = buffers.get(buffer.index()).unwrap().0.as_slice();
+                            let data_as_slice = &data[data_idx..];
+                            let mut reader = std::io::Cursor::new(data_as_slice);
+                            for _ in 0..accessor.count() {
+                                let r = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
+                                let g = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
+                                let b = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
+                                let a = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
+                                let packed = ((r * 255.0) as u32)
+                                    | (((g * 255.0) as u32) << 8)
+                                    | (((b * 255.0) as u32) << 16)
+                                    | (((a * 255.0) as u32) << 24);
+                                mesh.vercol_seq.push(packed);
+                            }
                         }
 
                         gltf::Semantic::Joints(_) => {
@@ -1550,18 +1555,22 @@ impl CharacterMeshInfo {
             primitive_num: (mesh.index_seq.len() / 3) as u32,
         });
 
+        if !mesh.vercol_seq.is_empty() {
+            mesh.header.fvf |= D3DFVF_DIFFUSE;
+        }
+
         mesh.header.bone_index_num = mesh.bone_index_seq.len() as u32;
         mesh.header.vertex_num = mesh.vertex_seq.len() as u32;
         mesh.header.index_num = mesh.index_seq.len() as u32;
         mesh.header.subset_num = 1;
         mesh.header.bone_infl_factor = 2;
-        
+
         // Build vertex element sequence based on FVF and data present
         // D3DDECLTYPE values: FLOAT1=0, FLOAT2=1, FLOAT3=2, FLOAT4=3, D3DCOLOR/UBYTE4=4
-        // D3DDECLUSAGE values: POSITION=0, BLENDWEIGHT=1, BLENDINDICES=2, NORMAL=3, TEXCOORD=5
+        // D3DDECLUSAGE values: POSITION=0, BLENDWEIGHT=1, BLENDINDICES=2, NORMAL=3, COLOR=10, TEXCOORD=5
         let mut vertex_elements = vec![];
         let mut offset: u16 = 0;
-        
+
         // Position (always present): FLOAT3 at offset 0
         vertex_elements.push(D3DVertexElement9 {
             stream: 0,
@@ -1572,8 +1581,8 @@ impl CharacterMeshInfo {
             usage_index: 0,
         });
         offset += 12;  // 3 floats * 4 bytes
-        
-        // Blend weights (if skinned): FLOAT4 
+
+        // Blend weights (if skinned): FLOAT4
         if !mesh.blend_seq.is_empty() {
             vertex_elements.push(D3DVertexElement9 {
                 stream: 0,
@@ -1584,19 +1593,19 @@ impl CharacterMeshInfo {
                 usage_index: 0,
             });
             offset += 16;  // 4 floats * 4 bytes
-            
+
             // Blend indices: UBYTE4
             vertex_elements.push(D3DVertexElement9 {
                 stream: 0,
                 offset,
                 _type: 4,  // D3DDECLTYPE_UBYTE4 / D3DCOLOR
                 method: 0,
-                usage: 2,  // D3DDECLUSAGE_BLENDINDICES  
+                usage: 2,  // D3DDECLUSAGE_BLENDINDICES
                 usage_index: 0,
             });
             offset += 4;  // 4 bytes
         }
-        
+
         // Normal (if present): FLOAT3
         if !mesh.normal_seq.is_empty() {
             vertex_elements.push(D3DVertexElement9 {
@@ -1609,7 +1618,20 @@ impl CharacterMeshInfo {
             });
             offset += 12;  // 3 floats * 4 bytes
         }
-        
+
+        // Diffuse color (if present): D3DCOLOR
+        if !mesh.vercol_seq.is_empty() {
+            vertex_elements.push(D3DVertexElement9 {
+                stream: 0,
+                offset,
+                _type: 4,  // D3DDECLTYPE_D3DCOLOR
+                method: 0,
+                usage: 10, // D3DDECLUSAGE_COLOR
+                usage_index: 0,
+            });
+            offset += 4;
+        }
+
         // Texcoord (if present): FLOAT2
         if !mesh.texcoord_seq[0].is_empty() {
             vertex_elements.push(D3DVertexElement9 {
@@ -1620,14 +1642,13 @@ impl CharacterMeshInfo {
                 usage: 5,  // D3DDECLUSAGE_TEXCOORD
                 usage_index: 0,
             });
-            // offset += 8;  // 2 floats * 4 bytes (not needed for last element before end marker)
         }
-        
-        // End marker: stream=255 signals end of declaration
+
+        // D3DDECL_END
         vertex_elements.push(D3DVertexElement9 {
-            stream: 255,
+            stream: 0xFF,
             offset: 0,
-            _type: 0,  // D3DDECLTYPE_UNUSED / end marker
+            _type: 17, // D3DDECLTYPE_UNUSED (D3DDECL_END)
             method: 0,
             usage: 0,
             usage_index: 0,
@@ -1729,7 +1750,23 @@ impl CharacterMeshInfo {
                 }
 
                 gltf::Semantic::Colors(_) => {
-                    // TODO: implement color import if needed
+                    let view = accessor.view().unwrap();
+                    let buffer = view.buffer();
+                    let data_idx = accessor.offset() + view.offset();
+                    let data = buffers.get(buffer.index()).unwrap().0.as_slice();
+                    let data_as_slice = &data[data_idx..];
+                    let mut reader = std::io::Cursor::new(data_as_slice);
+                    for _ in 0..accessor.count() {
+                        let r = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
+                        let g = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
+                        let b = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
+                        let a = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
+                        let packed = ((r * 255.0).round() as u32)
+                            | (((g * 255.0).round() as u32) << 8)
+                            | (((b * 255.0).round() as u32) << 16)
+                            | (((a * 255.0).round() as u32) << 24);
+                        mesh.vercol_seq.push(packed);
+                    }
                 }
 
                 gltf::Semantic::Joints(_) => {
@@ -1864,16 +1901,20 @@ impl CharacterMeshInfo {
             primitive_num: (mesh.index_seq.len() / 3) as u32,
         });
 
+        if !mesh.vercol_seq.is_empty() {
+            mesh.header.fvf |= D3DFVF_DIFFUSE;
+        }
+
         mesh.header.bone_index_num = mesh.bone_index_seq.len() as u32;
         mesh.header.vertex_num = mesh.vertex_seq.len() as u32;
         mesh.header.index_num = mesh.index_seq.len() as u32;
         mesh.header.subset_num = 1;
         mesh.header.bone_infl_factor = 2;
-        
+
         // Build vertex element sequence
         let mut vertex_elements = vec![];
         let mut offset: u16 = 0;
-        
+
         vertex_elements.push(D3DVertexElement9 {
             stream: 0,
             offset,
@@ -1883,7 +1924,7 @@ impl CharacterMeshInfo {
             usage_index: 0,
         });
         offset += 12;
-        
+
         if !mesh.blend_seq.is_empty() {
             vertex_elements.push(D3DVertexElement9 {
                 stream: 0,
@@ -1894,7 +1935,7 @@ impl CharacterMeshInfo {
                 usage_index: 0,
             });
             offset += 16;
-            
+
             vertex_elements.push(D3DVertexElement9 {
                 stream: 0,
                 offset,
@@ -1905,7 +1946,7 @@ impl CharacterMeshInfo {
             });
             offset += 4;
         }
-        
+
         if !mesh.normal_seq.is_empty() {
             vertex_elements.push(D3DVertexElement9 {
                 stream: 0,
@@ -1917,7 +1958,19 @@ impl CharacterMeshInfo {
             });
             offset += 12;
         }
-        
+
+        if !mesh.vercol_seq.is_empty() {
+            vertex_elements.push(D3DVertexElement9 {
+                stream: 0,
+                offset,
+                _type: 4,
+                method: 0,
+                usage: 10,
+                usage_index: 0,
+            });
+            offset += 4;
+        }
+
         if !mesh.texcoord_seq[0].is_empty() {
             vertex_elements.push(D3DVertexElement9 {
                 stream: 0,
@@ -1928,16 +1981,16 @@ impl CharacterMeshInfo {
                 usage_index: 0,
             });
         }
-        
+
         vertex_elements.push(D3DVertexElement9 {
-            stream: 255,
+            stream: 0xFF,
             offset: 0,
-            _type: 0,
+            _type: 17, // D3DDECLTYPE_UNUSED (D3DDECL_END)
             method: 0,
             usage: 0,
             usage_index: 0,
         });
-        
+
         mesh.vertex_element_seq = vertex_elements;
         mesh.header.vertex_element_num = mesh.vertex_element_seq.len() as u32;
 
@@ -1984,8 +2037,8 @@ impl CharacterMeshInfo {
     /// Internal helper to import from a specific primitive
     fn from_gltf_primitive_internal(
         _doc: &gltf::Document,
-        buffers: &Vec<gltf::buffer::Data>,
-        _images: &Vec<gltf::image::Data>,
+        buffers: &[gltf::buffer::Data],
+        _images: &[gltf::image::Data],
         _bone_file: &crate::animation::character::LwBoneFile,
         primitive: gltf::Primitive<'_>,
     ) -> anyhow::Result<Self> {
@@ -2049,7 +2102,23 @@ impl CharacterMeshInfo {
                 }
 
                 gltf::Semantic::Colors(_) => {
-                    // TODO: implement color import if needed
+                    let view = accessor.view().unwrap();
+                    let buffer = view.buffer();
+                    let data_idx = accessor.offset() + view.offset();
+                    let data = buffers.get(buffer.index()).unwrap().0.as_slice();
+                    let data_as_slice = &data[data_idx..];
+                    let mut reader = std::io::Cursor::new(data_as_slice);
+                    for _ in 0..accessor.count() {
+                        let r = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
+                        let g = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
+                        let b = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
+                        let a = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
+                        let packed = ((r * 255.0).round() as u32)
+                            | (((g * 255.0).round() as u32) << 8)
+                            | (((b * 255.0).round() as u32) << 16)
+                            | (((a * 255.0).round() as u32) << 24);
+                        mesh.vercol_seq.push(packed);
+                    }
                 }
 
                 gltf::Semantic::Joints(_) => {
@@ -2184,16 +2253,20 @@ impl CharacterMeshInfo {
             primitive_num: (mesh.index_seq.len() / 3) as u32,
         });
 
+        if !mesh.vercol_seq.is_empty() {
+            mesh.header.fvf |= D3DFVF_DIFFUSE;
+        }
+
         mesh.header.bone_index_num = mesh.bone_index_seq.len() as u32;
         mesh.header.vertex_num = mesh.vertex_seq.len() as u32;
         mesh.header.index_num = mesh.index_seq.len() as u32;
         mesh.header.subset_num = 1;
         mesh.header.bone_infl_factor = 2;
-        
+
         // Build vertex element sequence
         let mut vertex_elements = vec![];
         let mut offset: u16 = 0;
-        
+
         vertex_elements.push(D3DVertexElement9 {
             stream: 0,
             offset,
@@ -2203,7 +2276,7 @@ impl CharacterMeshInfo {
             usage_index: 0,
         });
         offset += 12;
-        
+
         if !mesh.blend_seq.is_empty() {
             vertex_elements.push(D3DVertexElement9 {
                 stream: 0,
@@ -2214,7 +2287,7 @@ impl CharacterMeshInfo {
                 usage_index: 0,
             });
             offset += 16;
-            
+
             vertex_elements.push(D3DVertexElement9 {
                 stream: 0,
                 offset,
@@ -2225,7 +2298,7 @@ impl CharacterMeshInfo {
             });
             offset += 4;
         }
-        
+
         if !mesh.normal_seq.is_empty() {
             vertex_elements.push(D3DVertexElement9 {
                 stream: 0,
@@ -2237,7 +2310,19 @@ impl CharacterMeshInfo {
             });
             offset += 12;
         }
-        
+
+        if !mesh.vercol_seq.is_empty() {
+            vertex_elements.push(D3DVertexElement9 {
+                stream: 0,
+                offset,
+                _type: 4,
+                method: 0,
+                usage: 10,
+                usage_index: 0,
+            });
+            offset += 4;
+        }
+
         if !mesh.texcoord_seq[0].is_empty() {
             vertex_elements.push(D3DVertexElement9 {
                 stream: 0,
@@ -2248,16 +2333,16 @@ impl CharacterMeshInfo {
                 usage_index: 0,
             });
         }
-        
+
         vertex_elements.push(D3DVertexElement9 {
-            stream: 255,
+            stream: 0xFF,
             offset: 0,
-            _type: 0,
+            _type: 17, // D3DDECLTYPE_UNUSED (D3DDECL_END)
             method: 0,
             usage: 0,
             usage_index: 0,
         });
-        
+
         mesh.vertex_element_seq = vertex_elements;
         mesh.header.vertex_element_num = mesh.vertex_element_seq.len() as u32;
 
@@ -2271,8 +2356,8 @@ impl CharacterMeshInfo {
         &self,
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
     ) -> gltf::json::mesh::Primitive {
-        let pos_idx = self.get_vertex_position_accessor(fields_to_aggregate);
-        let norm_idx = self.get_vertex_normal_accessor(fields_to_aggregate);
+        let pos_idx = self.get_vertex_position_accessor(fields_to_aggregate, false);
+        let norm_idx = self.get_vertex_normal_accessor(fields_to_aggregate, false);
         let idx_idx = self.get_vertex_index_accessor(fields_to_aggregate);
 
         let mut attributes = BTreeMap::from([
@@ -2312,10 +2397,19 @@ impl CharacterMeshInfo {
     }
 
     pub fn get_size(&self) -> u32 {
-        let mut size = 0;
-
-        // size += std::mem::size_of::<
-
-        size
+        let header_size = std::mem::size_of::<CharacterInfoMeshHeader>();
+        let ve_size = self.vertex_element_seq.len() * std::mem::size_of::<D3DVertexElement9>();
+        let vert_size = self.vertex_seq.len() * std::mem::size_of::<LwVector3>();
+        let norm_size = self.normal_seq.len() * std::mem::size_of::<LwVector3>();
+        let tc_size: usize = self.texcoord_seq.iter()
+            .map(|tc| tc.len() * std::mem::size_of::<LwVector2>())
+            .sum();
+        let col_size = self.vercol_seq.len() * std::mem::size_of::<u32>();
+        let blend_size = self.blend_seq.len() * std::mem::size_of::<CharacterMeshBlendInfo>();
+        let bone_idx_size = self.bone_index_seq.len() * std::mem::size_of::<u32>();
+        let idx_size = self.index_seq.len() * std::mem::size_of::<u32>();
+        let sub_size = self.subset_seq.len() * std::mem::size_of::<CharacterMeshSubsetInfo>();
+        (header_size + ve_size + vert_size + norm_size + tc_size + col_size
+            + blend_size + bone_idx_size + idx_size + sub_size) as u32
     }
 }

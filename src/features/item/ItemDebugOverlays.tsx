@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import * as THREE from "three";
 import { Html } from "@react-three/drei";
+import { useAtom, useAtomValue } from "jotai";
+import { WorkbenchDummy } from "@/types/item";
+import { isWorkbenchModeAtom, editingDummyAtom } from "@/store/workbench";
 
 // ============================================================================
 // SHARED CONSTANTS (duplicated from character module, no cross-feature imports)
@@ -289,6 +292,12 @@ export function ItemDummyHelpers({
   const [dummies, setDummies] = useState<THREE.Object3D[]>([]);
   const [hoveredObject, setHoveredObject] = useState<ObjectInfo | null>(null);
   const [pinnedObject, setPinnedObject] = useState<ObjectInfo | null>(null);
+  const isWorkbenchMode = useAtomValue(isWorkbenchModeAtom);
+  const [editingDummy, setEditingDummy] = useAtom(editingDummyAtom);
+
+  // In workbench mode, dummies are always visible since they're the
+  // primary editing target — no need to manually toggle the D button.
+  const effectiveShowDummies = showDummies || isWorkbenchMode;
 
   const helperScale = useMemo(() => calculateHelperScale(scene), [scene]);
 
@@ -302,6 +311,19 @@ export function ItemDummyHelpers({
     setDummies(found);
   }, [scene]);
 
+  // Sync editingDummyAtom → pinnedObject (side panel → 3D view)
+  useEffect(() => {
+    if (!isWorkbenchMode) return;
+    if (editingDummy == null) {
+      setPinnedObject(null);
+      return;
+    }
+    const target = dummies.find((d) => d.userData?.id === editingDummy);
+    if (target && pinnedObject?.object !== target) {
+      setPinnedObject({ object: target });
+    }
+  }, [editingDummy, dummies, isWorkbenchMode]);
+
   // Add/remove helpers as direct children of dummy nodes
   useEffect(() => {
     const { dummyMaterial: dMat, pinnedMaterial: pMat } =
@@ -312,7 +334,7 @@ export function ItemDummyHelpers({
       let helper = dummyHelperMap.get(dummy);
       const isPinned = pinnedObject?.object === dummy;
 
-      if (showDummies) {
+      if (effectiveShowDummies) {
         if (!helper) {
           helper = new THREE.Mesh(boxGeo, dMat);
           helper.name = `helper_dummy_${dummy.name}`;
@@ -331,7 +353,7 @@ export function ItemDummyHelpers({
         helper.visible = false;
       }
     });
-  }, [dummies, showDummies, pinnedObject, helperScale]);
+  }, [dummies, effectiveShowDummies, pinnedObject, helperScale]);
 
   useEffect(() => {
     return () => {
@@ -361,9 +383,13 @@ export function ItemDummyHelpers({
     if (pinnedObject?.object === object) {
       setPinnedObject(null);
       setHoveredObject(null);
+      if (isWorkbenchMode) setEditingDummy(null);
     } else {
       setPinnedObject({ object });
       setHoveredObject(null);
+      if (isWorkbenchMode && object.userData?.id != null) {
+        setEditingDummy(object.userData.id);
+      }
     }
   };
 
@@ -376,7 +402,7 @@ export function ItemDummyHelpers({
 
   return (
     <>
-      {showDummies &&
+      {effectiveShowDummies &&
         dummies.map((dummy, index) => (
           <DummyClickTarget
             key={`dummy-click-${index}`}
@@ -402,6 +428,121 @@ export function ItemDummyHelpers({
           scene={scene}
           isPinned={!!pinnedObject}
         />
+      )}
+    </>
+  );
+}
+
+// ============================================================================
+// WORKBENCH DUMMY HELPERS (state-driven, not from glTF)
+// ============================================================================
+
+interface ItemWorkbenchDummyHelpersProps {
+  scene: THREE.Object3D;
+  dummies: WorkbenchDummy[];
+  showDummies: boolean;
+}
+
+export function ItemWorkbenchDummyHelpers({
+  scene,
+  dummies,
+  showDummies,
+}: ItemWorkbenchDummyHelpersProps) {
+  const isWorkbenchMode = useAtomValue(isWorkbenchModeAtom);
+  const [editingDummy, setEditingDummy] = useAtom(editingDummyAtom);
+  const [hoveredId, setHoveredId] = useState<number | null>(null);
+
+  const effectiveShowDummies = showDummies || isWorkbenchMode;
+  const helperScale = useMemo(() => calculateHelperScale(scene), [scene]);
+  const clickTargetSize =
+    helperScale * DUMMY_HELPER_SCALE_MULTIPLIER * CLICK_TARGET_SCALE_MULTIPLIER;
+
+  const pinnedId = editingDummy;
+  const displayedId = pinnedId ?? hoveredId;
+  const displayedDummy = displayedId != null
+    ? dummies.find((d) => d.id === displayedId) ?? null
+    : null;
+
+  if (!effectiveShowDummies) return null;
+
+  return (
+    <>
+      {dummies.map((dummy) => {
+        const isPinned = pinnedId === dummy.id;
+        return (
+          <mesh
+            key={`workbench-dummy-${dummy.id}`}
+            position={dummy.position}
+            onClick={(e) => {
+              e.stopPropagation();
+              setEditingDummy(isPinned ? null : dummy.id);
+              setHoveredId(null);
+            }}
+            onPointerOver={(e) => {
+              e.stopPropagation();
+              if (!pinnedId) setHoveredId(dummy.id);
+            }}
+            onPointerOut={(e) => {
+              e.stopPropagation();
+              if (!pinnedId) setHoveredId(null);
+            }}
+          >
+            <boxGeometry args={[clickTargetSize, clickTargetSize, clickTargetSize]} />
+            <meshBasicMaterial
+              color={isPinned ? 0xffff00 : 0xff00ff}
+              depthTest={false}
+              depthWrite={false}
+            />
+          </mesh>
+        );
+      })}
+
+      {displayedDummy && (
+        <Html
+          position={displayedDummy.position}
+          style={{ pointerEvents: pinnedId != null ? "auto" : "none" }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "rgba(0, 0, 0, 0.95)",
+              color: "#fff",
+              padding: "10px 12px",
+              borderRadius: "8px",
+              fontSize: "12px",
+              fontFamily: "monospace",
+              minWidth: "220px",
+              maxWidth: "280px",
+              border: pinnedId != null ? "2px solid #ffff00" : "1px solid #666",
+              userSelect: pinnedId != null ? "text" : "none",
+              cursor: pinnedId != null ? "text" : "default",
+              transform: "translateY(-100%) translateY(-10px)",
+            }}
+          >
+            <div style={{ fontWeight: "bold", color: "#ffff00", marginBottom: "6px" }}>
+              Dummy {displayedDummy.id}{displayedDummy.label ? `: ${displayedDummy.label}` : ""}
+              {pinnedId != null && " (pinned)"}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "80px 1fr", gap: "4px" }}>
+              <div style={{ color: "#888" }}>Position:</div>
+              <div>
+                [{displayedDummy.position.map((v) => v.toFixed(3)).join(", ")}]
+              </div>
+            </div>
+            <div
+              style={{
+                marginTop: "6px",
+                fontSize: "11px",
+                color: "#666",
+                fontStyle: "italic",
+              }}
+            >
+              {pinnedId != null
+                ? "Click the dummy again to dismiss"
+                : "Click to pin this info"}
+            </div>
+          </div>
+        </Html>
       )}
     </>
   );

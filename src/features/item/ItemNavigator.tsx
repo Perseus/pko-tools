@@ -1,12 +1,13 @@
 import { currentProjectAtom } from "@/store/project";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useVirtualizer, Virtualizer } from "@tanstack/react-virtual";
 import React, { useEffect, useMemo, useState } from "react";
 import { ScrollAreaVirtualizable } from "@/components/ui/scroll-area-virtualizable";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { SidebarContent, SidebarHeader } from "@/components/ui/sidebar";
 import { Button } from "@/components/ui/button";
 import { Item, ITEM_TYPE_NAMES, ModelVariant } from "@/types/item";
-import { getItemList, getItemLitInfo, getItemMetadata, loadItemModel } from "@/commands/item";
+import { getItemList, getItemLitInfo, getItemMetadata, loadItemModel, saveWorkbench } from "@/commands/item";
 import {
   itemGltfJsonAtom,
   itemLitInfoAtom,
@@ -17,14 +18,23 @@ import {
 } from "@/store/item";
 import { Input } from "@/components/ui/input";
 import { ExportItemToGltf } from "./ExportItemToGltf";
-import { ImportItemFromGltf } from "./ImportItemFromGltf";
-import { Download, Upload } from "lucide-react";
+import { WorkbenchNavigator } from "./WorkbenchNavigator";
+import { WorkbenchSidePanel } from "./WorkbenchSidePanel";
+import { Download, Upload, ArrowLeft, Save, Loader2 } from "lucide-react";
+import { openImportWizardAtom } from "@/store/import";
+import { isWorkbenchModeAtom, activeWorkbenchAtom, dummyPlacementModeAtom } from "@/store/workbench";
+import { toast } from "@/hooks/use-toast";
 
 export default function ItemNavigator() {
   const [items, setItems] = useState<Item[]>([]);
   const [filteredItems, setFilteredItems] = useState<Item[]>([]);
   const [showExport, setShowExport] = useState(false);
-  const [showImport, setShowImport] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const openImportWizard = useSetAtom(openImportWizardAtom);
+  const [isWorkbenchMode, setIsWorkbenchMode] = useAtom(isWorkbenchModeAtom);
+  const [activeWorkbench, setActiveWorkbench] = useAtom(activeWorkbenchAtom);
+  const setPlacementMode = useSetAtom(dummyPlacementModeAtom);
+  const currentProject = useAtomValue(currentProjectAtom);
   const [itemGltfJson, setItemGltfJson] = useAtom(itemGltfJsonAtom);
   const [, setItemLitInfo] = useAtom(itemLitInfoAtom);
   const [, setItemMetadata] = useAtom(itemMetadataAtom);
@@ -32,8 +42,6 @@ export default function ItemNavigator() {
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const modelVariant = useAtomValue(selectedModelVariantAtom);
-
-  const currentProject = useAtomValue(currentProjectAtom);
   const [selectedItem, setSelectedItem] = useAtom(selectedItemAtom);
 
   useEffect(() => {
@@ -117,6 +125,9 @@ export default function ItemNavigator() {
   }
 
   async function selectItem(item: Item) {
+    // Exit workbench mode when selecting a regular item
+    setIsWorkbenchMode(false);
+    setActiveWorkbench(null);
     setSelectedItem(item);
     await loadModel(item, modelVariant);
   }
@@ -128,6 +139,78 @@ export default function ItemNavigator() {
     }
   }, [modelVariant]);
 
+  function exitWorkbench() {
+    setIsWorkbenchMode(false);
+    setActiveWorkbench(null);
+    setPlacementMode(false);
+  }
+
+  async function handleSaveWorkbench() {
+    if (!activeWorkbench || !currentProject) return;
+    setSaving(true);
+    try {
+      await saveWorkbench(currentProject.id, activeWorkbench);
+      toast({ title: "Workbench saved" });
+    } catch (err) {
+      toast({ title: "Save failed", description: String(err) });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  // ── Workbench mode: replace navigator with editing tools ──
+  if (isWorkbenchMode && activeWorkbench) {
+    return (
+      <div className="flex flex-col h-full">
+        <SidebarHeader className="shrink-0">
+          <SidebarContent>
+            <div className="flex items-center justify-between">
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs -ml-1"
+                onClick={exitWorkbench}
+              >
+                <ArrowLeft className="h-3 w-3 mr-1" /> Items
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7"
+                onClick={handleSaveWorkbench}
+                disabled={saving}
+              >
+                {saving ? (
+                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                ) : (
+                  <Save className="h-3 w-3 mr-1" />
+                )}
+                Save
+              </Button>
+            </div>
+
+            <div className="pt-1">
+              <div className="flex items-center gap-2 mb-1">
+                <div className="h-2 w-2 rounded-full bg-amber-400 shrink-0" />
+                <span className="text-sm font-medium truncate">
+                  {activeWorkbench.itemName || "Untitled Item"}
+                </span>
+              </div>
+              <div className="text-[11px] text-muted-foreground font-mono">
+                {activeWorkbench.modelId}
+              </div>
+            </div>
+          </SidebarContent>
+        </SidebarHeader>
+
+        <ScrollArea className="flex-1 px-3 pb-4">
+          <WorkbenchSidePanel />
+        </ScrollArea>
+      </div>
+    );
+  }
+
+  // ── Normal mode: item browser ──
   return (
     <>
       <SidebarHeader>
@@ -211,16 +294,17 @@ export default function ItemNavigator() {
               variant="outline"
               size="sm"
               className="flex-1"
-              onClick={() => setShowImport(true)}
+              onClick={() => openImportWizard("item")}
             >
               <Upload className="h-3 w-3 mr-1" /> Import
             </Button>
           </div>
+
+          <WorkbenchNavigator />
         </SidebarContent>
       </SidebarHeader>
 
       <ExportItemToGltf open={showExport} onOpenChange={setShowExport} />
-      <ImportItemFromGltf open={showImport} onOpenChange={setShowImport} />
     </>
   );
 }

@@ -80,6 +80,14 @@ impl Project {
                 ));
             }
 
+            // Ensure workbench tables exist (migration for older projects)
+            let cloned_for_migrate = db.db.clone();
+            if let Ok(mut conn) = cloned_for_migrate.lock() {
+                let _ = Project::init_workbenches_table(&mut conn);
+                let _ = Project::init_workbench_dummies_table(&mut conn);
+                drop(conn);
+            }
+
             let project = Self {
                 id: project_id,
                 name,
@@ -132,6 +140,8 @@ impl Project {
         if let Ok(mut db) = db.lock() {
             Project::init_info_table(&mut db, &self.name, &self.project_directory)?;
             Project::init_characters_table(&mut db)?;
+            Project::init_workbenches_table(&mut db)?;
+            Project::init_workbench_dummies_table(&mut db)?;
         } else {
             return Err(anyhow::anyhow!("Could not lock database"));
         }
@@ -176,6 +186,48 @@ impl Project {
         )?;
 
         Ok(())
+    }
+
+    fn init_workbenches_table(conn: &mut Connection) -> anyhow::Result<()> {
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS workbenches (
+                model_id TEXT PRIMARY KEY,
+                item_name TEXT NOT NULL DEFAULT '',
+                item_type INTEGER NOT NULL DEFAULT 0,
+                item_description TEXT NOT NULL DEFAULT '',
+                scale_factor REAL NOT NULL DEFAULT 1.0,
+                source_file TEXT,
+                lgo_path TEXT NOT NULL,
+                has_glow_overlay INTEGER NOT NULL DEFAULT 0,
+                registered_item_id INTEGER,
+                created_at TEXT NOT NULL,
+                modified_at TEXT NOT NULL
+            )",
+            [],
+        )?;
+        Ok(())
+    }
+
+    fn init_workbench_dummies_table(conn: &mut Connection) -> anyhow::Result<()> {
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS workbench_dummies (
+                id INTEGER NOT NULL,
+                model_id TEXT NOT NULL,
+                label TEXT NOT NULL DEFAULT '',
+                position_x REAL NOT NULL DEFAULT 0.0,
+                position_y REAL NOT NULL DEFAULT 0.0,
+                position_z REAL NOT NULL DEFAULT 0.0,
+                PRIMARY KEY (model_id, id),
+                FOREIGN KEY (model_id) REFERENCES workbenches(model_id) ON DELETE CASCADE
+            )",
+            [],
+        )?;
+        Ok(())
+    }
+
+    /// Expose the database Arc<Mutex<Connection>> for direct use by modules.
+    pub fn db_arc(&self) -> std::sync::Arc<std::sync::Mutex<Connection>> {
+        self.db.db.clone()
     }
 
     // client-specific commands and methods

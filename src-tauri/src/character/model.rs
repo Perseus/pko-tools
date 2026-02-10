@@ -10,7 +10,7 @@ use crate::{
     animation::character::{LwBoneFile, LW_INVALID_INDEX, LW_MAX_NAME},
     character::{helper::BoundingSphereInfo, mesh::CharacterInfoMeshHeader, texture},
     d3d::{D3DBlend, D3DCmpFunc, D3DFormat, D3DPool, D3DRenderStateType},
-    math::{LwMatrix44, LwSphere, LwVector3},
+    math::{self, LwMatrix44, LwSphere, LwVector3},
 };
 use ::gltf::{
     buffer, image,
@@ -95,6 +95,7 @@ impl<const SET_SIZE: usize, const SEQ_SIZE: usize> RenderStateSetTemplate<SET_SI
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[binrw]
 pub struct RenderCtrlCreateInfo {
     // this determines the type of rendering pipeline or vertex shader behaviour that the object will use
@@ -129,6 +130,7 @@ pub struct RenderCtrlCreateInfo {
     pub ps_id: u32,
 }
 
+#[derive(Serialize, Deserialize, Clone)]
 #[binrw]
 pub struct StateCtrl {
     // 8 flags that determine the state of an object in the scene/game world
@@ -208,16 +210,17 @@ impl CharacterGeometricModel {
         &self,
         project_dir: &Path,
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
+        y_up: bool,
     ) -> anyhow::Result<gltf::mesh::Primitive> {
         let mesh_info = self.mesh_info.as_ref().unwrap();
-        let primitive = mesh_info.get_gltf_primitive(project_dir, fields_to_aggregate, &self.material_seq);
+        let primitive = mesh_info.get_gltf_primitive(project_dir, fields_to_aggregate, &self.material_seq, y_up);
 
         Ok(primitive)
     }
 
     /// Get glTF helper nodes (dummy points, bounding spheres, etc.)
     /// The mesh_index parameter associates these helpers with a specific mesh for round-trip support
-    pub fn get_gltf_helper_nodes_for_mesh(&self, mesh_index: usize) -> Vec<gltf::Node> {
+    pub fn get_gltf_helper_nodes_for_mesh(&self, mesh_index: usize, y_up: bool) -> Vec<gltf::Node> {
         if self.helper_data.is_none() {
             return vec![];
         }
@@ -227,11 +230,14 @@ impl CharacterGeometricModel {
 
         // Dummy points (attachment points for effects, items, etc.)
         for dummy in helper_data.dummy_seq.iter() {
+            let mat = if y_up { math::z_up_to_y_up_mat4(dummy.mat.to_slice()) } else { dummy.mat.to_slice() };
+            let mat_local = if y_up { math::z_up_to_y_up_mat4(dummy.mat_local.to_slice()) } else { dummy.mat_local.to_slice() };
+            let mat_local_json = serde_json::to_string(&mat_local).unwrap_or_default();
             let node = gltf::Node {
                 camera: None,
                 children: None,
                 extensions: None,
-                matrix: Some(dummy.mat.to_slice()),
+                matrix: Some(mat),
                 mesh: None,
                 name: Some(format!("Dummy{}", dummy.id)),
                 rotation: None,
@@ -241,8 +247,8 @@ impl CharacterGeometricModel {
                 weights: None,
                 extras: Some(
                     RawValue::from_string(format!(
-                        r#"{{"type":"dummy","id":{},"parent_type":{},"parent_id":{},"mesh_index":{}}}"#,
-                        dummy.id, dummy.parent_type, dummy.parent_id, mesh_index
+                        r#"{{"type":"dummy","id":{},"parent_type":{},"parent_id":{},"mesh_index":{},"mat_local":{}}}"#,
+                        dummy.id, dummy.parent_type, dummy.parent_id, mesh_index, mat_local_json
                     ))
                     .unwrap(),
                 ),
@@ -252,11 +258,14 @@ impl CharacterGeometricModel {
 
         // Bounding spheres
         for bsphere in helper_data.bsphere_seq.iter() {
+            let mat = if y_up { math::z_up_to_y_up_mat4(bsphere.mat.to_slice()) } else { bsphere.mat.to_slice() };
+            let center = [bsphere.sphere.c.0.x, bsphere.sphere.c.0.y, bsphere.sphere.c.0.z];
+            let center = if y_up { math::z_up_to_y_up_vec3(center) } else { center };
             let node = gltf::Node{
                 camera: None,
                 children: None,
                 extensions: None,
-                matrix: Some(bsphere.mat.to_slice()),
+                matrix: Some(mat),
                 mesh: None,
                 name: Some(format!("BoundingSphere{}", bsphere.id)),
                 rotation: None,
@@ -269,9 +278,9 @@ impl CharacterGeometricModel {
                         format!(
                             r#"{{"radius":{},"center":[{},{},{}],"type":"bounding_sphere","id":{},"mesh_index":{}}}"#,
                             bsphere.sphere.r,
-                            bsphere.sphere.c.0.x,
-                            bsphere.sphere.c.0.y,
-                            bsphere.sphere.c.0.z,
+                            center[0],
+                            center[1],
+                            center[2],
                             bsphere.id,
                             mesh_index
                         )
@@ -284,10 +293,10 @@ impl CharacterGeometricModel {
 
         nodes
     }
-    
+
     /// Get glTF helper nodes without mesh association (legacy, uses mesh_index 0)
     pub fn get_gltf_helper_nodes(&self) -> Vec<gltf::Node> {
-        self.get_gltf_helper_nodes_for_mesh(0)
+        self.get_gltf_helper_nodes_for_mesh(0, false)
     }
 
     pub fn from_file(file_path: PathBuf) -> anyhow::Result<Self> {
@@ -417,7 +426,7 @@ impl CharacterGeometricModel {
             },
             helper_size: 50,
             mtl_size: mtl_size as u32,
-            mesh_size: 61504,
+            mesh_size: mesh.get_size(),
             state_ctrl: StateCtrl {
                 // most default values seem to be "enabled" and "visible"
                 // i found a few that were had "transparent" as true as well
@@ -436,7 +445,7 @@ impl CharacterGeometricModel {
             helper_data: Some(helper_data),
         })
     }
-    
+
     /// Import a specific primitive from a glTF document as a CharacterGeometricModel
     /// This is used for multi-part models where each primitive becomes a separate LGO file
     pub fn from_gltf_primitive(
@@ -489,7 +498,7 @@ impl CharacterGeometricModel {
             },
             helper_size: 50,
             mtl_size: mtl_size as u32,
-            mesh_size: 61504,
+            mesh_size: mesh.get_size(),
             state_ctrl: StateCtrl {
                 _state_seq: [1, 1, 0, 0, 0, 0, 0, 0],
             },
@@ -505,7 +514,7 @@ impl CharacterGeometricModel {
             helper_data: Some(helper_data),
         })
     }
-    
+
     /// Import a specific mesh from a glTF document as a CharacterGeometricModel
     /// This is the preferred method - each mesh becomes a separate LGO file
     /// Each mesh is expected to have exactly one primitive (idiomatic glTF structure)
@@ -558,7 +567,7 @@ impl CharacterGeometricModel {
             },
             helper_size: 50,
             mtl_size: mtl_size as u32,
-            mesh_size: 61504,
+            mesh_size: mesh.get_size(),
             state_ctrl: StateCtrl {
                 _state_seq: [1, 1, 0, 0, 0, 0, 0, 0],
             },

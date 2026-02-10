@@ -18,6 +18,7 @@ import ItemsPage from "./pages/items";
 import WorkspaceNavigator from "./components/WorkspaceNavigator/WorkspaceNavigator";
 import ProjectCreator from "./pages/project-creator/ProjectCreator";
 import { Toaster } from "./components/ui/toaster";
+import { ImportWizard } from "./features/import/ImportWizard";
 
 function App() {
   const [, setCurrentProject] = useAtom(currentProjectAtom);
@@ -57,6 +58,7 @@ function App() {
           </Routes>
           <WorkspaceNavigator />
         </main>
+        <ImportWizard />
         <Toaster />
         <StatusBar className="fixed bottom-0 z-20" />
       </div>

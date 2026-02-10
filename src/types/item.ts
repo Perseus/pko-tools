@@ -146,3 +146,109 @@ export type ItemImportResult = {
   texture_files: string[];
   import_dir: string;
 };
+
+export type DecompileResult = {
+  records_total: number;
+  records_written: number;
+  records_skipped: number;
+  output_path: string;
+};
+
+// ============================================================================
+// Workbench Types
+// ============================================================================
+
+export type WorkbenchDummy = {
+  id: number;
+  label: string;
+  position: [number, number, number];
+};
+
+export type WorkbenchState = {
+  modelId: string;
+  itemName: string;
+  itemType: number;
+  itemDescription: string;
+  scaleFactor: number;
+  sourceFile: string | null;
+  lgoPath: string;
+  hasGlowOverlay: boolean;
+  registeredItemId: number | null;
+  createdAt: string;
+  modifiedAt: string;
+  dummies: WorkbenchDummy[];
+};
+
+export type WorkbenchSummary = {
+  modelId: string;
+  itemName: string;
+  itemType: number;
+  dummyCount: number;
+  hasGlowOverlay: boolean;
+};
+
+export type ItemInfoPreview = {
+  tsvLine: string;
+  assignedId: number;
+};
+
+/** Suggested dummy positions per item type */
+export const DUMMY_PRESETS: Record<number, { label: string; position: [number, number, number] }[]> = {
+  // Sword 1H
+  1: [
+    { label: "Guard area", position: [0, 0.4, 0] },
+    { label: "Mid-blade", position: [0, 1.2, 0] },
+    { label: "Blade tip", position: [0, 2.0, 0] },
+  ],
+  // Sword 2H
+  2: [
+    { label: "Guard area", position: [0, 0.4, 0] },
+    { label: "Mid-blade", position: [0, 1.4, 0] },
+    { label: "Blade tip", position: [0, 2.4, 0] },
+  ],
+  // Bow
+  3: [
+    { label: "Grip", position: [0, 0.8, 0] },
+    { label: "Upper tip", position: [0, 1.6, 0] },
+    { label: "Lower tip", position: [0, 0.0, 0] },
+  ],
+  // Gun
+  4: [
+    { label: "Grip", position: [0, 0.2, 0] },
+    { label: "Barrel mid", position: [0, 0.8, 0] },
+    { label: "Muzzle", position: [0, 1.4, 0] },
+  ],
+  // Knife/Dagger
+  5: [
+    { label: "Guard", position: [0, 0.3, 0] },
+    { label: "Blade center", position: [0, 0.7, 0] },
+    { label: "Blade tip", position: [0, 1.1, 0] },
+  ],
+  // Shield
+  6: [
+    { label: "Face center", position: [0, 0.6, 0] },
+    { label: "Edge", position: [0.4, 0.6, 0] },
+  ],
+  // Staff
+  7: [
+    { label: "Base grip", position: [0, 0.2, 0] },
+    { label: "Shaft mid", position: [0, 1.2, 0] },
+    { label: "Staff head", position: [0, 2.2, 0] },
+  ],
+  // Axe
+  8: [
+    { label: "Handle base", position: [0, 0.2, 0] },
+    { label: "Axe head center", position: [0, 1.4, 0] },
+    { label: "Axe head edge", position: [0.3, 1.6, 0] },
+  ],
+  // Boxing Glove
+  14: [
+    { label: "Knuckle center", position: [0, 0.3, 0] },
+    { label: "Knuckle top", position: [0, 0.5, 0] },
+  ],
+  // Claw
+  15: [
+    { label: "Base", position: [0, 0.2, 0] },
+    { label: "Claw tip", position: [0, 0.8, 0] },
+  ],
+};

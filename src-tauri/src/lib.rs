@@ -9,8 +9,13 @@ mod d3d;
 mod db;
 pub mod decompiler;
 pub mod math;
+pub mod mesh_processing;
 mod preferences;
 mod projects;
+pub mod registration;
+pub mod retarget;
+pub mod texture_pipeline;
+pub mod validation;
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -89,8 +94,36 @@ pub fn run() {
             item::commands::get_item_metadata,
             item::commands::export_item_to_gltf,
             item::commands::import_item_from_gltf,
+            item::commands::load_model_preview,
             item::commands::get_forge_effect_preview,
             item::commands::get_item_category_availability,
+            item::commands::decompile_item_refine_info,
+            item::commands::decompile_item_refine_effect_info,
+            item::commands::decompile_scene_effect_info,
+            item::commands::decompile_stone_info,
+            item::commands::add_glow_overlay,
+            item::commands::export_item,
+            item::commands::rotate_item,
+            item::commands::rescale_item,
+            item::commands::create_workbench,
+            item::commands::load_workbench,
+            item::commands::save_workbench,
+            item::commands::list_workbenches,
+            item::commands::delete_workbench,
+            item::commands::update_dummies,
+            item::commands::generate_item_info_entry,
+            item::commands::register_item,
+            mesh_processing::commands::analyze_mesh,
+            mesh_processing::commands::analyze_mesh_scale,
+            texture_pipeline::commands::preview_texture_conversion,
+            validation::commands::validate_model_for_import,
+            registration::commands::check_model_id_available,
+            registration::commands::get_next_available_model_id,
+            registration::commands::register_imported_character,
+            retarget::commands::analyze_external_model,
+            retarget::commands::auto_map_bones_cmd,
+            retarget::commands::apply_bone_mapping,
+            retarget::commands::validate_bone_mapping,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

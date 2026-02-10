@@ -200,7 +200,7 @@ impl Character {
         })
     }
 
-    pub fn get_gltf_json(&self, project_dir: &Path) -> anyhow::Result<String> {
+    pub fn get_gltf_json(&self, project_dir: &Path, y_up: bool) -> anyhow::Result<String> {
         let parts = self.get_parts();
         let mut model_locations = vec![];
 
@@ -244,7 +244,7 @@ impl Character {
         // Each mesh has one primitive and is named after the LGO file
         let mut meshes: Vec<gltf::Mesh> = vec![];
         for (i, model) in models.iter().enumerate() {
-            let primitive = model.get_gltf_mesh_primitive(project_dir, &mut fields_to_aggregate)?;
+            let primitive = model.get_gltf_mesh_primitive(project_dir, &mut fields_to_aggregate, y_up)?;
             let model_id_base = self.model as u32 * 1000000;
             let suit_id = self.suit_id as u32 * 10000;
             let model_id = model_id_base + suit_id + i as u32;
@@ -260,21 +260,21 @@ impl Character {
         }
         
         let mesh_count = meshes.len();
-        let (skin, nodes) = animation.to_gltf_skin_and_nodes_multi(&mut fields_to_aggregate, mesh_count);
+        let (skin, nodes) = animation.to_gltf_skin_and_nodes_multi(&mut fields_to_aggregate, mesh_count, y_up);
         fields_to_aggregate.skin.push(skin);
         fields_to_aggregate.nodes.extend(nodes);
 
         let helpers: Vec<Vec<gltf::Node>> = models
             .iter()
             .enumerate()
-            .map(|(i, model)| model.get_gltf_helper_nodes_for_mesh(i))
+            .map(|(i, model)| model.get_gltf_helper_nodes_for_mesh(i, y_up))
             .collect();
         let mut total_helper_nodes = 0;
         for helper_nodes in helpers.iter() {
             total_helper_nodes += helper_nodes.len();
             fields_to_aggregate.nodes.extend(helper_nodes.clone());
         }
-        animation.to_gltf_animations_and_sampler(&mut fields_to_aggregate);
+        animation.to_gltf_animations_and_sampler(&mut fields_to_aggregate, y_up);
 
         // Build scene node indices: root bone, skinned mesh nodes, and all helper nodes
         let mut scene_nodes = vec![
@@ -442,12 +442,20 @@ pub fn get_character_gltf_json(
     project_id: uuid::Uuid,
     character_id: u32,
 ) -> anyhow::Result<String> {
+    get_character_gltf_json_with_options(project_id, character_id, false)
+}
+
+pub fn get_character_gltf_json_with_options(
+    project_id: uuid::Uuid,
+    character_id: u32,
+    y_up: bool,
+) -> anyhow::Result<String> {
     let project = projects::project::Project::get_project(project_id)?;
     let character = get_character(project_id, character_id)?;
 
     let project_dir = project.project_directory.as_ref();
 
-    let gltf_json = character.get_gltf_json(project_dir)?;
+    let gltf_json = character.get_gltf_json(project_dir, y_up)?;
     Ok(gltf_json)
 }
 
@@ -508,7 +516,7 @@ mod test {
             suit_num: 0,
         };
 
-        let gltf = character.get_gltf_json(Path::new("/mnt/d/EA 1.0.1"));
+        let gltf = character.get_gltf_json(Path::new("/mnt/d/EA 1.0.1"), false);
         let mut file = File::create("./test_artifacts/test.gltf").unwrap();
         file.write_all(gltf.unwrap().as_bytes()).unwrap();
     }

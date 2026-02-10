@@ -216,6 +216,15 @@ pub struct LwMatrix44(
 );
 
 impl LwMatrix44 {
+    pub fn from_slice(s: &[f32; 16]) -> Self {
+        LwMatrix44(Matrix4::new(
+            s[0], s[1], s[2], s[3],
+            s[4], s[5], s[6], s[7],
+            s[8], s[9], s[10], s[11],
+            s[12], s[13], s[14], s[15],
+        ))
+    }
+
     pub fn to_slice(&self) -> [f32; 16] {
         let m = &self.0;
         [
@@ -262,6 +271,11 @@ impl LwMatrix44 {
         let rotation_quat = matrix4_to_quaternion(rot_mat);
 
         (LwVector3(translation), LwQuaternion(rotation_quat), scale)
+    }
+
+    /// Create a translation-only matrix.
+    pub fn from_translation(translation: Vector3<f32>) -> Self {
+        LwMatrix44(Matrix4::from_translation(translation))
     }
 
     /// Create a transformation matrix that first scales then translates.
@@ -359,6 +373,52 @@ pub struct LwPlane {
 pub struct LwSphere {
     pub c: LwVector3,
     pub r: f32,
+}
+
+/// Convert a position/direction vector from Z-up to Y-up coordinate system.
+/// Z-up (x, y, z) → Y-up (x, z, -y)
+pub fn z_up_to_y_up_vec3(v: [f32; 3]) -> [f32; 3] {
+    [v[0], v[2], -v[1]]
+}
+
+/// Convert a quaternion from Z-up to Y-up coordinate system.
+/// In (w,x,y,z) notation: (w, x, y, z) → (w, x, z, -y)
+/// Input/output uses glTF [x, y, z, w] order.
+pub fn z_up_to_y_up_quat(q: [f32; 4]) -> [f32; 4] {
+    // q is [x, y, z, w] in glTF order
+    // Swizzle the vector part: (x, y, z) → (x, z, -y)
+    [q[0], q[2], -q[1], q[3]]
+}
+
+/// Convert a column-major 4x4 matrix from Z-up to Y-up coordinate system.
+/// M' = B * M * B^(-1) where B maps (x,y,z) → (x,z,-y).
+pub fn z_up_to_y_up_mat4(m: [f32; 16]) -> [f32; 16] {
+    let mat = Matrix4::new(
+        m[0], m[1], m[2], m[3],
+        m[4], m[5], m[6], m[7],
+        m[8], m[9], m[10], m[11],
+        m[12], m[13], m[14], m[15],
+    );
+
+    // B: maps (x,y,z) → (x,z,-y)
+    let b = Matrix4::new(
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, -1.0, 0.0,
+        0.0, 1.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 1.0,
+    );
+
+    // B^(-1): maps (x,y,z) → (x,-z,y) (orthogonal, so B^(-1) = B^T)
+    let b_inv = Matrix4::new(
+        1.0, 0.0, 0.0, 0.0,
+        0.0, 0.0, 1.0, 0.0,
+        0.0, -1.0, 0.0, 0.0,
+        0.0, 0.0, 0.0, 1.0,
+    );
+
+    let result = b * mat * b_inv;
+
+    LwMatrix44(result).to_slice()
 }
 
 #[cfg(test)]

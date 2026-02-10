@@ -249,6 +249,101 @@ pub fn get_character_info_structure(version: GameVersion) -> Structure {
     }
 }
 
+/// Helper: build the 108-byte CRawDataInfo base prefix.
+///
+/// Only emits `nID` (offset 100, 4 bytes) as a visible field.
+/// All other base fields (bExist, nIndex, szDataName, etc.) are padding.
+fn raw_data_info_base(builder: StructureBuilder) -> StructureBuilder {
+    builder
+        .pad(100) // skip bExist(4) + nIndex(4) + szDataName(72) + dwLastUseTick(4) + bEnable(4) + pData(4) + dwPackOffset(4) + dwDataSize(4) = 100 bytes to nID
+        .field_long("nID")
+        .pad(4) // dwLoadCnt
+}
+
+/// Create ItemRefineInfo structure (152 bytes total).
+///
+/// CItemRefineInfo extends CRawDataInfo:
+///   Base: 108 bytes (only nID emitted)
+///   Value: short[14] (28 bytes) — effect category → refine effect ID
+///   fChaEffectScale: float[4] (16 bytes) — per-character-type effect scale
+pub fn create_item_refine_info() -> Structure {
+    let builder = StructureBuilder::new("ItemRefineInfo");
+    raw_data_info_base(builder)
+        .field_short_repeat("Value", 14)
+        .field_float_repeat("fChaEffectScale", 4)
+        .build()
+}
+
+/// Create ItemRefineEffectInfo structure (164 bytes total).
+///
+/// CItemRefineEffectInfo extends CRawDataInfo:
+///   Base: 108 bytes (only nID emitted)
+///   nLightID: int (4 bytes)
+///   sEffectID: short[16] (32 bytes) — [cha_type][tier] flattened
+///   chDummy: byte[4] (4 bytes)
+///   _sEffectNum: int[4] (16 bytes)
+pub fn create_item_refine_effect_info() -> Structure {
+    let builder = StructureBuilder::new("ItemRefineEffectInfo");
+    raw_data_info_base(builder)
+        .field_long("nLightID")
+        .field_short_repeat("sEffectID", 16)
+        .field_byte_repeat("chDummy", 4)
+        .field_long_repeat("_sEffectNum", 4)
+        .build()
+}
+
+/// Create sceneffectinfo structure (208 bytes total).
+///
+/// CMagicInfo extends CRawDataInfo:
+///   Base: 108 bytes (only nID emitted)
+///   szName: char[16]
+///   szPhotoName: char[16]
+///   nPhotoTexID: int
+///   nEffType: int
+///   nObjType: int
+///   nDummyNum: int
+///   nDummy: int[8]
+///   nDummy2: int
+///   nHeightOff: int
+///   fPlayTime: float
+///   LightID: int
+///   fBaseSize: float
+pub fn create_scene_effect_info() -> Structure {
+    let builder = StructureBuilder::new("sceneffectinfo");
+    raw_data_info_base(builder)
+        .field_char_fixed("szName", 16)
+        .field_char_fixed("szPhotoName", 16)
+        .field_long("nPhotoTexID")
+        .field_long("nEffType")
+        .field_long("nObjType")
+        .field_long("nDummyNum")
+        .field_long_repeat("nDummy", 8)
+        .field_long("nDummy2")
+        .field_long("nHeightOff")
+        .field_float("fPlayTime")
+        .field_long("LightID")
+        .field_float("fBaseSize")
+        .build()
+}
+
+/// Create StoneInfo structure.
+///
+/// CStoneInfo extends CRawDataInfo:
+///   Base: 108 bytes (only nID emitted)
+///   nItemID: int (4 bytes)
+///   nEquipPos: int[3] (12 bytes)
+///   nType: int (4 bytes)
+///   szHintFunc: char[64] (64 bytes)
+pub fn create_stone_info() -> Structure {
+    let builder = StructureBuilder::new("StoneInfo");
+    raw_data_info_base(builder)
+        .field_long("nItemID")
+        .field_long_repeat("nEquipPos", 3)
+        .field_long("nType")
+        .field_char_fixed("szHintFunc", 64)
+        .build()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -264,5 +359,52 @@ mod tests {
         assert!(fields.contains(&"Name".to_string()));
         assert!(fields.contains(&"Level".to_string()));
         assert!(fields.contains(&"Max HP".to_string()));
+    }
+
+    #[test]
+    fn test_item_refine_info_structure() {
+        let structure = create_item_refine_info();
+        assert_eq!(structure.name(), "ItemRefineInfo");
+        let fields = structure.field_names();
+        assert!(fields.contains(&"nID".to_string()));
+        assert!(fields.contains(&"Value".to_string()));
+        assert!(fields.contains(&"fChaEffectScale".to_string()));
+    }
+
+    #[test]
+    fn test_item_refine_effect_info_structure() {
+        let structure = create_item_refine_effect_info();
+        assert_eq!(structure.name(), "ItemRefineEffectInfo");
+        let fields = structure.field_names();
+        assert!(fields.contains(&"nID".to_string()));
+        assert!(fields.contains(&"nLightID".to_string()));
+        assert!(fields.contains(&"sEffectID".to_string()));
+        assert!(fields.contains(&"chDummy".to_string()));
+        // _sEffectNum starts with _ so it's excluded from field_names() (treated as internal)
+        // but it's still parsed and present in the raw output
+    }
+
+    #[test]
+    fn test_scene_effect_info_structure() {
+        let structure = create_scene_effect_info();
+        assert_eq!(structure.name(), "sceneffectinfo");
+        let fields = structure.field_names();
+        assert!(fields.contains(&"nID".to_string()));
+        assert!(fields.contains(&"szName".to_string()));
+        assert!(fields.contains(&"nEffType".to_string()));
+        assert!(fields.contains(&"fPlayTime".to_string()));
+        assert!(fields.contains(&"fBaseSize".to_string()));
+    }
+
+    #[test]
+    fn test_stone_info_structure() {
+        let structure = create_stone_info();
+        assert_eq!(structure.name(), "StoneInfo");
+        let fields = structure.field_names();
+        assert!(fields.contains(&"nID".to_string()));
+        assert!(fields.contains(&"nItemID".to_string()));
+        assert!(fields.contains(&"nEquipPos".to_string()));
+        assert!(fields.contains(&"nType".to_string()));
+        assert!(fields.contains(&"szHintFunc".to_string()));
     }
 }
