@@ -147,15 +147,63 @@ The game uses a right-handed coordinate system. Matrix transformations in `src-t
 - Some tests reference hardcoded paths in `/mnt/d/EA 1.0.1` and `./test_artifacts/` - update paths as needed
 - Key test: `is_able_to_convert_lab_back_to_gltf` in `src-tauri/src/character/mod.rs`
 
+## Item Import Pipeline (`src-tauri/src/item/model.rs`)
+
+The item import converts glTF/GLB files into PKO `.lgo` + `.bmp` files. Key functions and concepts:
+
+### Core Functions
+- **`import_item_from_gltf()`** — Main import: reads glTF, merges meshes, writes LGO + BMP files. Accepts `scale_factor: f32` to resize vertices.
+- **`build_gltf_from_lgo()`** — Preview: reads an LGO back and generates glTF JSON for the 3D viewer. Used by `load_model_preview` command.
+- **`build_item_primitives_split()`** — Shared by both export viewer and preview. Converts LGO mesh data into glTF primitives, splitting main mesh from glow overlay. Takes `has_overlay: bool` — pass `true` for PKO items, `false` for imported models.
+- **`build_single_material()`** — Builds a glTF PBR material from a `CharMaterialTextureInfo`. Searches for textures in `texture/item/`, `texture/character/`, `texture/` subdirectories.
+- **`extract_material_colors()`** — Extracts diffuse and emissive colors from PKO material data for glTF output.
+
+### Multi-Mesh Merging
+External GLB files (e.g., from Blender/Sketchfab) often have multiple mesh nodes. The import merges ALL non-overlay mesh nodes into a single LGO mesh:
+- Collects all mesh node indices (skipping nodes tagged `"glowOverlay"` in extras)
+- Reads vertices from each mesh's first primitive via `read_prim_vertices()` (stride-aware)
+- Offsets indices from subsequent meshes by cumulative vertex count
+- If vertex color counts don't match vertex count after merging, vertex colors are discarded
+
+### Glow Overlay (Subset 1 Convention)
+In PKO items, subset index 1 is the glow overlay used for forge effects. `build_item_primitives_split` sets it to alpha=0 (invisible) when `has_overlay=true`. For imported models without overlays, pass `has_overlay=false` to avoid hiding legitimate geometry.
+
+### Material/Texture Gotchas
+- **Emissive texture loss**: PKO format can't store emissive textures. If a source glTF has `emissive_factor=[1,1,1]` + `emissive_texture`, the import zeros out emissive to prevent white wash-out (the texture modulated where glow appeared, but we lose that).
+- **Preview emissive**: `build_gltf_from_lgo` zeros out emissive on all preview materials to avoid wash-out from LGO files with stored white emissive.
+- **BMP encoding**: Import writes standard BMPs (not PKO-encoded). The load-side `decode_pko_texture` handles both formats.
+- **Texture search**: `build_single_material` searches `project_dir/{texture/item, texture/character, texture}/` for textures. For import preview, pass the import directory (e.g., `imports/item/`) as `project_dir`.
+
+### Scale
+- PKO items are small: a typical sword is ~2.7 units tall (Y range ~-0.4 to 2.4)
+- External models are often much larger (Blender meters vs PKO units)
+- `import_item_from_gltf` accepts `scale_factor` parameter, applied to all vertex positions after reading
+- The import wizard UI has a scale factor input at `src/features/import/steps/ConfigurationStep.tsx`
+
+### Import Data Flow (End-to-End)
+1. UI: `ConfigurationStep` collects modelId, filePath, scaleFactor
+2. UI: `ProcessingStep` calls `importItemFromGltf(modelId, filePath, scaleFactor)`
+3. TS: `src/commands/item.ts` invokes Tauri command `import_item_from_gltf`
+4. Rust: `src-tauri/src/item/commands.rs` resolves project dir, calls `model::import_item_from_gltf`
+5. Rust: `src-tauri/src/item/model.rs` reads glTF, merges meshes, scales vertices, writes LGO + BMPs
+6. UI: `ResultStep` shows output files with "View Model" button
+7. "View Model": calls `load_model_preview(lgo_path)` → `build_gltf_from_lgo` → sets glTF atom → navigates to viewer
+
+### LwVector3 Access Pattern
+`LwVector3` is a newtype wrapper: access fields via `v.0.x`, `v.0.y`, `v.0.z` (not `v.x`).
+
 ## Known Limitations
 
 - **Import:** Only supports single-mesh characters. Multi-mesh models or complex subsequences will fail
+- **Item Import:** Multi-mesh GLB files are merged into one LGO mesh. Overlay detection is by node extras (`"glowOverlay"`), not automatic.
 - **Alignment Issues:** Some models (e.g., Black Dragon wings) have scaling issues on export
 - **Bounding Spheres:** May be slightly off; adjust via bone custom properties in Blender
 
 ## Development Notes
 
 - Frontend uses path alias `@/` → `./src/`
+- Frontend uses `react-router` (NOT `react-router-dom`) for routing
 - Tauri expects fixed port 1420 for dev server
 - Sentry is configured for error tracking in production
 - The app creates `exports/gltf/` and `imports/character/` directories at startup
+- Cargo commands must run from `src-tauri/` directory (or use `cd src-tauri &&`)

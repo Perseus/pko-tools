@@ -5,7 +5,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::{broadcast::get_broadcaster, AppState};
 
-use super::{get_character_gltf_json, get_character_metadata, info::get_all_characters, Character, CharacterMetadata};
+use super::{get_character_gltf_json, get_character_gltf_json_with_options, get_character_metadata, info::get_all_characters, Character, CharacterMetadata};
 
 #[tauri::command]
 pub async fn get_character_list(project_id: String) -> Result<Vec<Character>, String> {
@@ -22,10 +22,21 @@ pub async fn get_character_list(project_id: String) -> Result<Vec<Character>, St
 #[tauri::command]
 pub async fn load_character(
     app: AppHandle,
+    app_state: tauri::State<'_, AppState>,
     project_id: String,
     character_id: u32,
 ) -> Result<String, String> {
-    let project_id = uuid::Uuid::from_str(&project_id).unwrap();
+    let project_id = uuid::Uuid::from_str(&project_id)
+        .map_err(|e| e.to_string())?;
+
+    // Check cache first
+    {
+        let cache = app_state.character_gltf_cache.lock()
+            .map_err(|e| e.to_string())?;
+        if let Some(cached) = cache.get(&(project_id, character_id)) {
+            return Ok(cached.clone());
+        }
+    }
 
     let mut receiver = get_broadcaster().subscribe();
 
@@ -36,11 +47,17 @@ pub async fn load_character(
         }
     });
 
-    let char_gltf_json = get_character_gltf_json(project_id, character_id);
-    if char_gltf_json.is_err() {
-        return Err(char_gltf_json.err().unwrap().to_string());
+    let char_gltf_json = get_character_gltf_json(project_id, character_id)
+        .map_err(|e| e.to_string())?;
+
+    // Store in cache
+    {
+        let mut cache = app_state.character_gltf_cache.lock()
+            .map_err(|e| e.to_string())?;
+        cache.insert((project_id, character_id), char_gltf_json.clone());
     }
-    Ok(char_gltf_json.unwrap())
+
+    Ok(char_gltf_json)
 }
 
 #[derive(serde::Serialize)]
@@ -54,7 +71,9 @@ pub async fn export_to_gltf(
     app: AppHandle,
     app_state: tauri::State<'_, AppState>,
     character_id: u32,
+    y_up: Option<bool>,
 ) -> Result<ExportResult, String> {
+    let y_up = y_up.unwrap_or(false);
     let current_project = app_state.preferences.get_current_project();
     if current_project.is_none() {
         return Err("No project selected".to_string());
@@ -82,7 +101,7 @@ pub async fn export_to_gltf(
         }
     });
 
-    let character = get_character_gltf_json(project_uuid, character_id);
+    let character = get_character_gltf_json_with_options(project_uuid, character_id, y_up);
     if character.is_err() {
         return Err(character.err().unwrap().to_string());
     }
@@ -152,6 +171,28 @@ pub async fn import_character_from_gltf(
 
 
     Err("Invalid project id".to_string())
+}
+
+#[tauri::command]
+pub async fn invalidate_character_cache(
+    app_state: tauri::State<'_, AppState>,
+    project_id: Option<String>,
+    character_id: Option<u32>,
+) -> Result<(), String> {
+    let mut cache = app_state.character_gltf_cache.lock()
+        .map_err(|e| e.to_string())?;
+
+    match (project_id, character_id) {
+        (Some(pid), Some(cid)) => {
+            let uuid = uuid::Uuid::from_str(&pid).map_err(|e| e.to_string())?;
+            cache.remove(&(uuid, cid));
+        }
+        _ => {
+            cache.clear();
+        }
+    }
+
+    Ok(())
 }
 
 #[tauri::command]

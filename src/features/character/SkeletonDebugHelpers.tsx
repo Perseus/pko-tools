@@ -1,6 +1,8 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import * as THREE from 'three';
-import { Html } from '@react-three/drei';
+import { Html, PivotControls } from '@react-three/drei';
+import { useAtom, useAtomValue } from 'jotai';
+import { dummyEditModeAtom, dummyEditsAtom, type DummyTransformEdit } from '@/store/character';
 
 // ============================================================================
 // HELPER SIZE CONFIGURATION
@@ -107,9 +109,19 @@ export function SkeletonDebugHelpers({ scene, showBones, showDummies }: Skeleton
   const [dummies, setDummies] = useState<THREE.Object3D[]>([]);
   const [hoveredObject, setHoveredObject] = useState<ObjectInfo | null>(null);
   const [pinnedObject, setPinnedObject] = useState<ObjectInfo | null>(null);
-  
+  const dummyEditMode = useAtomValue(dummyEditModeAtom);
+  const [, setDummyEdits] = useAtom(dummyEditsAtom);
+
   // Calculate helper scale based on model size
   const helperScale = useMemo(() => calculateHelperScale(scene), [scene]);
+
+  const handleDummyEdit = useCallback((name: string, transform: DummyTransformEdit) => {
+    setDummyEdits(prev => {
+      const next = new Map(prev);
+      next.set(name, transform);
+      return next;
+    });
+  }, [setDummyEdits]);
 
   // Extract bones and dummies once on mount
   useEffect(() => {
@@ -274,6 +286,15 @@ export function SkeletonDebugHelpers({ scene, showBones, showDummies }: Skeleton
         />
       ))}
 
+      {/* Dummy edit gizmo when edit mode is active and a dummy is pinned */}
+      {dummyEditMode && showDummies && pinnedObject?.type === 'dummy' && (
+        <DummyEditGizmo
+          dummy={pinnedObject.object}
+          scale={helperScale}
+          onEdit={handleDummyEdit}
+        />
+      )}
+
       {/* Click-away listener */}
       {pinnedObject && (
         <mesh onClick={handleClickAway} position={[0, 0, -1000]}>
@@ -366,6 +387,79 @@ function DummyClickTarget({ dummy, scale, onHover, onUnhover, onClick }: DummyCl
       <boxGeometry args={[clickTargetSize, clickTargetSize, clickTargetSize]} />
       <meshBasicMaterial transparent opacity={0} />
     </mesh>
+  );
+}
+
+// Reusable objects for matrix decomposition (avoids per-drag allocation)
+const _dragPos = new THREE.Vector3();
+const _dragQuat = new THREE.Quaternion();
+const _dragScale = new THREE.Vector3();
+const _dragEuler = new THREE.Euler();
+const _parentInverse = new THREE.Matrix4();
+const _newLocal = new THREE.Matrix4();
+
+interface DummyEditGizmoProps {
+  dummy: THREE.Object3D;
+  scale: number;
+  onEdit: (name: string, transform: DummyTransformEdit) => void;
+}
+
+function DummyEditGizmo({ dummy, scale, onEdit }: DummyEditGizmoProps) {
+  const [worldPos, setWorldPos] = useState<[number, number, number]>([0, 0, 0]);
+
+  useEffect(() => {
+    const update = () => {
+      dummy.updateWorldMatrix(true, false);
+      const wp = new THREE.Vector3().setFromMatrixPosition(dummy.matrixWorld);
+      setWorldPos([wp.x, wp.y, wp.z]);
+    };
+    update();
+    const interval = setInterval(update, 100); // lower frequency since gizmo handles its own frame
+    return () => clearInterval(interval);
+  }, [dummy]);
+
+  const handleDrag = useCallback((localMatrix: THREE.Matrix4) => {
+    // localMatrix is the cumulative drag transform in world space.
+    // Decompose to get the new world-space position/rotation.
+    localMatrix.decompose(_dragPos, _dragQuat, _dragScale);
+
+    // Convert from world space back to the dummy's local space
+    if (dummy.parent) {
+      dummy.parent.updateWorldMatrix(true, false);
+      _parentInverse.copy(dummy.parent.matrixWorld).invert();
+      _newLocal.multiplyMatrices(_parentInverse, localMatrix);
+      _newLocal.decompose(_dragPos, _dragQuat, _dragScale);
+    }
+
+    dummy.position.copy(_dragPos);
+    dummy.quaternion.copy(_dragQuat);
+    dummy.scale.copy(_dragScale);
+
+    _dragEuler.setFromQuaternion(_dragQuat);
+    onEdit(dummy.name, {
+      position: [_dragPos.x, _dragPos.y, _dragPos.z],
+      rotation: [_dragEuler.x, _dragEuler.y, _dragEuler.z],
+      scale: [_dragScale.x, _dragScale.y, _dragScale.z],
+    });
+  }, [dummy, onEdit]);
+
+  const gizmoScale = scale * DUMMY_HELPER_SCALE_MULTIPLIER * 3;
+
+  return (
+    <PivotControls
+      offset={worldPos}
+      scale={gizmoScale}
+      visible
+      onDrag={handleDrag}
+      activeAxes={[true, true, true]}
+      depthTest={false}
+      autoTransform={false}
+    >
+      <mesh>
+        <boxGeometry args={[0.001, 0.001, 0.001]} />
+        <meshBasicMaterial transparent opacity={0} />
+      </mesh>
+    </PivotControls>
   );
 }
 

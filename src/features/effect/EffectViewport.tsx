@@ -6,11 +6,11 @@ import EffectPlaybackDriver from "@/features/effect/EffectPlaybackDriver";
 import ParticleSimulator from "@/features/effect/particle/ParticleSimulator";
 import CharacterPreview from "@/features/effect/CharacterPreview";
 import { Button } from "@/components/ui/button";
-import { effectDataAtom, effectPlaybackAtom, effectTextureReloadAtom, effectTextureStatusAtom, selectedSubEffectIndexAtom } from "@/store/effect";
+import { compositePreviewAtom, effectDataAtom, effectPlaybackAtom, effectTextureReloadAtom, effectTextureStatusAtom, selectedSubEffectIndexAtom } from "@/store/effect";
 import { pathPointsAtom } from "@/store/path";
 import { gizmoModeAtom, type GizmoMode } from "@/store/gizmo";
 import { useAtom, useAtomValue } from "jotai";
-import { Maximize2, MousePointer, Move, RotateCw } from "lucide-react";
+import { Layers, Maximize2, MousePointer, Move, RotateCw } from "lucide-react";
 import StripEffectRenderer from "@/features/effect/StripEffectRenderer";
 import PathVisualizer from "@/features/effect/PathVisualizer";
 import { getPathPosition } from "@/features/effect/animation";
@@ -67,6 +67,7 @@ export default function EffectViewport() {
   const textureStatus = useAtomValue(effectTextureStatusAtom);
   const [, setReloadToken] = useAtom(effectTextureReloadAtom);
   const [gizmoMode, setGizmoMode] = useAtom(gizmoModeAtom);
+  const [compositePreview, setCompositePreview] = useAtom(compositePreviewAtom);
 
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {
@@ -79,11 +80,12 @@ export default function EffectViewport() {
       else if (key === "r" && !event.metaKey && !event.ctrlKey) setGizmoMode("rotate");
       else if (key === "s" && !event.metaKey && !event.ctrlKey) setGizmoMode("scale");
       else if (key === "escape") setGizmoMode("off");
+      else if (key === "c") setCompositePreview(prev => !prev);
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [setGizmoMode]);
+  }, [setGizmoMode, setCompositePreview]);
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-xl border border-border bg-muted/40">
@@ -91,11 +93,11 @@ export default function EffectViewport() {
         <color attach="background" args={["#1e1e2e"]} />
         <ambientLight intensity={0.8} />
         <directionalLight position={[6, 8, 4]} intensity={1.2} />
-        {/* During playback, render ALL sub-effects simultaneously (PKO behavior).
-            When stopped, render only the selected sub-effect for editing.
+        {/* During playback or composite preview, render ALL sub-effects simultaneously (PKO behavior).
+            When stopped without composite, render only the selected sub-effect for editing.
             PathFollower moves the entire effect group along the path during playback. */}
         <PathFollower>
-          {effectData && playback.isPlaying
+          {effectData && (playback.isPlaying || compositePreview)
             ? effectData.subEffects.map((_, i) => (
                 <EffectSubRenderer key={i} subEffectIndex={i} />
               ))
@@ -130,6 +132,17 @@ export default function EffectViewport() {
               <Icon className="h-3.5 w-3.5" />
             </Button>
           ))}
+          <div className="mx-0.5 h-5 w-px bg-border" />
+          <Button
+            size="icon"
+            variant={compositePreview ? "secondary" : "ghost"}
+            className="h-7 w-7"
+            title="Composite preview: show all sub-effects (C)"
+            aria-label="composite-preview"
+            onClick={() => setCompositePreview(!compositePreview)}
+          >
+            <Layers className="h-3.5 w-3.5" />
+          </Button>
         </div>
       )}
 

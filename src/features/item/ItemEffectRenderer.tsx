@@ -3,6 +3,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { invoke } from "@tauri-apps/api/core";
 import { ParticleEffectInfo } from "@/types/item";
+import { createEffectTexture } from "@/features/effect/rendering";
 
 /** Effect animation type enum matching game engine I_Effect.h */
 const EFFECT_FRAMETEX = 1;
@@ -523,15 +524,7 @@ function EffectGroup({ effectName, projectId, projectDir, dummyMatrix, effectSca
         bytes[i] = binaryStr.charCodeAt(i);
       }
 
-      const tex = new THREE.DataTexture(
-        bytes,
-        decoded.width,
-        decoded.height,
-        THREE.RGBAFormat
-      );
-      tex.wrapS = THREE.RepeatWrapping;
-      tex.wrapT = THREE.RepeatWrapping;
-      tex.needsUpdate = true;
+      const tex = createEffectTexture(bytes, decoded.width, decoded.height);
       newTextures.set(texName, tex);
     }
 

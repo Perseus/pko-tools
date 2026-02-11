@@ -15,9 +15,12 @@ import StatusBar from "./components/StatusBar/StatusBar";
 import CharacterPage from "./pages/characters";
 import EffectsPage from "./pages/effects";
 import ItemsPage from "./pages/items";
+import MapsPage from "./pages/maps";
+import BuildingsPage from "./pages/buildings";
 import WorkspaceNavigator from "./components/WorkspaceNavigator/WorkspaceNavigator";
 import ProjectCreator from "./pages/project-creator/ProjectCreator";
 import { Toaster } from "./components/ui/toaster";
+import { ImportWizard } from "./features/import/ImportWizard";
 
 function App() {
   const [, setCurrentProject] = useAtom(currentProjectAtom);
@@ -53,10 +56,13 @@ function App() {
             <Route path="/characters" element={<CharacterPage/>} />
             <Route path="/effects" element={<EffectsPage />} />
             <Route path="/items" element={<ItemsPage />} />
+            <Route path="/maps" element={<MapsPage />} />
+            <Route path="/buildings" element={<BuildingsPage />} />
             <Route path="*" element={<div />} />
           </Routes>
           <WorkspaceNavigator />
         </main>
+        <ImportWizard />
         <Toaster />
         <StatusBar className="fixed bottom-0 z-20" />
       </div>

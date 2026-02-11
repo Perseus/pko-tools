@@ -5,18 +5,28 @@ mod broadcast;
 pub mod character;
 pub mod effect;
 pub mod item;
+pub mod map;
 mod d3d;
 mod db;
 pub mod decompiler;
 pub mod math;
+pub mod mesh_processing;
 mod preferences;
 mod projects;
+pub mod registration;
+pub mod retarget;
+pub mod texture_pipeline;
+pub mod validation;
 
+use std::collections::HashMap;
+use std::sync::Mutex;
 use tauri::Manager;
 
-struct AppState {
+pub struct AppState {
     current_project: Option<projects::project::Project>,
     preferences: preferences::Preferences,
+    /// Cache of glTF JSON strings keyed by (project_id, character_id).
+    pub character_gltf_cache: Mutex<HashMap<(uuid::Uuid, u32), String>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -38,6 +48,7 @@ pub fn run() {
             let mut state = AppState {
                 current_project: None,
                 preferences,
+                character_gltf_cache: Mutex::new(HashMap::new()),
             };
 
             if let Some(current_project_id) = &state.preferences.get_current_project() {
@@ -65,6 +76,7 @@ pub fn run() {
             character::commands::export_to_gltf,
             character::commands::import_character_from_gltf,
             character::commands::get_character_metadata_cmd,
+            character::commands::invalidate_character_cache,
             effect::commands::list_effects,
             effect::commands::load_effect,
             effect::commands::save_effect,
@@ -83,8 +95,44 @@ pub fn run() {
             item::commands::get_item_metadata,
             item::commands::export_item_to_gltf,
             item::commands::import_item_from_gltf,
+            item::commands::load_model_preview,
             item::commands::get_forge_effect_preview,
             item::commands::get_item_category_availability,
+            item::commands::decompile_item_refine_info,
+            item::commands::decompile_item_refine_effect_info,
+            item::commands::decompile_scene_effect_info,
+            item::commands::decompile_stone_info,
+            item::commands::add_glow_overlay,
+            item::commands::export_item,
+            item::commands::rotate_item,
+            item::commands::rescale_item,
+            item::commands::create_workbench,
+            item::commands::load_workbench,
+            item::commands::save_workbench,
+            item::commands::list_workbenches,
+            item::commands::delete_workbench,
+            item::commands::update_dummies,
+            item::commands::generate_item_info_entry,
+            item::commands::register_item,
+            mesh_processing::commands::analyze_mesh,
+            mesh_processing::commands::analyze_mesh_scale,
+            texture_pipeline::commands::preview_texture_conversion,
+            validation::commands::validate_model_for_import,
+            registration::commands::check_model_id_available,
+            registration::commands::get_next_available_model_id,
+            registration::commands::register_imported_character,
+            retarget::commands::analyze_external_model,
+            retarget::commands::auto_map_bones_cmd,
+            retarget::commands::apply_bone_mapping,
+            retarget::commands::validate_bone_mapping,
+            map::commands::get_map_list,
+            map::commands::load_map_terrain,
+            map::commands::get_map_metadata,
+            map::commands::export_map_to_gltf,
+            map::commands::export_map_for_unity,
+            map::commands::get_building_list,
+            map::commands::load_building_model,
+            map::commands::export_building_to_gltf,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

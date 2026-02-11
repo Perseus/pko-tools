@@ -11,8 +11,9 @@ import {
   itemDebugConfigAtom,
 } from "@/store/item";
 import { currentProjectAtom } from "@/store/project";
+import { isWorkbenchModeAtom, activeWorkbenchAtom, dummyPlacementModeAtom, editingDummyAtom } from "@/store/workbench";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { Suspense, useEffect, useRef } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Environment, OrbitControls } from "@react-three/drei";
 import * as THREE from "three";
@@ -21,10 +22,13 @@ import { ItemMetadataPanel } from "./ItemMetadataPanel";
 import { ForgeCategorySelector } from "./ForgeCategorySelector";
 import { ForgeEffectInfoPanel } from "./ForgeEffectInfoPanel";
 import { ItemViewerToolbar } from "./ItemViewerToolbar";
+import { DecompileTablesPanel } from "./DecompileTablesPanel";
+import { DummyPlacementOverlay } from "./DummyPlacementOverlay";
 import {
   getForgeEffectPreview,
   getItemCategoryAvailability,
 } from "@/commands/item";
+import { WorkbenchDummy } from "@/types/item";
 
 export default function ItemWorkbench() {
   const itemGltfJson = useAtomValue(itemGltfJsonAtom);
@@ -41,6 +45,11 @@ export default function ItemWorkbench() {
   const [categoryAvailability, setCategoryAvailability] = useAtom(
     itemCategoryAvailabilityAtom
   );
+  const [showTables, setShowTables] = useState(false);
+  const isWorkbenchMode = useAtomValue(isWorkbenchModeAtom);
+  const [workbench, setWorkbench] = useAtom(activeWorkbenchAtom);
+  const placementMode = useAtomValue(dummyPlacementModeAtom);
+  const editingDummy = useAtomValue(editingDummyAtom);
 
   // Track a request counter to avoid stale responses
   const requestIdRef = useRef(0);
@@ -114,48 +123,91 @@ export default function ItemWorkbench() {
     setForgePreview,
   ]);
 
+  const handleDummyPlaced = useCallback(
+    (position: [number, number, number]) => {
+      if (!workbench || !currentProject) return;
+
+      let newDummies: WorkbenchDummy[];
+
+      if (editingDummy != null) {
+        // Relocate the selected dummy to the clicked position
+        newDummies = workbench.dummies.map((d) =>
+          d.id === editingDummy ? { ...d, position } : d
+        );
+      } else {
+        // Create a new dummy at the clicked position
+        const nextId =
+          workbench.dummies.length > 0
+            ? Math.max(...workbench.dummies.map((d) => d.id)) + 1
+            : 0;
+        newDummies = [
+          ...workbench.dummies,
+          { id: nextId, label: `Dummy ${nextId}`, position },
+        ];
+      }
+
+      setWorkbench({ ...workbench, dummies: newDummies });
+    },
+    [workbench, currentProject, setWorkbench, editingDummy]
+  );
+
   return (
     <div className="h-full w-full flex flex-col">
-      <ItemViewerToolbar />
-      <div className="flex-1 relative">
-        <ItemMetadataPanel metadata={itemMetadata} />
-        <ForgeCategorySelector
-          categories={categoryAvailability?.categories ?? null}
-          selected={effectCategory}
-          onSelect={setEffectCategory}
-        />
-        <ForgeEffectInfoPanel
-          preview={forgePreview}
-          effectConfig={effectConfig}
-          effectCategory={effectCategory}
-        />
-        <Canvas
-          style={{ height: "100%", width: "100%" }}
-          shadows
-          camera={{ position: [3, 4, 4], fov: 35 }}
-        >
-          <ambientLight intensity={1} />
-          <directionalLight position={[5, 5, 5]} castShadow />
-          <Environment background>
-            <mesh scale={100}>
-              <sphereGeometry args={[1, 16, 16]} />
-              <meshBasicMaterial color="#393939" side={THREE.BackSide} />
-            </mesh>
-          </Environment>
-          <Suspense fallback={null}>
-            <ItemModelViewer
-              gltfJson={itemGltfJson}
-              litInfo={litInfo}
-              effectConfig={effectConfig}
-              debugConfig={debugConfig}
-              projectId={currentProject?.id ?? ""}
-              projectDir={currentProject?.projectDirectory ?? ""}
-              forgePreview={forgePreview}
+      <ItemViewerToolbar showTables={showTables} onToggleTables={() => setShowTables((v) => !v)} />
+      <div className="flex-1 flex relative">
+        <div className="flex-1 relative">
+          {!isWorkbenchMode && <ItemMetadataPanel metadata={itemMetadata} />}
+          {!isWorkbenchMode && (
+            <ForgeCategorySelector
+              categories={categoryAvailability?.categories ?? null}
+              selected={effectCategory}
+              onSelect={setEffectCategory}
             />
-          </Suspense>
-          <OrbitControls />
-          <gridHelper args={[20, 20, 20]} position-y={0.01} />
-        </Canvas>
+          )}
+          {!isWorkbenchMode && (
+            <ForgeEffectInfoPanel
+              preview={forgePreview}
+              effectConfig={effectConfig}
+              effectCategory={effectCategory}
+            />
+          )}
+          {!isWorkbenchMode && <DecompileTablesPanel open={showTables} />}
+          <Canvas
+            style={{
+              height: "100%",
+              width: "100%",
+              cursor: placementMode ? "crosshair" : undefined,
+            }}
+            shadows
+            camera={{ position: [3, 4, 4], fov: 35 }}
+          >
+            <ambientLight intensity={1} />
+            <directionalLight position={[5, 5, 5]} castShadow />
+            <Environment background>
+              <mesh scale={100}>
+                <sphereGeometry args={[1, 16, 16]} />
+                <meshBasicMaterial color="#393939" side={THREE.BackSide} />
+              </mesh>
+            </Environment>
+            <Suspense fallback={null}>
+              <ItemModelViewer
+                gltfJson={itemGltfJson}
+                litInfo={litInfo}
+                effectConfig={effectConfig}
+                debugConfig={debugConfig}
+                projectId={currentProject?.id ?? ""}
+                projectDir={currentProject?.projectDirectory ?? ""}
+                forgePreview={forgePreview}
+                workbenchDummies={isWorkbenchMode ? workbench?.dummies ?? [] : null}
+              />
+            </Suspense>
+            {isWorkbenchMode && (
+              <DummyPlacementOverlay onPlace={handleDummyPlaced} />
+            )}
+            <OrbitControls />
+            <gridHelper args={[20, 20, 20]} position-y={0.01} />
+          </Canvas>
+        </div>
       </div>
     </div>
   );

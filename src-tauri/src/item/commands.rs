@@ -10,6 +10,7 @@ use super::{
     model,
     refine,
     sceneffect,
+    workbench,
     Item, ItemMetadata,
 };
 
@@ -173,6 +174,7 @@ pub async fn import_item_from_gltf(
     app_state: tauri::State<'_, AppState>,
     model_id: String,
     file_path: String,
+    scale_factor: Option<f32>,
 ) -> Result<ItemImportResult, String> {
     let current_project = app_state.preferences.get_current_project();
     if current_project.is_none() {
@@ -196,7 +198,7 @@ pub async fn import_item_from_gltf(
         return Err(format!("File not found: {}", file_path));
     }
 
-    let result = model::import_item_from_gltf(gltf_path, &model_id, &import_dir)
+    let result = model::import_item_from_gltf(gltf_path, &model_id, &import_dir, scale_factor.unwrap_or(1.0))
         .map_err(|e| format!("Import failed: {}", e))?;
 
     Ok(ItemImportResult {
@@ -208,6 +210,34 @@ pub async fn import_item_from_gltf(
             .collect(),
         import_dir: import_dir.to_string_lossy().to_string(),
     })
+}
+
+// ============================================================================
+// Model preview from file path
+// ============================================================================
+
+#[tauri::command]
+pub async fn load_model_preview(lgo_path: String, has_overlay: Option<bool>) -> Result<String, String> {
+  let path = std::path::Path::new(&lgo_path);
+  if !path.exists() {
+    return Err(format!("LGO file not found: {}", lgo_path));
+  }
+
+    // Use the LGO's grandparent directory as texture search dir.
+    // For imports at `imports/item/model/{id}.lgo`, textures are at
+    // `imports/item/texture/{name}.bmp` — build_single_material searches
+    // `project_dir/texture/` which matches this layout when project_dir = `imports/item/`.
+    let texture_search_dir = path
+        .parent()  // imports/item/model/
+        .and_then(|p| p.parent())  // imports/item/
+        .unwrap_or(path);
+
+  let use_overlay = has_overlay.unwrap_or(false);
+  if use_overlay {
+    model::build_gltf_from_lgo_with_overlay(path, texture_search_dir, true).map_err(|e| e.to_string())
+  } else {
+    model::build_gltf_from_lgo(path, texture_search_dir).map_err(|e| e.to_string())
+  }
 }
 
 // ============================================================================
@@ -507,6 +537,387 @@ pub async fn get_forge_effect_preview(
         effect_level,
         alpha,
     })
+}
+
+// ============================================================================
+// Table decompile commands
+// ============================================================================
+
+#[tauri::command]
+pub async fn decompile_item_refine_info(
+    project_id: String,
+) -> Result<crate::decompiler::DecompileResult, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+    let project_dir = project.project_directory.as_ref();
+
+    let input_path = project_dir.join("scripts/table/ItemRefineInfo.bin");
+    let output_path = project_dir
+        .join("pko-tools")
+        .join("exports")
+        .join("tables")
+        .join("ItemRefineInfo.txt");
+
+    let structure = crate::decompiler::create_item_refine_info();
+    crate::decompiler::decompile_rawdataset_to_tsv(&input_path, &output_path, &structure)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn decompile_item_refine_effect_info(
+    project_id: String,
+) -> Result<crate::decompiler::DecompileResult, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+    let project_dir = project.project_directory.as_ref();
+
+    let input_path = project_dir.join("scripts/table/ItemRefineEffectInfo.bin");
+    let output_path = project_dir
+        .join("pko-tools")
+        .join("exports")
+        .join("tables")
+        .join("ItemRefineEffectInfo.txt");
+
+    let structure = crate::decompiler::create_item_refine_effect_info();
+    crate::decompiler::decompile_rawdataset_to_tsv(&input_path, &output_path, &structure)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn decompile_scene_effect_info(
+    project_id: String,
+) -> Result<crate::decompiler::DecompileResult, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+    let project_dir = project.project_directory.as_ref();
+
+    let input_path = project_dir.join("scripts/table/sceneffectinfo.bin");
+    let output_path = project_dir
+        .join("pko-tools")
+        .join("exports")
+        .join("tables")
+        .join("sceneffectinfo.txt");
+
+    let structure = crate::decompiler::create_scene_effect_info();
+    crate::decompiler::decompile_rawdataset_to_tsv(&input_path, &output_path, &structure)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn decompile_stone_info(
+    project_id: String,
+) -> Result<crate::decompiler::DecompileResult, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+    let project_dir = project.project_directory.as_ref();
+
+    let input_path = project_dir.join("scripts/table/StoneInfo.bin");
+    let output_path = project_dir
+        .join("pko-tools")
+        .join("exports")
+        .join("tables")
+        .join("StoneInfo.txt");
+
+    let structure = crate::decompiler::create_stone_info();
+    crate::decompiler::decompile_rawdataset_to_tsv(&input_path, &output_path, &structure)
+        .map_err(|e| e.to_string())
+}
+
+// ============================================================================
+// Workbench commands
+// ============================================================================
+
+#[tauri::command]
+pub async fn add_glow_overlay(lgo_path: String) -> Result<String, String> {
+    let path = std::path::Path::new(&lgo_path);
+    if !path.exists() {
+        return Err(format!("LGO file not found: {}", lgo_path));
+    }
+
+    workbench::add_glow_overlay(path).map_err(|e| e.to_string())?;
+
+    // Return regenerated glTF preview
+    let texture_search_dir = path
+        .parent()
+        .and_then(|p| p.parent())
+        .unwrap_or(path);
+
+    model::build_gltf_from_lgo_with_overlay(path, texture_search_dir, true)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn export_item(
+    project_id: String,
+    lgo_path: String,
+    target_model_id: String,
+) -> Result<workbench::ExportResult, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+
+    let path = std::path::Path::new(&lgo_path);
+    if !path.exists() {
+        return Err(format!("LGO file not found: {}", lgo_path));
+    }
+
+    workbench::export_item(
+        project.project_directory.as_ref(),
+        path,
+        &target_model_id,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn rotate_item(
+    lgo_path: String,
+    x_deg: f32,
+    y_deg: f32,
+    z_deg: f32,
+) -> Result<String, String> {
+    let path = std::path::Path::new(&lgo_path);
+    if !path.exists() {
+        return Err(format!("LGO file not found: {}", lgo_path));
+    }
+
+    workbench::rotate_lgo(path, x_deg, y_deg, z_deg).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn rescale_item(
+    project_id: String,
+    model_id: String,
+    lgo_path: String,
+    factor: f32,
+) -> Result<String, String> {
+    let path = std::path::Path::new(&lgo_path);
+    if !path.exists() {
+        return Err(format!("LGO file not found: {}", lgo_path));
+    }
+
+    let gltf_json = workbench::rescale_lgo(path, factor).map_err(|e| e.to_string())?;
+
+    // Update scale_factor in the database (cumulative)
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+
+    let db = project.db_arc();
+    let conn = db.lock().map_err(|_| "Could not lock database".to_string())?;
+
+    conn.execute(
+        "UPDATE workbenches SET scale_factor = scale_factor * ?1, modified_at = ?2 WHERE model_id = ?3",
+        rusqlite::params![
+            factor as f64,
+            {
+                let secs = std::time::SystemTime::now()
+                    .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs();
+                format!("{}", secs)
+            },
+            model_id
+        ],
+    ).map_err(|e| e.to_string())?;
+
+    Ok(gltf_json)
+}
+
+#[tauri::command]
+pub async fn create_workbench(
+    project_id: String,
+    model_id: String,
+    item_name: String,
+    item_type: u32,
+    source_file: Option<String>,
+    scale_factor: f32,
+    lgo_path: String,
+) -> Result<(), String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+
+    let db = project.db_arc();
+    let conn = db.lock().map_err(|_| "Could not lock database".to_string())?;
+
+    workbench::create_workbench(
+        &conn,
+        &model_id,
+        &item_name,
+        item_type,
+        source_file.as_deref(),
+        scale_factor,
+        &lgo_path,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn load_workbench(
+    project_id: String,
+    model_id: String,
+) -> Result<workbench::WorkbenchState, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+
+    let db = project.db_arc();
+    let conn = db.lock().map_err(|_| "Could not lock database".to_string())?;
+
+    workbench::load_workbench(&conn, &model_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn save_workbench(
+    project_id: String,
+    state: workbench::WorkbenchState,
+) -> Result<(), String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+
+    let db = project.db_arc();
+    let conn = db.lock().map_err(|_| "Could not lock database".to_string())?;
+
+    workbench::save_workbench(&conn, &state).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn list_workbenches(
+    project_id: String,
+) -> Result<Vec<workbench::WorkbenchSummary>, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+
+    let db = project.db_arc();
+    let conn = db.lock().map_err(|_| "Could not lock database".to_string())?;
+
+    workbench::list_workbenches(&conn).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn delete_workbench(
+    project_id: String,
+    model_id: String,
+) -> Result<(), String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+
+    let db = project.db_arc();
+    let conn = db.lock().map_err(|_| "Could not lock database".to_string())?;
+
+    workbench::delete_workbench(&conn, &model_id).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn update_dummies(
+    project_id: String,
+    model_id: String,
+    lgo_path: String,
+    dummies: Vec<workbench::WorkbenchDummy>,
+) -> Result<String, String> {
+    let path = std::path::Path::new(&lgo_path);
+    if !path.exists() {
+        return Err(format!("LGO file not found: {}", lgo_path));
+    }
+
+    // Update LGO and get regenerated glTF
+    let gltf_json = workbench::update_dummies(path, dummies.clone())
+        .map_err(|e| e.to_string())?;
+
+    // Also persist dummies to database
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+
+    let db = project.db_arc();
+    let conn = db.lock().map_err(|_| "Could not lock database".to_string())?;
+
+    // Update dummies in the database
+    conn.execute(
+        "DELETE FROM workbench_dummies WHERE model_id = ?1",
+        rusqlite::params![model_id],
+    ).map_err(|e| e.to_string())?;
+
+    for dummy in &dummies {
+        conn.execute(
+            "INSERT INTO workbench_dummies (id, model_id, label, position_x, position_y, position_z)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            rusqlite::params![
+                dummy.id,
+                model_id,
+                dummy.label,
+                dummy.position[0],
+                dummy.position[1],
+                dummy.position[2],
+            ],
+        ).map_err(|e| e.to_string())?;
+    }
+
+    // Update has_glow_overlay flag based on current LGO state
+    let now = {
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::SystemTime::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs();
+        format!("{}", secs)
+    };
+    conn.execute(
+        "UPDATE workbenches SET modified_at = ?1 WHERE model_id = ?2",
+        rusqlite::params![now, model_id],
+    ).map_err(|e| e.to_string())?;
+
+    Ok(gltf_json)
+}
+
+#[tauri::command]
+pub async fn generate_item_info_entry(
+    project_id: String,
+    model_id: String,
+    requested_id: Option<u32>,
+) -> Result<workbench::ItemInfoPreview, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+
+    let db = project.db_arc();
+    let conn = db.lock().map_err(|_| "Could not lock database".to_string())?;
+
+    let state = workbench::load_workbench(&conn, &model_id).map_err(|e| e.to_string())?;
+
+    workbench::generate_item_info_entry(project.project_directory.as_ref(), &state, requested_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn register_item(
+    project_id: String,
+    model_id: String,
+    tsv_line: String,
+    assigned_id: u32,
+) -> Result<(), String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+
+    let db = project.db_arc();
+    let conn = db.lock().map_err(|_| "Could not lock database".to_string())?;
+
+    workbench::register_item(
+        project.project_directory.as_ref(),
+        &conn,
+        &model_id,
+        &tsv_line,
+        assigned_id,
+    )
+    .map_err(|e| e.to_string())
 }
 
 /// Resolve a file path using case-insensitive matching on the filename component.

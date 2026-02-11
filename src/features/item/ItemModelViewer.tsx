@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
-import { ItemLitInfo } from "@/types/item";
+import { ItemLitInfo, WorkbenchDummy } from "@/types/item";
 import { ItemEffectConfig, ItemDebugConfig } from "@/store/item";
 import { ItemLitRenderer } from "./ItemLitRenderer";
 import { ForgeEffectPreview } from "@/types/item";
@@ -13,6 +13,7 @@ import {
   ItemBoundingSphereIndicators,
   ItemMeshHighlights,
   ItemDummyHelpers,
+  ItemWorkbenchDummyHelpers,
 } from "./ItemDebugOverlays";
 
 function jsonToDataURI(json: string): Promise<string> {
@@ -60,6 +61,7 @@ function ItemModel({
   projectId,
   projectDir,
   forgePreview,
+  workbenchDummies,
 }: {
   gltfDataURI: string;
   litInfo: ItemLitInfo | null;
@@ -68,13 +70,14 @@ function ItemModel({
   projectId: string;
   projectDir: string;
   forgePreview: ForgeEffectPreview | null;
+  workbenchDummies: WorkbenchDummy[] | null;
 }) {
   const { scene } = useGLTF(gltfDataURI);
 
   // Find the glow overlay mesh and the main weapon mesh.
   // The glow overlay is a separate node named "glow_overlay" with
   // userData.glowOverlay === true (set via glTF node extras).
-  const { glowMesh, glowNode, weaponMesh, dummyPoints } = useMemo(() => {
+  const { glowMesh, glowNode, weaponMesh, sceneDummyPoints } = useMemo(() => {
     // Ensure world matrices are computed before extracting transforms.
     // GLTFLoader sets node.matrix but does NOT compute matrixWorld.
     scene.updateMatrixWorld(true);
@@ -130,9 +133,22 @@ function ItemModel({
       glowMesh: glow as THREE.Mesh | null,
       glowNode: glowParent as THREE.Object3D | null,
       weaponMesh: weapon as THREE.Mesh | null,
-      dummyPoints: dummies,
+      sceneDummyPoints: dummies,
     };
   }, [scene]);
+
+  const dummyPoints = useMemo(() => {
+    if (!workbenchDummies) return sceneDummyPoints;
+    return workbenchDummies.map((dummy) => ({
+      id: dummy.id,
+      name: dummy.label || `Dummy${dummy.id}`,
+      matrix: new THREE.Matrix4().makeTranslation(
+        dummy.position[0],
+        dummy.position[1],
+        dummy.position[2]
+      ),
+    }));
+  }, [sceneDummyPoints, workbenchDummies]);
 
   // Extract debug data
   const boundingSpheres = useMemo(
@@ -232,10 +248,18 @@ function ItemModel({
           meshes={itemMeshes}
           visible={debugConfig.showWireframe}
         />
-        <ItemDummyHelpers
-          scene={scene}
-          showDummies={debugConfig.showDummies}
-        />
+        {workbenchDummies ? (
+          <ItemWorkbenchDummyHelpers
+            scene={scene}
+            dummies={workbenchDummies}
+            showDummies={debugConfig.showDummies}
+          />
+        ) : (
+          <ItemDummyHelpers
+            scene={scene}
+            showDummies={debugConfig.showDummies}
+          />
+        )}
       </group>
     </>
   );
@@ -249,6 +273,7 @@ export default function ItemModelViewer({
   projectId,
   projectDir,
   forgePreview,
+  workbenchDummies,
 }: {
   gltfJson: string | null;
   litInfo: ItemLitInfo | null;
@@ -257,6 +282,7 @@ export default function ItemModelViewer({
   projectId: string;
   projectDir: string;
   forgePreview: ForgeEffectPreview | null;
+  workbenchDummies: WorkbenchDummy[] | null;
 }) {
   const [gltfDataURI, setGltfDataURI] = useState<string | null>(null);
 
@@ -285,6 +311,7 @@ export default function ItemModelViewer({
       projectId={projectId}
       projectDir={projectDir}
       forgePreview={forgePreview ?? null}
+      workbenchDummies={workbenchDummies}
     />
   );
 }

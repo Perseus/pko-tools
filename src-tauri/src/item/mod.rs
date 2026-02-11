@@ -4,6 +4,7 @@ pub mod lit;
 pub mod model;
 pub mod refine;
 pub mod sceneffect;
+pub mod workbench;
 
 use serde::{Deserialize, Serialize};
 

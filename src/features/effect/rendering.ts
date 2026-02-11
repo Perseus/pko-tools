@@ -273,6 +273,27 @@ export function resolveBlendFactors(srcBlend: number, destBlend: number): {
   };
 }
 
+/**
+ * Create a DataTexture with correct settings for effect rendering.
+ * Both the effect editor and item viewer must use identical texture setup
+ * to avoid visual discrepancies (colorSpace, flipY, filtering).
+ */
+export function createEffectTexture(
+  data: Uint8Array,
+  width: number,
+  height: number,
+): THREE.DataTexture {
+  const tex = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.flipY = true;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.needsUpdate = true;
+  return tex;
+}
+
 export function resolveTextureName(subEffect: SubEffect, selectedFrameIndex: number) {
   if (subEffect.frameTexNames.length > 0) {
     return subEffect.frameTexNames[selectedFrameIndex] ?? subEffect.frameTexNames[0];
