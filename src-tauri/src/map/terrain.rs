@@ -277,14 +277,19 @@ pub(crate) fn get_tile<'a>(map: &'a ParsedMap, tx: i32, ty: i32) -> Option<&'a M
     section.tiles.get(tile_idx)
 }
 
-/// Convert tile height byte to world units with visual exaggeration.
+/// Convert tile height byte to glTF Y-coordinate.
 /// Client code: `pTile->fHeight = (float)(tile.cHeight * 10) / 100.0f`
-/// The raw range is only ±12.7 units across maps hundreds of tiles wide,
-/// so we scale up to make terrain relief visible in the viewer.
-const HEIGHT_EXAGGERATION: f32 = 5.0;
-
+///
+/// The root node has a uniform scale of MAP_VISUAL_SCALE (5.0) applied to
+/// all axes.  X/Z need this scale (1 tile → 5 world-units).  But the
+/// original engine does NOT scale heights by the world-scale factor — fHeight
+/// is already in world units.  So we pre-divide by MAP_VISUAL_SCALE here so
+/// that after the uniform 5× scale the vertex Y equals the original fHeight.
+///
+/// Result after Unity import: vertex Y × 5 = (c_height × 0.1 / 5) × 5
+///                                         = c_height × 0.1  (original game height)
 fn tile_height(tile: &MapTile) -> f32 {
-    (tile.c_height as f32 * 10.0) / 100.0 * HEIGHT_EXAGGERATION
+    (tile.c_height as f32 * 10.0) / 100.0 / 5.0
 }
 
 /// Build a glTF JSON string representing the terrain mesh.
@@ -772,9 +777,9 @@ pub fn build_terrain_gltf(
         extras: None,
     };
 
-    // Build nodes — all children of a scaled root node for visual sizing.
-    // The game uses 1 tile = 1 world unit, but a uniform scale makes the
-    // terrain feel more proportional when viewed in the 3D viewer.
+    // Build nodes — all children of a uniformly-scaled root node.
+    // tile_height() pre-divides Y by this factor so that after the uniform
+    // scale, vertex heights match the original game's fHeight values.
     const MAP_VISUAL_SCALE: f32 = 5.0;
 
     let mut nodes = vec![];
@@ -926,7 +931,8 @@ pub fn build_terrain_gltf(
                 name: Some(format!("obj_{}_{}", obj.obj_type, i)),
                 mesh: mesh_ref,
                 // Y-up: X = world_x, Y = terrain_height + height_offset, Z = world_y
-                translation: Some([obj.world_x, terrain_h + obj.world_z, obj.world_y]),
+                // world_z divided by 5.0 to match tile_height's pre-division
+                translation: Some([obj.world_x, terrain_h + obj.world_z / 5.0, obj.world_y]),
                 rotation: rotation.map(|r| gltf::scene::UnitQuaternion(r)),
                 extras: Some(RawValue::from_string(extras_json)?),
                 ..Default::default()
@@ -935,7 +941,9 @@ pub fn build_terrain_gltf(
         }
     }
 
-    // Root node applies uniform visual scale to all children
+    // Root node applies uniform scale to all children.
+    // Heights are pre-divided by MAP_VISUAL_SCALE so that after the uniform
+    // scale, vertical positions match the original game's unscaled fHeight.
     let root_node_idx = nodes.len() as u32;
     nodes.push(gltf::Node {
         name: Some("map_root".to_string()),
@@ -1181,28 +1189,88 @@ pub fn export_map_for_unity(
                 continue;
             }
 
-            // Look up terrain height at the object's position
+            // Look up terrain height at the object's position.
+            // tile_height() already pre-divides by 5.0 for the uniform root scale.
+            // obj.world_z is in original game units, so divide it by 5.0 too.
+            // After the MapImporter multiplies by world_scale (5.0):
+            //   Y_final = (terrain_h + world_z/5) * 5 = original_fHeight + world_z
             let terrain_h = get_tile(&parsed_map, obj.world_x as i32, obj.world_y as i32)
                 .map(|t| tile_height(t))
                 .unwrap_or(0.0);
 
-            // Position in Y-up glTF space (same formula as terrain.rs:929)
             placements.push(serde_json::json!({
                 "obj_id": obj.obj_id,
-                "position": [obj.world_x, terrain_h + obj.world_z, obj.world_y],
+                "position": [obj.world_x, terrain_h + obj.world_z / 5.0, obj.world_y],
                 "rotation_y_degrees": obj.yaw_angle,
                 "scale": obj.scale,
             }));
         }
     }
 
+    // 10. Build collision grid (2x tile resolution) and region grid
+    let w = parsed_map.header.n_width;
+    let h = parsed_map.header.n_height;
+    let col_w = (w * 2) as usize;
+    let col_h = (h * 2) as usize;
+
+    // Collision: 1 byte per sub-block, row-major (Y outer, X inner)
+    // Each tile (tx, ty) has 4 sub-blocks in a 2x2 grid:
+    //   bt_block[0] → (tx*2,   ty*2)     top-left
+    //   bt_block[1] → (tx*2+1, ty*2)     top-right
+    //   bt_block[2] → (tx*2,   ty*2+1)   bottom-left
+    //   bt_block[3] → (tx*2+1, ty*2+1)   bottom-right
+    let mut collision_data = vec![0u8; col_w * col_h];
+
+    // Region: i16 per tile, little-endian, row-major
+    let mut region_data = vec![0u8; (w as usize) * (h as usize) * 2];
+
+    for ty in 0..h {
+        for tx in 0..w {
+            if let Some(tile) = get_tile(&parsed_map, tx, ty) {
+                // Collision sub-blocks
+                let cx = (tx * 2) as usize;
+                let cy = (ty * 2) as usize;
+                collision_data[cy * col_w + cx] = tile.bt_block[0];
+                collision_data[cy * col_w + cx + 1] = tile.bt_block[1];
+                collision_data[(cy + 1) * col_w + cx] = tile.bt_block[2];
+                collision_data[(cy + 1) * col_w + cx + 1] = tile.bt_block[3];
+
+                // Region
+                let region_idx = ((ty as usize) * (w as usize) + (tx as usize)) * 2;
+                region_data[region_idx..region_idx + 2]
+                    .copy_from_slice(&tile.s_region.to_le_bytes());
+            }
+        }
+    }
+
+    let collision_b64 = BASE64_STANDARD.encode(&collision_data);
+    let region_b64 = BASE64_STANDARD.encode(&region_data);
+
     let manifest = serde_json::json!({
         "map_name": map_name,
         "coordinate_system": "y_up",
         "world_scale": 5.0,
         "terrain_gltf": "terrain.gltf",
+        "map_width_tiles": w,
+        "map_height_tiles": h,
+        "section_width": parsed_map.header.n_section_width,
+        "section_height": parsed_map.header.n_section_height,
         "buildings": buildings_map,
         "placements": placements,
+        "collision_grid": {
+            "width": col_w,
+            "height": col_h,
+            "tile_size": 0.5,
+            "description": "1 byte per sub-block at 2x tile resolution. 0=walkable, nonzero=blocked. Row-major order (Y outer, X inner). World position of sub-block (sx, sy) = (sx * tile_size * world_scale, sy * tile_size * world_scale).",
+            "data": collision_b64,
+        },
+        "region_grid": {
+            "width": w,
+            "height": h,
+            "tile_size": 1.0,
+            "description": "i16 little-endian per tile. Zone/region ID for gameplay rules. Row-major order (Y outer, X inner).",
+            "data": region_b64,
+        },
     });
 
     let manifest_path = output_dir.join("manifest.json");
@@ -1318,16 +1386,16 @@ mod tests {
             bt_block: [0; 4],
         };
         let h = tile_height(&tile);
-        // cHeight=10 → raw 1.0 × HEIGHT_EXAGGERATION(5) = 5.0
-        assert!((h - 5.0).abs() < 0.01, "height={}", h);
+        // cHeight=10 → raw 1.0 / 5.0 = 0.2 (pre-divided for uniform 5× root scale)
+        assert!((h - 0.2).abs() < 0.01, "height={}", h);
 
         let tile2 = MapTile {
             c_height: -5,
             ..tile
         };
         let h2 = tile_height(&tile2);
-        // cHeight=-5 → raw -0.5 × 5 = -2.5
-        assert!((h2 - (-2.5)).abs() < 0.01, "height={}", h2);
+        // cHeight=-5 → raw -0.5 / 5.0 = -0.1
+        assert!((h2 - (-0.1)).abs() < 0.01, "height={}", h2);
     }
 
     #[test]

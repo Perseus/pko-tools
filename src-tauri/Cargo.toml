@@ -28,6 +28,10 @@ lto = false           # LTO is very slow, skip for PR builds
 codegen-units = 16    # More parallel codegen (default release is 1)
 opt-level = 2         # Still optimized, but not max
 
+[[bin]]
+name = "export-cli"
+path = "src/bin/export_cli.rs"
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
