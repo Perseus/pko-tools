@@ -1833,7 +1833,7 @@ fn extract_material_colors(mat_info: Option<&CharMaterialTextureInfo>) -> ([f32;
 /// PKO uses a simple obfuscation: swap the first 44 bytes with the last 44 bytes,
 /// then append a 4-byte "mp.x" marker. If the marker is present, reverse the process
 /// to recover the original BMP/TGA/DDS data.
-fn decode_pko_texture(data: &[u8]) -> Vec<u8> {
+pub(crate) fn decode_pko_texture(data: &[u8]) -> Vec<u8> {
     const MARKER: &[u8; 4] = b"mp.x";
     const SWAP_SIZE: usize = 44;
 

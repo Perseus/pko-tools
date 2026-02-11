@@ -5,6 +5,7 @@ mod broadcast;
 pub mod character;
 pub mod effect;
 pub mod item;
+pub mod map;
 mod d3d;
 mod db;
 pub mod decompiler;
@@ -124,6 +125,14 @@ pub fn run() {
             retarget::commands::auto_map_bones_cmd,
             retarget::commands::apply_bone_mapping,
             retarget::commands::validate_bone_mapping,
+            map::commands::get_map_list,
+            map::commands::load_map_terrain,
+            map::commands::get_map_metadata,
+            map::commands::export_map_to_gltf,
+            map::commands::export_map_for_unity,
+            map::commands::get_building_list,
+            map::commands::load_building_model,
+            map::commands::export_building_to_gltf,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

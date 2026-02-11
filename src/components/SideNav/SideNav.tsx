@@ -53,6 +53,16 @@ export default function SideNav() {
             url: "/items",
             isActive: pathname.startsWith("/items"),
           },
+          {
+            title: "Maps",
+            url: "/maps",
+            isActive: pathname.startsWith("/maps"),
+          },
+          {
+            title: "Buildings",
+            url: "/buildings",
+            isActive: pathname.startsWith("/buildings"),
+          },
         ],
       },
     ],
