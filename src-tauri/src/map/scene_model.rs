@@ -1,7 +1,8 @@
 //! LMO → glTF conversion for scene building models.
 //!
-//! Two entry points:
+//! Three entry points:
 //! - `build_gltf_from_lmo` — standalone building viewer (single LMO → complete glTF)
+//! - `build_gltf_from_lmo_roundtrip` — export for editing (preserves PKO extras for re-import)
 //! - `load_scene_models` — map integration (batch load unique models, return glTF components)
 
 use std::collections::HashMap;
@@ -16,12 +17,144 @@ use gltf_json::{
     animation::{Channel, Sampler, Target},
     validation::{Checked, USize64},
 };
+use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 
 use crate::item::model::decode_pko_texture;
 
-use super::lmo::{self, LmoGeomObject, LmoModel};
+use super::lmo::{self, LmoGeomObject, LmoModel, LmoTexInfo, RenderStateAtom};
 use super::scene_obj::SceneObject;
 use super::scene_obj_info::SceneObjModelInfo;
+
+// ============================================================================
+// PKO extras structs — stored in glTF node/mesh extras for round-trip
+// ============================================================================
+
+/// Node-level extras: per-geometry-object header fields.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PkoLmoExtras {
+    /// Marker to identify this as an LMO building node.
+    pub pko_lmo_geom: bool,
+    pub geom_id: u32,
+    pub parent_id: u32,
+    pub obj_type: u32,
+    /// mat_local stored as flat 16-element array (row-major 4×4).
+    pub mat_local: [f32; 16],
+    /// lwRenderCtrlCreateInfo — 16 bytes, base64-encoded.
+    pub rcci: String,
+    /// lwStateCtrl — 8 bytes, base64-encoded.
+    pub state_ctrl: String,
+    pub fvf: u32,
+    pub pt_type: u32,
+    #[serde(default)]
+    pub bone_infl_factor: u32,
+    #[serde(default)]
+    pub vertex_element_num: u32,
+    /// Raw vertex elements blob, base64-encoded.
+    #[serde(default)]
+    pub vertex_elements_blob: String,
+    /// Mesh render state set: 8 atoms.
+    pub mesh_rs_set: Vec<RenderStateAtom>,
+    /// Helper section as raw bytes, base64-encoded.
+    pub helper_blob: String,
+    /// Animation section as raw bytes (normalized to v0x1005), base64-encoded.
+    pub raw_anim_blob: String,
+    /// Vertex colors (D3DCOLOR u32 array), if present.
+    #[serde(default)]
+    pub vertex_colors: Vec<u32>,
+    /// Subset definitions for this geometry object.
+    #[serde(default)]
+    pub subsets: Vec<PkoLmoSubsetExtras>,
+}
+
+/// Subset info stored in extras for exact round-trip of subset boundaries.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PkoLmoSubsetExtras {
+    pub primitive_num: u32,
+    pub start_index: u32,
+    pub vertex_num: u32,
+    pub min_index: u32,
+}
+
+/// Mesh-level extras: per-material data for all materials in the geometry object.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PkoLmoMaterialExtras {
+    pub pko_lmo_materials: Vec<PkoLmoMaterialInfo>,
+}
+
+/// Per-material properties stored in glTF extras.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PkoLmoMaterialInfo {
+    pub opacity: f32,
+    pub transp_type: u32,
+    pub diffuse: [f32; 4],
+    pub ambient: [f32; 4],
+    pub specular: [f32; 4],
+    pub emissive: [f32; 4],
+    pub power: f32,
+    pub rs_set: Vec<RenderStateAtom>,
+    pub tex_infos: Vec<PkoLmoTexStageInfo>,
+}
+
+/// Per-texture-stage metadata stored in glTF extras.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PkoLmoTexStageInfo {
+    pub stage: u32,
+    pub level: u32,
+    pub usage: u32,
+    pub d3d_format: u32,
+    pub d3d_pool: u32,
+    pub byte_alignment_flag: u32,
+    pub tex_type: u32,
+    pub width: u32,
+    pub height: u32,
+    pub colorkey_type: u32,
+    pub colorkey: u32,
+    pub filename: String,
+    pub data: u32,
+    pub tss_set: Vec<RenderStateAtom>,
+}
+
+impl From<&LmoTexInfo> for PkoLmoTexStageInfo {
+    fn from(t: &LmoTexInfo) -> Self {
+        Self {
+            stage: t.stage,
+            level: t.level,
+            usage: t.usage,
+            d3d_format: t.d3d_format,
+            d3d_pool: t.d3d_pool,
+            byte_alignment_flag: t.byte_alignment_flag,
+            tex_type: t.tex_type,
+            width: t.width,
+            height: t.height,
+            colorkey_type: t.colorkey_type,
+            colorkey: t.colorkey,
+            filename: t.filename.clone(),
+            data: t.data,
+            tss_set: t.tss_set.clone(),
+        }
+    }
+}
+
+/// Flatten a 4×4 row-major matrix to a 16-element array.
+fn mat44_to_flat(m: &[[f32; 4]; 4]) -> [f32; 16] {
+    [
+        m[0][0], m[0][1], m[0][2], m[0][3],
+        m[1][0], m[1][1], m[1][2], m[1][3],
+        m[2][0], m[2][1], m[2][2], m[2][3],
+        m[3][0], m[3][1], m[3][2], m[3][3],
+    ]
+}
+
+/// Unflatten a 16-element array to a 4×4 row-major matrix.
+pub fn flat_to_mat44(f: &[f32; 16]) -> [[f32; 4]; 4] {
+    [
+        [f[0], f[1], f[2], f[3]],
+        [f[4], f[5], f[6], f[7]],
+        [f[8], f[9], f[10], f[11]],
+        [f[12], f[13], f[14], f[15]],
+    ]
+}
 
 /// Search for an LMO file in the standard model directories.
 /// PKO clients store scene models in `model/scene/`, but some may be in `model/`.
@@ -848,6 +981,256 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
 }
 
 // ============================================================================
+// PKO Z-up mat_local → glTF Y-up node matrix conversion
+// ============================================================================
+
+/// Convert a PKO Z-up 4×4 matrix to glTF Y-up column-major matrix for node transform.
+///
+/// PKO mat_local is row-major in Z-up space. glTF node matrix is column-major in Y-up.
+/// We apply the coordinate change: (x,y,z) → (x,z,-y) to the rotation/scale and translation.
+fn mat_local_to_gltf_matrix(m: &[[f32; 4]; 4]) -> [f32; 16] {
+    // Coordinate change matrix C: maps Z-up → Y-up
+    //   C = | 1  0  0 |
+    //       | 0  0  1 |
+    //       | 0 -1  0 |
+    //
+    // The 3x3 rotation/scale part R' = C * R * C^-1 where C^-1 = C^T
+    // Translation t' = C * t
+    //
+    // R is the upper-left 3×3 of mat_local (rows 0-2, cols 0-2)
+    // t is (m[3][0], m[3][1], m[3][2])
+
+    // C * R * C^T (where C swaps Y↔Z and negates new Z)
+    // Row 0 of R = (m[0][0], m[0][1], m[0][2])
+    // Row 1 of R = (m[1][0], m[1][1], m[1][2])
+    // Row 2 of R = (m[2][0], m[2][1], m[2][2])
+    //
+    // C * R:
+    //   row0: (m[0][0], m[0][1], m[0][2])     // x stays
+    //   row1: (m[2][0], m[2][1], m[2][2])     // z→y
+    //   row2: (-m[1][0], -m[1][1], -m[1][2]) // -y→z
+    //
+    // (C * R) * C^T  (C^T swaps cols 1,2 and negates col 2):
+    //   R'[0][0] = m[0][0], R'[0][1] = m[0][2], R'[0][2] = -m[0][1]
+    //   R'[1][0] = m[2][0], R'[1][1] = m[2][2], R'[1][2] = -m[2][1]
+    //   R'[2][0] = -m[1][0], R'[2][1] = -m[1][2], R'[2][2] = m[1][1]
+
+    let r00 = m[0][0]; let r01 = m[0][2]; let r02 = -m[0][1];
+    let r10 = m[2][0]; let r11 = m[2][2]; let r12 = -m[2][1];
+    let r20 = -m[1][0]; let r21 = -m[1][2]; let r22 = m[1][1];
+
+    // Translation: C * (tx, ty, tz) = (tx, tz, -ty)
+    let tx = m[3][0];
+    let ty = m[3][2];
+    let tz = -m[3][1];
+
+    // glTF uses column-major: column 0 is [r00, r10, r20, 0], etc.
+    [
+        r00, r10, r20, 0.0,  // column 0
+        r01, r11, r21, 0.0,  // column 1
+        r02, r12, r22, 0.0,  // column 2
+        tx,  ty,  tz,  1.0,  // column 3 (translation)
+    ]
+}
+
+// ============================================================================
+// Public API: export for round-trip editing (with PKO extras)
+// ============================================================================
+
+/// Build a complete glTF JSON string for round-trip editing of an LMO building.
+///
+/// Unlike `build_gltf_from_lmo`, this function:
+/// - Does NOT bake `mat_local` into vertex positions — stores it as a glTF node matrix
+/// - Stores all PKO metadata in glTF node/mesh extras for lossless re-import
+/// - Includes vertex colors as extras (glTF COLOR_0 could be added but extras are simpler)
+pub fn build_gltf_from_lmo_roundtrip(lmo_path: &Path, project_dir: &Path) -> Result<String> {
+    let model = lmo::load_lmo(lmo_path)?;
+
+    if model.geom_objects.is_empty() {
+        return Err(anyhow!("LMO file has no geometry objects"));
+    }
+
+    let mut builder = GltfBuilder::new();
+    let mut child_indices = Vec::new();
+    let mut animated_nodes: Vec<(u32, &LmoGeomObject)> = Vec::new();
+
+    for (gi, geom) in model.geom_objects.iter().enumerate() {
+        let prefix = format!("geom{}", gi);
+        let material_base_idx = builder.materials.len() as u32;
+
+        // Add materials (with textures for standalone editing)
+        if geom.materials.is_empty() {
+            build_lmo_material(
+                &mut builder,
+                &lmo::LmoMaterial::new_simple(
+                    [0.7, 0.7, 0.7, 1.0],
+                    [0.3, 0.3, 0.3, 1.0],
+                    1.0,
+                    None,
+                ),
+                &format!("{}_default_mat", prefix),
+                project_dir,
+                true,
+            );
+        } else {
+            for (mi, mat) in geom.materials.iter().enumerate() {
+                build_lmo_material(
+                    &mut builder,
+                    mat,
+                    &format!("{}_mat{}", prefix, mi),
+                    project_dir,
+                    true,
+                );
+            }
+        }
+
+        // Build primitives WITHOUT baking mat_local (skip_local_transform=true always).
+        // Animated objects also skip local transform (same as viewer).
+        let primitives = build_geom_primitives(
+            &mut builder, geom, &prefix, material_base_idx, true, // always skip local transform
+        );
+
+        if primitives.is_empty() {
+            continue;
+        }
+
+        // Build material extras
+        let mat_extras = PkoLmoMaterialExtras {
+            pko_lmo_materials: geom.materials.iter().map(|mat| {
+                PkoLmoMaterialInfo {
+                    opacity: mat.opacity,
+                    transp_type: mat.transp_type,
+                    diffuse: mat.diffuse,
+                    ambient: mat.ambient,
+                    specular: mat.specular,
+                    emissive: mat.emissive,
+                    power: mat.power,
+                    rs_set: mat.rs_set.clone(),
+                    tex_infos: mat.tex_infos.iter().map(PkoLmoTexStageInfo::from).collect(),
+                }
+            }).collect(),
+        };
+        let mat_extras_json = serde_json::to_string(&mat_extras)?;
+
+        let mesh_idx = builder.meshes.len() as u32;
+        builder.meshes.push(gltf_json::Mesh {
+            name: Some(format!("geom_{}", gi)),
+            primitives,
+            weights: None,
+            extensions: None,
+            extras: Some(RawValue::from_string(mat_extras_json)?),
+        });
+
+        // Build node extras with all PKO header fields
+        let node_extras = PkoLmoExtras {
+            pko_lmo_geom: true,
+            geom_id: geom.id,
+            parent_id: geom.parent_id,
+            obj_type: geom.obj_type,
+            mat_local: mat44_to_flat(&geom.mat_local),
+            rcci: BASE64_STANDARD.encode(&geom.rcci),
+            state_ctrl: BASE64_STANDARD.encode(&geom.state_ctrl),
+            fvf: geom.fvf,
+            pt_type: geom.pt_type,
+            bone_infl_factor: geom.bone_infl_factor,
+            vertex_element_num: geom.vertex_element_num,
+            vertex_elements_blob: if geom.vertex_elements_blob.is_empty() {
+                String::new()
+            } else {
+                BASE64_STANDARD.encode(&geom.vertex_elements_blob)
+            },
+            mesh_rs_set: geom.mesh_rs_set.clone(),
+            helper_blob: if geom.helper_blob.is_empty() {
+                String::new()
+            } else {
+                BASE64_STANDARD.encode(&geom.helper_blob)
+            },
+            raw_anim_blob: if geom.raw_anim_blob.is_empty() {
+                String::new()
+            } else {
+                BASE64_STANDARD.encode(&geom.raw_anim_blob)
+            },
+            vertex_colors: geom.vertex_colors.clone(),
+            subsets: geom.subsets.iter().map(|s| PkoLmoSubsetExtras {
+                primitive_num: s.primitive_num,
+                start_index: s.start_index,
+                vertex_num: s.vertex_num,
+                min_index: s.min_index,
+            }).collect(),
+        };
+        let node_extras_json = serde_json::to_string(&node_extras)?;
+
+        // Use glTF node matrix for the mat_local transform (converted to Y-up)
+        let has_animation = geom.animation.is_some();
+        let node_matrix = if !has_animation && !is_identity(&geom.mat_local) {
+            Some(mat_local_to_gltf_matrix(&geom.mat_local))
+        } else {
+            None
+        };
+
+        let node_idx = builder.nodes.len() as u32;
+        let mut node = gltf_json::Node {
+            mesh: Some(gltf_json::Index::new(mesh_idx)),
+            name: Some(format!("geom_node_{}", gi)),
+            extras: Some(RawValue::from_string(node_extras_json)?),
+            ..Default::default()
+        };
+        if let Some(mat) = node_matrix {
+            node.matrix = Some(mat);
+        }
+        builder.nodes.push(node);
+        child_indices.push(gltf_json::Index::new(node_idx));
+
+        if has_animation {
+            animated_nodes.push((node_idx, geom));
+        }
+    }
+
+    if child_indices.is_empty() {
+        return Err(anyhow!("No renderable geometry in LMO file"));
+    }
+
+    let animations = build_animations(&mut builder, &animated_nodes);
+
+    // Root node (no extras on root)
+    let root_idx = builder.nodes.len() as u32;
+    builder.nodes.push(gltf_json::Node {
+        name: Some("building_root".to_string()),
+        children: Some(child_indices),
+        ..Default::default()
+    });
+
+    let root = gltf_json::Root {
+        asset: gltf_json::Asset {
+            version: "2.0".to_string(),
+            generator: Some("pko-tools-roundtrip".to_string()),
+            ..Default::default()
+        },
+        nodes: builder.nodes,
+        scenes: vec![gltf_json::Scene {
+            nodes: vec![gltf_json::Index::new(root_idx)],
+            name: Some("BuildingScene".to_string()),
+            extensions: None,
+            extras: None,
+        }],
+        scene: Some(gltf_json::Index::new(0)),
+        accessors: builder.accessors,
+        buffers: builder.buffers,
+        buffer_views: builder.buffer_views,
+        meshes: builder.meshes,
+        materials: builder.materials,
+        images: builder.images,
+        samplers: builder.samplers,
+        textures: builder.textures,
+        animations,
+        ..Default::default()
+    };
+
+    let json = serde_json::to_string_pretty(&root)?;
+    Ok(json)
+}
+
+// ============================================================================
 // Public API: batch load scene models for map integration
 // ============================================================================
 
@@ -1549,5 +1932,271 @@ mod tests {
                 "version-0 LMO should have texture images"
             );
         }
+    }
+
+    // ====================================================================
+    // Roundtrip export tests
+    // ====================================================================
+
+    #[test]
+    fn roundtrip_export_has_node_extras() {
+        let model = make_test_model();
+        // Write model to temp file, then export roundtrip
+        let temp_dir = std::env::temp_dir().join("pko_roundtrip_test");
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let lmo_path = temp_dir.join("test_rt.lmo");
+
+        // Write LMO binary using the writer
+        let data = crate::map::lmo_writer::write_lmo(&model);
+        std::fs::write(&lmo_path, &data).unwrap();
+
+        let json = build_gltf_from_lmo_roundtrip(&lmo_path, &temp_dir).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        // Find node with extras
+        let nodes = parsed["nodes"].as_array().unwrap();
+        let geom_node = nodes.iter().find(|n| {
+            n.get("extras")
+                .and_then(|e| e.get("pko_lmo_geom"))
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        });
+        assert!(geom_node.is_some(), "should have a node with pko_lmo_geom extras");
+
+        let extras = &geom_node.unwrap()["extras"];
+        assert_eq!(extras["geom_id"].as_u64().unwrap(), 1);
+        assert_eq!(extras["fvf"].as_u64().unwrap(), 0x112);
+        assert_eq!(extras["pt_type"].as_u64().unwrap(), 4);
+        assert!(extras["pko_lmo_geom"].as_bool().unwrap());
+
+        // mat_local should be flat 16-element array
+        let mat_local = extras["mat_local"].as_array().unwrap();
+        assert_eq!(mat_local.len(), 16);
+
+        // rcci and state_ctrl should be base64 strings
+        assert!(extras["rcci"].is_string());
+        assert!(extras["state_ctrl"].is_string());
+
+        // mesh_rs_set should be array of 8 atoms
+        let mesh_rs = extras["mesh_rs_set"].as_array().unwrap();
+        assert_eq!(mesh_rs.len(), 8);
+
+        // subsets should be present
+        let subsets = extras["subsets"].as_array().unwrap();
+        assert_eq!(subsets.len(), 1);
+        assert_eq!(subsets[0]["primitive_num"].as_u64().unwrap(), 1);
+
+        // Clean up
+        let _ = std::fs::remove_file(&lmo_path);
+    }
+
+    #[test]
+    fn roundtrip_export_has_material_extras() {
+        let model = make_test_model();
+        let temp_dir = std::env::temp_dir().join("pko_roundtrip_test2");
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let lmo_path = temp_dir.join("test_rt2.lmo");
+
+        let data = crate::map::lmo_writer::write_lmo(&model);
+        std::fs::write(&lmo_path, &data).unwrap();
+
+        let json = build_gltf_from_lmo_roundtrip(&lmo_path, &temp_dir).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        // Find mesh with material extras
+        let meshes = parsed["meshes"].as_array().unwrap();
+        let mesh = &meshes[0];
+        let extras = mesh.get("extras").expect("mesh should have extras");
+        let materials = extras["pko_lmo_materials"].as_array().unwrap();
+        assert_eq!(materials.len(), 1);
+
+        let mat = &materials[0];
+        assert!((mat["opacity"].as_f64().unwrap() - 1.0).abs() < 0.01);
+        assert_eq!(mat["tex_infos"].as_array().unwrap().len(), 4);
+
+        // Diffuse should match
+        let diffuse = mat["diffuse"].as_array().unwrap();
+        assert!((diffuse[0].as_f64().unwrap() - 0.8).abs() < 0.01);
+
+        // Texture filename should be in tex_infos[0]
+        let tex0 = &mat["tex_infos"].as_array().unwrap()[0];
+        assert_eq!(tex0["filename"].as_str().unwrap(), "wall.bmp");
+
+        let _ = std::fs::remove_file(&lmo_path);
+    }
+
+    #[test]
+    fn roundtrip_export_extras_serde_roundtrip() {
+        // Test that PkoLmoExtras can be serialized and deserialized losslessly
+        let extras = PkoLmoExtras {
+            pko_lmo_geom: true,
+            geom_id: 42,
+            parent_id: 0xFFFFFFFF,
+            obj_type: 0,
+            mat_local: [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 10.0, 20.0, 30.0, 1.0],
+            rcci: BASE64_STANDARD.encode([1u8, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]),
+            state_ctrl: BASE64_STANDARD.encode([0xAAu8, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF, 0x11, 0x22]),
+            fvf: 0x112,
+            pt_type: 4,
+            bone_infl_factor: 0,
+            vertex_element_num: 0,
+            vertex_elements_blob: String::new(),
+            mesh_rs_set: vec![lmo::RenderStateAtom { state: 7, value0: 42, value1: 0 }; 8],
+            helper_blob: String::new(),
+            raw_anim_blob: String::new(),
+            vertex_colors: vec![0xFFFF0000, 0xFF00FF00, 0xFF0000FF],
+            subsets: vec![PkoLmoSubsetExtras { primitive_num: 1, start_index: 0, vertex_num: 3, min_index: 0 }],
+        };
+
+        let json = serde_json::to_string(&extras).unwrap();
+        let parsed: PkoLmoExtras = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(parsed.geom_id, 42);
+        assert_eq!(parsed.parent_id, 0xFFFFFFFF);
+        assert_eq!(parsed.fvf, 0x112);
+        assert_eq!(parsed.mat_local[12], 10.0); // translation X
+        assert_eq!(parsed.vertex_colors.len(), 3);
+        assert_eq!(parsed.subsets.len(), 1);
+
+        // Decode rcci back
+        let rcci_bytes = BASE64_STANDARD.decode(&parsed.rcci).unwrap();
+        assert_eq!(rcci_bytes, vec![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+    }
+
+    #[test]
+    fn roundtrip_export_material_extras_backward_compat() {
+        // Test that missing optional fields deserialize with defaults
+        let json = r#"{"pko_lmo_materials":[{"opacity":1.0,"transp_type":0,"diffuse":[0.8,0.2,0.1,1.0],"ambient":[0.3,0.3,0.3,1.0],"specular":[0.0,0.0,0.0,1.0],"emissive":[0.0,0.0,0.0,0.0],"power":0.0,"rs_set":[],"tex_infos":[]}]}"#;
+        let parsed: PkoLmoMaterialExtras = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed.pko_lmo_materials.len(), 1);
+        assert!((parsed.pko_lmo_materials[0].opacity - 1.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn mat_local_to_gltf_matrix_identity() {
+        let id = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ];
+        let gltf_mat = mat_local_to_gltf_matrix(&id);
+        // Identity in any coordinate system should remain identity
+        let expected = [
+            1.0, 0.0, 0.0, 0.0,
+            0.0, 1.0, 0.0, 0.0,
+            0.0, 0.0, 1.0, 0.0,
+            0.0, 0.0, 0.0, 1.0,
+        ];
+        for i in 0..16 {
+            assert!((gltf_mat[i] - expected[i]).abs() < 1e-5, "element {} mismatch: {} vs {}", i, gltf_mat[i], expected[i]);
+        }
+    }
+
+    #[test]
+    fn mat_local_to_gltf_matrix_translation() {
+        // PKO Z-up translation (tx=10, ty=20, tz=30)
+        // Should become glTF Y-up: (10, 30, -20)
+        let m = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [10.0, 20.0, 30.0, 1.0],
+        ];
+        let gltf_mat = mat_local_to_gltf_matrix(&m);
+        // Column 3 (translation) = elements [12, 13, 14, 15]
+        assert!((gltf_mat[12] - 10.0).abs() < 1e-5, "tx");
+        assert!((gltf_mat[13] - 30.0).abs() < 1e-5, "ty");
+        assert!((gltf_mat[14] - (-20.0)).abs() < 1e-5, "tz");
+    }
+
+    #[test]
+    fn roundtrip_export_does_not_bake_mat_local() {
+        // Verify that roundtrip export doesn't bake mat_local into vertices
+        let mut model = make_test_model();
+        model.geom_objects[0].mat_local[3][0] = 100.0; // translation X=100
+
+        let temp_dir = std::env::temp_dir().join("pko_roundtrip_nobake");
+        let _ = std::fs::create_dir_all(&temp_dir);
+        let lmo_path = temp_dir.join("test_nobake.lmo");
+        let data = crate::map::lmo_writer::write_lmo(&model);
+        std::fs::write(&lmo_path, &data).unwrap();
+
+        let json = build_gltf_from_lmo_roundtrip(&lmo_path, &temp_dir).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        // The node should have a matrix transform (not identity, since mat_local is not identity)
+        let nodes = parsed["nodes"].as_array().unwrap();
+        let geom_node = nodes.iter().find(|n| {
+            n.get("extras")
+                .and_then(|e| e.get("pko_lmo_geom"))
+                .is_some()
+        }).unwrap();
+        assert!(geom_node.get("matrix").is_some(), "node should have a matrix transform");
+
+        // Vertices should NOT have the 100.0 translation baked in
+        // The original vertex at (0,0,0) should still be near origin in glTF space
+        // (after Z-up→Y-up: (0,0,0) → (0,0,0))
+        let accessors = parsed["accessors"].as_array().unwrap();
+        let pos_acc = accessors.iter().find(|a| {
+            a["name"].as_str().map(|n| n.contains("pos")).unwrap_or(false)
+        }).unwrap();
+        let min_val = pos_acc["min"].as_array().unwrap();
+        // If mat_local were baked, min X would be ~100. Since it's not, it should be ~0.
+        let min_x = min_val[0].as_f64().unwrap();
+        assert!(min_x.abs() < 1.0, "vertex X should not have mat_local translation baked in, got {}", min_x);
+
+        let _ = std::fs::remove_file(&lmo_path);
+    }
+
+    #[test]
+    fn roundtrip_export_real_lmo() {
+        let scene_dir = std::path::Path::new("../top-client/model/scene");
+        if !scene_dir.exists() {
+            return;
+        }
+
+        let lmo_file = std::fs::read_dir(scene_dir)
+            .ok()
+            .and_then(|mut dir| {
+                dir.find(|e| {
+                    e.as_ref()
+                        .ok()
+                        .map(|e| e.path().extension().map(|ext| ext.to_ascii_lowercase() == "lmo").unwrap_or(false))
+                        .unwrap_or(false)
+                })
+            })
+            .and_then(|e| e.ok())
+            .map(|e| e.path());
+
+        let lmo_path = match lmo_file {
+            Some(p) => p,
+            None => return,
+        };
+
+        let project_dir = std::path::Path::new("../top-client");
+        let json = build_gltf_from_lmo_roundtrip(&lmo_path, project_dir).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        // Should have generator = pko-tools-roundtrip
+        assert_eq!(parsed["asset"]["generator"].as_str().unwrap(), "pko-tools-roundtrip");
+
+        // Should have node extras
+        let nodes = parsed["nodes"].as_array().unwrap();
+        let geom_nodes: Vec<_> = nodes.iter().filter(|n| {
+            n.get("extras")
+                .and_then(|e| e.get("pko_lmo_geom"))
+                .is_some()
+        }).collect();
+        assert!(!geom_nodes.is_empty(), "should have at least one node with PKO extras");
+
+        // Should have mesh extras
+        let meshes = parsed["meshes"].as_array().unwrap();
+        let mesh_with_extras = meshes.iter().find(|m| {
+            m.get("extras")
+                .and_then(|e| e.get("pko_lmo_materials"))
+                .is_some()
+        });
+        assert!(mesh_with_extras.is_some(), "should have at least one mesh with material extras");
     }
 }

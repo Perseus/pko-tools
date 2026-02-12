@@ -170,6 +170,11 @@ pub struct LmoMaterial {
 impl LmoMaterial {
     /// Create a material with minimal required fields and defaults for round-trip fields.
     pub fn new_simple(diffuse: [f32; 4], ambient: [f32; 4], opacity: f32, tex_filename: Option<String>) -> Self {
+        let mut tex_infos: [LmoTexInfo; 4] = std::array::from_fn(|_| LmoTexInfo::default());
+        // Sync tex_filename into tex_infos[0] so the writer picks it up
+        if let Some(ref name) = tex_filename {
+            tex_infos[0].filename = name.clone();
+        }
         Self {
             diffuse,
             ambient,
@@ -179,7 +184,7 @@ impl LmoMaterial {
             opacity,
             transp_type: 0,
             rs_set: vec![RenderStateAtom::default(); LW_MTL_RS_NUM],
-            tex_infos: std::array::from_fn(|_| LmoTexInfo::default()),
+            tex_infos,
             tex_filename,
         }
     }
