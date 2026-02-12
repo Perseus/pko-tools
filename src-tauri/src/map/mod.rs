@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod lmo;
+pub mod lmo_writer;
 pub mod scene_model;
 pub mod scene_obj;
 pub mod scene_obj_info;

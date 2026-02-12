@@ -119,6 +119,7 @@ pub struct LmoGeomObject {
     pub pt_type: u32,
     pub bone_infl_factor: u32,
     pub vertex_element_num: u32,
+    pub vertex_elements_blob: Vec<u8>,
     pub mesh_rs_set: Vec<RenderStateAtom>,
 
     // --- Geometry data ---
@@ -445,6 +446,7 @@ struct MeshData {
     pt_type: u32,
     bone_infl_factor: u32,
     vertex_element_num: u32,
+    vertex_elements_blob: Vec<u8>,
     mesh_rs_set: Vec<RenderStateAtom>,
     vertices: Vec<[f32; 3]>,
     normals: Vec<[f32; 3]>,
@@ -508,10 +510,12 @@ fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<MeshData> 
     }
 
     if mesh_version >= EXP_OBJ_VERSION_1_0_0_4 {
-        // D3DVertexElement9 entries (8 bytes each) — skip
-        if vertex_element_num > 0 {
-            cursor.seek(SeekFrom::Current(vertex_element_num as i64 * 8))?;
-        }
+        // D3DVertexElement9 entries (8 bytes each) — store as raw blob for round-trip
+        let vertex_elements_blob = if vertex_element_num > 0 {
+            read_bytes(cursor, vertex_element_num as usize * 8)?
+        } else {
+            Vec::new()
+        };
 
         let mut vertices = Vec::with_capacity(vertex_num);
         for _ in 0..vertex_num {
@@ -565,7 +569,7 @@ fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<MeshData> 
             });
         }
 
-        Ok(MeshData { fvf, pt_type, bone_infl_factor, vertex_element_num, mesh_rs_set,
+        Ok(MeshData { fvf, pt_type, bone_infl_factor, vertex_element_num, vertex_elements_blob, mesh_rs_set,
             vertices, normals, texcoords, vertex_colors, indices, subsets })
     } else {
         // Old format (pre-1.0.0.4): subsets FIRST
@@ -621,7 +625,7 @@ fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<MeshData> 
             indices.push(read_u32(cursor)?);
         }
 
-        Ok(MeshData { fvf, pt_type, bone_infl_factor, vertex_element_num, mesh_rs_set,
+        Ok(MeshData { fvf, pt_type, bone_infl_factor, vertex_element_num, vertex_elements_blob: Vec::new(), mesh_rs_set,
             vertices, normals, texcoords, vertex_colors, indices, subsets })
     }
 }
@@ -755,6 +759,34 @@ fn read_animation(
     Ok(None)
 }
 
+/// Normalize an animation blob to v0x1005 internal format.
+///
+/// Animation section layout differs by version:
+/// - v0:      [old_version(4)] [data_bone_size(4)] [data_mat_size(4)] [texuv(256)] [teximg(256)] [data...]
+/// - v0x1004: [data_bone_size(4)] [data_mat_size(4)] [texuv(256)] [teximg(256)] [data...]
+/// - v0x1005: [data_bone_size(4)] [data_mat_size(4)] [mtlopac(64)] [texuv(256)] [teximg(256)] [data...]
+///
+/// The writer always outputs v0x1005, so the blob must match that layout.
+fn normalize_anim_blob(blob: &[u8], file_version: u32) -> Vec<u8> {
+    if file_version >= EXP_OBJ_VERSION_1_0_0_5 || blob.is_empty() {
+        return blob.to_vec();
+    }
+
+    // For v0: skip the old_version prefix (4 bytes)
+    let skip = if file_version == EXP_OBJ_VERSION_0_0_0_0 { 4 } else { 0 };
+    if blob.len() < skip + 8 {
+        return blob.to_vec(); // Too short to normalize
+    }
+
+    let src = &blob[skip..];
+    // Insert 64 zero bytes (mtlopac_size[16]) after data_bone_size(4) + data_mat_size(4)
+    let mut result = Vec::with_capacity(src.len() + 64);
+    result.extend_from_slice(&src[..8]); // data_bone_size + data_mat_size
+    result.extend(std::iter::repeat(0u8).take(64)); // mtlopac_size[16] = all zeros
+    result.extend_from_slice(&src[8..]); // rest: texuv + teximg + data
+    result
+}
+
 // ============================================================================
 // Geometry object parsing
 // ============================================================================
@@ -838,6 +870,7 @@ fn read_geom_object(data: &[u8], addr: usize, size: usize, file_version: u32, pa
     let mut pt_type = 4u32; // TRIANGLELIST default
     let mut bone_infl_factor = 0u32;
     let mut vertex_element_num = 0u32;
+    let mut vertex_elements_blob = Vec::new();
     let mut mesh_rs_set = vec![RenderStateAtom::default(); LW_MESH_RS_NUM];
     let mut vertices = Vec::new();
     let mut normals = Vec::new();
@@ -853,6 +886,7 @@ fn read_geom_object(data: &[u8], addr: usize, size: usize, file_version: u32, pa
                 pt_type = md.pt_type;
                 bone_infl_factor = md.bone_infl_factor;
                 vertex_element_num = md.vertex_element_num;
+                vertex_elements_blob = md.vertex_elements_blob;
                 mesh_rs_set = md.mesh_rs_set;
                 vertices = md.vertices;
                 normals = md.normals;
@@ -877,19 +911,22 @@ fn read_geom_object(data: &[u8], addr: usize, size: usize, file_version: u32, pa
         Vec::new()
     };
 
-    // Animation section — store raw blob AND decomposed data
+    // Animation section — store normalized raw blob AND decomposed data
+    // The blob is normalized to v0x1005 format so the writer can always output v0x1005.
     let raw_anim_blob;
     let animation;
     if anim_size > 0 {
         cursor.set_position(anim_offset);
         let mut blob = vec![0u8; anim_size];
         cursor.read_exact(&mut blob)?;
-        raw_anim_blob = blob;
+        raw_anim_blob = normalize_anim_blob(&blob, file_version);
 
         if parse_animations {
             // Re-parse for decomposed translation/rotation (for glTF visualization)
+            // Use the normalized blob with v0x1005 format
+            let normalized_size = raw_anim_blob.len();
             let mut anim_cursor = Cursor::new(raw_anim_blob.as_slice());
-            animation = match read_animation(&mut anim_cursor, anim_size, file_version) {
+            animation = match read_animation(&mut anim_cursor, normalized_size, EXP_OBJ_VERSION_1_0_0_5) {
                 Ok(anim) => anim,
                 Err(e) => {
                     eprintln!("Warning: failed to read animation: {}", e);
@@ -915,6 +952,7 @@ fn read_geom_object(data: &[u8], addr: usize, size: usize, file_version: u32, pa
         pt_type,
         bone_infl_factor,
         vertex_element_num,
+        vertex_elements_blob,
         mesh_rs_set,
         vertices,
         normals,

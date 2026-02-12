@@ -1007,6 +1007,7 @@ mod tests {
                 pt_type: 4,
                 bone_infl_factor: 0,
                 vertex_element_num: 0,
+                vertex_elements_blob: vec![],
                 mesh_rs_set: vec![lmo::RenderStateAtom::default(); 8],
                 vertices: vec![
                     [0.0, 0.0, 0.0],
