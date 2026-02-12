@@ -10,3 +10,11 @@ export type BuildingImportResult = {
   import_dir: string;
   building_id: string;
 };
+
+export type BuildingWorkbenchState = {
+  building_id: string;
+  source_file: string;
+  scale_factor: number;
+  lmo_path: string;
+  created_at: string;
+};

@@ -1,4 +1,5 @@
 pub mod building_import;
+pub mod building_workbench;
 pub mod commands;
 pub mod lmo;
 pub mod lmo_writer;

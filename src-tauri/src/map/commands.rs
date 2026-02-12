@@ -3,6 +3,7 @@ use std::str::FromStr;
 use crate::projects::project::Project;
 
 use super::building_import::BuildingImportResult;
+use super::building_workbench::{self, BuildingWorkbenchState};
 use super::terrain;
 use super::{BuildingEntry, MapEntry, MapExportResult, MapForUnityExportResult, MapMetadata};
 
@@ -263,4 +264,92 @@ pub async fn import_building_from_gltf(
         scale_factor,
     )
     .map_err(|e| e.to_string())
+}
+
+// ============================================================================
+// Building workbench commands
+// ============================================================================
+
+#[tauri::command]
+pub async fn rescale_building(
+    project_id: String,
+    lmo_path: String,
+    factor: f32,
+) -> Result<String, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+
+    building_workbench::rescale_building(
+        std::path::Path::new(&lmo_path),
+        factor,
+        project.project_directory.as_ref(),
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn rotate_building(
+    project_id: String,
+    lmo_path: String,
+    x_deg: f32,
+    y_deg: f32,
+    z_deg: f32,
+) -> Result<String, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+
+    building_workbench::rotate_building(
+        std::path::Path::new(&lmo_path),
+        x_deg,
+        y_deg,
+        z_deg,
+        project.project_directory.as_ref(),
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn export_building_to_game(
+    lmo_path: String,
+    import_dir: String,
+    export_dir: String,
+    building_id: String,
+) -> Result<String, String> {
+    building_workbench::export_building(
+        std::path::Path::new(&lmo_path),
+        std::path::Path::new(&import_dir),
+        std::path::Path::new(&export_dir),
+        &building_id,
+    )
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn save_building_workbench(
+    project_id: String,
+    state: BuildingWorkbenchState,
+) -> Result<(), String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+
+    let db = project.db_arc();
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    building_workbench::save_workbench(&conn, &state).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn load_building_workbench(
+    project_id: String,
+    building_id: String,
+) -> Result<Option<BuildingWorkbenchState>, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+
+    let db = project.db_arc();
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    building_workbench::load_workbench(&conn, &building_id).map_err(|e| e.to_string())
 }

@@ -135,6 +135,11 @@ pub fn run() {
             map::commands::export_building_to_gltf,
             map::commands::export_building_for_editing,
             map::commands::import_building_from_gltf,
+            map::commands::rescale_building,
+            map::commands::rotate_building,
+            map::commands::export_building_to_game,
+            map::commands::save_building_workbench,
+            map::commands::load_building_workbench,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

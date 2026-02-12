@@ -1,4 +1,8 @@
-import { BuildingEntry, BuildingImportResult } from "@/types/buildings";
+import {
+  BuildingEntry,
+  BuildingImportResult,
+  BuildingWorkbenchState,
+} from "@/types/buildings";
 import { invoke } from "@tauri-apps/api/core";
 
 export const getBuildingList = async (
@@ -41,4 +45,45 @@ export const importBuildingFromGltf = async (
     filePath,
     scaleFactor,
   });
+};
+
+export const rescaleBuilding = async (
+  projectId: string,
+  lmoPath: string,
+  factor: number
+): Promise<string> => {
+  return invoke("rescale_building", { projectId, lmoPath: lmoPath, factor });
+};
+
+export const rotateBuilding = async (
+  projectId: string,
+  lmoPath: string,
+  xDeg: number,
+  yDeg: number,
+  zDeg: number
+): Promise<string> => {
+  return invoke("rotate_building", { projectId, lmoPath: lmoPath, xDeg, yDeg, zDeg });
+};
+
+export const exportBuildingToGame = async (
+  lmoPath: string,
+  importDir: string,
+  exportDir: string,
+  buildingId: string
+): Promise<string> => {
+  return invoke("export_building_to_game", { lmoPath, importDir, exportDir, buildingId });
+};
+
+export const saveBuildingWorkbench = async (
+  projectId: string,
+  state: BuildingWorkbenchState
+): Promise<void> => {
+  return invoke("save_building_workbench", { projectId, state });
+};
+
+export const loadBuildingWorkbench = async (
+  projectId: string,
+  buildingId: string
+): Promise<BuildingWorkbenchState | null> => {
+  return invoke("load_building_workbench", { projectId, buildingId });
 };
