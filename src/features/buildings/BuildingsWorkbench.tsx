@@ -1,7 +1,7 @@
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, GizmoHelper, GizmoViewport } from "@react-three/drei";
 import { useAtom, useAtomValue } from "jotai";
-import { Suspense, useState } from "react";
+import React, { Suspense, useState } from "react";
 import {
   activeBuildingWorkbenchAtom,
   buildingGltfJsonAtom,
