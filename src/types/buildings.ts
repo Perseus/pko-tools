@@ -3,3 +3,10 @@ export type BuildingEntry = {
   filename: string;
   display_name: string;
 };
+
+export type BuildingImportResult = {
+  lmo_path: string;
+  texture_paths: string[];
+  import_dir: string;
+  building_id: string;
+};

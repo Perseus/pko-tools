@@ -1,4 +1,4 @@
-import { BuildingEntry } from "@/types/buildings";
+import { BuildingEntry, BuildingImportResult } from "@/types/buildings";
 import { invoke } from "@tauri-apps/api/core";
 
 export const getBuildingList = async (
@@ -20,4 +20,25 @@ export const exportBuildingToGltf = async (
   outputDir: string
 ): Promise<string> => {
   return invoke("export_building_to_gltf", { projectId, buildingId, outputDir });
+};
+
+export const exportBuildingForEditing = async (
+  projectId: string,
+  buildingId: number
+): Promise<string> => {
+  return invoke("export_building_for_editing", { projectId, buildingId });
+};
+
+export const importBuildingFromGltf = async (
+  projectId: string,
+  buildingId: string,
+  filePath: string,
+  scaleFactor: number
+): Promise<BuildingImportResult> => {
+  return invoke("import_building_from_gltf", {
+    projectId,
+    buildingId,
+    filePath,
+    scaleFactor,
+  });
 };

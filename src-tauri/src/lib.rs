@@ -133,6 +133,8 @@ pub fn run() {
             map::commands::get_building_list,
             map::commands::load_building_model,
             map::commands::export_building_to_gltf,
+            map::commands::export_building_for_editing,
+            map::commands::import_building_from_gltf,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

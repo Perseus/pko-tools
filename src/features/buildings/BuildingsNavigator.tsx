@@ -5,7 +5,13 @@ import React, { useEffect, useState } from "react";
 import { ScrollAreaVirtualizable } from "@/components/ui/scroll-area-virtualizable";
 import { SidebarHeader } from "@/components/ui/sidebar";
 import { BuildingEntry } from "@/types/buildings";
-import { getBuildingList, loadBuildingModel, exportBuildingToGltf } from "@/commands/buildings";
+import {
+  getBuildingList,
+  loadBuildingModel,
+  exportBuildingToGltf,
+  exportBuildingForEditing,
+  importBuildingFromGltf,
+} from "@/commands/buildings";
 import {
   buildingGltfJsonAtom,
   buildingLoadingAtom,
@@ -13,7 +19,8 @@ import {
 } from "@/store/buildings";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Download, Loader2 } from "lucide-react";
+import { Download, Loader2, Pencil, Upload } from "lucide-react";
+import { open } from "@tauri-apps/plugin-dialog";
 import { toast } from "@/hooks/use-toast";
 
 export default function BuildingsNavigator() {
@@ -22,6 +29,8 @@ export default function BuildingsNavigator() {
     []
   );
   const [exporting, setExporting] = useState(false);
+  const [exportingForEdit, setExportingForEdit] = useState(false);
+  const [importing, setImporting] = useState(false);
   const currentProject = useAtomValue(currentProjectAtom);
   const [, setBuildingGltfJson] = useAtom(buildingGltfJsonAtom);
   const [, setBuildingLoading] = useAtom(buildingLoadingAtom);
@@ -110,6 +119,63 @@ export default function BuildingsNavigator() {
     }
   }
 
+  async function handleExportForEditing() {
+    if (!currentProject || !selectedBuilding) return;
+    setExportingForEdit(true);
+    try {
+      const result = await exportBuildingForEditing(
+        currentProject.id,
+        selectedBuilding.id
+      );
+      toast({
+        title: "Exported for editing",
+        description: `Saved to ${result}`,
+      });
+    } catch (err) {
+      toast({
+        title: "Export failed",
+        description: String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setExportingForEdit(false);
+    }
+  }
+
+  async function handleImport() {
+    if (!currentProject) return;
+    const filePath = await open({
+      multiple: false,
+      filters: [{ name: "glTF/GLB", extensions: ["gltf", "glb"] }],
+    });
+    if (!filePath) return;
+
+    const buildingId = prompt("Enter building ID (e.g., 100):");
+    if (!buildingId) return;
+
+    setImporting(true);
+    try {
+      const result = await importBuildingFromGltf(
+        currentProject.id,
+        buildingId,
+        filePath,
+        1.0
+      );
+      toast({
+        title: "Import complete",
+        description: `LMO saved to ${result.lmo_path}`,
+      });
+    } catch (err) {
+      toast({
+        title: "Import failed",
+        description: String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setImporting(false);
+    }
+  }
+
   return (
     <>
       <SidebarHeader className="p-2 border-b">
@@ -126,21 +192,51 @@ export default function BuildingsNavigator() {
           onChange={(e) => setQuery(e.target.value)}
         />
         {selectedBuilding && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="w-full mt-1.5 h-7 text-xs"
-            onClick={handleExport}
-            disabled={exporting}
-          >
-            {exporting ? (
-              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-            ) : (
-              <Download className="mr-1 h-3 w-3" />
-            )}
-            Export to glTF
-          </Button>
+          <div className="flex gap-1 mt-1.5">
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 h-7 text-xs"
+              onClick={handleExport}
+              disabled={exporting}
+            >
+              {exporting ? (
+                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+              ) : (
+                <Download className="mr-1 h-3 w-3" />
+              )}
+              Export
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="flex-1 h-7 text-xs"
+              onClick={handleExportForEditing}
+              disabled={exportingForEdit}
+            >
+              {exportingForEdit ? (
+                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+              ) : (
+                <Pencil className="mr-1 h-3 w-3" />
+              )}
+              Edit
+            </Button>
+          </div>
         )}
+        <Button
+          variant="outline"
+          size="sm"
+          className="w-full mt-1.5 h-7 text-xs"
+          onClick={handleImport}
+          disabled={importing || !currentProject}
+        >
+          {importing ? (
+            <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+          ) : (
+            <Upload className="mr-1 h-3 w-3" />
+          )}
+          Import Building
+        </Button>
       </SidebarHeader>
 
       <ScrollAreaVirtualizable ref={parentRef} className="flex-1">
