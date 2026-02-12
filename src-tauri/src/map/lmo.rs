@@ -764,6 +764,15 @@ fn read_animation(
     Ok(None)
 }
 
+/// Read animation from a normalized v0x1005 animation blob.
+/// Used by the import pipeline to re-decompose animation data from round-tripped blobs.
+pub fn read_animation_from_blob(
+    cursor: &mut Cursor<&[u8]>,
+    blob_size: usize,
+) -> Result<Option<LmoAnimData>> {
+    read_animation(cursor, blob_size, EXP_OBJ_VERSION_1_0_0_5)
+}
+
 /// Normalize an animation blob to v0x1005 internal format.
 ///
 /// Animation section layout differs by version:

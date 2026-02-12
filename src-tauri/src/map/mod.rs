@@ -1,3 +1,4 @@
+pub mod building_import;
 pub mod commands;
 pub mod lmo;
 pub mod lmo_writer;
