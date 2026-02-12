@@ -16,13 +16,13 @@ use base64::Engine;
 use serde::{Deserialize, Serialize};
 
 use super::lmo::{
-    D3DFVF_DIFFUSE, D3DFVF_NORMAL, D3DFVF_TEXCOUNT_SHIFT, LmoGeomObject, LmoMaterial, LmoModel,
-    LmoSubset, LmoTexInfo, MtlFormatVersion, NonGeomEntry, RenderStateAtom,
+    D3DFVF_NORMAL, D3DFVF_TEXCOUNT_SHIFT, LmoGeomObject, LmoMaterial, LmoModel,
+    LmoSubset, LmoTexInfo, MtlFormatVersion, RenderStateAtom,
     EXP_OBJ_VERSION_1_0_0_5,
 };
 use super::lmo_writer::write_lmo;
 use super::scene_model::{
-    PkoLmoExtras, PkoLmoMaterialExtras, PkoLmoMaterialInfo, PkoLmoTexStageInfo, flat_to_mat44,
+    PkoLmoExtras, PkoLmoMaterialExtras, PkoLmoMaterialInfo, flat_to_mat44,
 };
 
 // ============================================================================
@@ -354,6 +354,7 @@ pub fn import_building_from_gltf(
 // Round-trip import (PKO extras present)
 // ============================================================================
 
+#[allow(clippy::too_many_arguments)]
 fn import_roundtrip(
     doc: &::gltf::Document,
     buffers: &[::gltf::buffer::Data],
@@ -525,6 +526,7 @@ fn import_roundtrip(
 // Fresh import (no PKO extras — external model from Blender)
 // ============================================================================
 
+#[allow(clippy::too_many_arguments)]
 fn import_fresh(
     doc: &::gltf::Document,
     buffers: &[::gltf::buffer::Data],
@@ -771,8 +773,9 @@ fn build_subsets_from_primitives(
 }
 
 /// Extract textures for a round-trip material (checks if the glTF texture changed).
+#[allow(clippy::too_many_arguments)]
 fn extract_material_textures(
-    doc: &::gltf::Document,
+    _doc: &::gltf::Document,
     images: &[::gltf::image::Data],
     mesh: &::gltf::Mesh,
     material_subset_idx: usize,
@@ -1086,6 +1089,179 @@ mod tests {
                 "geom[{}] anim blob mismatch",
                 i
             );
+        }
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn fresh_import_no_extras() {
+        // Export a model using the viewer path (no PKO extras) → import should use fresh defaults
+        let original = make_test_model();
+        let temp_dir = std::env::temp_dir().join("pko_import_test_fresh");
+        let _ = std::fs::create_dir_all(&temp_dir);
+
+        // Write LMO first
+        let lmo_data = crate::map::lmo_writer::write_lmo(&original);
+        let lmo_path = temp_dir.join("test_fresh.lmo");
+        std::fs::write(&lmo_path, &lmo_data).unwrap();
+
+        // Export using the VIEWER path (no PKO extras)
+        let json =
+            crate::map::scene_model::build_gltf_from_lmo(&lmo_path, &temp_dir).unwrap();
+        let gltf_path = temp_dir.join("test_fresh.gltf");
+        std::fs::write(&gltf_path, &json).unwrap();
+
+        // Import back — should take fresh path
+        let result =
+            import_building_from_gltf(&gltf_path, "test_fresh", &temp_dir, 1.0).unwrap();
+
+        let imported = lmo::load_lmo(std::path::Path::new(&result.lmo_path)).unwrap();
+
+        // Fresh import should produce exactly 1 geom object (merged)
+        assert_eq!(imported.geom_objects.len(), 1, "fresh import should merge into 1 geom");
+
+        let imp_geom = &imported.geom_objects[0];
+
+        // Verify fresh defaults
+        assert_eq!(imp_geom.id, 0, "fresh import should assign id=0");
+        assert_eq!(imp_geom.parent_id, 0xFFFFFFFF, "fresh import parent_id");
+        assert_eq!(imp_geom.obj_type, 0, "fresh import obj_type");
+        assert_eq!(imp_geom.pt_type, 4, "fresh import pt_type (TRIANGLELIST)");
+        assert_eq!(imp_geom.bone_infl_factor, 0, "fresh import bone_infl_factor");
+        assert_eq!(imp_geom.vertex_element_num, 0, "fresh import vertex_element_num");
+        assert!(imp_geom.helper_blob.is_empty(), "fresh import no helpers");
+        assert!(imp_geom.raw_anim_blob.is_empty(), "fresh import no animation");
+
+        // mat_local should be identity
+        for r in 0..4 {
+            for c in 0..4 {
+                let expected = if r == c { 1.0 } else { 0.0 };
+                assert!(
+                    (imp_geom.mat_local[r][c] - expected).abs() < 1e-5,
+                    "mat_local[{}][{}] expected {} got {}",
+                    r, c, expected, imp_geom.mat_local[r][c]
+                );
+            }
+        }
+
+        // FVF should include at least XYZ
+        assert!(imp_geom.fvf & 0x002 != 0, "FVF should include D3DFVF_XYZ");
+
+        // Should have vertices (from the original triangle)
+        assert!(imp_geom.vertices.len() >= 3, "should have at least 3 vertices");
+        assert!(!imp_geom.indices.is_empty(), "should have indices");
+        assert!(!imp_geom.subsets.is_empty(), "should have at least one subset");
+        assert!(!imp_geom.materials.is_empty(), "should have at least one material");
+
+        // Clean up
+        let _ = std::fs::remove_dir_all(temp_dir);
+    }
+
+    #[test]
+    fn full_roundtrip_animated_building() {
+        // Animated building (by-bd013 lighthouse) full round-trip: LMO → glTF → LMO
+        // Verifies animation blobs are preserved through export/import
+        let path = std::path::Path::new("../top-client/model/scene/by-bd013.lmo");
+        if !path.exists() {
+            return;
+        }
+
+        let project_dir = std::path::Path::new("../top-client");
+        let temp_dir = std::env::temp_dir().join("pko_anim_rt_test");
+        let _ = std::fs::create_dir_all(&temp_dir);
+
+        // Parse original
+        let original = lmo::load_lmo(path).unwrap();
+
+        // Find geom objects with animation
+        let animated_count = original
+            .geom_objects
+            .iter()
+            .filter(|g| !g.raw_anim_blob.is_empty())
+            .count();
+        assert!(animated_count > 0, "by-bd013 should have animated objects");
+
+        // Export roundtrip glTF
+        let json =
+            crate::map::scene_model::build_gltf_from_lmo_roundtrip(path, project_dir).unwrap();
+        let gltf_path = temp_dir.join("anim_rt.gltf");
+        std::fs::write(&gltf_path, &json).unwrap();
+
+        // Import back
+        let result =
+            import_building_from_gltf(&gltf_path, "anim_rt_test", &temp_dir, 1.0).unwrap();
+
+        // Re-parse
+        let imported = lmo::load_lmo(std::path::Path::new(&result.lmo_path)).unwrap();
+
+        assert_eq!(
+            imported.geom_objects.len(),
+            original.geom_objects.len(),
+            "geom object count mismatch"
+        );
+
+        for (i, (orig, imp)) in original
+            .geom_objects
+            .iter()
+            .zip(imported.geom_objects.iter())
+            .enumerate()
+        {
+            assert_eq!(orig.id, imp.id, "geom[{}] id mismatch", i);
+
+            // Animation blob should be exactly preserved
+            assert_eq!(
+                orig.raw_anim_blob.len(),
+                imp.raw_anim_blob.len(),
+                "geom[{}] anim blob size mismatch: {} vs {}",
+                i,
+                orig.raw_anim_blob.len(),
+                imp.raw_anim_blob.len()
+            );
+            assert_eq!(
+                orig.raw_anim_blob, imp.raw_anim_blob,
+                "geom[{}] anim blob content mismatch",
+                i
+            );
+
+            // Helper blob should also be preserved
+            assert_eq!(
+                orig.helper_blob, imp.helper_blob,
+                "geom[{}] helper blob mismatch",
+                i
+            );
+
+            // Vertex/index counts should match
+            assert_eq!(
+                orig.vertices.len(),
+                imp.vertices.len(),
+                "geom[{}] vertex count mismatch",
+                i
+            );
+            assert_eq!(
+                orig.indices.len(),
+                imp.indices.len(),
+                "geom[{}] index count mismatch",
+                i
+            );
+
+            // Material count should match
+            assert_eq!(
+                orig.materials.len(),
+                imp.materials.len(),
+                "geom[{}] material count mismatch",
+                i
+            );
+
+            // If original has animation data, verify it parses correctly
+            if orig.animation.is_some() {
+                assert!(
+                    imp.animation.is_some(),
+                    "geom[{}] should have parsed animation data",
+                    i
+                );
+            }
         }
 
         // Clean up
