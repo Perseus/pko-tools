@@ -2,6 +2,14 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Workflow
+
+When asked to implement something, always create a written plan first and get user approval before writing code. Never jump straight into implementation.
+
+## Languages & Linting
+
+Primary languages: Rust (main backend/tools), TypeScript (web frontend/tools). Always run `cargo clippy` after Rust changes and fix warnings. Run all tests before considering a task complete.
+
 ## Project Overview
 
 This is a Tauri-based desktop application for converting TOP/PKO game client assets. It enables importing, editing, and exporting character models, animations, and textures by converting proprietary game formats (`.lgo`, `.lab`, `.bmp`) to/from standard glTF format for use in 3D tools like Blender.
@@ -112,6 +120,18 @@ The Tauri backend is organized into domain modules:
 3. User selects character → `load_character` command retrieves model data
 4. **Export:** Rust reads `.lgo` + `.lab` files → converts to glTF JSON → frontend downloads file
 5. **Import:** User selects glTF file → Rust parses glTF → writes `.lgo`, `.lab`, `.bmp` files to `imports/` folder
+
+## 3D/Engine Conventions
+
+This project involves PKO (Pirate King Online) game engine files. Coordinate systems differ between PKO/glTF (right-handed) and Unity (left-handed) — always account for coordinate handedness conversions when working with 3D positions, especially Z-axis flipping and terrain height offsets.
+
+## Debugging
+
+When fixing visual/rendering bugs, verify the fix actually resolves the visual issue — don't assume the first hypothesis is correct. Common pitfalls: emissive factors preserved without their textures, wrong atlas regions/sprite coordinates, texture encoding mismatches (PKO-encoded vs standard BMP/DDS).
+
+## Import/Export Pipeline
+
+When working on import/export pipelines (GLB, glTF, PKO models), always verify binary size matches expected format by checking FVF flags, vertex color data inclusion, and texture path resolution (character folder vs items folder depending on model type).
 
 ## Important Implementation Details
 
