@@ -748,12 +748,12 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
             // Default material
             build_lmo_material(
                 &mut builder,
-                &lmo::LmoMaterial {
-                    diffuse: [0.7, 0.7, 0.7, 1.0],
-                    ambient: [0.3, 0.3, 0.3, 1.0],
-                    opacity: 1.0,
-                    tex_filename: None,
-                },
+                &lmo::LmoMaterial::new_simple(
+                    [0.7, 0.7, 0.7, 1.0],
+                    [0.3, 0.3, 0.3, 1.0],
+                    1.0,
+                    None,
+                ),
                 &format!("{}_default_mat", prefix),
                 project_dir,
                 true,
@@ -941,12 +941,12 @@ fn add_model_to_builder(
         if geom.materials.is_empty() {
             build_lmo_material(
                 builder,
-                &lmo::LmoMaterial {
-                    diffuse: [0.7, 0.7, 0.7, 1.0],
-                    ambient: [0.3, 0.3, 0.3, 1.0],
-                    opacity: 1.0,
-                    tex_filename: None,
-                },
+                &lmo::LmoMaterial::new_simple(
+                    [0.7, 0.7, 0.7, 1.0],
+                    [0.3, 0.3, 0.3, 1.0],
+                    1.0,
+                    None,
+                ),
                 &format!("{}_mat", prefix),
                 project_dir,
                 false, // skip textures for map batch loading
@@ -1001,6 +1001,13 @@ mod tests {
                     [0.0, 0.0, 1.0, 0.0],
                     [0.0, 0.0, 0.0, 1.0],
                 ],
+                rcci: [0u8; 16],
+                state_ctrl: [0u8; 8],
+                fvf: 0x112, // XYZ | NORMAL | TEX1
+                pt_type: 4,
+                bone_infl_factor: 0,
+                vertex_element_num: 0,
+                mesh_rs_set: vec![lmo::RenderStateAtom::default(); 8],
                 vertices: vec![
                     [0.0, 0.0, 0.0],
                     [1.0, 0.0, 0.0],
@@ -1020,14 +1027,18 @@ mod tests {
                     vertex_num: 3,
                     min_index: 0,
                 }],
-                materials: vec![lmo::LmoMaterial {
-                    diffuse: [0.8, 0.2, 0.1, 1.0],
-                    ambient: [0.3, 0.3, 0.3, 1.0],
-                    opacity: 1.0,
-                    tex_filename: Some("wall.bmp".to_string()),
-                }],
+                materials: vec![lmo::LmoMaterial::new_simple(
+                    [0.8, 0.2, 0.1, 1.0],
+                    [0.3, 0.3, 0.3, 1.0],
+                    1.0,
+                    Some("wall.bmp".to_string()),
+                )],
+                helper_blob: vec![],
+                raw_anim_blob: vec![],
                 animation: None,
+                mtl_format_version: lmo::MtlFormatVersion::Current,
             }],
+            non_geom_entries: vec![],
         }
     }
 
@@ -1086,12 +1097,12 @@ mod tests {
 
     #[test]
     fn build_material_opaque() {
-        let mat = lmo::LmoMaterial {
-            diffuse: [0.5, 0.6, 0.7, 1.0],
-            ambient: [0.1, 0.1, 0.1, 1.0],
-            opacity: 1.0,
-            tex_filename: None,
-        };
+        let mat = lmo::LmoMaterial::new_simple(
+            [0.5, 0.6, 0.7, 1.0],
+            [0.1, 0.1, 0.1, 1.0],
+            1.0,
+            None,
+        );
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
         build_lmo_material(&mut builder, &mat, "test", &tmp, false);
@@ -1107,12 +1118,12 @@ mod tests {
 
     #[test]
     fn build_material_transparent() {
-        let mat = lmo::LmoMaterial {
-            diffuse: [0.5, 0.6, 0.7, 1.0],
-            ambient: [0.1, 0.1, 0.1, 1.0],
-            opacity: 0.5,
-            tex_filename: None,
-        };
+        let mat = lmo::LmoMaterial::new_simple(
+            [0.5, 0.6, 0.7, 1.0],
+            [0.1, 0.1, 0.1, 1.0],
+            0.5,
+            None,
+        );
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
         build_lmo_material(&mut builder, &mat, "test", &tmp, false);

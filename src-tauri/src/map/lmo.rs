@@ -15,8 +15,8 @@
 //!                  helper_size(4) + anim_size(4)
 //!     Materials:   mtl_num(4) + mtl_num × lwMtlTexInfo
 //!     Mesh:        lwMeshInfoHeader + vertices + normals + texcoords + colors + indices + subsets
-//!     Helpers:     (skip)
-//!     Animation:   (skip)
+//!     Helpers:     helper_blob (raw bytes)
+//!     Animation:   raw_anim_blob (raw bytes) — also decomposed for glTF visualization
 //! ```
 
 use std::io::{Cursor, Read as IoRead, Seek, SeekFrom};
@@ -24,19 +24,22 @@ use std::path::Path;
 
 use anyhow::{anyhow, Result};
 use cgmath::{InnerSpace, Matrix3, Matrix4, Quaternion, Vector3};
+use serde::{Deserialize, Serialize};
 
 // FVF flags (matching character/mesh.rs)
-const D3DFVF_NORMAL: u32 = 0x010;
-const D3DFVF_DIFFUSE: u32 = 0x040;
-const D3DFVF_TEXCOUNT_MASK: u32 = 0xf00;
-const D3DFVF_TEXCOUNT_SHIFT: u32 = 8;
+pub const D3DFVF_NORMAL: u32 = 0x010;
+pub const D3DFVF_DIFFUSE: u32 = 0x040;
+pub const D3DFVF_TEXCOUNT_MASK: u32 = 0xf00;
+pub const D3DFVF_TEXCOUNT_SHIFT: u32 = 8;
 
 // Object types in the header table
-const OBJ_TYPE_GEOMETRY: u32 = 1;
+pub const OBJ_TYPE_GEOMETRY: u32 = 1;
+pub const OBJ_TYPE_HELPER: u32 = 2;
 
 // Version constants
-const EXP_OBJ_VERSION_0_0_0_0: u32 = 0;
-const EXP_OBJ_VERSION_1_0_0_4: u32 = 0x1004;
+pub const EXP_OBJ_VERSION_0_0_0_0: u32 = 0;
+pub const EXP_OBJ_VERSION_1_0_0_4: u32 = 0x1004;
+pub const EXP_OBJ_VERSION_1_0_0_5: u32 = 0x1005;
 
 // Mesh render state atom count
 const LW_MESH_RS_NUM: usize = 8;
@@ -46,6 +49,50 @@ const LW_MTL_RS_NUM: usize = 8;
 const LW_MAX_TEXTURESTAGE_NUM: usize = 4;
 const LW_MAX_SUBSET_NUM: usize = 16;
 const RENDER_STATE_ATOM_SIZE: usize = 12; // state(4) + value0(4) + value1(4)
+
+/// A render state atom: state(u32) + value0(u32) + value1(u32) = 12 bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct RenderStateAtom {
+    pub state: u32,
+    pub value0: u32,
+    pub value1: u32,
+}
+
+impl Default for RenderStateAtom {
+    fn default() -> Self {
+        Self { state: 0, value0: 0, value1: 0 }
+    }
+}
+
+/// Texture stage info — all D3D metadata for a single texture slot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LmoTexInfo {
+    pub stage: u32,
+    pub level: u32,
+    pub usage: u32,
+    pub d3d_format: u32,
+    pub d3d_pool: u32,
+    pub byte_alignment_flag: u32,
+    pub tex_type: u32,
+    pub width: u32,
+    pub height: u32,
+    pub colorkey_type: u32,
+    pub colorkey: u32,
+    pub filename: String,
+    pub data: u32,
+    pub tss_set: Vec<RenderStateAtom>,
+}
+
+impl Default for LmoTexInfo {
+    fn default() -> Self {
+        Self {
+            stage: 0, level: 0, usage: 0, d3d_format: 0, d3d_pool: 0,
+            byte_alignment_flag: 0, tex_type: 0, width: 0, height: 0,
+            colorkey_type: 0, colorkey: 0, filename: String::new(), data: 0,
+            tss_set: vec![RenderStateAtom::default(); LW_MTL_RS_NUM],
+        }
+    }
+}
 
 /// Animation data for a geometry object — decomposed from matrix keyframes.
 #[derive(Debug, Clone)]
@@ -62,6 +109,19 @@ pub struct LmoGeomObject {
     pub parent_id: u32,
     pub obj_type: u32,
     pub mat_local: [[f32; 4]; 4],
+
+    // --- Round-trip header fields ---
+    pub rcci: [u8; 16],
+    pub state_ctrl: [u8; 8],
+
+    // --- Mesh header fields (needed for binary writer) ---
+    pub fvf: u32,
+    pub pt_type: u32,
+    pub bone_infl_factor: u32,
+    pub vertex_element_num: u32,
+    pub mesh_rs_set: Vec<RenderStateAtom>,
+
+    // --- Geometry data ---
     pub vertices: Vec<[f32; 3]>,
     pub normals: Vec<[f32; 3]>,
     pub texcoords: Vec<[f32; 2]>,
@@ -69,11 +129,20 @@ pub struct LmoGeomObject {
     pub indices: Vec<u32>,
     pub subsets: Vec<LmoSubset>,
     pub materials: Vec<LmoMaterial>,
+
+    // --- Pass-through blobs for round-trip ---
+    pub helper_blob: Vec<u8>,
+    pub raw_anim_blob: Vec<u8>,
+
+    // --- Decomposed animation for glTF visualization ---
     pub animation: Option<LmoAnimData>,
+
+    // --- Material format version for writer ---
+    pub mtl_format_version: MtlFormatVersion,
 }
 
 /// A mesh subset — defines a range of indices rendered with a specific material.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LmoSubset {
     pub primitive_num: u32,
     pub start_index: u32,
@@ -81,13 +150,38 @@ pub struct LmoSubset {
     pub min_index: u32,
 }
 
-/// Material info extracted from an LMO geometry object.
-#[derive(Debug, Clone)]
+/// Material info for an LMO geometry object — stores ALL fields for round-trip.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LmoMaterial {
     pub diffuse: [f32; 4],
     pub ambient: [f32; 4],
+    pub specular: [f32; 4],
+    pub emissive: [f32; 4],
+    pub power: f32,
     pub opacity: f32,
+    pub transp_type: u32,
+    pub rs_set: Vec<RenderStateAtom>,
+    pub tex_infos: [LmoTexInfo; 4],
+    // Convenience accessor — first texture's filename (backward-compatible)
     pub tex_filename: Option<String>,
+}
+
+impl LmoMaterial {
+    /// Create a material with minimal required fields and defaults for round-trip fields.
+    pub fn new_simple(diffuse: [f32; 4], ambient: [f32; 4], opacity: f32, tex_filename: Option<String>) -> Self {
+        Self {
+            diffuse,
+            ambient,
+            specular: [0.0; 4],
+            emissive: [0.0; 4],
+            power: 0.0,
+            opacity,
+            transp_type: 0,
+            rs_set: vec![RenderStateAtom::default(); LW_MTL_RS_NUM],
+            tex_infos: std::array::from_fn(|_| LmoTexInfo::default()),
+            tex_filename,
+        }
+    }
 }
 
 /// A parsed LMO model containing multiple geometry objects.
@@ -95,6 +189,26 @@ pub struct LmoMaterial {
 pub struct LmoModel {
     pub version: u32,
     pub geom_objects: Vec<LmoGeomObject>,
+    /// Non-geometry header table entries (e.g., global helpers type=2) — stored for round-trip.
+    pub non_geom_entries: Vec<NonGeomEntry>,
+}
+
+/// A non-geometry entry in the header table (type != 1), stored as raw bytes for round-trip.
+#[derive(Debug, Clone)]
+pub struct NonGeomEntry {
+    pub obj_type: u32,
+    pub data: Vec<u8>,
+}
+
+/// Material format version determined from the mtl_old_version field.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum MtlFormatVersion {
+    /// MTLTEX_VERSION0000: no opacity/transp, lwTexInfo_0000, old rs/tss (128 bytes each)
+    V0000,
+    /// MTLTEX_VERSION0001: has opacity/transp, lwTexInfo_0001, old rs/tss (128 bytes each)
+    V0001,
+    /// MTLTEX_VERSION0002+ / EXP_OBJ >= 1.0.0.0: has opacity/transp, lwTexInfo, new rs/tss (96 bytes each)
+    Current,
 }
 
 // ============================================================================
@@ -134,15 +248,22 @@ fn read_mat44(cursor: &mut Cursor<&[u8]>) -> Result<[[f32; 4]; 4]> {
 // Material parsing
 // ============================================================================
 
-/// Material format version determined from the mtl_old_version field.
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum MtlFormatVersion {
-    /// MTLTEX_VERSION0000: no opacity/transp, lwTexInfo_0000, old rs/tss (128 bytes each)
-    V0000,
-    /// MTLTEX_VERSION0001: has opacity/transp, lwTexInfo_0001, old rs/tss (128 bytes each)
-    V0001,
-    /// MTLTEX_VERSION0002+ / EXP_OBJ >= 1.0.0.0: has opacity/transp, lwTexInfo, new rs/tss (96 bytes each)
-    Current,
+fn read_rs_atoms(cursor: &mut Cursor<&[u8]>, count: usize) -> Result<Vec<RenderStateAtom>> {
+    let mut atoms = Vec::with_capacity(count);
+    for _ in 0..count {
+        atoms.push(RenderStateAtom {
+            state: read_u32(cursor)?,
+            value0: read_u32(cursor)?,
+            value1: read_u32(cursor)?,
+        });
+    }
+    Ok(atoms)
+}
+
+fn read_bytes(cursor: &mut Cursor<&[u8]>, n: usize) -> Result<Vec<u8>> {
+    let mut buf = vec![0u8; n];
+    cursor.read_exact(&mut buf)?;
+    Ok(buf)
 }
 
 /// Read a single material entry from cursor, format determined by `mtl_ver`.
@@ -153,64 +274,149 @@ enum MtlFormatVersion {
 ///   - Current: opacity(4) + transp(4) + lwMaterial(68) + lwRenderStateAtom[8](96) + lwTexInfo[4]
 fn read_material(cursor: &mut Cursor<&[u8]>, mtl_ver: MtlFormatVersion) -> Result<LmoMaterial> {
     // Opacity / transp_type — absent in V0000
-    let opacity = if mtl_ver == MtlFormatVersion::V0000 {
-        1.0
+    let (opacity, transp_type) = if mtl_ver == MtlFormatVersion::V0000 {
+        (1.0, 0u32)
     } else {
         let o = read_f32(cursor)?;
-        let _transp_type = read_u32(cursor)?;
-        o
+        let t = read_u32(cursor)?;
+        (o, t)
     };
 
     // CharMaterial: dif(16) + amb(16) + spe(16) + emi(16) + power(4) = 68 bytes
     let diffuse = [read_f32(cursor)?, read_f32(cursor)?, read_f32(cursor)?, read_f32(cursor)?];
     let ambient = [read_f32(cursor)?, read_f32(cursor)?, read_f32(cursor)?, read_f32(cursor)?];
-    cursor.seek(SeekFrom::Current(16))?; // specular
-    cursor.seek(SeekFrom::Current(16))?; // emissive
-    cursor.seek(SeekFrom::Current(4))?;  // power
+    let specular = [read_f32(cursor)?, read_f32(cursor)?, read_f32(cursor)?, read_f32(cursor)?];
+    let emissive = [read_f32(cursor)?, read_f32(cursor)?, read_f32(cursor)?, read_f32(cursor)?];
+    let power = read_f32(cursor)?;
 
     // rs_set — old formats use lwRenderStateSetMtl2 (128 bytes), new uses lwRenderStateAtom[8] (96 bytes)
-    let mtl_rs_size: i64 = match mtl_ver {
-        MtlFormatVersion::V0000 | MtlFormatVersion::V0001 => 128,
-        MtlFormatVersion::Current => (LW_MTL_RS_NUM * RENDER_STATE_ATOM_SIZE) as i64,
+    let rs_set = match mtl_ver {
+        MtlFormatVersion::V0000 | MtlFormatVersion::V0001 => {
+            // Old format: 128 bytes — store as raw bytes, converted to 8 atoms padded with zeros
+            // We read raw 128 bytes but store as Vec<RenderStateAtom> for uniformity
+            let raw = read_bytes(cursor, 128)?;
+            // Interpret old format: lwRenderStateValue[2][8] — each value = state(4) + value(4) = 8 bytes
+            // Repack into RenderStateAtom with value1=0
+            let mut atoms = Vec::with_capacity(LW_MTL_RS_NUM);
+            let mut off = 0;
+            for _ in 0..LW_MTL_RS_NUM.min(raw.len() / 8) {
+                let state = u32::from_le_bytes([raw[off], raw[off+1], raw[off+2], raw[off+3]]);
+                let value0 = u32::from_le_bytes([raw[off+4], raw[off+5], raw[off+6], raw[off+7]]);
+                atoms.push(RenderStateAtom { state, value0, value1: 0 });
+                off += 8;
+            }
+            while atoms.len() < LW_MTL_RS_NUM {
+                atoms.push(RenderStateAtom::default());
+            }
+            atoms
+        }
+        MtlFormatVersion::Current => {
+            read_rs_atoms(cursor, LW_MTL_RS_NUM)?
+        }
     };
-    cursor.seek(SeekFrom::Current(mtl_rs_size))?;
 
-    // tex_seq: 4 × TextureInfo — extract filename from first texture slot
+    // tex_seq: 4 × TextureInfo — read ALL fields for round-trip
+    let mut tex_infos: [LmoTexInfo; 4] = std::array::from_fn(|_| LmoTexInfo::default());
     let mut tex_filename = None;
+
     for i in 0..LW_MAX_TEXTURESTAGE_NUM {
         match mtl_ver {
             MtlFormatVersion::V0000 => {
                 // lwTexInfo_0000: stage(4) + colorkey_type(4) + colorkey(4) + format(4) +
                 //                 file_name(64) + lwTextureStageStateSetTex2(128) = 208
-                cursor.seek(SeekFrom::Current(16))?; // stage + colorkey_type + colorkey + format
+                let stage = read_u32(cursor)?;
+                let colorkey_type = read_u32(cursor)?;
+                let colorkey = read_u32(cursor)?;
+                let d3d_format = read_u32(cursor)?;
                 let fname = read_cstr_fixed(cursor, 64)?;
-                cursor.seek(SeekFrom::Current(128))?; // tss_set
+                // Old tss_set: 128 bytes
+                let raw_tss = read_bytes(cursor, 128)?;
+                let mut tss_set = Vec::with_capacity(LW_MTL_RS_NUM);
+                let mut off = 0;
+                for _ in 0..LW_MTL_RS_NUM.min(raw_tss.len() / 8) {
+                    let s = u32::from_le_bytes([raw_tss[off], raw_tss[off+1], raw_tss[off+2], raw_tss[off+3]]);
+                    let v = u32::from_le_bytes([raw_tss[off+4], raw_tss[off+5], raw_tss[off+6], raw_tss[off+7]]);
+                    tss_set.push(RenderStateAtom { state: s, value0: v, value1: 0 });
+                    off += 8;
+                }
+                while tss_set.len() < LW_MTL_RS_NUM {
+                    tss_set.push(RenderStateAtom::default());
+                }
 
                 if i == 0 && !fname.is_empty() {
-                    tex_filename = Some(fname);
+                    tex_filename = Some(fname.clone());
                 }
+                tex_infos[i] = LmoTexInfo {
+                    stage, level: 0, usage: 0, d3d_format, d3d_pool: 0,
+                    byte_alignment_flag: 0, tex_type: 0, width: 0, height: 0,
+                    colorkey_type, colorkey, filename: fname, data: 0, tss_set,
+                };
             }
             MtlFormatVersion::V0001 => {
                 // lwTexInfo_0001: stage(4) + level(4) + usage(4) + format(4) + pool(4) +
                 //   byte_align(4) + type(4) + width(4) + height(4) + colorkey_type(4) +
                 //   colorkey(4) + file_name(64) + data(4) + lwTextureStageStateSetTex2(128) = 240
-                cursor.seek(SeekFrom::Current(44))?; // 11 DWORDs
+                let stage = read_u32(cursor)?;
+                let level = read_u32(cursor)?;
+                let usage = read_u32(cursor)?;
+                let d3d_format = read_u32(cursor)?;
+                let d3d_pool = read_u32(cursor)?;
+                let byte_alignment_flag = read_u32(cursor)?;
+                let tex_type = read_u32(cursor)?;
+                let width = read_u32(cursor)?;
+                let height = read_u32(cursor)?;
+                let colorkey_type = read_u32(cursor)?;
+                let colorkey = read_u32(cursor)?;
                 let fname = read_cstr_fixed(cursor, 64)?;
-                cursor.seek(SeekFrom::Current(4 + 128))?; // data + tss_set
+                let data = read_u32(cursor)?;
+                // Old tss_set: 128 bytes
+                let raw_tss = read_bytes(cursor, 128)?;
+                let mut tss_set = Vec::with_capacity(LW_MTL_RS_NUM);
+                let mut off = 0;
+                for _ in 0..LW_MTL_RS_NUM.min(raw_tss.len() / 8) {
+                    let s = u32::from_le_bytes([raw_tss[off], raw_tss[off+1], raw_tss[off+2], raw_tss[off+3]]);
+                    let v = u32::from_le_bytes([raw_tss[off+4], raw_tss[off+5], raw_tss[off+6], raw_tss[off+7]]);
+                    tss_set.push(RenderStateAtom { state: s, value0: v, value1: 0 });
+                    off += 8;
+                }
+                while tss_set.len() < LW_MTL_RS_NUM {
+                    tss_set.push(RenderStateAtom::default());
+                }
 
                 if i == 0 && !fname.is_empty() {
-                    tex_filename = Some(fname);
+                    tex_filename = Some(fname.clone());
                 }
+                tex_infos[i] = LmoTexInfo {
+                    stage, level, usage, d3d_format, d3d_pool,
+                    byte_alignment_flag, tex_type, width, height,
+                    colorkey_type, colorkey, filename: fname, data, tss_set,
+                };
             }
             MtlFormatVersion::Current => {
                 // lwTexInfo: same fields as V0001 but tss_set is lwRenderStateAtom[8] (96 bytes)
-                cursor.seek(SeekFrom::Current(44))?; // 11 DWORDs
+                let stage = read_u32(cursor)?;
+                let level = read_u32(cursor)?;
+                let usage = read_u32(cursor)?;
+                let d3d_format = read_u32(cursor)?;
+                let d3d_pool = read_u32(cursor)?;
+                let byte_alignment_flag = read_u32(cursor)?;
+                let tex_type = read_u32(cursor)?;
+                let width = read_u32(cursor)?;
+                let height = read_u32(cursor)?;
+                let colorkey_type = read_u32(cursor)?;
+                let colorkey = read_u32(cursor)?;
                 let fname = read_cstr_fixed(cursor, 64)?;
-                cursor.seek(SeekFrom::Current(4 + (LW_MTL_RS_NUM * RENDER_STATE_ATOM_SIZE) as i64))?; // data + tss_set
+                let data = read_u32(cursor)?;
+                let tss_set = read_rs_atoms(cursor, LW_MTL_RS_NUM)?;
 
                 if i == 0 && !fname.is_empty() {
-                    tex_filename = Some(fname);
+                    tex_filename = Some(fname.clone());
                 }
+                tex_infos[i] = LmoTexInfo {
+                    stage, level, usage, d3d_format, d3d_pool,
+                    byte_alignment_flag, tex_type, width, height,
+                    colorkey_type, colorkey, filename: fname, data, tss_set,
+                };
             }
         }
     }
@@ -218,7 +424,13 @@ fn read_material(cursor: &mut Cursor<&[u8]>, mtl_ver: MtlFormatVersion) -> Resul
     Ok(LmoMaterial {
         diffuse,
         ambient,
+        specular,
+        emissive,
+        power,
         opacity,
+        transp_type,
+        rs_set,
+        tex_infos,
         tex_filename,
     })
 }
@@ -227,18 +439,23 @@ fn read_material(cursor: &mut Cursor<&[u8]>, mtl_ver: MtlFormatVersion) -> Resul
 // Mesh parsing
 // ============================================================================
 
-/// Read mesh data from cursor. Returns (vertices, normals, texcoords, vertex_colors, indices, subsets).
-///
-/// `file_version` is the top-level LMO file version. For version 0, an extra `old_version`
-/// DWORD is read first and used to determine the actual mesh format.
-fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<(
-    Vec<[f32; 3]>,
-    Vec<[f32; 3]>,
-    Vec<[f32; 2]>,
-    Vec<u32>,
-    Vec<u32>,
-    Vec<LmoSubset>,
-)> {
+/// Mesh data parsed from a geometry object.
+struct MeshData {
+    fvf: u32,
+    pt_type: u32,
+    bone_infl_factor: u32,
+    vertex_element_num: u32,
+    mesh_rs_set: Vec<RenderStateAtom>,
+    vertices: Vec<[f32; 3]>,
+    normals: Vec<[f32; 3]>,
+    texcoords: Vec<[f32; 2]>,
+    vertex_colors: Vec<u32>,
+    indices: Vec<u32>,
+    subsets: Vec<LmoSubset>,
+}
+
+/// Read mesh data from cursor, returning all header fields + geometry data.
+fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<MeshData> {
     // For version 0, the mesh section has an embedded old_version prefix
     let mesh_version = if file_version == EXP_OBJ_VERSION_0_0_0_0 {
         read_u32(cursor)?
@@ -247,61 +464,60 @@ fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<(
     };
 
     // Read mesh header — format depends on version
-    let (fvf, vertex_num, index_num, subset_num, bone_index_num, vertex_element_num);
+    let (fvf, pt_type, vertex_num, index_num, subset_num, bone_index_num, bone_infl_factor, vertex_element_num);
+    let mesh_rs_set;
 
     if mesh_version >= EXP_OBJ_VERSION_1_0_0_4 {
-        // Full header: fvf + pt_type + vertex_num + index_num + subset_num +
-        //              bone_index_num + bone_infl_factor + vertex_element_num + rs_set[8]
         fvf = read_u32(cursor)?;
-        let _pt_type = read_u32(cursor)?;
+        pt_type = read_u32(cursor)?;
         vertex_num = read_u32(cursor)? as usize;
         index_num = read_u32(cursor)? as usize;
         subset_num = read_u32(cursor)? as usize;
         bone_index_num = read_u32(cursor)? as usize;
-        let _bone_infl_factor = read_u32(cursor)?;
-        vertex_element_num = read_u32(cursor)? as usize;
-
-        // rs_set: 8 × RenderStateAtom (12 bytes each)
-        cursor.seek(SeekFrom::Current((LW_MESH_RS_NUM * RENDER_STATE_ATOM_SIZE) as i64))?;
+        bone_infl_factor = read_u32(cursor)?;
+        vertex_element_num = read_u32(cursor)?;
+        mesh_rs_set = read_rs_atoms(cursor, LW_MESH_RS_NUM)?;
     } else {
-        // Older header: fvf + pt_type + vertex_num + index_num + subset_num + bone_index_num
-        // No bone_infl_factor, no vertex_element_num
         fvf = read_u32(cursor)?;
-        let _pt_type = read_u32(cursor)?;
+        pt_type = read_u32(cursor)?;
         vertex_num = read_u32(cursor)? as usize;
         index_num = read_u32(cursor)? as usize;
         subset_num = read_u32(cursor)? as usize;
         bone_index_num = read_u32(cursor)? as usize;
+        bone_infl_factor = 0;
         vertex_element_num = 0;
 
         if mesh_version == 0 {
-            // MESH_VERSION0000: rs_set is lwRenderStateSetMesh2 = lwRenderStateValue[2][8]
-            // lwRenderStateValue = state(4) + value(4) = 8 bytes
-            // Total: 2 × 8 × 8 = 128 bytes
-            cursor.seek(SeekFrom::Current(128))?;
+            // MESH_VERSION0000: 128 bytes — old format
+            let raw = read_bytes(cursor, 128)?;
+            let mut atoms = Vec::with_capacity(LW_MESH_RS_NUM);
+            let mut off = 0;
+            for _ in 0..LW_MESH_RS_NUM.min(raw.len() / 8) {
+                let state = u32::from_le_bytes([raw[off], raw[off+1], raw[off+2], raw[off+3]]);
+                let value0 = u32::from_le_bytes([raw[off+4], raw[off+5], raw[off+6], raw[off+7]]);
+                atoms.push(RenderStateAtom { state, value0, value1: 0 });
+                off += 8;
+            }
+            while atoms.len() < LW_MESH_RS_NUM {
+                atoms.push(RenderStateAtom::default());
+            }
+            mesh_rs_set = atoms;
         } else {
-            // MESH_VERSION0001 / EXP_OBJ_VERSION_1_0_0_0..3: rs_set is lwRenderStateAtom[8]
-            // lwRenderStateAtom = state(4) + value0(4) + value1(4) = 12 bytes
-            // Total: 8 × 12 = 96 bytes
-            cursor.seek(SeekFrom::Current((LW_MESH_RS_NUM * RENDER_STATE_ATOM_SIZE) as i64))?;
+            mesh_rs_set = read_rs_atoms(cursor, LW_MESH_RS_NUM)?;
         }
     }
 
     if mesh_version >= EXP_OBJ_VERSION_1_0_0_4 {
-        // New format: vertex_elements, vertices, normals, texcoords, colors, blending, indices, subsets
-
-        // D3DVertexElement9 entries (8 bytes each)
+        // D3DVertexElement9 entries (8 bytes each) — skip
         if vertex_element_num > 0 {
             cursor.seek(SeekFrom::Current(vertex_element_num as i64 * 8))?;
         }
 
-        // Vertex positions
         let mut vertices = Vec::with_capacity(vertex_num);
         for _ in 0..vertex_num {
             vertices.push([read_f32(cursor)?, read_f32(cursor)?, read_f32(cursor)?]);
         }
 
-        // Normals
         let mut normals = Vec::new();
         if (fvf & D3DFVF_NORMAL) != 0 {
             normals.reserve(vertex_num);
@@ -310,7 +526,6 @@ fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<(
             }
         }
 
-        // Texture coordinates
         let tex_count = ((fvf & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT) as usize;
         let mut texcoords = Vec::new();
         for tc in 0..tex_count {
@@ -323,7 +538,6 @@ fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<(
             }
         }
 
-        // Vertex colors
         let mut vertex_colors = Vec::new();
         if (fvf & D3DFVF_DIFFUSE) != 0 {
             vertex_colors.reserve(vertex_num);
@@ -332,20 +546,15 @@ fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<(
             }
         }
 
-        // Skip blend/bone data if present
         if bone_index_num > 0 {
-            // lwBlendInfo per vertex (each is 8 bytes: 2 floats for weights)
-            // + DWORD per bone_index
             cursor.seek(SeekFrom::Current(vertex_num as i64 * 8 + bone_index_num as i64 * 4))?;
         }
 
-        // Indices (u32)
         let mut indices = Vec::with_capacity(index_num);
         for _ in 0..index_num {
             indices.push(read_u32(cursor)?);
         }
 
-        // Subsets
         let mut subsets = Vec::with_capacity(subset_num);
         for _ in 0..subset_num {
             subsets.push(LmoSubset {
@@ -356,11 +565,10 @@ fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<(
             });
         }
 
-        Ok((vertices, normals, texcoords, vertex_colors, indices, subsets))
+        Ok(MeshData { fvf, pt_type, bone_infl_factor, vertex_element_num, mesh_rs_set,
+            vertices, normals, texcoords, vertex_colors, indices, subsets })
     } else {
-        // Old format (pre-1.0.0.4): subsets FIRST, then vertices, normals, texcoords, colors, blending, indices
-
-        // Subsets come first
+        // Old format (pre-1.0.0.4): subsets FIRST
         let mut subsets = Vec::with_capacity(subset_num);
         for _ in 0..subset_num {
             subsets.push(LmoSubset {
@@ -371,13 +579,11 @@ fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<(
             });
         }
 
-        // Vertex positions
         let mut vertices = Vec::with_capacity(vertex_num);
         for _ in 0..vertex_num {
             vertices.push([read_f32(cursor)?, read_f32(cursor)?, read_f32(cursor)?]);
         }
 
-        // Normals
         let mut normals = Vec::new();
         if (fvf & D3DFVF_NORMAL) != 0 {
             normals.reserve(vertex_num);
@@ -386,7 +592,6 @@ fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<(
             }
         }
 
-        // Texture coordinates
         let tex_count = ((fvf & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT) as usize;
         let mut texcoords = Vec::new();
         for tc in 0..tex_count {
@@ -399,7 +604,6 @@ fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<(
             }
         }
 
-        // Vertex colors
         let mut vertex_colors = Vec::new();
         if (fvf & D3DFVF_DIFFUSE) != 0 {
             vertex_colors.reserve(vertex_num);
@@ -408,19 +612,17 @@ fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<(
             }
         }
 
-        // Skip blend/bone data if present (old format uses BYTE bone indices)
         if bone_index_num > 0 {
-            // lwBlendInfo per vertex (8 bytes) + BYTE per bone_index
             cursor.seek(SeekFrom::Current(vertex_num as i64 * 8 + bone_index_num as i64))?;
         }
 
-        // Indices (u32)
         let mut indices = Vec::with_capacity(index_num);
         for _ in 0..index_num {
             indices.push(read_u32(cursor)?);
         }
 
-        Ok((vertices, normals, texcoords, vertex_colors, indices, subsets))
+        Ok(MeshData { fvf, pt_type, bone_infl_factor, vertex_element_num, mesh_rs_set,
+            vertices, normals, texcoords, vertex_colors, indices, subsets })
     }
 }
 
@@ -579,11 +781,13 @@ fn read_geom_object(data: &[u8], addr: usize, size: usize, file_version: u32, pa
     let obj_type = read_u32(&mut cursor)?;
     let mat_local = read_mat44(&mut cursor)?;
 
-    // rcci: lwRenderCtrlCreateInfo — 4 DWORDs = 16 bytes
-    cursor.seek(SeekFrom::Current(16))?;
+    // rcci: lwRenderCtrlCreateInfo — 4 DWORDs = 16 bytes (store for round-trip)
+    let mut rcci = [0u8; 16];
+    cursor.read_exact(&mut rcci)?;
 
-    // state_ctrl: lwStateCtrl — BYTE[8] = 8 bytes
-    cursor.seek(SeekFrom::Current(8))?;
+    // state_ctrl: lwStateCtrl — BYTE[8] = 8 bytes (store for round-trip)
+    let mut state_ctrl = [0u8; 8];
+    cursor.read_exact(&mut state_ctrl)?;
 
     let mtl_size = read_u32(&mut cursor)? as usize;
     let mesh_size = read_u32(&mut cursor)? as usize;
@@ -591,15 +795,16 @@ fn read_geom_object(data: &[u8], addr: usize, size: usize, file_version: u32, pa
     let anim_size = read_u32(&mut cursor)? as usize;
 
     // Compute section offsets within the chunk using sizes (for fallback positioning)
-    let header_size = header_prefix + 116; // old_version prefix (if v0) + lwGeomObjInfoHeader
+    let header_size = header_prefix + 116;
     let mesh_offset = (header_size + mtl_size) as u64;
+    let helper_offset = (header_size + mtl_size + mesh_size) as u64;
     let anim_offset = (header_size + mtl_size + mesh_size + helper_size) as u64;
 
     // Materials — try to parse; failures are non-fatal
     let mut materials = Vec::new();
+    let mut mtl_format_version = MtlFormatVersion::Current;
     if mtl_size > 0 {
-        let parse_result = (|| -> Result<Vec<LmoMaterial>> {
-            // Determine material format version
+        let parse_result = (|| -> Result<(Vec<LmoMaterial>, MtlFormatVersion)> {
             let mtl_ver = if file_version == EXP_OBJ_VERSION_0_0_0_0 {
                 let mtl_old_version = read_u32(&mut cursor)?;
                 match mtl_old_version {
@@ -616,19 +821,24 @@ fn read_geom_object(data: &[u8], addr: usize, size: usize, file_version: u32, pa
             for _ in 0..mtl_num {
                 mats.push(read_material(&mut cursor, mtl_ver)?);
             }
-            Ok(mats)
+            Ok((mats, mtl_ver))
         })();
 
-        if let Ok(mats) = parse_result {
+        if let Ok((mats, ver)) = parse_result {
             materials = mats;
+            mtl_format_version = ver;
         }
     }
 
-    // Always jump to mesh section using size-based offset — material parsing may
-    // have consumed wrong number of bytes for old format materials
+    // Always jump to mesh section using size-based offset
     cursor.set_position(mesh_offset);
 
-    // Mesh
+    // Mesh — store all header fields
+    let mut fvf = 0u32;
+    let mut pt_type = 4u32; // TRIANGLELIST default
+    let mut bone_infl_factor = 0u32;
+    let mut vertex_element_num = 0u32;
+    let mut mesh_rs_set = vec![RenderStateAtom::default(); LW_MESH_RS_NUM];
     let mut vertices = Vec::new();
     let mut normals = Vec::new();
     let mut texcoords = Vec::new();
@@ -638,13 +848,18 @@ fn read_geom_object(data: &[u8], addr: usize, size: usize, file_version: u32, pa
 
     if mesh_size > 0 {
         match read_mesh(&mut cursor, file_version) {
-            Ok((v, n, t, c, i, s)) => {
-                vertices = v;
-                normals = n;
-                texcoords = t;
-                vertex_colors = c;
-                indices = i;
-                subsets = s;
+            Ok(md) => {
+                fvf = md.fvf;
+                pt_type = md.pt_type;
+                bone_infl_factor = md.bone_infl_factor;
+                vertex_element_num = md.vertex_element_num;
+                mesh_rs_set = md.mesh_rs_set;
+                vertices = md.vertices;
+                normals = md.normals;
+                texcoords = md.texcoords;
+                vertex_colors = md.vertex_colors;
+                indices = md.indices;
+                subsets = md.subsets;
             }
             Err(e) => {
                 eprintln!("Warning: failed to read mesh: {}", e);
@@ -652,18 +867,41 @@ fn read_geom_object(data: &[u8], addr: usize, size: usize, file_version: u32, pa
         }
     }
 
-    // Skip helpers, then optionally parse animation
-    let animation = if parse_animations && anim_size > 0 {
+    // Helper section — store as raw byte blob for round-trip
+    let helper_blob = if helper_size > 0 {
+        cursor.set_position(helper_offset);
+        let mut blob = vec![0u8; helper_size];
+        cursor.read_exact(&mut blob)?;
+        blob
+    } else {
+        Vec::new()
+    };
+
+    // Animation section — store raw blob AND decomposed data
+    let raw_anim_blob;
+    let animation;
+    if anim_size > 0 {
         cursor.set_position(anim_offset);
-        match read_animation(&mut cursor, anim_size, file_version) {
-            Ok(anim) => anim,
-            Err(e) => {
-                eprintln!("Warning: failed to read animation: {}", e);
-                None
-            }
+        let mut blob = vec![0u8; anim_size];
+        cursor.read_exact(&mut blob)?;
+        raw_anim_blob = blob;
+
+        if parse_animations {
+            // Re-parse for decomposed translation/rotation (for glTF visualization)
+            let mut anim_cursor = Cursor::new(raw_anim_blob.as_slice());
+            animation = match read_animation(&mut anim_cursor, anim_size, file_version) {
+                Ok(anim) => anim,
+                Err(e) => {
+                    eprintln!("Warning: failed to read animation: {}", e);
+                    None
+                }
+            };
+        } else {
+            animation = None;
         }
     } else {
-        None
+        raw_anim_blob = Vec::new();
+        animation = None;
     };
 
     Ok(LmoGeomObject {
@@ -671,6 +909,13 @@ fn read_geom_object(data: &[u8], addr: usize, size: usize, file_version: u32, pa
         parent_id,
         obj_type,
         mat_local,
+        rcci,
+        state_ctrl,
+        fvf,
+        pt_type,
+        bone_infl_factor,
+        vertex_element_num,
+        mesh_rs_set,
         vertices,
         normals,
         texcoords,
@@ -678,7 +923,10 @@ fn read_geom_object(data: &[u8], addr: usize, size: usize, file_version: u32, pa
         indices,
         subsets,
         materials,
+        helper_blob,
+        raw_anim_blob,
         animation,
+        mtl_format_version,
     })
 }
 
@@ -711,23 +959,36 @@ fn parse_lmo_opts(data: &[u8], parse_animations: bool) -> Result<LmoModel> {
         headers.push((obj_type, addr, size));
     }
 
-    // Parse geometry objects (type 1), skip helpers (type 2)
+    // Parse geometry objects (type 1), store non-geometry entries as raw blobs
     let mut geom_objects = Vec::new();
+    let mut non_geom_entries = Vec::new();
     for (obj_type, addr, size) in &headers {
-        if *obj_type != OBJ_TYPE_GEOMETRY {
-            continue;
-        }
-        match read_geom_object(data, *addr, *size, version, parse_animations) {
-            Ok(geom) => geom_objects.push(geom),
-            Err(e) => {
-                eprintln!("Warning: failed to read geometry object at offset {}: {}", addr, e);
+        if *obj_type == OBJ_TYPE_GEOMETRY {
+            match read_geom_object(data, *addr, *size, version, parse_animations) {
+                Ok(geom) => geom_objects.push(geom),
+                Err(e) => {
+                    eprintln!("Warning: failed to read geometry object at offset {}: {}", addr, e);
+                }
             }
+        } else {
+            // Non-geometry entry (e.g., global helper type=2) — store raw bytes
+            let end = (*addr + *size).min(data.len());
+            let blob = if *addr < data.len() {
+                data[*addr..end].to_vec()
+            } else {
+                Vec::new()
+            };
+            non_geom_entries.push(NonGeomEntry {
+                obj_type: *obj_type,
+                data: blob,
+            });
         }
     }
 
     Ok(LmoModel {
         version,
         geom_objects,
+        non_geom_entries,
     })
 }
 
