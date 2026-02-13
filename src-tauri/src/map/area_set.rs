@@ -30,16 +30,22 @@ const RAW_DATA_INFO_NID_OFFSET: usize = 100;
 // AreaSet derived fields start after CRawDataInfo base (108 bytes)
 const AREA_DERIVED_OFFSET: usize = 108;
 
-fn read_u32(data: &[u8], offset: usize) -> u32 {
-    u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
+fn read_u32(data: &[u8], offset: usize) -> Option<u32> {
+    data.get(offset..offset + 4)
+        .and_then(|s| s.try_into().ok())
+        .map(u32::from_le_bytes)
 }
 
-fn read_i32(data: &[u8], offset: usize) -> i32 {
-    i32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
+fn read_i32(data: &[u8], offset: usize) -> Option<i32> {
+    data.get(offset..offset + 4)
+        .and_then(|s| s.try_into().ok())
+        .map(i32::from_le_bytes)
 }
 
-fn read_f32(data: &[u8], offset: usize) -> f32 {
-    f32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
+fn read_f32(data: &[u8], offset: usize) -> Option<f32> {
+    data.get(offset..offset + 4)
+        .and_then(|s| s.try_into().ok())
+        .map(f32::from_le_bytes)
 }
 
 /// Unpack Windows RGB() DWORD (0x00BBGGRR) to [R, G, B, A].
@@ -76,7 +82,7 @@ pub fn parse_area_set_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, AreaDefini
         return Ok(HashMap::new());
     }
 
-    let entry_size = read_u32(data, 0) as usize;
+    let entry_size = read_u32(data, 0).unwrap_or(0) as usize;
     if entry_size == 0 {
         return Ok(HashMap::new());
     }
@@ -92,29 +98,31 @@ pub fn parse_area_set_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, AreaDefini
         }
         let chunk = &data[offset..offset + entry_size];
 
-        let b_exist = read_i32(chunk, RAW_DATA_INFO_BEXIST_OFFSET);
+        // Base fields — skip entry if chunk is too small
+        let b_exist = match read_i32(chunk, RAW_DATA_INFO_BEXIST_OFFSET) {
+            Some(v) => v,
+            None => continue,
+        };
         if b_exist == 0 {
             continue;
         }
 
-        let area_id = read_u32(chunk, RAW_DATA_INFO_NID_OFFSET);
+        let area_id = match read_u32(chunk, RAW_DATA_INFO_NID_OFFSET) {
+            Some(v) => v,
+            None => continue,
+        };
 
-        // Derived fields
+        // Derived fields — need at least offset d+28 (29 bytes from d)
         let d = AREA_DERIVED_OFFSET;
-        if chunk.len() < d + 29 {
-            continue; // Not enough data for derived fields
-        }
-
-        let dw_color = read_u32(chunk, d);
-        let n_music = read_i32(chunk, d + 4);
-        let dw_env_color = read_u32(chunk, d + 8);
-        let dw_light_color = read_u32(chunk, d + 12);
-        let light_dir = [
-            read_f32(chunk, d + 16),
-            read_f32(chunk, d + 20),
-            read_f32(chunk, d + 24),
-        ];
-        let ch_type = chunk[d + 28];
+        let dw_color = match read_u32(chunk, d) { Some(v) => v, None => continue };
+        let n_music = match read_i32(chunk, d + 4) { Some(v) => v, None => continue };
+        let dw_env_color = match read_u32(chunk, d + 8) { Some(v) => v, None => continue };
+        let dw_light_color = match read_u32(chunk, d + 12) { Some(v) => v, None => continue };
+        let light_dir = match (read_f32(chunk, d + 16), read_f32(chunk, d + 20), read_f32(chunk, d + 24)) {
+            (Some(x), Some(y), Some(z)) => [x, y, z],
+            _ => continue,
+        };
+        let ch_type = match chunk.get(d + 28) { Some(&v) => v, None => continue };
 
         map.insert(
             area_id,

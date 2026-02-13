@@ -40,24 +40,31 @@ const RAW_DATA_INFO_NID_OFFSET: usize = 100;
 // CMapInfo derived fields start after CRawDataInfo base (108 bytes)
 const MAP_DERIVED_OFFSET: usize = 108;
 
-fn read_u32(data: &[u8], offset: usize) -> u32 {
-    u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
+fn read_u32(data: &[u8], offset: usize) -> Option<u32> {
+    data.get(offset..offset + 4)
+        .and_then(|s| s.try_into().ok())
+        .map(u32::from_le_bytes)
 }
 
-fn read_i32(data: &[u8], offset: usize) -> i32 {
-    i32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
+fn read_i32(data: &[u8], offset: usize) -> Option<i32> {
+    data.get(offset..offset + 4)
+        .and_then(|s| s.try_into().ok())
+        .map(i32::from_le_bytes)
 }
 
-fn read_f32(data: &[u8], offset: usize) -> f32 {
-    f32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
+fn read_f32(data: &[u8], offset: usize) -> Option<f32> {
+    data.get(offset..offset + 4)
+        .and_then(|s| s.try_into().ok())
+        .map(f32::from_le_bytes)
 }
 
 /// Read a null-terminated string from a fixed-size buffer.
-fn read_fixed_string(data: &[u8], offset: usize, max_len: usize) -> String {
+/// Returns None if the buffer is too small.
+fn read_fixed_string(data: &[u8], offset: usize, max_len: usize) -> Option<String> {
     let end = offset + max_len;
-    let slice = &data[offset..end];
+    let slice = data.get(offset..end)?;
     let nul_pos = slice.iter().position(|&b| b == 0).unwrap_or(max_len);
-    String::from_utf8_lossy(&slice[..nul_pos]).to_string()
+    Some(String::from_utf8_lossy(&slice[..nul_pos]).to_string())
 }
 
 /// Parse mapinfo.bin — CRawDataSet binary format.
@@ -75,7 +82,7 @@ pub fn parse_mapinfo_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, MapInfo>> {
         return Ok(HashMap::new());
     }
 
-    let entry_size = read_u32(data, 0) as usize;
+    let entry_size = read_u32(data, 0).unwrap_or(0) as usize;
     if entry_size == 0 {
         return Ok(HashMap::new());
     }
@@ -91,30 +98,38 @@ pub fn parse_mapinfo_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, MapInfo>> {
         }
         let chunk = &data[offset..offset + entry_size];
 
-        let b_exist = read_i32(chunk, RAW_DATA_INFO_BEXIST_OFFSET);
+        // Base fields — skip entry if chunk is too small
+        let b_exist = match read_i32(chunk, RAW_DATA_INFO_BEXIST_OFFSET) {
+            Some(v) => v,
+            None => continue,
+        };
         if b_exist == 0 {
             continue;
         }
 
-        let map_id = read_u32(chunk, RAW_DATA_INFO_NID_OFFSET);
-        let data_name = read_fixed_string(chunk, RAW_DATA_INFO_DATANAME_OFFSET, 72);
+        let map_id = match read_u32(chunk, RAW_DATA_INFO_NID_OFFSET) {
+            Some(v) => v,
+            None => continue,
+        };
+        let data_name = match read_fixed_string(chunk, RAW_DATA_INFO_DATANAME_OFFSET, 72) {
+            Some(v) => v,
+            None => continue,
+        };
 
         // Derived fields
         let d = MAP_DERIVED_OFFSET;
-        if chunk.len() < d + 40 {
-            continue; // Not enough data for all derived fields
-        }
-
-        let display_name = read_fixed_string(chunk, d, 16);
-        let init_x = read_i32(chunk, d + 16);
-        let init_y = read_i32(chunk, d + 20);
-        let light_dir = [
-            read_f32(chunk, d + 24),
-            read_f32(chunk, d + 28),
-            read_f32(chunk, d + 32),
-        ];
-        let light_color = [chunk[d + 36], chunk[d + 37], chunk[d + 38]];
-        let show_switch = chunk[d + 39] != 0;
+        let display_name = match read_fixed_string(chunk, d, 16) { Some(v) => v, None => continue };
+        let init_x = match read_i32(chunk, d + 16) { Some(v) => v, None => continue };
+        let init_y = match read_i32(chunk, d + 20) { Some(v) => v, None => continue };
+        let light_dir = match (read_f32(chunk, d + 24), read_f32(chunk, d + 28), read_f32(chunk, d + 32)) {
+            (Some(x), Some(y), Some(z)) => [x, y, z],
+            _ => continue,
+        };
+        let light_color = match (chunk.get(d + 36), chunk.get(d + 37), chunk.get(d + 38)) {
+            (Some(&r), Some(&g), Some(&b)) => [r, g, b],
+            _ => continue,
+        };
+        let show_switch = match chunk.get(d + 39) { Some(&v) => v != 0, None => continue };
 
         map.insert(
             map_id,
@@ -154,16 +169,26 @@ pub fn load_mapinfo(project_dir: &Path) -> anyhow::Result<HashMap<u32, MapInfo>>
 
 /// Find the MapInfo entry matching a map folder name (e.g., "07xmas").
 /// Matches against data_name (the szDataName field from CRawDataInfo).
+/// Uses strict matching: exact match or path-suffix match only.
+/// No substring fallback to avoid ambiguity with shared prefixes (garner/garner2).
 pub fn find_map_info<'a>(
     infos: &'a HashMap<u32, MapInfo>,
     map_name: &str,
 ) -> Option<&'a MapInfo> {
     let map_name_lower = map_name.to_lowercase();
-    infos.values().find(|info| {
+
+    // Pass 1: exact match on data_name
+    if let Some(info) = infos.values().find(|info| {
         info.data_name.to_lowercase() == map_name_lower
-            || info.data_name.to_lowercase().ends_with(&format!("/{}", map_name_lower))
-            || info.data_name.to_lowercase().ends_with(&format!("\\{}", map_name_lower))
-            || info.data_name.to_lowercase().contains(&map_name_lower)
+    }) {
+        return Some(info);
+    }
+
+    // Pass 2: path-suffix match (data_name ends with "/map_name" or "\map_name")
+    infos.values().find(|info| {
+        let dn = info.data_name.to_lowercase();
+        dn.ends_with(&format!("/{}", map_name_lower))
+            || dn.ends_with(&format!("\\{}", map_name_lower))
     })
 }
 
@@ -183,8 +208,10 @@ mod tests {
     #[test]
     fn read_fixed_string_basic() {
         let data = b"hello\0world\0\0\0\0\0";
-        assert_eq!(read_fixed_string(data, 0, 5), "hello");
-        assert_eq!(read_fixed_string(data, 0, 16), "hello");
+        assert_eq!(read_fixed_string(data, 0, 5).unwrap(), "hello");
+        assert_eq!(read_fixed_string(data, 0, 16).unwrap(), "hello");
+        // Out of bounds returns None
+        assert!(read_fixed_string(data, 0, 32).is_none());
     }
 
     #[test]
@@ -232,5 +259,46 @@ mod tests {
 
         let not_found = find_map_info(&infos, "garner");
         assert!(not_found.is_none());
+    }
+
+    #[test]
+    fn find_map_info_no_prefix_ambiguity() {
+        let mut infos = HashMap::new();
+        infos.insert(
+            1,
+            MapInfo {
+                map_id: 1,
+                data_name: "map/garner".to_string(),
+                display_name: "Garner".to_string(),
+                init_x: 100,
+                init_y: 100,
+                light_dir: [1.0, 1.0, -1.0],
+                light_color: [255, 255, 255],
+                show_switch: false,
+            },
+        );
+        infos.insert(
+            2,
+            MapInfo {
+                map_id: 2,
+                data_name: "map/garner2".to_string(),
+                display_name: "Garner2".to_string(),
+                init_x: 200,
+                init_y: 200,
+                light_dir: [1.0, 1.0, -1.0],
+                light_color: [255, 255, 255],
+                show_switch: false,
+            },
+        );
+
+        // "garner" must match map_id=1, NOT map_id=2
+        let found = find_map_info(&infos, "garner");
+        assert!(found.is_some());
+        assert_eq!(found.unwrap().map_id, 1, "should match garner, not garner2");
+
+        // "garner2" must match map_id=2
+        let found2 = find_map_info(&infos, "garner2");
+        assert!(found2.is_some());
+        assert_eq!(found2.unwrap().map_id, 2);
     }
 }

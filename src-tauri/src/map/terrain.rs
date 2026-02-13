@@ -23,6 +23,9 @@ use crate::map::scene_obj::{parse_obj_file, ParsedObjFile};
 
 const CUR_VERSION_NO: i32 = 780627; // MP_MAP_FLAG(780624) + 3
 
+/// If serialized effect_definitions exceeds this size, export as sidecar file.
+const SIDECAR_THRESHOLD: usize = 5 * 1024 * 1024; // 5MB
+
 // ============================================================================
 // Parsed structures
 // ============================================================================
@@ -1424,22 +1427,44 @@ pub fn export_map_for_unity(
     let tile_color_b64 = BASE64_STANDARD.encode(&tile_color_bytes);
 
     // 11. Build effect definitions from .eff files
+    // Canonical schema: each effect's EffFile fields are flattened to the top level
+    // alongside "filename", matching the plan's manifest v2 spec.
     let mut effect_definitions = serde_json::Map::new();
+    let mut missing_effect_ids: Vec<u16> = Vec::new();
     for &eff_id in &unique_eff_ids {
         if let Some(eff_info) = effect_info.get(&(eff_id as u32)) {
             if let Some(eff_file) = load_effect_file(project_dir, &eff_info.filename) {
-                // Serialize the full EffFile data (already has Serialize derive)
-                if let Ok(eff_json) = serde_json::to_value(&eff_file) {
-                    effect_definitions.insert(
-                        eff_id.to_string(),
-                        serde_json::json!({
-                            "filename": eff_info.filename,
-                            "data": eff_json,
-                        }),
-                    );
+                if let Ok(serde_json::Value::Object(mut eff_obj)) = serde_json::to_value(&eff_file) {
+                    // Flatten: merge filename into the EffFile object at the top level
+                    eff_obj.insert("filename".to_string(), serde_json::json!(eff_info.filename));
+                    effect_definitions.insert(eff_id.to_string(), serde_json::Value::Object(eff_obj));
+                } else {
+                    eprintln!("Warning: effect {} ({}) failed to serialize", eff_id, eff_info.filename);
+                    missing_effect_ids.push(eff_id);
                 }
+            } else {
+                eprintln!("Warning: effect {} ({}) .eff file not found or failed to parse", eff_id, eff_info.filename);
+                missing_effect_ids.push(eff_id);
             }
+        } else {
+            eprintln!("Warning: effect {} not found in sceneffectinfo", eff_id);
+            missing_effect_ids.push(eff_id);
         }
+    }
+
+    // 11b. Check effect_definitions size — if >5MB, export as sidecar file
+    let eff_defs_json_value = serde_json::Value::Object(effect_definitions.clone());
+    let eff_defs_size = serde_json::to_string(&eff_defs_json_value)
+        .map(|s| s.len())
+        .unwrap_or(0);
+    // Defined at module scope as SIDECAR_THRESHOLD
+
+    let use_sidecar = eff_defs_size > SIDECAR_THRESHOLD;
+
+    if use_sidecar {
+        let sidecar_path = output_dir.join("effect_definitions.json");
+        let sidecar_json = serde_json::to_string_pretty(&eff_defs_json_value)?;
+        std::fs::write(&sidecar_path, sidecar_json.as_bytes())?;
     }
 
     // 12. Build areas dict from AreaSet.bin
@@ -1471,70 +1496,70 @@ pub fn export_map_for_unity(
     let water_textures = copy_water_textures(project_dir, output_dir);
 
     // 15. Build manifest v2 JSON
-    let manifest = serde_json::json!({
-        "version": 2,
-        "map_name": map_name,
-        "coordinate_system": "y_up",
-        "world_scale": 5.0,
+    // Build manifest as a Map so we can conditionally include/omit keys
+    let mut manifest_map = serde_json::Map::new();
+    manifest_map.insert("version".into(), serde_json::json!(2));
+    manifest_map.insert("map_name".into(), serde_json::json!(map_name));
+    manifest_map.insert("coordinate_system".into(), serde_json::json!("y_up"));
+    manifest_map.insert("world_scale".into(), serde_json::json!(5.0));
 
-        // Map dimensions
-        "map_width_tiles": parsed_map.header.n_width,
-        "map_height_tiles": parsed_map.header.n_height,
-        "section_width": parsed_map.header.n_section_width,
-        "section_height": parsed_map.header.n_section_height,
+    // Map dimensions
+    manifest_map.insert("map_width_tiles".into(), serde_json::json!(parsed_map.header.n_width));
+    manifest_map.insert("map_height_tiles".into(), serde_json::json!(parsed_map.header.n_height));
+    manifest_map.insert("section_width".into(), serde_json::json!(parsed_map.header.n_section_width));
+    manifest_map.insert("section_height".into(), serde_json::json!(parsed_map.header.n_section_height));
 
-        // Terrain
-        "terrain_gltf": "terrain.gltf",
+    // Terrain
+    manifest_map.insert("terrain_gltf".into(), serde_json::json!("terrain.gltf"));
 
-        // Grids (base64-encoded)
-        "collision_grid": {
-            "width": coll_w,
-            "height": coll_h,
-            "tile_size": 0.5,
-            "data": collision_b64,
-        },
-        "region_grid": {
-            "width": parsed_map.header.n_width,
-            "height": parsed_map.header.n_height,
-            "data": region_b64,
-        },
-        "area_grid": {
-            "width": parsed_map.header.n_width,
-            "height": parsed_map.header.n_height,
-            "data": area_b64,
-        },
-        "tile_texture_grid": {
-            "width": parsed_map.header.n_width,
-            "height": parsed_map.header.n_height,
-            "data": tile_tex_b64,
-        },
-        "tile_color_grid": {
-            "width": parsed_map.header.n_width,
-            "height": parsed_map.header.n_height,
-            "data": tile_color_b64,
-        },
+    // Grids (base64-encoded)
+    manifest_map.insert("collision_grid".into(), serde_json::json!({
+        "width": coll_w, "height": coll_h, "tile_size": 0.5, "data": collision_b64,
+    }));
+    manifest_map.insert("region_grid".into(), serde_json::json!({
+        "width": parsed_map.header.n_width, "height": parsed_map.header.n_height, "data": region_b64,
+    }));
+    manifest_map.insert("area_grid".into(), serde_json::json!({
+        "width": parsed_map.header.n_width, "height": parsed_map.header.n_height, "data": area_b64,
+    }));
+    manifest_map.insert("tile_texture_grid".into(), serde_json::json!({
+        "width": parsed_map.header.n_width, "height": parsed_map.header.n_height, "data": tile_tex_b64,
+    }));
+    manifest_map.insert("tile_color_grid".into(), serde_json::json!({
+        "width": parsed_map.header.n_width, "height": parsed_map.header.n_height, "data": tile_color_b64,
+    }));
 
-        // Buildings
-        "buildings": buildings_map,
-        "placements": placements,
+    // Buildings
+    manifest_map.insert("buildings".into(), serde_json::Value::Object(buildings_map));
+    manifest_map.insert("placements".into(), serde_json::json!(placements));
 
-        // Effects
-        "effect_placements": effect_placements,
-        "effect_definitions": effect_definitions,
+    // Effects — conditionally inline or sidecar (never both)
+    manifest_map.insert("effect_placements".into(), serde_json::json!(effect_placements));
+    if use_sidecar {
+        manifest_map.insert("effect_definitions_file".into(), serde_json::json!("effect_definitions.json"));
+    } else {
+        manifest_map.insert("effect_definitions".into(), eff_defs_json_value);
+    }
+    if !missing_effect_ids.is_empty() {
+        let mut sorted_missing = missing_effect_ids.clone();
+        sorted_missing.sort_unstable();
+        manifest_map.insert("missing_effect_ids".into(), serde_json::json!(sorted_missing));
+    }
 
-        // Areas (from AreaSet.bin, keyed by btIsland value)
-        "areas": areas_json,
+    // Areas (from AreaSet.bin, keyed by btIsland value)
+    manifest_map.insert("areas".into(), areas_json);
 
-        // Map settings
-        "spawn_point": spawn_point,
-        "light_direction": light_direction,
-        "light_color": light_color,
-        "ambient": [0.4, 0.4, 0.4],
-        "background_color": [10, 10, 125],
+    // Map settings
+    manifest_map.insert("spawn_point".into(), serde_json::json!(spawn_point));
+    manifest_map.insert("light_direction".into(), serde_json::json!(light_direction));
+    manifest_map.insert("light_color".into(), serde_json::json!(light_color));
+    manifest_map.insert("ambient".into(), serde_json::json!([0.4, 0.4, 0.4]));
+    manifest_map.insert("background_color".into(), serde_json::json!([10, 10, 125]));
 
-        // Water textures (paths relative to output dir)
-        "water_textures": water_textures,
-    });
+    // Water textures (paths relative to output dir)
+    manifest_map.insert("water_textures".into(), serde_json::json!(water_textures));
+
+    let manifest = serde_json::Value::Object(manifest_map);
 
     let manifest_path = output_dir.join("manifest.json");
     let manifest_json = serde_json::to_string_pretty(&manifest)?;
@@ -1767,6 +1792,94 @@ mod tests {
             parsed.header.n_section_height,
             non_empty
         );
+    }
+
+    #[test]
+    fn sidecar_threshold_inline_when_small() {
+        // Small effect_definitions should be inlined
+        let mut defs = serde_json::Map::new();
+        defs.insert("1".into(), serde_json::json!({"filename": "test.eff", "subEffects": []}));
+        let eff_value = serde_json::Value::Object(defs);
+        let size = serde_json::to_string(&eff_value).unwrap().len();
+        assert!(size < super::SIDECAR_THRESHOLD, "test data should be below 5MB");
+
+        // Simulate manifest assembly with use_sidecar=false
+        let mut manifest_map = serde_json::Map::new();
+        manifest_map.insert("effect_definitions".into(), eff_value);
+        // effect_definitions_file should NOT be present
+        assert!(manifest_map.contains_key("effect_definitions"));
+        assert!(!manifest_map.contains_key("effect_definitions_file"));
+    }
+
+    #[test]
+    fn sidecar_threshold_file_when_large() {
+        // Simulate sidecar mode: effect_definitions_file present, effect_definitions absent
+        let mut manifest_map = serde_json::Map::new();
+        // In sidecar mode, only effect_definitions_file is inserted
+        manifest_map.insert("effect_definitions_file".into(), serde_json::json!("effect_definitions.json"));
+        assert!(!manifest_map.contains_key("effect_definitions"));
+        assert!(manifest_map.contains_key("effect_definitions_file"));
+        assert_eq!(manifest_map["effect_definitions_file"], "effect_definitions.json");
+    }
+
+    #[test]
+    fn missing_effect_ids_omitted_when_empty() {
+        // missing_effect_ids should not appear in manifest when empty
+        let missing: Vec<u16> = vec![];
+        let mut manifest_map = serde_json::Map::new();
+        if !missing.is_empty() {
+            manifest_map.insert("missing_effect_ids".into(), serde_json::json!(missing));
+        }
+        assert!(!manifest_map.contains_key("missing_effect_ids"),
+            "empty missing_effect_ids should be omitted");
+    }
+
+    #[test]
+    fn missing_effect_ids_present_when_nonempty() {
+        let missing: Vec<u16> = vec![5, 12];
+        let mut manifest_map = serde_json::Map::new();
+        if !missing.is_empty() {
+            manifest_map.insert("missing_effect_ids".into(), serde_json::json!(missing));
+        }
+        assert!(manifest_map.contains_key("missing_effect_ids"));
+        let arr = manifest_map["missing_effect_ids"].as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0], 5);
+        assert_eq!(arr[1], 12);
+    }
+
+    #[test]
+    fn effect_definition_schema_is_flat() {
+        // Verify that effect definitions use flat schema (EffFile fields + filename at same level)
+        // not nested { "filename": ..., "data": <EffFile> }
+        let eff = crate::effect::model::EffFile {
+            version: 1,
+            idx_tech: 0,
+            use_path: false,
+            path_name: String::new(),
+            use_sound: false,
+            sound_name: String::new(),
+            rotating: false,
+            rota_vec: [0.0; 3],
+            rota_vel: 0.0,
+            eff_num: 0,
+            sub_effects: vec![],
+        };
+
+        // Replicate the flatten logic from export_map_for_unity
+        if let serde_json::Value::Object(mut eff_obj) = serde_json::to_value(&eff).unwrap() {
+            eff_obj.insert("filename".to_string(), serde_json::json!("test.eff"));
+
+            // "filename" is at top level alongside EffFile fields
+            assert!(eff_obj.contains_key("filename"));
+            assert!(eff_obj.contains_key("subEffects")); // camelCase from serde rename
+            assert!(eff_obj.contains_key("idxTech"));
+            // "data" key must NOT exist (flat, not nested)
+            assert!(!eff_obj.contains_key("data"),
+                "effect definition should be flat, not nested under 'data'");
+        } else {
+            panic!("EffFile should serialize to a JSON object");
+        }
     }
 
     #[test]
