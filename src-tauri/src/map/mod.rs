@@ -1,5 +1,7 @@
+pub mod area_set;
 pub mod commands;
 pub mod lmo;
+pub mod mapinfo;
 pub mod scene_model;
 pub mod scene_obj;
 pub mod scene_obj_info;
@@ -54,6 +56,8 @@ pub struct MapForUnityExportResult {
     pub manifest_path: String,
     pub total_buildings_exported: u32,
     pub total_placements: u32,
+    pub total_effect_placements: u32,
+    pub total_effect_definitions: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

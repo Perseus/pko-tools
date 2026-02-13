@@ -13,6 +13,7 @@ use image::RgbImage;
 use serde_json::value::RawValue;
 
 use super::{MapEntry, MapMetadata};
+use crate::effect::model::EffFile;
 use crate::map::scene_model::LoadedSceneModels;
 use crate::map::scene_obj::{parse_obj_file, ParsedObjFile};
 
@@ -1062,10 +1063,200 @@ pub fn build_map_viewer_gltf(project_dir: &Path, map_name: &str) -> Result<Strin
     )
 }
 
+// ============================================================================
+// Grid builders for manifest v2
+// ============================================================================
+
+/// Build collision grid from tile bt_block[4] data at 2x tile resolution.
+/// Returns (grid_bytes, width, height) where width=n_width*2, height=n_height*2.
+fn build_collision_grid(map: &ParsedMap) -> (Vec<u8>, i32, i32) {
+    let w = map.header.n_width * 2;
+    let h = map.header.n_height * 2;
+    let mut grid = vec![0u8; (w * h) as usize];
+
+    for ty in 0..map.header.n_height {
+        for tx in 0..map.header.n_width {
+            if let Some(tile) = get_tile(map, tx, ty) {
+                for sub_y in 0..2i32 {
+                    for sub_x in 0..2i32 {
+                        let cx = tx * 2 + sub_x;
+                        let cy = ty * 2 + sub_y;
+                        let idx = (cy * w + cx) as usize;
+                        let block_idx = (sub_y * 2 + sub_x) as usize;
+                        grid[idx] = tile.bt_block[block_idx];
+                    }
+                }
+            }
+        }
+    }
+
+    (grid, w, h)
+}
+
+/// Build region grid (sRegion i16 per tile). Returns raw i16 LE bytes.
+fn build_region_grid(map: &ParsedMap) -> Vec<u8> {
+    let w = map.header.n_width;
+    let h = map.header.n_height;
+    let mut data = Vec::with_capacity((w * h * 2) as usize);
+
+    for ty in 0..h {
+        for tx in 0..w {
+            let region = get_tile(map, tx, ty)
+                .map(|t| t.s_region)
+                .unwrap_or(0);
+            data.extend_from_slice(&region.to_le_bytes());
+        }
+    }
+
+    data
+}
+
+/// Build area grid (btIsland u8 per tile).
+fn build_area_grid(map: &ParsedMap) -> Vec<u8> {
+    let w = map.header.n_width;
+    let h = map.header.n_height;
+    let mut grid = vec![0u8; (w * h) as usize];
+
+    for ty in 0..h {
+        for tx in 0..w {
+            let island = get_tile(map, tx, ty)
+                .map(|t| t.bt_island)
+                .unwrap_or(0);
+            grid[(ty * w + tx) as usize] = island;
+        }
+    }
+
+    grid
+}
+
+/// Build tile texture grid (dwTileInfo & 0x3F per tile → u8).
+fn build_tile_texture_grid(map: &ParsedMap) -> Vec<u8> {
+    let w = map.header.n_width;
+    let h = map.header.n_height;
+    let mut grid = vec![0u8; (w * h) as usize];
+
+    for ty in 0..h {
+        for tx in 0..w {
+            let tex_id = get_tile(map, tx, ty)
+                .map(|t| (t.dw_tile_info & 0x3F) as u8)
+                .unwrap_or(0);
+            grid[(ty * w + tx) as usize] = tex_id;
+        }
+    }
+
+    grid
+}
+
+/// Build tile color grid (sColor i16 per tile). Returns raw i16 LE bytes.
+fn build_tile_color_grid(map: &ParsedMap) -> Vec<u8> {
+    let w = map.header.n_width;
+    let h = map.header.n_height;
+    let mut data = Vec::with_capacity((w * h * 2) as usize);
+
+    for ty in 0..h {
+        for tx in 0..w {
+            let color = get_tile(map, tx, ty)
+                .map(|t| t.s_color)
+                .unwrap_or(0);
+            data.extend_from_slice(&color.to_le_bytes());
+        }
+    }
+
+    data
+}
+
+/// Find and load an .eff file from the project directory.
+/// sceneffectinfo stores filenames with .par extension; actual files use .eff.
+fn load_effect_file(project_dir: &Path, eff_filename: &str) -> Option<EffFile> {
+    // Strip extension and try .eff
+    let base = eff_filename
+        .strip_suffix(".par")
+        .or_else(|| eff_filename.strip_suffix(".PAR"))
+        .or_else(|| eff_filename.strip_suffix(".eff"))
+        .or_else(|| eff_filename.strip_suffix(".EFF"))
+        .unwrap_or(eff_filename);
+
+    let eff_path = project_dir.join("effect").join(format!("{}.eff", base));
+    if eff_path.exists() {
+        if let Ok(bytes) = std::fs::read(&eff_path) {
+            return EffFile::from_bytes(&bytes).ok();
+        }
+    }
+
+    // Try case-insensitive search in effect directory
+    let effect_dir = project_dir.join("effect");
+    if effect_dir.exists() {
+        let target = format!("{}.eff", base).to_lowercase();
+        if let Ok(entries) = std::fs::read_dir(&effect_dir) {
+            for entry in entries.flatten() {
+                if entry.file_name().to_string_lossy().to_lowercase() == target {
+                    if let Ok(bytes) = std::fs::read(entry.path()) {
+                        return EffFile::from_bytes(&bytes).ok();
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Copy water textures from BMP to PNG format.
+/// Copies ocean_h.01.bmp through ocean_h.30.bmp from the project's water texture directory.
+fn copy_water_textures(project_dir: &Path, output_dir: &Path) -> Vec<String> {
+    let water_dir = project_dir.join("texture/terrain/water");
+    if !water_dir.exists() {
+        return Vec::new();
+    }
+
+    let out_water_dir = output_dir.join("water");
+    let _ = std::fs::create_dir_all(&out_water_dir);
+
+    let mut copied = Vec::new();
+    for i in 1..=30 {
+        let bmp_name = format!("ocean_h.{:02}.bmp", i);
+        let bmp_path = water_dir.join(&bmp_name);
+
+        if !bmp_path.exists() {
+            // Try case-insensitive
+            let target = bmp_name.to_lowercase();
+            let found = std::fs::read_dir(&water_dir)
+                .ok()
+                .and_then(|entries| {
+                    entries
+                        .flatten()
+                        .find(|e| e.file_name().to_string_lossy().to_lowercase() == target)
+                        .map(|e| e.path())
+                });
+
+            if let Some(found_path) = found {
+                if let Ok(img) = image::open(&found_path) {
+                    let png_name = format!("ocean_h_{:02}.png", i);
+                    let png_path = out_water_dir.join(&png_name);
+                    if img.save(&png_path).is_ok() {
+                        copied.push(format!("water/{}", png_name));
+                    }
+                }
+            }
+            continue;
+        }
+
+        if let Ok(img) = image::open(&bmp_path) {
+            let png_name = format!("ocean_h_{:02}.png", i);
+            let png_path = out_water_dir.join(&png_name);
+            if img.save(&png_path).is_ok() {
+                copied.push(format!("water/{}", png_name));
+            }
+        }
+    }
+
+    copied
+}
+
 /// Export a map as three separate pieces for Unity (or similar engines):
 /// 1. Terrain-only glTF (no buildings embedded)
 /// 2. Individual building glTFs (one per unique building type, with textures + animations)
-/// 3. Placement manifest JSON (tells the engine where to instantiate each building)
+/// 3. Manifest v2 JSON (grids, placements, effects, areas, environment)
 pub fn export_map_for_unity(
     project_dir: &Path,
     map_name: &str,
@@ -1090,6 +1281,16 @@ pub fn export_map_for_unity(
 
     // 3. Load sceneobjinfo for obj_id → filename mapping
     let obj_info = super::scene_obj_info::load_scene_obj_info(project_dir).unwrap_or_default();
+
+    // 3b. Load AreaSet.bin for per-area definitions
+    let area_defs = super::area_set::load_area_set(project_dir).unwrap_or_default();
+
+    // 3c. Load mapinfo.bin for spawn point and per-map settings
+    let map_infos = super::mapinfo::load_mapinfo(project_dir).unwrap_or_default();
+    let this_map_info = super::mapinfo::find_map_info(&map_infos, map_name);
+
+    // 3d. Load sceneffectinfo for effect_id → .eff filename mapping
+    let effect_info = crate::item::sceneffect::load_scene_effect_info(project_dir).unwrap_or_default();
 
     // 4. Bake terrain texture atlas
     let atlas = super::texture::try_bake_atlas(project_dir, &parsed_map);
@@ -1174,35 +1375,165 @@ pub fn export_map_for_unity(
         );
     }
 
-    // Build placements array
+    // Build placements array (buildings, type=0) and effect placements (type=1)
+    let mut effect_placements = Vec::new();
+    let mut unique_eff_ids: HashSet<u16> = HashSet::new();
+
     if let Some(ref obj_file) = objects {
         for obj in &obj_file.objects {
-            if obj.obj_type != 0 {
-                continue;
-            }
-
             // Look up terrain height at the object's position
             let terrain_h = get_tile(&parsed_map, obj.world_x as i32, obj.world_y as i32)
                 .map(|t| tile_height(t))
                 .unwrap_or(0.0);
 
-            // Position in Y-up glTF space (same formula as terrain.rs:929)
-            placements.push(serde_json::json!({
-                "obj_id": obj.obj_id,
-                "position": [obj.world_x, terrain_h + obj.world_z, obj.world_y],
-                "rotation_y_degrees": obj.yaw_angle,
-                "scale": obj.scale,
-            }));
+            // Position in Y-up glTF space
+            let position = [obj.world_x, terrain_h + obj.world_z, obj.world_y];
+
+            if obj.obj_type == 0 {
+                // Building placement
+                placements.push(serde_json::json!({
+                    "obj_id": obj.obj_id,
+                    "position": position,
+                    "rotation_y_degrees": obj.yaw_angle,
+                    "scale": obj.scale,
+                }));
+            } else if obj.obj_type == 1 {
+                // Effect placement
+                effect_placements.push(serde_json::json!({
+                    "eff_id": obj.obj_id,
+                    "position": position,
+                    "rotation_y_degrees": obj.yaw_angle,
+                    "scale": obj.scale,
+                }));
+                unique_eff_ids.insert(obj.obj_id);
+            }
         }
     }
 
+    // 10. Build grids
+    let (collision_bytes, coll_w, coll_h) = build_collision_grid(&parsed_map);
+    let region_bytes = build_region_grid(&parsed_map);
+    let area_bytes = build_area_grid(&parsed_map);
+    let tile_tex_bytes = build_tile_texture_grid(&parsed_map);
+    let tile_color_bytes = build_tile_color_grid(&parsed_map);
+
+    let collision_b64 = BASE64_STANDARD.encode(&collision_bytes);
+    let region_b64 = BASE64_STANDARD.encode(&region_bytes);
+    let area_b64 = BASE64_STANDARD.encode(&area_bytes);
+    let tile_tex_b64 = BASE64_STANDARD.encode(&tile_tex_bytes);
+    let tile_color_b64 = BASE64_STANDARD.encode(&tile_color_bytes);
+
+    // 11. Build effect definitions from .eff files
+    let mut effect_definitions = serde_json::Map::new();
+    for &eff_id in &unique_eff_ids {
+        if let Some(eff_info) = effect_info.get(&(eff_id as u32)) {
+            if let Some(eff_file) = load_effect_file(project_dir, &eff_info.filename) {
+                // Serialize the full EffFile data (already has Serialize derive)
+                if let Ok(eff_json) = serde_json::to_value(&eff_file) {
+                    effect_definitions.insert(
+                        eff_id.to_string(),
+                        serde_json::json!({
+                            "filename": eff_info.filename,
+                            "data": eff_json,
+                        }),
+                    );
+                }
+            }
+        }
+    }
+
+    // 12. Build areas dict from AreaSet.bin
+    let areas_json = super::area_set::areas_to_json(&area_defs);
+
+    // 13. Build spawn point and environment from mapinfo.bin
+    let spawn_point = this_map_info.map(|info| {
+        serde_json::json!({
+            "tile_x": info.init_x,
+            "tile_y": info.init_y,
+        })
+    });
+
+    // Default environment settings (from original PKO engine)
+    let light_direction = this_map_info
+        .map(|info| info.light_dir)
+        .unwrap_or([-1.0, -1.0, -1.0]);
+    let light_color = this_map_info
+        .map(|info| {
+            [
+                info.light_color[0] as f32 / 255.0,
+                info.light_color[1] as f32 / 255.0,
+                info.light_color[2] as f32 / 255.0,
+            ]
+        })
+        .unwrap_or([0.6, 0.6, 0.6]);
+
+    // 14. Copy water textures
+    let water_textures = copy_water_textures(project_dir, output_dir);
+
+    // 15. Build manifest v2 JSON
     let manifest = serde_json::json!({
+        "version": 2,
         "map_name": map_name,
         "coordinate_system": "y_up",
         "world_scale": 5.0,
+
+        // Map dimensions
+        "map_width_tiles": parsed_map.header.n_width,
+        "map_height_tiles": parsed_map.header.n_height,
+        "section_width": parsed_map.header.n_section_width,
+        "section_height": parsed_map.header.n_section_height,
+
+        // Terrain
         "terrain_gltf": "terrain.gltf",
+
+        // Grids (base64-encoded)
+        "collision_grid": {
+            "width": coll_w,
+            "height": coll_h,
+            "tile_size": 0.5,
+            "data": collision_b64,
+        },
+        "region_grid": {
+            "width": parsed_map.header.n_width,
+            "height": parsed_map.header.n_height,
+            "data": region_b64,
+        },
+        "area_grid": {
+            "width": parsed_map.header.n_width,
+            "height": parsed_map.header.n_height,
+            "data": area_b64,
+        },
+        "tile_texture_grid": {
+            "width": parsed_map.header.n_width,
+            "height": parsed_map.header.n_height,
+            "data": tile_tex_b64,
+        },
+        "tile_color_grid": {
+            "width": parsed_map.header.n_width,
+            "height": parsed_map.header.n_height,
+            "data": tile_color_b64,
+        },
+
+        // Buildings
         "buildings": buildings_map,
         "placements": placements,
+
+        // Effects
+        "effect_placements": effect_placements,
+        "effect_definitions": effect_definitions,
+
+        // Areas (from AreaSet.bin, keyed by btIsland value)
+        "areas": areas_json,
+
+        // Map settings
+        "spawn_point": spawn_point,
+        "light_direction": light_direction,
+        "light_color": light_color,
+        "ambient": [0.4, 0.4, 0.4],
+        "background_color": [10, 10, 125],
+
+        // Water textures (paths relative to output dir)
+        "water_textures": water_textures,
     });
 
     let manifest_path = output_dir.join("manifest.json");
@@ -1216,6 +1547,8 @@ pub fn export_map_for_unity(
         manifest_path: manifest_path.to_string_lossy().to_string(),
         total_buildings_exported: unique_obj_ids.len() as u32,
         total_placements: placements.len() as u32,
+        total_effect_placements: effect_placements.len() as u32,
+        total_effect_definitions: effect_definitions.len() as u32,
     })
 }
 
@@ -1252,6 +1585,82 @@ pub fn get_metadata(project_dir: &Path, map_name: &str) -> Result<MapMetadata> {
         non_empty_sections: non_empty,
         total_tiles,
         object_count,
+    })
+}
+
+// ============================================================================
+// Batch export
+// ============================================================================
+
+/// Result of a batch export operation.
+#[derive(Debug, serde::Serialize)]
+pub struct BatchExportResult {
+    pub total_maps: usize,
+    pub succeeded: usize,
+    pub failed: usize,
+    pub results: Vec<BatchExportMapResult>,
+}
+
+/// Result for a single map in a batch export.
+#[derive(Debug, serde::Serialize)]
+pub struct BatchExportMapResult {
+    pub map_name: String,
+    pub success: bool,
+    pub error: Option<String>,
+    pub buildings_exported: u32,
+    pub placements: u32,
+    pub effect_placements: u32,
+}
+
+/// Export all maps found in the project directory.
+/// Each map gets its own subdirectory under `output_base_dir`.
+/// Maps that fail are logged and skipped — the batch continues.
+pub fn batch_export_for_unity(
+    project_dir: &Path,
+    output_base_dir: &Path,
+) -> Result<BatchExportResult> {
+    let maps = scan_maps(project_dir)?;
+    let total = maps.len();
+    let mut results = Vec::with_capacity(total);
+    let mut succeeded = 0usize;
+    let mut failed = 0usize;
+
+    for map_entry in &maps {
+        let map_name = &map_entry.name;
+        let output_dir = output_base_dir.join(map_name);
+
+        match export_map_for_unity(project_dir, map_name, &output_dir) {
+            Ok(result) => {
+                results.push(BatchExportMapResult {
+                    map_name: map_name.clone(),
+                    success: true,
+                    error: None,
+                    buildings_exported: result.total_buildings_exported,
+                    placements: result.total_placements,
+                    effect_placements: result.total_effect_placements,
+                });
+                succeeded += 1;
+            }
+            Err(e) => {
+                eprintln!("Failed to export map '{}': {}", map_name, e);
+                results.push(BatchExportMapResult {
+                    map_name: map_name.clone(),
+                    success: false,
+                    error: Some(e.to_string()),
+                    buildings_exported: 0,
+                    placements: 0,
+                    effect_placements: 0,
+                });
+                failed += 1;
+            }
+        }
+    }
+
+    Ok(BatchExportResult {
+        total_maps: total,
+        succeeded,
+        failed,
+        results,
     })
 }
 
