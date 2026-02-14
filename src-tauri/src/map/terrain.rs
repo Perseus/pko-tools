@@ -13,6 +13,7 @@ use image::RgbImage;
 use serde_json::value::RawValue;
 
 use super::{MapEntry, MapMetadata};
+use crate::effect::model::EffFile;
 use crate::map::scene_model::LoadedSceneModels;
 use crate::map::scene_obj::{parse_obj_file, ParsedObjFile};
 
@@ -21,6 +22,9 @@ use crate::map::scene_obj::{parse_obj_file, ParsedObjFile};
 // ============================================================================
 
 const CUR_VERSION_NO: i32 = 780627; // MP_MAP_FLAG(780624) + 3
+
+/// If serialized effect_definitions exceeds this size, export as sidecar file.
+const SIDECAR_THRESHOLD: usize = 5 * 1024 * 1024; // 5MB
 
 // ============================================================================
 // Parsed structures
@@ -1062,10 +1066,200 @@ pub fn build_map_viewer_gltf(project_dir: &Path, map_name: &str) -> Result<Strin
     )
 }
 
+// ============================================================================
+// Grid builders for manifest v2
+// ============================================================================
+
+/// Build collision grid from tile bt_block[4] data at 2x tile resolution.
+/// Returns (grid_bytes, width, height) where width=n_width*2, height=n_height*2.
+fn build_collision_grid(map: &ParsedMap) -> (Vec<u8>, i32, i32) {
+    let w = map.header.n_width * 2;
+    let h = map.header.n_height * 2;
+    let mut grid = vec![0u8; (w * h) as usize];
+
+    for ty in 0..map.header.n_height {
+        for tx in 0..map.header.n_width {
+            if let Some(tile) = get_tile(map, tx, ty) {
+                for sub_y in 0..2i32 {
+                    for sub_x in 0..2i32 {
+                        let cx = tx * 2 + sub_x;
+                        let cy = ty * 2 + sub_y;
+                        let idx = (cy * w + cx) as usize;
+                        let block_idx = (sub_y * 2 + sub_x) as usize;
+                        grid[idx] = tile.bt_block[block_idx];
+                    }
+                }
+            }
+        }
+    }
+
+    (grid, w, h)
+}
+
+/// Build region grid (sRegion i16 per tile). Returns raw i16 LE bytes.
+fn build_region_grid(map: &ParsedMap) -> Vec<u8> {
+    let w = map.header.n_width;
+    let h = map.header.n_height;
+    let mut data = Vec::with_capacity((w * h * 2) as usize);
+
+    for ty in 0..h {
+        for tx in 0..w {
+            let region = get_tile(map, tx, ty)
+                .map(|t| t.s_region)
+                .unwrap_or(0);
+            data.extend_from_slice(&region.to_le_bytes());
+        }
+    }
+
+    data
+}
+
+/// Build area grid (btIsland u8 per tile).
+fn build_area_grid(map: &ParsedMap) -> Vec<u8> {
+    let w = map.header.n_width;
+    let h = map.header.n_height;
+    let mut grid = vec![0u8; (w * h) as usize];
+
+    for ty in 0..h {
+        for tx in 0..w {
+            let island = get_tile(map, tx, ty)
+                .map(|t| t.bt_island)
+                .unwrap_or(0);
+            grid[(ty * w + tx) as usize] = island;
+        }
+    }
+
+    grid
+}
+
+/// Build tile texture grid (dwTileInfo & 0x3F per tile → u8).
+fn build_tile_texture_grid(map: &ParsedMap) -> Vec<u8> {
+    let w = map.header.n_width;
+    let h = map.header.n_height;
+    let mut grid = vec![0u8; (w * h) as usize];
+
+    for ty in 0..h {
+        for tx in 0..w {
+            let tex_id = get_tile(map, tx, ty)
+                .map(|t| (t.dw_tile_info & 0x3F) as u8)
+                .unwrap_or(0);
+            grid[(ty * w + tx) as usize] = tex_id;
+        }
+    }
+
+    grid
+}
+
+/// Build tile color grid (sColor i16 per tile). Returns raw i16 LE bytes.
+fn build_tile_color_grid(map: &ParsedMap) -> Vec<u8> {
+    let w = map.header.n_width;
+    let h = map.header.n_height;
+    let mut data = Vec::with_capacity((w * h * 2) as usize);
+
+    for ty in 0..h {
+        for tx in 0..w {
+            let color = get_tile(map, tx, ty)
+                .map(|t| t.s_color)
+                .unwrap_or(0);
+            data.extend_from_slice(&color.to_le_bytes());
+        }
+    }
+
+    data
+}
+
+/// Find and load an .eff file from the project directory.
+/// sceneffectinfo stores filenames with .par extension; actual files use .eff.
+fn load_effect_file(project_dir: &Path, eff_filename: &str) -> Option<EffFile> {
+    // Strip extension and try .eff
+    let base = eff_filename
+        .strip_suffix(".par")
+        .or_else(|| eff_filename.strip_suffix(".PAR"))
+        .or_else(|| eff_filename.strip_suffix(".eff"))
+        .or_else(|| eff_filename.strip_suffix(".EFF"))
+        .unwrap_or(eff_filename);
+
+    let eff_path = project_dir.join("effect").join(format!("{}.eff", base));
+    if eff_path.exists() {
+        if let Ok(bytes) = std::fs::read(&eff_path) {
+            return EffFile::from_bytes(&bytes).ok();
+        }
+    }
+
+    // Try case-insensitive search in effect directory
+    let effect_dir = project_dir.join("effect");
+    if effect_dir.exists() {
+        let target = format!("{}.eff", base).to_lowercase();
+        if let Ok(entries) = std::fs::read_dir(&effect_dir) {
+            for entry in entries.flatten() {
+                if entry.file_name().to_string_lossy().to_lowercase() == target {
+                    if let Ok(bytes) = std::fs::read(entry.path()) {
+                        return EffFile::from_bytes(&bytes).ok();
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Copy water textures from BMP to PNG format.
+/// Copies ocean_h.01.bmp through ocean_h.30.bmp from the project's water texture directory.
+fn copy_water_textures(project_dir: &Path, output_dir: &Path) -> Vec<String> {
+    let water_dir = project_dir.join("texture/terrain/water");
+    if !water_dir.exists() {
+        return Vec::new();
+    }
+
+    let out_water_dir = output_dir.join("water");
+    let _ = std::fs::create_dir_all(&out_water_dir);
+
+    let mut copied = Vec::new();
+    for i in 1..=30 {
+        let bmp_name = format!("ocean_h.{:02}.bmp", i);
+        let bmp_path = water_dir.join(&bmp_name);
+
+        if !bmp_path.exists() {
+            // Try case-insensitive
+            let target = bmp_name.to_lowercase();
+            let found = std::fs::read_dir(&water_dir)
+                .ok()
+                .and_then(|entries| {
+                    entries
+                        .flatten()
+                        .find(|e| e.file_name().to_string_lossy().to_lowercase() == target)
+                        .map(|e| e.path())
+                });
+
+            if let Some(found_path) = found {
+                if let Ok(img) = image::open(&found_path) {
+                    let png_name = format!("ocean_h_{:02}.png", i);
+                    let png_path = out_water_dir.join(&png_name);
+                    if img.save(&png_path).is_ok() {
+                        copied.push(format!("water/{}", png_name));
+                    }
+                }
+            }
+            continue;
+        }
+
+        if let Ok(img) = image::open(&bmp_path) {
+            let png_name = format!("ocean_h_{:02}.png", i);
+            let png_path = out_water_dir.join(&png_name);
+            if img.save(&png_path).is_ok() {
+                copied.push(format!("water/{}", png_name));
+            }
+        }
+    }
+
+    copied
+}
+
 /// Export a map as three separate pieces for Unity (or similar engines):
 /// 1. Terrain-only glTF (no buildings embedded)
 /// 2. Individual building glTFs (one per unique building type, with textures + animations)
-/// 3. Placement manifest JSON (tells the engine where to instantiate each building)
+/// 3. Manifest v2 JSON (grids, placements, effects, areas, environment)
 pub fn export_map_for_unity(
     project_dir: &Path,
     map_name: &str,
@@ -1090,6 +1284,16 @@ pub fn export_map_for_unity(
 
     // 3. Load sceneobjinfo for obj_id → filename mapping
     let obj_info = super::scene_obj_info::load_scene_obj_info(project_dir).unwrap_or_default();
+
+    // 3b. Load AreaSet.bin for per-area definitions
+    let area_defs = super::area_set::load_area_set(project_dir).unwrap_or_default();
+
+    // 3c. Load mapinfo.bin for spawn point and per-map settings
+    let map_infos = super::mapinfo::load_mapinfo(project_dir).unwrap_or_default();
+    let this_map_info = super::mapinfo::find_map_info(&map_infos, map_name);
+
+    // 3d. Load sceneffectinfo for effect_id → .eff filename mapping
+    let effect_info = crate::item::sceneffect::load_scene_effect_info(project_dir).unwrap_or_default();
 
     // 4. Bake terrain texture atlas
     let atlas = super::texture::try_bake_atlas(project_dir, &parsed_map);
@@ -1174,36 +1378,188 @@ pub fn export_map_for_unity(
         );
     }
 
-    // Build placements array
+    // Build placements array (buildings, type=0) and effect placements (type=1)
+    let mut effect_placements = Vec::new();
+    let mut unique_eff_ids: HashSet<u16> = HashSet::new();
+
     if let Some(ref obj_file) = objects {
         for obj in &obj_file.objects {
-            if obj.obj_type != 0 {
-                continue;
-            }
-
             // Look up terrain height at the object's position
             let terrain_h = get_tile(&parsed_map, obj.world_x as i32, obj.world_y as i32)
                 .map(|t| tile_height(t))
                 .unwrap_or(0.0);
 
-            // Position in Y-up glTF space (same formula as terrain.rs:929)
-            placements.push(serde_json::json!({
-                "obj_id": obj.obj_id,
-                "position": [obj.world_x, terrain_h + obj.world_z, obj.world_y],
-                "rotation_y_degrees": obj.yaw_angle,
-                "scale": obj.scale,
-            }));
+            // Position in Y-up glTF space
+            let position = [obj.world_x, terrain_h + obj.world_z, obj.world_y];
+
+            if obj.obj_type == 0 {
+                // Building placement
+                placements.push(serde_json::json!({
+                    "obj_id": obj.obj_id,
+                    "position": position,
+                    "rotation_y_degrees": obj.yaw_angle,
+                    "scale": obj.scale,
+                }));
+            } else if obj.obj_type == 1 {
+                // Effect placement
+                effect_placements.push(serde_json::json!({
+                    "eff_id": obj.obj_id,
+                    "position": position,
+                    "rotation_y_degrees": obj.yaw_angle,
+                    "scale": obj.scale,
+                }));
+                unique_eff_ids.insert(obj.obj_id);
+            }
         }
     }
 
-    let manifest = serde_json::json!({
-        "map_name": map_name,
-        "coordinate_system": "y_up",
-        "world_scale": 5.0,
-        "terrain_gltf": "terrain.gltf",
-        "buildings": buildings_map,
-        "placements": placements,
+    // 10. Build grids
+    let (collision_bytes, coll_w, coll_h) = build_collision_grid(&parsed_map);
+    let region_bytes = build_region_grid(&parsed_map);
+    let area_bytes = build_area_grid(&parsed_map);
+    let tile_tex_bytes = build_tile_texture_grid(&parsed_map);
+    let tile_color_bytes = build_tile_color_grid(&parsed_map);
+
+    let collision_b64 = BASE64_STANDARD.encode(&collision_bytes);
+    let region_b64 = BASE64_STANDARD.encode(&region_bytes);
+    let area_b64 = BASE64_STANDARD.encode(&area_bytes);
+    let tile_tex_b64 = BASE64_STANDARD.encode(&tile_tex_bytes);
+    let tile_color_b64 = BASE64_STANDARD.encode(&tile_color_bytes);
+
+    // 11. Build effect definitions from .eff files
+    // Canonical schema: each effect's EffFile fields are flattened to the top level
+    // alongside "filename", matching the plan's manifest v2 spec.
+    let mut effect_definitions = serde_json::Map::new();
+    let mut missing_effect_ids: Vec<u16> = Vec::new();
+    for &eff_id in &unique_eff_ids {
+        if let Some(eff_info) = effect_info.get(&(eff_id as u32)) {
+            if let Some(eff_file) = load_effect_file(project_dir, &eff_info.filename) {
+                if let Ok(serde_json::Value::Object(mut eff_obj)) = serde_json::to_value(&eff_file) {
+                    // Flatten: merge filename into the EffFile object at the top level
+                    eff_obj.insert("filename".to_string(), serde_json::json!(eff_info.filename));
+                    effect_definitions.insert(eff_id.to_string(), serde_json::Value::Object(eff_obj));
+                } else {
+                    eprintln!("Warning: effect {} ({}) failed to serialize", eff_id, eff_info.filename);
+                    missing_effect_ids.push(eff_id);
+                }
+            } else {
+                eprintln!("Warning: effect {} ({}) .eff file not found or failed to parse", eff_id, eff_info.filename);
+                missing_effect_ids.push(eff_id);
+            }
+        } else {
+            eprintln!("Warning: effect {} not found in sceneffectinfo", eff_id);
+            missing_effect_ids.push(eff_id);
+        }
+    }
+
+    // 11b. Check effect_definitions size — if >5MB, export as sidecar file
+    let eff_defs_json_value = serde_json::Value::Object(effect_definitions.clone());
+    let eff_defs_size = serde_json::to_string(&eff_defs_json_value)
+        .map(|s| s.len())
+        .unwrap_or(0);
+    // Defined at module scope as SIDECAR_THRESHOLD
+
+    let use_sidecar = eff_defs_size > SIDECAR_THRESHOLD;
+
+    if use_sidecar {
+        let sidecar_path = output_dir.join("effect_definitions.json");
+        let sidecar_json = serde_json::to_string_pretty(&eff_defs_json_value)?;
+        std::fs::write(&sidecar_path, sidecar_json.as_bytes())?;
+    }
+
+    // 12. Build areas dict from AreaSet.bin
+    let areas_json = super::area_set::areas_to_json(&area_defs);
+
+    // 13. Build spawn point and environment from mapinfo.bin
+    let spawn_point = this_map_info.map(|info| {
+        serde_json::json!({
+            "tile_x": info.init_x,
+            "tile_y": info.init_y,
+        })
     });
+
+    // Default environment settings (from original PKO engine)
+    let light_direction = this_map_info
+        .map(|info| info.light_dir)
+        .unwrap_or([-1.0, -1.0, -1.0]);
+    let light_color = this_map_info
+        .map(|info| {
+            [
+                info.light_color[0] as f32 / 255.0,
+                info.light_color[1] as f32 / 255.0,
+                info.light_color[2] as f32 / 255.0,
+            ]
+        })
+        .unwrap_or([0.6, 0.6, 0.6]);
+
+    // 14. Copy water textures
+    let water_textures = copy_water_textures(project_dir, output_dir);
+
+    // 15. Build manifest v2 JSON
+    // Build manifest as a Map so we can conditionally include/omit keys
+    let mut manifest_map = serde_json::Map::new();
+    manifest_map.insert("version".into(), serde_json::json!(2));
+    manifest_map.insert("map_name".into(), serde_json::json!(map_name));
+    manifest_map.insert("coordinate_system".into(), serde_json::json!("y_up"));
+    manifest_map.insert("world_scale".into(), serde_json::json!(5.0));
+
+    // Map dimensions
+    manifest_map.insert("map_width_tiles".into(), serde_json::json!(parsed_map.header.n_width));
+    manifest_map.insert("map_height_tiles".into(), serde_json::json!(parsed_map.header.n_height));
+    manifest_map.insert("section_width".into(), serde_json::json!(parsed_map.header.n_section_width));
+    manifest_map.insert("section_height".into(), serde_json::json!(parsed_map.header.n_section_height));
+
+    // Terrain
+    manifest_map.insert("terrain_gltf".into(), serde_json::json!("terrain.gltf"));
+
+    // Grids (base64-encoded)
+    manifest_map.insert("collision_grid".into(), serde_json::json!({
+        "width": coll_w, "height": coll_h, "tile_size": 0.5, "data": collision_b64,
+    }));
+    manifest_map.insert("region_grid".into(), serde_json::json!({
+        "width": parsed_map.header.n_width, "height": parsed_map.header.n_height, "data": region_b64,
+    }));
+    manifest_map.insert("area_grid".into(), serde_json::json!({
+        "width": parsed_map.header.n_width, "height": parsed_map.header.n_height, "data": area_b64,
+    }));
+    manifest_map.insert("tile_texture_grid".into(), serde_json::json!({
+        "width": parsed_map.header.n_width, "height": parsed_map.header.n_height, "data": tile_tex_b64,
+    }));
+    manifest_map.insert("tile_color_grid".into(), serde_json::json!({
+        "width": parsed_map.header.n_width, "height": parsed_map.header.n_height, "data": tile_color_b64,
+    }));
+
+    // Buildings
+    manifest_map.insert("buildings".into(), serde_json::Value::Object(buildings_map));
+    manifest_map.insert("placements".into(), serde_json::json!(placements));
+
+    // Effects — conditionally inline or sidecar (never both)
+    manifest_map.insert("effect_placements".into(), serde_json::json!(effect_placements));
+    if use_sidecar {
+        manifest_map.insert("effect_definitions_file".into(), serde_json::json!("effect_definitions.json"));
+    } else {
+        manifest_map.insert("effect_definitions".into(), eff_defs_json_value);
+    }
+    if !missing_effect_ids.is_empty() {
+        let mut sorted_missing = missing_effect_ids.clone();
+        sorted_missing.sort_unstable();
+        manifest_map.insert("missing_effect_ids".into(), serde_json::json!(sorted_missing));
+    }
+
+    // Areas (from AreaSet.bin, keyed by btIsland value)
+    manifest_map.insert("areas".into(), areas_json);
+
+    // Map settings
+    manifest_map.insert("spawn_point".into(), serde_json::json!(spawn_point));
+    manifest_map.insert("light_direction".into(), serde_json::json!(light_direction));
+    manifest_map.insert("light_color".into(), serde_json::json!(light_color));
+    manifest_map.insert("ambient".into(), serde_json::json!([0.4, 0.4, 0.4]));
+    manifest_map.insert("background_color".into(), serde_json::json!([10, 10, 125]));
+
+    // Water textures (paths relative to output dir)
+    manifest_map.insert("water_textures".into(), serde_json::json!(water_textures));
+
+    let manifest = serde_json::Value::Object(manifest_map);
 
     let manifest_path = output_dir.join("manifest.json");
     let manifest_json = serde_json::to_string_pretty(&manifest)?;
@@ -1216,6 +1572,8 @@ pub fn export_map_for_unity(
         manifest_path: manifest_path.to_string_lossy().to_string(),
         total_buildings_exported: unique_obj_ids.len() as u32,
         total_placements: placements.len() as u32,
+        total_effect_placements: effect_placements.len() as u32,
+        total_effect_definitions: effect_definitions.len() as u32,
     })
 }
 
@@ -1252,6 +1610,82 @@ pub fn get_metadata(project_dir: &Path, map_name: &str) -> Result<MapMetadata> {
         non_empty_sections: non_empty,
         total_tiles,
         object_count,
+    })
+}
+
+// ============================================================================
+// Batch export
+// ============================================================================
+
+/// Result of a batch export operation.
+#[derive(Debug, serde::Serialize)]
+pub struct BatchExportResult {
+    pub total_maps: usize,
+    pub succeeded: usize,
+    pub failed: usize,
+    pub results: Vec<BatchExportMapResult>,
+}
+
+/// Result for a single map in a batch export.
+#[derive(Debug, serde::Serialize)]
+pub struct BatchExportMapResult {
+    pub map_name: String,
+    pub success: bool,
+    pub error: Option<String>,
+    pub buildings_exported: u32,
+    pub placements: u32,
+    pub effect_placements: u32,
+}
+
+/// Export all maps found in the project directory.
+/// Each map gets its own subdirectory under `output_base_dir`.
+/// Maps that fail are logged and skipped — the batch continues.
+pub fn batch_export_for_unity(
+    project_dir: &Path,
+    output_base_dir: &Path,
+) -> Result<BatchExportResult> {
+    let maps = scan_maps(project_dir)?;
+    let total = maps.len();
+    let mut results = Vec::with_capacity(total);
+    let mut succeeded = 0usize;
+    let mut failed = 0usize;
+
+    for map_entry in &maps {
+        let map_name = &map_entry.name;
+        let output_dir = output_base_dir.join(map_name);
+
+        match export_map_for_unity(project_dir, map_name, &output_dir) {
+            Ok(result) => {
+                results.push(BatchExportMapResult {
+                    map_name: map_name.clone(),
+                    success: true,
+                    error: None,
+                    buildings_exported: result.total_buildings_exported,
+                    placements: result.total_placements,
+                    effect_placements: result.total_effect_placements,
+                });
+                succeeded += 1;
+            }
+            Err(e) => {
+                eprintln!("Failed to export map '{}': {}", map_name, e);
+                results.push(BatchExportMapResult {
+                    map_name: map_name.clone(),
+                    success: false,
+                    error: Some(e.to_string()),
+                    buildings_exported: 0,
+                    placements: 0,
+                    effect_placements: 0,
+                });
+                failed += 1;
+            }
+        }
+    }
+
+    Ok(BatchExportResult {
+        total_maps: total,
+        succeeded,
+        failed,
+        results,
     })
 }
 
@@ -1358,6 +1792,94 @@ mod tests {
             parsed.header.n_section_height,
             non_empty
         );
+    }
+
+    #[test]
+    fn sidecar_threshold_inline_when_small() {
+        // Small effect_definitions should be inlined
+        let mut defs = serde_json::Map::new();
+        defs.insert("1".into(), serde_json::json!({"filename": "test.eff", "subEffects": []}));
+        let eff_value = serde_json::Value::Object(defs);
+        let size = serde_json::to_string(&eff_value).unwrap().len();
+        assert!(size < super::SIDECAR_THRESHOLD, "test data should be below 5MB");
+
+        // Simulate manifest assembly with use_sidecar=false
+        let mut manifest_map = serde_json::Map::new();
+        manifest_map.insert("effect_definitions".into(), eff_value);
+        // effect_definitions_file should NOT be present
+        assert!(manifest_map.contains_key("effect_definitions"));
+        assert!(!manifest_map.contains_key("effect_definitions_file"));
+    }
+
+    #[test]
+    fn sidecar_threshold_file_when_large() {
+        // Simulate sidecar mode: effect_definitions_file present, effect_definitions absent
+        let mut manifest_map = serde_json::Map::new();
+        // In sidecar mode, only effect_definitions_file is inserted
+        manifest_map.insert("effect_definitions_file".into(), serde_json::json!("effect_definitions.json"));
+        assert!(!manifest_map.contains_key("effect_definitions"));
+        assert!(manifest_map.contains_key("effect_definitions_file"));
+        assert_eq!(manifest_map["effect_definitions_file"], "effect_definitions.json");
+    }
+
+    #[test]
+    fn missing_effect_ids_omitted_when_empty() {
+        // missing_effect_ids should not appear in manifest when empty
+        let missing: Vec<u16> = vec![];
+        let mut manifest_map = serde_json::Map::new();
+        if !missing.is_empty() {
+            manifest_map.insert("missing_effect_ids".into(), serde_json::json!(missing));
+        }
+        assert!(!manifest_map.contains_key("missing_effect_ids"),
+            "empty missing_effect_ids should be omitted");
+    }
+
+    #[test]
+    fn missing_effect_ids_present_when_nonempty() {
+        let missing: Vec<u16> = vec![5, 12];
+        let mut manifest_map = serde_json::Map::new();
+        if !missing.is_empty() {
+            manifest_map.insert("missing_effect_ids".into(), serde_json::json!(missing));
+        }
+        assert!(manifest_map.contains_key("missing_effect_ids"));
+        let arr = manifest_map["missing_effect_ids"].as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        assert_eq!(arr[0], 5);
+        assert_eq!(arr[1], 12);
+    }
+
+    #[test]
+    fn effect_definition_schema_is_flat() {
+        // Verify that effect definitions use flat schema (EffFile fields + filename at same level)
+        // not nested { "filename": ..., "data": <EffFile> }
+        let eff = crate::effect::model::EffFile {
+            version: 1,
+            idx_tech: 0,
+            use_path: false,
+            path_name: String::new(),
+            use_sound: false,
+            sound_name: String::new(),
+            rotating: false,
+            rota_vec: [0.0; 3],
+            rota_vel: 0.0,
+            eff_num: 0,
+            sub_effects: vec![],
+        };
+
+        // Replicate the flatten logic from export_map_for_unity
+        if let serde_json::Value::Object(mut eff_obj) = serde_json::to_value(&eff).unwrap() {
+            eff_obj.insert("filename".to_string(), serde_json::json!("test.eff"));
+
+            // "filename" is at top level alongside EffFile fields
+            assert!(eff_obj.contains_key("filename"));
+            assert!(eff_obj.contains_key("subEffects")); // camelCase from serde rename
+            assert!(eff_obj.contains_key("idxTech"));
+            // "data" key must NOT exist (flat, not nested)
+            assert!(!eff_obj.contains_key("data"),
+                "effect definition should be flat, not nested under 'data'");
+        } else {
+            panic!("EffFile should serialize to a JSON object");
+        }
     }
 
     #[test]

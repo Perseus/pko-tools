@@ -87,6 +87,24 @@ pub async fn export_map_for_unity(
     .map_err(|e| e.to_string())
 }
 
+#[tauri::command]
+pub async fn batch_export_maps_for_unity(
+    project_id: String,
+) -> Result<super::terrain::BatchExportResult, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+
+    let output_base_dir = project
+        .project_directory
+        .join("pko-tools")
+        .join("exports")
+        .join("map");
+
+    terrain::batch_export_for_unity(project.project_directory.as_ref(), &output_base_dir)
+        .map_err(|e| e.to_string())
+}
+
 // ============================================================================
 // Building commands
 // ============================================================================
