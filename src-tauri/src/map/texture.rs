@@ -389,6 +389,128 @@ pub fn try_bake_atlas(
 }
 
 // ============================================================================
+// Phase E: Individual terrain texture + alpha atlas export
+// ============================================================================
+
+/// Export individual terrain textures as 256×256 PNGs to `output_dir/terrain_textures/`.
+/// Returns a map of texture_id → relative path (e.g. "terrain_textures/terrain_5.png").
+/// Only exports textures that are actually referenced by the map.
+pub fn export_terrain_textures(
+    project_dir: &Path,
+    parsed_map: &ParsedMap,
+    output_dir: &Path,
+) -> Result<HashMap<u8, String>> {
+    let terrain_info_path = project_dir
+        .join("scripts")
+        .join("table")
+        .join("TerrainInfo.bin");
+
+    let terrain_info_data = std::fs::read(&terrain_info_path)
+        .map_err(|e| anyhow::anyhow!("Failed to read TerrainInfo.bin: {}", e))?;
+    let terrain_info = parse_terrain_info(&terrain_info_data)?;
+
+    let referenced_ids = collect_referenced_tex_ids(parsed_map);
+    if referenced_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let tex_dir = output_dir.join("terrain_textures");
+    std::fs::create_dir_all(&tex_dir)?;
+
+    let mut exported = HashMap::new();
+
+    for &id in &referenced_ids {
+        let info = match terrain_info.get(&id) {
+            Some(info) => info,
+            None => continue,
+        };
+
+        if let Some(img) = load_pko_image(project_dir, &info.path) {
+            // Resize to 256×256 for consistency
+            let resized = img.resize_exact(256, 256, image::imageops::FilterType::Lanczos3);
+            let png_name = format!("terrain_{}.png", id);
+            let png_path = tex_dir.join(&png_name);
+            resized.save(&png_path)
+                .map_err(|e| anyhow::anyhow!("Failed to save terrain texture {}: {}", id, e))?;
+            exported.insert(id, format!("terrain_textures/{}", png_name));
+        }
+    }
+
+    eprintln!(
+        "Exported {}/{} terrain textures ({} referenced)",
+        exported.len(),
+        terrain_info.len(),
+        referenced_ids.len()
+    );
+
+    Ok(exported)
+}
+
+/// Export the alpha mask atlas (total.tga) as a PNG to `output_dir/terrain_textures/alpha_atlas.png`.
+/// Returns the relative path if successful.
+pub fn export_alpha_atlas(
+    project_dir: &Path,
+    output_dir: &Path,
+) -> Result<Option<String>> {
+    let atlas = match load_alpha_atlas(project_dir) {
+        Some(img) => img,
+        None => {
+            eprintln!("Warning: alpha mask atlas (total.tga) not found — blending will degrade to hard steps");
+            return Ok(None);
+        }
+    };
+
+    let tex_dir = output_dir.join("terrain_textures");
+    std::fs::create_dir_all(&tex_dir)?;
+
+    let png_path = tex_dir.join("alpha_atlas.png");
+    atlas.save(&png_path)
+        .map_err(|e| anyhow::anyhow!("Failed to save alpha atlas: {}", e))?;
+
+    Ok(Some("terrain_textures/alpha_atlas.png".to_string()))
+}
+
+/// Build tile layer grid: 7 bytes per tile encoding all 4 texture layers.
+/// Format per tile: [base_tex, L1_tex, L1_alpha, L2_tex, L2_alpha, L3_tex, L3_alpha]
+/// Row-major order (Y outer, X inner), same as other grids.
+pub fn build_tile_layer_grid(parsed_map: &ParsedMap) -> Vec<u8> {
+    let w = parsed_map.header.n_width;
+    let h = parsed_map.header.n_height;
+    let mut grid = Vec::with_capacity((w * h * 7) as usize);
+
+    for ty in 0..h {
+        for tx in 0..w {
+            let layers = match super::terrain::get_tile(parsed_map, tx, ty) {
+                Some(tile) => unpack_tile_layers(tile.bt_tile_info, tile.dw_tile_info),
+                None => [
+                    TileLayer { tex_id: 0, alpha: 0 },
+                    TileLayer { tex_id: 0, alpha: 0 },
+                    TileLayer { tex_id: 0, alpha: 0 },
+                    TileLayer { tex_id: 0, alpha: 0 },
+                ],
+            };
+
+            // 7 bytes: base_tex, L1_tex, L1_alpha, L2_tex, L2_alpha, L3_tex, L3_alpha
+            grid.push(layers[0].tex_id);
+            grid.push(layers[1].tex_id);
+            grid.push(layers[1].alpha);
+            grid.push(layers[2].tex_id);
+            grid.push(layers[2].alpha);
+            grid.push(layers[3].tex_id);
+            grid.push(layers[3].alpha);
+        }
+    }
+
+    grid
+}
+
+/// Get the ALPHA_NO_2_UV table (needed by Unity for shader constants).
+/// Returns the 16-entry UV lookup table as an array of [u, v] pairs.
+pub fn get_alpha_uv_table() -> &'static [[f32; 2]; 16] {
+    &ALPHA_NO_2_UV
+}
+
+// ============================================================================
 // Tests
 // ============================================================================
 
