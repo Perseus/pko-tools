@@ -224,8 +224,8 @@ fn sample_alpha(atlas: &DynamicImage, u: f32, v: f32) -> f32 {
     let px = ((u * w as f32) as u32).min(w - 1);
     let py = ((v * h as f32) as u32).min(h - 1);
     let pixel = atlas.get_pixel(px, py).to_rgba();
-    // Alpha mask is grayscale — use the red channel
-    pixel[0] as f32 / 255.0
+    // Alpha channel — matches original D3D pipeline (D3DTSS_ALPHAOP = SELECTARG1)
+    pixel[3] as f32 / 255.0
 }
 
 // ============================================================================
