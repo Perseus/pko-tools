@@ -1495,6 +1495,18 @@ pub fn export_map_for_unity(
     // 14. Copy water textures
     let water_textures = copy_water_textures(project_dir, output_dir);
 
+    // 14b. Export individual terrain textures for runtime blending (Phase E)
+    let terrain_textures = super::texture::export_terrain_textures(project_dir, &parsed_map, output_dir)
+        .unwrap_or_default();
+
+    // 14c. Export alpha mask atlas (Phase E)
+    let alpha_atlas_path = super::texture::export_alpha_atlas(project_dir, output_dir)
+        .unwrap_or(None);
+
+    // 14d. Build tile layer grid (Phase E) — 7 bytes per tile
+    let tile_layer_bytes = super::texture::build_tile_layer_grid(&parsed_map);
+    let tile_layer_b64 = BASE64_STANDARD.encode(&tile_layer_bytes);
+
     // 15. Build manifest v2 JSON
     // Build manifest as a Map so we can conditionally include/omit keys
     let mut manifest_map = serde_json::Map::new();
@@ -1558,6 +1570,25 @@ pub fn export_map_for_unity(
 
     // Water textures (paths relative to output dir)
     manifest_map.insert("water_textures".into(), serde_json::json!(water_textures));
+
+    // Terrain blending data (Phase E)
+    if !terrain_textures.is_empty() {
+        // terrain_textures dict: tex_id (string) → relative path
+        let tex_map: serde_json::Map<String, serde_json::Value> = terrain_textures
+            .iter()
+            .map(|(id, path)| (id.to_string(), serde_json::json!(path)))
+            .collect();
+        manifest_map.insert("terrain_textures".into(), serde_json::Value::Object(tex_map));
+    }
+    if let Some(ref alpha_path) = alpha_atlas_path {
+        manifest_map.insert("alpha_atlas".into(), serde_json::json!(alpha_path));
+    }
+    manifest_map.insert("tile_layer_grid".into(), serde_json::json!({
+        "width": parsed_map.header.n_width,
+        "height": parsed_map.header.n_height,
+        "bytes_per_tile": 7,
+        "data": tile_layer_b64,
+    }));
 
     let manifest = serde_json::Value::Object(manifest_map);
 
