@@ -154,7 +154,18 @@ fn load_pko_image(project_dir: &Path, rel_path: &str) -> Option<DynamicImage> {
         .or_else(|_| std::fs::read(project_dir.join(rel_path.replace('\\', "/"))))
         .ok()?;
     let decoded = decode_pko_texture(&tex_data);
-    image::load_from_memory(&decoded).ok()
+    // Try auto-detect first, then fall back to format hint from extension.
+    // TGA has no magic number so load_from_memory can't auto-detect it.
+    image::load_from_memory(&decoded).ok().or_else(|| {
+        let ext = rel_path.rsplit('.').next()?.to_lowercase();
+        let fmt = match ext.as_str() {
+            "tga" => image::ImageFormat::Tga,
+            "bmp" => image::ImageFormat::Bmp,
+            "dds" => image::ImageFormat::Dds,
+            _ => return None,
+        };
+        image::load_from_memory_with_format(&decoded, fmt).ok()
+    })
 }
 
 /// Load terrain texture images for all referenced IDs.
