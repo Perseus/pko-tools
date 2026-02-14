@@ -281,14 +281,12 @@ pub(crate) fn get_tile<'a>(map: &'a ParsedMap, tx: i32, ty: i32) -> Option<&'a M
     section.tiles.get(tile_idx)
 }
 
-/// Convert tile height byte to world units with visual exaggeration.
+/// Convert tile height byte to glTF Y coordinate.
 /// Client code: `pTile->fHeight = (float)(tile.cHeight * 10) / 100.0f`
-/// The raw range is only ±12.7 units across maps hundreds of tiles wide,
-/// so we scale up to make terrain relief visible in the viewer.
-const HEIGHT_EXAGGERATION: f32 = 5.0;
-
+/// The glTF root node has a uniform 5x scale (MAP_VISUAL_SCALE), so we
+/// pre-divide by 5.0 here. After scaling: Y = original fHeight.
 fn tile_height(tile: &MapTile) -> f32 {
-    (tile.c_height as f32 * 10.0) / 100.0 * HEIGHT_EXAGGERATION
+    (tile.c_height as f32 * 10.0) / 100.0 / 5.0
 }
 
 /// Build a glTF JSON string representing the terrain mesh.
@@ -1783,16 +1781,16 @@ mod tests {
             bt_block: [0; 4],
         };
         let h = tile_height(&tile);
-        // cHeight=10 → raw 1.0 × HEIGHT_EXAGGERATION(5) = 5.0
-        assert!((h - 5.0).abs() < 0.01, "height={}", h);
+        // cHeight=10 → raw 1.0 / 5.0 = 0.2 (after root 5x scale → 1.0 = original fHeight)
+        assert!((h - 0.2).abs() < 0.01, "height={}", h);
 
         let tile2 = MapTile {
             c_height: -5,
             ..tile
         };
         let h2 = tile_height(&tile2);
-        // cHeight=-5 → raw -0.5 × 5 = -2.5
-        assert!((h2 - (-2.5)).abs() < 0.01, "height={}", h2);
+        // cHeight=-5 → raw -0.5 / 5.0 = -0.1
+        assert!((h2 - (-0.1)).abs() < 0.01, "height={}", h2);
     }
 
     #[test]
