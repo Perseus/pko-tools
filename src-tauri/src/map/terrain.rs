@@ -1088,8 +1088,24 @@ pub fn build_map_viewer_gltf(project_dir: &Path, map_name: &str) -> Result<Strin
 // Grid builders for manifest v2
 // ============================================================================
 
+/// Decode btBlock byte to object height using the original engine formula.
+/// From MPTile.h `_getObjHeight`: bits 0-5 = magnitude (0-63),
+/// bit 6 = sign (1 = negative), bit 7 = collision flag (ignored for height).
+/// Returns height in original engine world units (range ±3.15).
+pub fn decode_obj_height(bt_block_byte: u8) -> f32 {
+    let magnitude = (bt_block_byte & 0x3F) as f32; // bits 0-5
+    let signed = (bt_block_byte & 0x40) != 0; // bit 6
+    let height = magnitude * 5.0 / 100.0;
+    if signed {
+        -height
+    } else {
+        height
+    }
+}
+
 /// Build collision grid from tile bt_block[4] data at 2x tile resolution.
 /// Returns (grid_bytes, width, height) where width=n_width*2, height=n_height*2.
+/// Each byte is 1 (blocked) or 0 (walkable), extracted from bit 7 of btBlock.
 fn build_collision_grid(map: &ParsedMap) -> (Vec<u8>, i32, i32) {
     let w = map.header.n_width * 2;
     let h = map.header.n_height * 2;
@@ -1104,11 +1120,66 @@ fn build_collision_grid(map: &ParsedMap) -> (Vec<u8>, i32, i32) {
                         let cy = ty * 2 + sub_y;
                         let idx = (cy * w + cx) as usize;
                         let block_idx = (sub_y * 2 + sub_x) as usize;
-                        grid[idx] = tile.bt_block[block_idx];
+                        // Only store collision flag (bit 7). Previously stored
+                        // the raw byte, which caused walkable cells with height
+                        // data (bits 0-6) to be incorrectly treated as blocked.
+                        grid[idx] = if tile.bt_block[block_idx] & 0x80 != 0 {
+                            1
+                        } else {
+                            0
+                        };
                     }
                 }
             }
         }
+    }
+
+    (grid, w, h)
+}
+
+/// Build object height grid from tile btBlock[4] data at 2x tile resolution.
+/// Each cell is an i16 in little-endian encoding representing height in
+/// millimeters (height * 1000). This gives sub-millimeter precision for the
+/// ±3.15 range while keeping the grid compact (2 bytes per cell).
+/// Returns (grid_bytes, width, height).
+fn build_obj_height_grid(map: &ParsedMap) -> (Vec<u8>, i32, i32) {
+    let w = map.header.n_width * 2;
+    let h = map.header.n_height * 2;
+    // Pre-allocate as i16 array, then convert to bytes
+    let mut grid_i16 = vec![0i16; (w * h) as usize];
+
+    for ty in 0..map.header.n_height {
+        for tx in 0..map.header.n_width {
+            if let Some(tile) = get_tile(map, tx, ty) {
+                for sub_y in 0..2i32 {
+                    for sub_x in 0..2i32 {
+                        let cx = tx * 2 + sub_x;
+                        let cy = ty * 2 + sub_y;
+                        let idx = (cy * w + cx) as usize;
+                        let block_idx = (sub_y * 2 + sub_x) as usize;
+                        let height = decode_obj_height(tile.bt_block[block_idx]);
+                        grid_i16[idx] = (height * 1000.0).round() as i16;
+                    }
+                }
+            } else {
+                // Missing tile → UNDERWATER_HEIGHT for all 4 sub-tiles
+                let uw = (UNDERWATER_HEIGHT * 1000.0).round() as i16;
+                for sub_y in 0..2i32 {
+                    for sub_x in 0..2i32 {
+                        let cx = tx * 2 + sub_x;
+                        let cy = ty * 2 + sub_y;
+                        let idx = (cy * w + cx) as usize;
+                        grid_i16[idx] = uw;
+                    }
+                }
+            }
+        }
+    }
+
+    // Convert i16 array to LE bytes
+    let mut grid = Vec::with_capacity((w * h * 2) as usize);
+    for val in &grid_i16 {
+        grid.extend_from_slice(&val.to_le_bytes());
     }
 
     (grid, w, h)
@@ -1435,12 +1506,14 @@ pub fn export_map_for_unity(
 
     // 10. Build grids
     let (collision_bytes, coll_w, coll_h) = build_collision_grid(&parsed_map);
+    let (obj_height_bytes, obj_h_w, obj_h_h) = build_obj_height_grid(&parsed_map);
     let region_bytes = build_region_grid(&parsed_map);
     let area_bytes = build_area_grid(&parsed_map);
     let tile_tex_bytes = build_tile_texture_grid(&parsed_map);
     let tile_color_bytes = build_tile_color_grid(&parsed_map);
 
     let collision_b64 = BASE64_STANDARD.encode(&collision_bytes);
+    let obj_height_b64 = BASE64_STANDARD.encode(&obj_height_bytes);
     let region_b64 = BASE64_STANDARD.encode(&region_bytes);
     let area_b64 = BASE64_STANDARD.encode(&area_bytes);
     let tile_tex_b64 = BASE64_STANDARD.encode(&tile_tex_bytes);
@@ -1570,6 +1643,13 @@ pub fn export_map_for_unity(
         "collision_grid".into(),
         serde_json::json!({
             "width": coll_w, "height": coll_h, "tile_size": 0.5, "data": collision_b64,
+        }),
+    );
+    manifest_map.insert(
+        "obj_height_grid".into(),
+        serde_json::json!({
+            "width": obj_h_w, "height": obj_h_h, "tile_size": 0.5,
+            "encoding": "i16_le_millimeters", "data": obj_height_b64,
         }),
     );
     manifest_map.insert("region_grid".into(), serde_json::json!({
@@ -2168,5 +2248,333 @@ mod tests {
         assert!(gltf_json.contains("terrain_mesh"));
 
         eprintln!("glTF JSON length: {} bytes", gltf_json.len());
+    }
+
+    #[test]
+    fn decode_obj_height_formula() {
+        // Zero byte = zero height
+        assert_eq!(super::decode_obj_height(0x00), 0.0);
+
+        // Magnitude 1, positive: 1 * 5 / 100 = 0.05
+        assert!((super::decode_obj_height(0x01) - 0.05).abs() < 0.001);
+
+        // Magnitude 63 (max), positive: 63 * 5 / 100 = 3.15
+        assert!((super::decode_obj_height(0x3F) - 3.15).abs() < 0.001);
+
+        // Magnitude 1, negative (bit 6 set): -0.05
+        assert!((super::decode_obj_height(0x41) - (-0.05)).abs() < 0.001);
+
+        // Magnitude 63, negative: -3.15
+        assert!((super::decode_obj_height(0x7F) - (-3.15)).abs() < 0.001);
+
+        // Collision bit (bit 7) should not affect height
+        // 0x80 = collision only, no height = 0.0
+        assert_eq!(super::decode_obj_height(0x80), 0.0);
+
+        // 0x81 = collision + magnitude 1 positive = 0.05
+        assert!((super::decode_obj_height(0x81) - 0.05).abs() < 0.001);
+
+        // 0xC1 = collision + magnitude 1 negative = -0.05
+        assert!((super::decode_obj_height(0xC1) - (-0.05)).abs() < 0.001);
+    }
+
+    #[test]
+    fn collision_grid_stores_only_collision_flag() {
+        let parsed = ParsedMap {
+            header: MapHeader {
+                n_map_flag: CUR_VERSION_NO,
+                n_width: 1,
+                n_height: 1,
+                n_section_width: 1,
+                n_section_height: 1,
+            },
+            section_cnt_x: 1,
+            section_cnt_y: 1,
+            section_offsets: vec![0],
+            sections: vec![Some(MapSection {
+                tiles: vec![MapTile {
+                    dw_tile_info: 0,
+                    bt_tile_info: 0,
+                    s_color: 0,
+                    c_height: -5,
+                    s_region: 0,
+                    bt_island: 0,
+                    // sub-tile 0: walkable with height (0x49 = positive height, no collision)
+                    // sub-tile 1: blocked (0x80 = collision flag only)
+                    // sub-tile 2: walkable zero (0x00)
+                    // sub-tile 3: blocked with height (0xC9 = collision + negative height)
+                    bt_block: [0x49, 0x80, 0x00, 0xC9],
+                }],
+            })],
+        };
+
+        let (grid, w, h) = build_collision_grid(&parsed);
+        assert_eq!(w, 2);
+        assert_eq!(h, 2);
+        assert_eq!(grid.len(), 4);
+        // sub-tile 0 (0,0): 0x49 → bit 7 clear → walkable (0)
+        assert_eq!(grid[0], 0, "0x49 should be walkable");
+        // sub-tile 1 (1,0): 0x80 → bit 7 set → blocked (1)
+        assert_eq!(grid[1], 1, "0x80 should be blocked");
+        // sub-tile 2 (0,1): 0x00 → walkable (0)
+        assert_eq!(grid[2], 0, "0x00 should be walkable");
+        // sub-tile 3 (1,1): 0xC9 → bit 7 set → blocked (1)
+        assert_eq!(grid[3], 1, "0xC9 should be blocked");
+    }
+
+    #[test]
+    fn obj_height_grid_encodes_i16_millimeters() {
+        let parsed = ParsedMap {
+            header: MapHeader {
+                n_map_flag: CUR_VERSION_NO,
+                n_width: 1,
+                n_height: 1,
+                n_section_width: 1,
+                n_section_height: 1,
+            },
+            section_cnt_x: 1,
+            section_cnt_y: 1,
+            section_offsets: vec![0],
+            sections: vec![Some(MapSection {
+                tiles: vec![MapTile {
+                    dw_tile_info: 0,
+                    bt_tile_info: 0,
+                    s_color: 0,
+                    c_height: 0,
+                    s_region: 0,
+                    bt_island: 0,
+                    // 0x09 = magnitude 9, positive: 9*5/100 = 0.45 → 450 millis
+                    // 0x00 = 0.0 → 0 millis
+                    // 0x41 = magnitude 1, negative: -0.05 → -50 millis
+                    // 0x3F = magnitude 63, positive: 3.15 → 3150 millis
+                    bt_block: [0x09, 0x00, 0x41, 0x3F],
+                }],
+            })],
+        };
+
+        let (grid, w, h) = build_obj_height_grid(&parsed);
+        assert_eq!(w, 2);
+        assert_eq!(h, 2);
+        assert_eq!(grid.len(), 8); // 4 cells × 2 bytes each
+
+        let read_i16 = |idx: usize| -> i16 {
+            i16::from_le_bytes([grid[idx * 2], grid[idx * 2 + 1]])
+        };
+
+        assert_eq!(read_i16(0), 450, "0x09 → 0.45 → 450mm");
+        assert_eq!(read_i16(1), 0, "0x00 → 0.0 → 0mm");
+        assert_eq!(read_i16(2), -50, "0x41 → -0.05 → -50mm");
+        assert_eq!(read_i16(3), 3150, "0x3F → 3.15 → 3150mm");
+    }
+
+    #[test]
+    fn diagnostic_btblock_height_xmas() {
+        // Load the xmas map to analyze btBlock height data.
+        // Skip silently if top-client data not present.
+        let map_path = std::path::Path::new("../top-client/map/07xmas2.map");
+        if !map_path.exists() {
+            eprintln!("SKIP: {} not found", map_path.display());
+            return;
+        }
+
+        let data = std::fs::read(map_path).unwrap();
+        let parsed = parse_map(&data).unwrap();
+
+        let tw = parsed.header.n_width;
+        let th = parsed.header.n_height;
+        eprintln!("Map: {}x{} tiles, sections: {}x{}", tw, th, parsed.section_cnt_x, parsed.section_cnt_y);
+
+        // --- Global btBlock statistics ---
+        let mut total_subtiles: u64 = 0;
+        let mut nonzero_height: u64 = 0;    // bits 0-6 != 0
+        let mut collision_set: u64 = 0;      // bit 7 set
+        let mut walkable_nonzero: u64 = 0;   // bit 7 clear but bits 0-6 != 0 (collision grid bug)
+        let mut height_positive: u64 = 0;
+        let mut height_negative: u64 = 0;
+
+        // Histogram: height value → count (in 0.5-unit buckets)
+        let mut histogram: std::collections::BTreeMap<i32, u64> = std::collections::BTreeMap::new();
+
+        // --- Near-water analysis ---
+        // Tiles where cHeight < 0 (below sea level)
+        let mut underwater_tiles: u64 = 0;
+        let mut underwater_subtiles_nonzero_height: u64 = 0;
+        let mut underwater_min_obj_height: f32 = f32::MAX;
+        let mut underwater_max_obj_height: f32 = f32::MIN;
+
+        // Water-edge tiles: cHeight between -5 and 0 (transition zone)
+        let mut edge_tiles: u64 = 0;
+        let mut edge_subtiles_nonzero_height: u64 = 0;
+        let mut edge_min_obj_height: f32 = f32::MAX;
+        let mut edge_max_obj_height: f32 = f32::MIN;
+
+        // Global min/max
+        let mut global_min_obj_height: f32 = f32::MAX;
+        let mut global_max_obj_height: f32 = f32::MIN;
+        let mut global_min_c_height: i8 = i8::MAX;
+        let mut global_max_c_height: i8 = i8::MIN;
+
+        // Sample some edge tiles for detailed output
+        let mut edge_samples: Vec<(i32, i32, i8, [u8; 4], [f32; 4])> = Vec::new();
+
+        for ty in 0..th {
+            for tx in 0..tw {
+                let tile = match get_tile(&parsed, tx, ty) {
+                    Some(t) => t,
+                    None => continue,
+                };
+
+                if tile.c_height < global_min_c_height { global_min_c_height = tile.c_height; }
+                if tile.c_height > global_max_c_height { global_max_c_height = tile.c_height; }
+
+                let is_underwater = tile.c_height < 0;
+                let is_edge = tile.c_height >= -5 && tile.c_height < 0;
+                if is_underwater { underwater_tiles += 1; }
+                if is_edge { edge_tiles += 1; }
+
+                let mut obj_heights = [0.0f32; 4];
+                for i in 0..4 {
+                    let bb = tile.bt_block[i];
+                    let h = decode_obj_height(bb);
+                    obj_heights[i] = h;
+
+                    total_subtiles += 1;
+
+                    let has_height = (bb & 0x7F) != 0; // bits 0-6 non-zero
+                    let is_blocked = (bb & 0x80) != 0;  // bit 7
+
+                    if has_height { nonzero_height += 1; }
+                    if is_blocked { collision_set += 1; }
+                    if !is_blocked && bb != 0 { walkable_nonzero += 1; }
+                    if h > 0.001 { height_positive += 1; }
+                    if h < -0.001 { height_negative += 1; }
+
+                    // Histogram bucket: multiply by 10, round to nearest 5 (= 0.5 unit buckets)
+                    let bucket = (h * 10.0).round() as i32 / 5 * 5;
+                    *histogram.entry(bucket).or_insert(0) += 1;
+
+                    if h < global_min_obj_height { global_min_obj_height = h; }
+                    if h > global_max_obj_height { global_max_obj_height = h; }
+
+                    if is_underwater && has_height { underwater_subtiles_nonzero_height += 1; }
+                    if is_underwater && h < underwater_min_obj_height { underwater_min_obj_height = h; }
+                    if is_underwater && h > underwater_max_obj_height { underwater_max_obj_height = h; }
+
+                    if is_edge && has_height { edge_subtiles_nonzero_height += 1; }
+                    if is_edge && h < edge_min_obj_height { edge_min_obj_height = h; }
+                    if is_edge && h > edge_max_obj_height { edge_max_obj_height = h; }
+                }
+
+                // Collect detailed samples for edge tiles
+                if is_edge && edge_samples.len() < 20 {
+                    let any_nonzero = tile.bt_block.iter().any(|&b| (b & 0x7F) != 0);
+                    if any_nonzero {
+                        edge_samples.push((tx, ty, tile.c_height, tile.bt_block, obj_heights));
+                    }
+                }
+            }
+        }
+
+        // --- Print results ---
+        eprintln!("\n=== btBlock Height Diagnostic for 07xmas2 ===\n");
+
+        eprintln!("cHeight range: {} to {} (fHeight: {:.2} to {:.2})",
+            global_min_c_height, global_max_c_height,
+            global_min_c_height as f32 * 0.1, global_max_c_height as f32 * 0.1);
+
+        eprintln!("\n--- Global btBlock Statistics ---");
+        eprintln!("Total sub-tiles:       {}", total_subtiles);
+        eprintln!("Non-zero height:       {} ({:.1}%)", nonzero_height, nonzero_height as f64 / total_subtiles as f64 * 100.0);
+        eprintln!("Collision (bit 7):     {} ({:.1}%)", collision_set, collision_set as f64 / total_subtiles as f64 * 100.0);
+        eprintln!("Walkable but != 0:     {} ({:.1}%) ← COLLISION GRID BUG", walkable_nonzero, walkable_nonzero as f64 / total_subtiles as f64 * 100.0);
+        eprintln!("Height > 0:            {}", height_positive);
+        eprintln!("Height < 0:            {}", height_negative);
+        eprintln!("Obj height range:      {:.3} to {:.3}", global_min_obj_height, global_max_obj_height);
+
+        eprintln!("\n--- Height Histogram (0.5-unit buckets) ---");
+        for (&bucket, &count) in &histogram {
+            if count > 0 {
+                let lo = bucket as f64 / 10.0;
+                let hi = lo + 0.5;
+                let bar_len = (count as f64 / total_subtiles as f64 * 200.0) as usize;
+                let bar: String = "#".repeat(bar_len.max(1).min(80));
+                eprintln!("[{:+5.1} to {:+5.1}]: {:>8} {}", lo, hi, count, bar);
+            }
+        }
+
+        eprintln!("\n--- Underwater Tiles (cHeight < 0) ---");
+        eprintln!("Underwater tiles:      {}", underwater_tiles);
+        eprintln!("Subtiles with height:  {}", underwater_subtiles_nonzero_height);
+        if underwater_tiles > 0 {
+            eprintln!("Obj height range:      {:.3} to {:.3}", underwater_min_obj_height, underwater_max_obj_height);
+        }
+
+        eprintln!("\n--- Water-Edge Tiles (-5 <= cHeight < 0) ---");
+        eprintln!("Edge tiles:            {}", edge_tiles);
+        eprintln!("Subtiles with height:  {}", edge_subtiles_nonzero_height);
+        if edge_tiles > 0 {
+            eprintln!("Obj height range:      {:.3} to {:.3}", edge_min_obj_height, edge_max_obj_height);
+        }
+
+        if !edge_samples.is_empty() {
+            eprintln!("\n--- Sample Water-Edge Tiles (up to 20) ---");
+            for (tx, ty, ch, bb, oh) in &edge_samples {
+                let fh = *ch as f32 * 0.1;
+                eprintln!(
+                    "  tile({},{}) cH={:+3} fH={:+5.1} btBlock=[0x{:02X},0x{:02X},0x{:02X},0x{:02X}] objH=[{:+.3},{:+.3},{:+.3},{:+.3}]",
+                    tx, ty, ch, fh, bb[0], bb[1], bb[2], bb[3], oh[0], oh[1], oh[2], oh[3]
+                );
+            }
+        }
+
+        // --- Compare cHeight terrain vs btBlock at same position ---
+        eprintln!("\n--- cHeight vs btBlock Height Comparison (underwater tiles) ---");
+        let mut deeper_count: u64 = 0;
+        let mut shallower_count: u64 = 0;
+        let mut same_count: u64 = 0;
+        let mut max_depth_diff: f32 = 0.0;
+
+        for ty in 0..th {
+            for tx in 0..tw {
+                let tile = match get_tile(&parsed, tx, ty) {
+                    Some(t) => t,
+                    None => continue,
+                };
+                if tile.c_height >= 0 { continue; }
+
+                let terrain_h = tile.c_height as f32 * 0.1; // fHeight (original engine units)
+                for i in 0..4 {
+                    let obj_h = decode_obj_height(tile.bt_block[i]);
+                    let diff = obj_h - terrain_h;
+                    if diff < -0.001 {
+                        deeper_count += 1; // btBlock is deeper than terrain
+                        if diff.abs() > max_depth_diff { max_depth_diff = diff.abs(); }
+                    } else if diff > 0.001 {
+                        shallower_count += 1; // btBlock is shallower than terrain
+                    } else {
+                        same_count += 1;
+                    }
+                }
+            }
+        }
+
+        eprintln!("btBlock DEEPER than terrain:    {} sub-tiles", deeper_count);
+        eprintln!("btBlock SHALLOWER than terrain:  {} sub-tiles", shallower_count);
+        eprintln!("btBlock SAME as terrain:         {} sub-tiles", same_count);
+        eprintln!("Max depth difference:            {:.3} units", max_depth_diff);
+
+        eprintln!("\n=== VERDICT ===");
+        if nonzero_height > 0 && walkable_nonzero > 0 {
+            eprintln!("CONFIRMED: btBlock has meaningful height data.");
+            eprintln!("CONFIRMED: Collision grid bug — {} walkable cells incorrectly blocked.", walkable_nonzero);
+        }
+        if deeper_count > 0 {
+            eprintln!("CONFIRMED: btBlock encodes DEEPER heights than terrain at water edges.");
+            eprintln!("→ Proceed with Phases 2-8 to use btBlock height for character placement.");
+        } else if nonzero_height == 0 {
+            eprintln!("DISPROVED: btBlock has NO meaningful height data. Investigate other causes.");
+        } else {
+            eprintln!("INCONCLUSIVE: btBlock has height data but not deeper than terrain at water.");
+        }
     }
 }
