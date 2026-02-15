@@ -47,12 +47,35 @@ const LW_MAX_TEXTURESTAGE_NUM: usize = 4;
 const LW_MAX_SUBSET_NUM: usize = 16;
 const RENDER_STATE_ATOM_SIZE: usize = 12; // state(4) + value0(4) + value1(4)
 
+// D3D9 render state constants used by PKO scene materials/meshes.
+const D3DRS_ALPHATESTENABLE: u32 = 15;
+const D3DRS_ALPHAREF: u32 = 24;
+const D3DRS_ALPHAFUNC: u32 = 25;
+const D3DCMP_GREATER: u32 = 5;
+
+#[derive(Debug, Clone, Copy, Default)]
+struct AlphaTestState {
+    enabled: bool,
+    alpha_ref: Option<u8>,
+    alpha_func: Option<u32>,
+}
+
+impl AlphaTestState {
+    fn normalized_enabled(self) -> bool {
+        self.enabled && self.alpha_func.map(|f| f == D3DCMP_GREATER).unwrap_or(true)
+    }
+
+    fn effective_alpha_ref(self) -> u8 {
+        self.alpha_ref.unwrap_or(129)
+    }
+}
+
 /// Animation data for a geometry object — decomposed from matrix keyframes.
 #[derive(Debug, Clone)]
 pub struct LmoAnimData {
     pub frame_num: u32,
-    pub translations: Vec<[f32; 3]>,  // per-frame translation (Z-up game space)
-    pub rotations: Vec<[f32; 4]>,     // per-frame quaternion [x,y,z,w] (Z-up game space)
+    pub translations: Vec<[f32; 3]>, // per-frame translation (Z-up game space)
+    pub rotations: Vec<[f32; 4]>,    // per-frame quaternion [x,y,z,w] (Z-up game space)
 }
 
 /// A single geometry object within an LMO file.
@@ -87,6 +110,8 @@ pub struct LmoMaterial {
     pub diffuse: [f32; 4],
     pub ambient: [f32; 4],
     pub opacity: f32,
+    pub alpha_test_enabled: bool,
+    pub alpha_ref: u8,
     pub tex_filename: Option<String>,
 }
 
@@ -130,6 +155,32 @@ fn read_mat44(cursor: &mut Cursor<&[u8]>) -> Result<[[f32; 4]; 4]> {
     Ok(mat)
 }
 
+fn read_render_state_atoms(
+    cursor: &mut Cursor<&[u8]>,
+    atom_count: usize,
+) -> Result<AlphaTestState> {
+    let mut alpha = AlphaTestState::default();
+    for _ in 0..atom_count {
+        let state = read_u32(cursor)?;
+        let value0 = read_u32(cursor)?;
+        let _value1 = read_u32(cursor)?;
+
+        match state {
+            D3DRS_ALPHATESTENABLE => {
+                alpha.enabled = value0 != 0;
+            }
+            D3DRS_ALPHAREF => {
+                alpha.alpha_ref = Some((value0 & 0xFF) as u8);
+            }
+            D3DRS_ALPHAFUNC => {
+                alpha.alpha_func = Some(value0);
+            }
+            _ => {}
+        }
+    }
+    Ok(alpha)
+}
+
 // ============================================================================
 // Material parsing
 // ============================================================================
@@ -162,18 +213,30 @@ fn read_material(cursor: &mut Cursor<&[u8]>, mtl_ver: MtlFormatVersion) -> Resul
     };
 
     // CharMaterial: dif(16) + amb(16) + spe(16) + emi(16) + power(4) = 68 bytes
-    let diffuse = [read_f32(cursor)?, read_f32(cursor)?, read_f32(cursor)?, read_f32(cursor)?];
-    let ambient = [read_f32(cursor)?, read_f32(cursor)?, read_f32(cursor)?, read_f32(cursor)?];
+    let diffuse = [
+        read_f32(cursor)?,
+        read_f32(cursor)?,
+        read_f32(cursor)?,
+        read_f32(cursor)?,
+    ];
+    let ambient = [
+        read_f32(cursor)?,
+        read_f32(cursor)?,
+        read_f32(cursor)?,
+        read_f32(cursor)?,
+    ];
     cursor.seek(SeekFrom::Current(16))?; // specular
     cursor.seek(SeekFrom::Current(16))?; // emissive
-    cursor.seek(SeekFrom::Current(4))?;  // power
+    cursor.seek(SeekFrom::Current(4))?; // power
 
     // rs_set — old formats use lwRenderStateSetMtl2 (128 bytes), new uses lwRenderStateAtom[8] (96 bytes)
-    let mtl_rs_size: i64 = match mtl_ver {
-        MtlFormatVersion::V0000 | MtlFormatVersion::V0001 => 128,
-        MtlFormatVersion::Current => (LW_MTL_RS_NUM * RENDER_STATE_ATOM_SIZE) as i64,
+    let rs_alpha = match mtl_ver {
+        MtlFormatVersion::V0000 | MtlFormatVersion::V0001 => {
+            cursor.seek(SeekFrom::Current(128))?;
+            AlphaTestState::default()
+        }
+        MtlFormatVersion::Current => read_render_state_atoms(cursor, LW_MTL_RS_NUM)?,
     };
-    cursor.seek(SeekFrom::Current(mtl_rs_size))?;
 
     // tex_seq: 4 × TextureInfo — extract filename from first texture slot
     let mut tex_filename = None;
@@ -206,7 +269,9 @@ fn read_material(cursor: &mut Cursor<&[u8]>, mtl_ver: MtlFormatVersion) -> Resul
                 // lwTexInfo: same fields as V0001 but tss_set is lwRenderStateAtom[8] (96 bytes)
                 cursor.seek(SeekFrom::Current(44))?; // 11 DWORDs
                 let fname = read_cstr_fixed(cursor, 64)?;
-                cursor.seek(SeekFrom::Current(4 + (LW_MTL_RS_NUM * RENDER_STATE_ATOM_SIZE) as i64))?; // data + tss_set
+                cursor.seek(SeekFrom::Current(
+                    4 + (LW_MTL_RS_NUM * RENDER_STATE_ATOM_SIZE) as i64,
+                ))?; // data + tss_set
 
                 if i == 0 && !fname.is_empty() {
                     tex_filename = Some(fname);
@@ -219,6 +284,12 @@ fn read_material(cursor: &mut Cursor<&[u8]>, mtl_ver: MtlFormatVersion) -> Resul
         diffuse,
         ambient,
         opacity,
+        alpha_test_enabled: rs_alpha.normalized_enabled(),
+        alpha_ref: if rs_alpha.normalized_enabled() {
+            rs_alpha.effective_alpha_ref()
+        } else {
+            rs_alpha.alpha_ref.unwrap_or(0)
+        },
         tex_filename,
     })
 }
@@ -231,13 +302,17 @@ fn read_material(cursor: &mut Cursor<&[u8]>, mtl_ver: MtlFormatVersion) -> Resul
 ///
 /// `file_version` is the top-level LMO file version. For version 0, an extra `old_version`
 /// DWORD is read first and used to determine the actual mesh format.
-fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<(
+fn read_mesh(
+    cursor: &mut Cursor<&[u8]>,
+    file_version: u32,
+) -> Result<(
     Vec<[f32; 3]>,
     Vec<[f32; 3]>,
     Vec<[f32; 2]>,
     Vec<u32>,
     Vec<u32>,
     Vec<LmoSubset>,
+    AlphaTestState,
 )> {
     // For version 0, the mesh section has an embedded old_version prefix
     let mesh_version = if file_version == EXP_OBJ_VERSION_0_0_0_0 {
@@ -245,6 +320,8 @@ fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<(
     } else {
         file_version
     };
+
+    let mut mesh_alpha = AlphaTestState::default();
 
     // Read mesh header — format depends on version
     let (fvf, vertex_num, index_num, subset_num, bone_index_num, vertex_element_num);
@@ -262,7 +339,7 @@ fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<(
         vertex_element_num = read_u32(cursor)? as usize;
 
         // rs_set: 8 × RenderStateAtom (12 bytes each)
-        cursor.seek(SeekFrom::Current((LW_MESH_RS_NUM * RENDER_STATE_ATOM_SIZE) as i64))?;
+        mesh_alpha = read_render_state_atoms(cursor, LW_MESH_RS_NUM)?;
     } else {
         // Older header: fvf + pt_type + vertex_num + index_num + subset_num + bone_index_num
         // No bone_infl_factor, no vertex_element_num
@@ -283,7 +360,7 @@ fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<(
             // MESH_VERSION0001 / EXP_OBJ_VERSION_1_0_0_0..3: rs_set is lwRenderStateAtom[8]
             // lwRenderStateAtom = state(4) + value0(4) + value1(4) = 12 bytes
             // Total: 8 × 12 = 96 bytes
-            cursor.seek(SeekFrom::Current((LW_MESH_RS_NUM * RENDER_STATE_ATOM_SIZE) as i64))?;
+            mesh_alpha = read_render_state_atoms(cursor, LW_MESH_RS_NUM)?;
         }
     }
 
@@ -336,7 +413,9 @@ fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<(
         if bone_index_num > 0 {
             // lwBlendInfo per vertex (each is 8 bytes: 2 floats for weights)
             // + DWORD per bone_index
-            cursor.seek(SeekFrom::Current(vertex_num as i64 * 8 + bone_index_num as i64 * 4))?;
+            cursor.seek(SeekFrom::Current(
+                vertex_num as i64 * 8 + bone_index_num as i64 * 4,
+            ))?;
         }
 
         // Indices (u32)
@@ -356,7 +435,15 @@ fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<(
             });
         }
 
-        Ok((vertices, normals, texcoords, vertex_colors, indices, subsets))
+        Ok((
+            vertices,
+            normals,
+            texcoords,
+            vertex_colors,
+            indices,
+            subsets,
+            mesh_alpha,
+        ))
     } else {
         // Old format (pre-1.0.0.4): subsets FIRST, then vertices, normals, texcoords, colors, blending, indices
 
@@ -411,7 +498,9 @@ fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<(
         // Skip blend/bone data if present (old format uses BYTE bone indices)
         if bone_index_num > 0 {
             // lwBlendInfo per vertex (8 bytes) + BYTE per bone_index
-            cursor.seek(SeekFrom::Current(vertex_num as i64 * 8 + bone_index_num as i64))?;
+            cursor.seek(SeekFrom::Current(
+                vertex_num as i64 * 8 + bone_index_num as i64,
+            ))?;
         }
 
         // Indices (u32)
@@ -420,7 +509,15 @@ fn read_mesh(cursor: &mut Cursor<&[u8]>, file_version: u32) -> Result<(
             indices.push(read_u32(cursor)?);
         }
 
-        Ok((vertices, normals, texcoords, vertex_colors, indices, subsets))
+        Ok((
+            vertices,
+            normals,
+            texcoords,
+            vertex_colors,
+            indices,
+            subsets,
+            mesh_alpha,
+        ))
     }
 }
 
@@ -439,9 +536,7 @@ fn decompose_matrix43(raw: &[f32; 12]) -> ([f32; 3], [f32; 4]) {
     // Column 2: [raw[6], raw[7], raw[8], 0]
     // Column 3: [raw[9], raw[10], raw[11], 1]
     let mat = Matrix4::new(
-        raw[0], raw[1], raw[2], 0.0,
-        raw[3], raw[4], raw[5], 0.0,
-        raw[6], raw[7], raw[8], 0.0,
+        raw[0], raw[1], raw[2], 0.0, raw[3], raw[4], raw[5], 0.0, raw[6], raw[7], raw[8], 0.0,
         raw[9], raw[10], raw[11], 1.0,
     );
 
@@ -457,9 +552,15 @@ fn decompose_matrix43(raw: &[f32; 12]) -> ([f32; 3], [f32; 4]) {
     let scale_y = col1.magnitude();
     let scale_z = col2.magnitude();
 
-    if scale_x > 1e-8 { col0 /= scale_x; }
-    if scale_y > 1e-8 { col1 /= scale_y; }
-    if scale_z > 1e-8 { col2 /= scale_z; }
+    if scale_x > 1e-8 {
+        col0 /= scale_x;
+    }
+    if scale_y > 1e-8 {
+        col1 /= scale_y;
+    }
+    if scale_z > 1e-8 {
+        col2 /= scale_z;
+    }
 
     let rotation_matrix = Matrix3::from_cols(col0, col1, col2);
     let q = Quaternion::from(rotation_matrix);
@@ -557,9 +658,18 @@ fn read_animation(
 // Geometry object parsing
 // ============================================================================
 
-fn read_geom_object(data: &[u8], addr: usize, size: usize, file_version: u32, parse_animations: bool) -> Result<LmoGeomObject> {
+fn read_geom_object(
+    data: &[u8],
+    addr: usize,
+    size: usize,
+    file_version: u32,
+    parse_animations: bool,
+) -> Result<LmoGeomObject> {
     if addr + size > data.len() {
-        return Err(anyhow!("Geometry object at offset {} exceeds file size", addr));
+        return Err(anyhow!(
+            "Geometry object at offset {} exceeds file size",
+            addr
+        ));
     }
 
     let chunk = &data[addr..addr + size];
@@ -635,19 +745,35 @@ fn read_geom_object(data: &[u8], addr: usize, size: usize, file_version: u32, pa
     let mut vertex_colors = Vec::new();
     let mut indices = Vec::new();
     let mut subsets = Vec::new();
+    let mut mesh_alpha = AlphaTestState::default();
 
     if mesh_size > 0 {
         match read_mesh(&mut cursor, file_version) {
-            Ok((v, n, t, c, i, s)) => {
+            Ok((v, n, t, c, i, s, alpha)) => {
                 vertices = v;
                 normals = n;
                 texcoords = t;
                 vertex_colors = c;
                 indices = i;
                 subsets = s;
+                mesh_alpha = alpha;
             }
             Err(e) => {
                 eprintln!("Warning: failed to read mesh: {}", e);
+            }
+        }
+    }
+
+    // Some LMO files store alpha test states at mesh-level rs_set rather than
+    // material rs_set. Promote mesh-level state to all materials when needed.
+    if mesh_alpha.normalized_enabled() {
+        let mesh_alpha_ref = mesh_alpha.effective_alpha_ref();
+        for mat in &mut materials {
+            if !mat.alpha_test_enabled {
+                mat.alpha_test_enabled = true;
+            }
+            if mat.alpha_ref == 0 {
+                mat.alpha_ref = mesh_alpha_ref;
             }
         }
     }
@@ -720,7 +846,10 @@ fn parse_lmo_opts(data: &[u8], parse_animations: bool) -> Result<LmoModel> {
         match read_geom_object(data, *addr, *size, version, parse_animations) {
             Ok(geom) => geom_objects.push(geom),
             Err(e) => {
-                eprintln!("Warning: failed to read geometry object at offset {}: {}", addr, e);
+                eprintln!(
+                    "Warning: failed to read geometry object at offset {}: {}",
+                    addr, e
+                );
             }
         }
     }
@@ -764,6 +893,21 @@ mod tests {
         buf.extend(std::iter::repeat(0u8).take(n));
     }
 
+    fn push_alpha_test_rs_atoms(buf: &mut Vec<u8>, enabled: bool, alpha_ref: u8) {
+        let mut atoms = [[0u32; 3]; LW_MTL_RS_NUM];
+        if enabled {
+            atoms[0] = [D3DRS_ALPHATESTENABLE, 1, 0];
+            atoms[1] = [D3DRS_ALPHAREF, alpha_ref as u32, 0];
+            atoms[2] = [D3DRS_ALPHAFUNC, D3DCMP_GREATER, 0];
+        }
+
+        for atom in atoms {
+            push_u32(buf, atom[0]);
+            push_u32(buf, atom[1]);
+            push_u32(buf, atom[2]);
+        }
+    }
+
     /// Write an identity 4×4 matrix (64 bytes).
     fn push_identity_mat44(buf: &mut Vec<u8>) {
         for r in 0..4u32 {
@@ -775,16 +919,21 @@ mod tests {
 
     /// Write a material (opacity + transp_type + CharMaterial + rs_set[8] + tex_seq[4]).
     fn push_material(buf: &mut Vec<u8>, diffuse: [f32; 4], opacity: f32, tex: &str) {
-        push_f32(buf, opacity);          // opacity
-        push_u32(buf, 0);                // transp_type
-        // CharMaterial: diffuse(16) + ambient(16) + specular(16) + emissive(16) + power(4) = 68
-        for &c in &diffuse { push_f32(buf, c); }   // diffuse
-        push_f32(buf, 0.3); push_f32(buf, 0.3); push_f32(buf, 0.3); push_f32(buf, 1.0); // ambient
-        push_zeros(buf, 16);             // specular
-        push_zeros(buf, 16);             // emissive
-        push_f32(buf, 0.0);             // power
-        // rs_set: 8 × RenderStateAtom (12 bytes)
-        push_zeros(buf, 8 * 12);
+        push_f32(buf, opacity); // opacity
+        push_u32(buf, 0); // transp_type
+                          // CharMaterial: diffuse(16) + ambient(16) + specular(16) + emissive(16) + power(4) = 68
+        for &c in &diffuse {
+            push_f32(buf, c);
+        } // diffuse
+        push_f32(buf, 0.3);
+        push_f32(buf, 0.3);
+        push_f32(buf, 0.3);
+        push_f32(buf, 1.0); // ambient
+        push_zeros(buf, 16); // specular
+        push_zeros(buf, 16); // emissive
+        push_f32(buf, 0.0); // power
+                            // rs_set: 8 × RenderStateAtom (12 bytes)
+        push_alpha_test_rs_atoms(buf, false, 0);
         // tex_seq: 4 × TextureInfo
         for i in 0..4 {
             push_u32(buf, 0); // stage
@@ -798,7 +947,7 @@ mod tests {
             push_u32(buf, 0); // height
             push_u32(buf, 0); // colorkey_type
             push_u32(buf, 0); // colorkey
-            // file_name[64]
+                              // file_name[64]
             let mut fname_buf = [0u8; 64];
             if i == 0 {
                 let bytes = tex.as_bytes();
@@ -807,7 +956,54 @@ mod tests {
             }
             buf.extend_from_slice(&fname_buf);
             push_u32(buf, 0); // data
-            // tss_set: 8 × RenderStateAtom
+                              // tss_set: 8 × RenderStateAtom
+            push_zeros(buf, 8 * 12);
+        }
+    }
+
+    fn push_material_with_alpha_test(
+        buf: &mut Vec<u8>,
+        diffuse: [f32; 4],
+        opacity: f32,
+        tex: &str,
+        enabled: bool,
+        alpha_ref: u8,
+    ) {
+        push_f32(buf, opacity); // opacity
+        push_u32(buf, 0); // transp_type
+        for &c in &diffuse {
+            push_f32(buf, c);
+        }
+        push_f32(buf, 0.3);
+        push_f32(buf, 0.3);
+        push_f32(buf, 0.3);
+        push_f32(buf, 1.0);
+        push_zeros(buf, 16);
+        push_zeros(buf, 16);
+        push_f32(buf, 0.0);
+
+        push_alpha_test_rs_atoms(buf, enabled, alpha_ref);
+
+        for i in 0..4 {
+            push_u32(buf, 0);
+            push_u32(buf, 0);
+            push_u32(buf, 0);
+            push_u32(buf, 0);
+            push_u32(buf, 0);
+            push_u32(buf, 0);
+            push_u32(buf, 0);
+            push_u32(buf, 0);
+            push_u32(buf, 0);
+            push_u32(buf, 0);
+            push_u32(buf, 0);
+            let mut fname_buf = [0u8; 64];
+            if i == 0 {
+                let bytes = tex.as_bytes();
+                let len = bytes.len().min(63);
+                fname_buf[..len].copy_from_slice(&bytes[..len]);
+            }
+            buf.extend_from_slice(&fname_buf);
+            push_u32(buf, 0);
             push_zeros(buf, 8 * 12);
         }
     }
@@ -845,16 +1041,16 @@ mod tests {
         let mut geom = Vec::new();
 
         // Geometry header (116 bytes)
-        push_u32(&mut geom, id);          // id
-        push_u32(&mut geom, 0xFFFFFFFF);  // parent_id
-        push_u32(&mut geom, 0);           // type
-        push_identity_mat44(&mut geom);   // mat_local (64 bytes)
-        push_zeros(&mut geom, 16);        // rcci
-        push_zeros(&mut geom, 8);         // state_ctrl
+        push_u32(&mut geom, id); // id
+        push_u32(&mut geom, 0xFFFFFFFF); // parent_id
+        push_u32(&mut geom, 0); // type
+        push_identity_mat44(&mut geom); // mat_local (64 bytes)
+        push_zeros(&mut geom, 16); // rcci
+        push_zeros(&mut geom, 8); // state_ctrl
         push_u32(&mut geom, mtl_size as u32);
         push_u32(&mut geom, mesh_size as u32);
-        push_u32(&mut geom, 0);           // helper_size
-        push_u32(&mut geom, 0);           // anim_size
+        push_u32(&mut geom, 0); // helper_size
+        push_u32(&mut geom, 0); // anim_size
 
         // Materials
         push_u32(&mut geom, mtl_num);
@@ -872,22 +1068,33 @@ mod tests {
         push_zeros(&mut geom, LW_MESH_RS_NUM * 12); // rs_set
 
         // Vertex positions: a simple triangle
-        push_f32(&mut geom, 0.0); push_f32(&mut geom, 0.0); push_f32(&mut geom, 0.0);
-        push_f32(&mut geom, 1.0); push_f32(&mut geom, 0.0); push_f32(&mut geom, 0.0);
-        push_f32(&mut geom, 0.0); push_f32(&mut geom, 1.0); push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 1.0);
+        push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 1.0);
+        push_f32(&mut geom, 0.0);
 
         // Normals
         if has_normals {
             for _ in 0..vertex_num {
-                push_f32(&mut geom, 0.0); push_f32(&mut geom, 0.0); push_f32(&mut geom, 1.0);
+                push_f32(&mut geom, 0.0);
+                push_f32(&mut geom, 0.0);
+                push_f32(&mut geom, 1.0);
             }
         }
 
         // Texcoords
         for _ in 0..tex_count {
-            push_f32(&mut geom, 0.0); push_f32(&mut geom, 0.0);
-            push_f32(&mut geom, 1.0); push_f32(&mut geom, 0.0);
-            push_f32(&mut geom, 0.0); push_f32(&mut geom, 1.0);
+            push_f32(&mut geom, 0.0);
+            push_f32(&mut geom, 0.0);
+            push_f32(&mut geom, 1.0);
+            push_f32(&mut geom, 0.0);
+            push_f32(&mut geom, 0.0);
+            push_f32(&mut geom, 1.0);
         }
 
         // Vertex colors
@@ -903,10 +1110,10 @@ mod tests {
         push_u32(&mut geom, 2);
 
         // Subsets
-        push_u32(&mut geom, 1);  // primitive_num (1 triangle)
-        push_u32(&mut geom, 0);  // start_index
-        push_u32(&mut geom, 3);  // vertex_num
-        push_u32(&mut geom, 0);  // min_index
+        push_u32(&mut geom, 1); // primitive_num (1 triangle)
+        push_u32(&mut geom, 0); // start_index
+        push_u32(&mut geom, 3); // vertex_num
+        push_u32(&mut geom, 0); // min_index
 
         geom
     }
@@ -922,13 +1129,92 @@ mod tests {
 
         let mut data = Vec::new();
         push_u32(&mut data, 0x1005); // version
-        push_u32(&mut data, 1);      // obj_num
-        // Header table entry
+        push_u32(&mut data, 1); // obj_num
+                                // Header table entry
         push_u32(&mut data, OBJ_TYPE_GEOMETRY);
         push_u32(&mut data, geom_addr as u32);
         push_u32(&mut data, geom_size as u32);
         data.extend_from_slice(&geom_blob);
 
+        data
+    }
+
+    fn build_single_geom_lmo_with_alpha(
+        material_alpha: bool,
+        mesh_alpha: bool,
+        alpha_ref: u8,
+    ) -> Vec<u8> {
+        let fvf = 0x002u32;
+        let vertex_num: u32 = 3;
+        let index_num: u32 = 3;
+        let subset_num: u32 = 1;
+
+        let mtl_num: u32 = 1;
+        let mtl_size = 4 + mtl_num as usize * material_entry_size();
+        let mesh_header_size = 32 + LW_MESH_RS_NUM * 12;
+        let mesh_data_size =
+            vertex_num as usize * 12 + index_num as usize * 4 + subset_num as usize * 16;
+        let mesh_size = mesh_header_size + mesh_data_size;
+
+        let mut geom = Vec::new();
+        push_u32(&mut geom, 42);
+        push_u32(&mut geom, 0xFFFFFFFF);
+        push_u32(&mut geom, 0);
+        push_identity_mat44(&mut geom);
+        push_zeros(&mut geom, 16);
+        push_zeros(&mut geom, 8);
+        push_u32(&mut geom, mtl_size as u32);
+        push_u32(&mut geom, mesh_size as u32);
+        push_u32(&mut geom, 0);
+        push_u32(&mut geom, 0);
+
+        push_u32(&mut geom, mtl_num);
+        push_material_with_alpha_test(
+            &mut geom,
+            [0.8, 0.2, 0.1, 1.0],
+            1.0,
+            "wall.bmp",
+            material_alpha,
+            alpha_ref,
+        );
+
+        push_u32(&mut geom, fvf);
+        push_u32(&mut geom, 4);
+        push_u32(&mut geom, vertex_num);
+        push_u32(&mut geom, index_num);
+        push_u32(&mut geom, subset_num);
+        push_u32(&mut geom, 0);
+        push_u32(&mut geom, 0);
+        push_u32(&mut geom, 0);
+        push_alpha_test_rs_atoms(&mut geom, mesh_alpha, alpha_ref);
+
+        push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 1.0);
+        push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 1.0);
+        push_f32(&mut geom, 0.0);
+
+        push_u32(&mut geom, 0);
+        push_u32(&mut geom, 1);
+        push_u32(&mut geom, 2);
+
+        push_u32(&mut geom, 1);
+        push_u32(&mut geom, 0);
+        push_u32(&mut geom, 3);
+        push_u32(&mut geom, 0);
+
+        let header_size = 4 + 4 + 12;
+        let mut data = Vec::new();
+        push_u32(&mut data, 0x1005);
+        push_u32(&mut data, 1);
+        push_u32(&mut data, OBJ_TYPE_GEOMETRY);
+        push_u32(&mut data, header_size as u32);
+        push_u32(&mut data, geom.len() as u32);
+        data.extend_from_slice(&geom);
         data
     }
 
@@ -1005,7 +1291,38 @@ mod tests {
         let mat = &geom.materials[0];
         assert!((mat.opacity - 1.0).abs() < f32::EPSILON);
         assert!((mat.diffuse[0] - 0.8).abs() < 0.01);
+        assert!(!mat.alpha_test_enabled);
+        assert_eq!(mat.alpha_ref, 0);
         assert_eq!(mat.tex_filename.as_deref(), Some("wall.bmp"));
+    }
+
+    #[test]
+    fn parse_material_level_alpha_test_state() {
+        let data = build_single_geom_lmo_with_alpha(true, false, 129);
+        let model = parse_lmo(&data).unwrap();
+
+        let mat = &model.geom_objects[0].materials[0];
+        assert!(
+            mat.alpha_test_enabled,
+            "material rs_set should enable alpha test"
+        );
+        assert_eq!(mat.alpha_ref, 129, "material alpha ref should be parsed");
+    }
+
+    #[test]
+    fn parse_mesh_level_alpha_test_state() {
+        let data = build_single_geom_lmo_with_alpha(false, true, 129);
+        let model = parse_lmo(&data).unwrap();
+
+        let mat = &model.geom_objects[0].materials[0];
+        assert!(
+            mat.alpha_test_enabled,
+            "mesh rs_set alpha test should propagate to materials"
+        );
+        assert_eq!(
+            mat.alpha_ref, 129,
+            "mesh alpha ref should propagate to materials"
+        );
     }
 
     #[test]
@@ -1071,7 +1388,10 @@ mod tests {
                 assert!(
                     (geom.mat_local[r][c] - expected).abs() < 1e-6,
                     "mat_local[{}][{}] = {}, expected {}",
-                    r, c, geom.mat_local[r][c], expected
+                    r,
+                    c,
+                    geom.mat_local[r][c],
+                    expected
                 );
             }
         }
@@ -1185,15 +1505,26 @@ mod tests {
             model.geom_objects.len()
         );
 
-        assert!(!model.geom_objects.is_empty(), "real LMO should have geometry");
+        assert!(
+            !model.geom_objects.is_empty(),
+            "real LMO should have geometry"
+        );
 
         for (i, geom) in model.geom_objects.iter().enumerate() {
-            assert!(!geom.vertices.is_empty(), "geom[{}] should have vertices", i);
+            assert!(
+                !geom.vertices.is_empty(),
+                "geom[{}] should have vertices",
+                i
+            );
             assert!(!geom.indices.is_empty(), "geom[{}] should have indices", i);
             eprintln!(
                 "  geom[{}]: id={}, verts={}, indices={}, mats={}, subsets={}",
-                i, geom.id, geom.vertices.len(), geom.indices.len(),
-                geom.materials.len(), geom.subsets.len()
+                i,
+                geom.id,
+                geom.vertices.len(),
+                geom.indices.len(),
+                geom.materials.len(),
+                geom.subsets.len()
             );
         }
     }
@@ -1219,12 +1550,20 @@ mod tests {
         );
 
         for (i, geom) in model.geom_objects.iter().enumerate() {
-            assert!(!geom.vertices.is_empty(), "geom[{}] should have vertices", i);
+            assert!(
+                !geom.vertices.is_empty(),
+                "geom[{}] should have vertices",
+                i
+            );
             assert!(!geom.indices.is_empty(), "geom[{}] should have indices", i);
             eprintln!(
                 "  geom[{}]: id={}, verts={}, indices={}, mats={}, subsets={}",
-                i, geom.id, geom.vertices.len(), geom.indices.len(),
-                geom.materials.len(), geom.subsets.len()
+                i,
+                geom.id,
+                geom.vertices.len(),
+                geom.indices.len(),
+                geom.materials.len(),
+                geom.subsets.len()
             );
 
             // Verify materials have texture filenames (old format should parse correctly)
@@ -1236,7 +1575,8 @@ mod tests {
                 assert!(
                     mat.tex_filename.is_some(),
                     "geom[{}].mat[{}] should have a texture filename",
-                    i, j
+                    i,
+                    j
                 );
             }
         }
@@ -1256,7 +1596,8 @@ mod tests {
         let mtl_num: u32 = 1;
         let mtl_size = 4 + mtl_num as usize * material_entry_size();
         let mesh_header_size = 32 + LW_MESH_RS_NUM * 12;
-        let mesh_data_size = vertex_num as usize * 12 + index_num as usize * 4 + subset_num as usize * 16;
+        let mesh_data_size =
+            vertex_num as usize * 12 + index_num as usize * 4 + subset_num as usize * 16;
         let mesh_size = mesh_header_size + mesh_data_size;
 
         // Animation size: header table + data
@@ -1275,7 +1616,7 @@ mod tests {
         push_u32(&mut geom, 0);
         push_identity_mat44(&mut geom);
         push_zeros(&mut geom, 16); // rcci
-        push_zeros(&mut geom, 8);  // state_ctrl
+        push_zeros(&mut geom, 8); // state_ctrl
         push_u32(&mut geom, mtl_size as u32);
         push_u32(&mut geom, mesh_size as u32);
         push_u32(&mut geom, 0); // helper_size
@@ -1296,14 +1637,24 @@ mod tests {
         push_u32(&mut geom, 0); // vertex_element_num
         push_zeros(&mut geom, LW_MESH_RS_NUM * 12);
         // Vertices
-        push_f32(&mut geom, 0.0); push_f32(&mut geom, 0.0); push_f32(&mut geom, 0.0);
-        push_f32(&mut geom, 1.0); push_f32(&mut geom, 0.0); push_f32(&mut geom, 0.0);
-        push_f32(&mut geom, 0.0); push_f32(&mut geom, 1.0); push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 1.0);
+        push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 1.0);
+        push_f32(&mut geom, 0.0);
         // Indices
-        push_u32(&mut geom, 0); push_u32(&mut geom, 1); push_u32(&mut geom, 2);
+        push_u32(&mut geom, 0);
+        push_u32(&mut geom, 1);
+        push_u32(&mut geom, 2);
         // Subset
-        push_u32(&mut geom, 1); push_u32(&mut geom, 0);
-        push_u32(&mut geom, 3); push_u32(&mut geom, 0);
+        push_u32(&mut geom, 1);
+        push_u32(&mut geom, 0);
+        push_u32(&mut geom, 3);
+        push_u32(&mut geom, 0);
 
         // Animation section (version 0x1005 header)
         push_u32(&mut geom, 0); // data_bone_size
@@ -1318,13 +1669,21 @@ mod tests {
         for f in 0..frame_num {
             // Identity rotation + translation that changes per frame
             // Column 0 (basis X): [1, 0, 0]
-            push_f32(&mut geom, 1.0); push_f32(&mut geom, 0.0); push_f32(&mut geom, 0.0);
+            push_f32(&mut geom, 1.0);
+            push_f32(&mut geom, 0.0);
+            push_f32(&mut geom, 0.0);
             // Column 1 (basis Y): [0, 1, 0]
-            push_f32(&mut geom, 0.0); push_f32(&mut geom, 1.0); push_f32(&mut geom, 0.0);
+            push_f32(&mut geom, 0.0);
+            push_f32(&mut geom, 1.0);
+            push_f32(&mut geom, 0.0);
             // Column 2 (basis Z): [0, 0, 1]
-            push_f32(&mut geom, 0.0); push_f32(&mut geom, 0.0); push_f32(&mut geom, 1.0);
+            push_f32(&mut geom, 0.0);
+            push_f32(&mut geom, 0.0);
+            push_f32(&mut geom, 1.0);
             // Translation: (f, 0, 0)
-            push_f32(&mut geom, f as f32); push_f32(&mut geom, 0.0); push_f32(&mut geom, 0.0);
+            push_f32(&mut geom, f as f32);
+            push_f32(&mut geom, 0.0);
+            push_f32(&mut geom, 0.0);
         }
 
         geom
@@ -1391,7 +1750,10 @@ mod tests {
         eprintln!("by-bd013: {} geometry objects", model.geom_objects.len());
 
         let has_animation = model.geom_objects.iter().any(|g| g.animation.is_some());
-        assert!(has_animation, "lighthouse should have at least one animated object");
+        assert!(
+            has_animation,
+            "lighthouse should have at least one animated object"
+        );
 
         for (i, geom) in model.geom_objects.iter().enumerate() {
             if let Some(ref anim) = geom.animation {
@@ -1417,16 +1779,17 @@ mod tests {
         let model = load_lmo(path).unwrap();
         eprintln!("nml-bd141: {} geometry objects", model.geom_objects.len());
 
-        let animated_count = model.geom_objects.iter().filter(|g| g.animation.is_some()).count();
+        let animated_count = model
+            .geom_objects
+            .iter()
+            .filter(|g| g.animation.is_some())
+            .count();
         eprintln!("  {} objects have animation", animated_count);
         assert!(animated_count > 0, "whirlpool should have animated objects");
 
         for (i, geom) in model.geom_objects.iter().enumerate() {
             if let Some(ref anim) = geom.animation {
-                eprintln!(
-                    "  geom[{}] id={}: {} frames",
-                    i, geom.id, anim.frame_num
-                );
+                eprintln!("  geom[{}] id={}: {} frames", i, geom.id, anim.frame_num);
                 assert!(anim.frame_num > 0);
             }
         }
