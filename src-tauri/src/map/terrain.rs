@@ -6,8 +6,8 @@ use base64::prelude::BASE64_STANDARD;
 use base64::Engine;
 use gltf::json as gltf;
 use gltf::{
-    validation::{Checked, USize64},
     accessor::{ComponentType, GenericComponentType},
+    validation::{Checked, USize64},
 };
 use image::RgbImage;
 use serde_json::value::RawValue;
@@ -22,6 +22,13 @@ use crate::map::scene_obj::{parse_obj_file, ParsedObjFile};
 // ============================================================================
 
 const CUR_VERSION_NO: i32 = 780627; // MP_MAP_FLAG(780624) + 3
+
+// Original PKO terrain/sea defaults (Engine/sdk/include/MPMap.h)
+pub(crate) const UNDERWATER_HEIGHT: f32 = -2.0;
+pub(crate) const UNDERWATER_TEXNO: u8 = 22;
+
+// Root node scale applied to exported glTF scene
+pub(crate) const MAP_VISUAL_SCALE: f32 = 5.0;
 
 /// If serialized effect_definitions exceeds this size, export as sidecar file.
 const SIDECAR_THRESHOLD: usize = 5 * 1024 * 1024; // 5MB
@@ -249,7 +256,10 @@ pub fn scan_maps(project_dir: &Path) -> Result<Vec<MapEntry>> {
         entries.push(MapEntry {
             name: file_name,
             display_name,
-            map_file: format!("map/{}.map", entry.path().file_stem().unwrap().to_str().unwrap()),
+            map_file: format!(
+                "map/{}.map",
+                entry.path().file_stem().unwrap().to_str().unwrap()
+            ),
             has_obj: obj_path.exists(),
             has_rbo: rbo_path.exists(),
             width,
@@ -286,7 +296,16 @@ pub(crate) fn get_tile<'a>(map: &'a ParsedMap, tx: i32, ty: i32) -> Option<&'a M
 /// The glTF root node has a uniform 5x scale (MAP_VISUAL_SCALE), so we
 /// pre-divide by 5.0 here. After scaling: Y = original fHeight.
 fn tile_height(tile: &MapTile) -> f32 {
-    (tile.c_height as f32 * 10.0) / 100.0 / 5.0
+    (tile.c_height as f32 * 10.0) / 100.0 / MAP_VISUAL_SCALE
+}
+
+/// Resolve the terrain tile used for a render vertex.
+///
+/// PKO vertex ownership semantics are strict: vertex (vx, vy) samples
+/// `GetTile(vx, vy)` directly. If that tile is out-of-range or section-missing,
+/// the render path falls back to default underwater tile values.
+fn get_render_vertex_tile<'a>(map: &'a ParsedMap, vx: i32, vy: i32) -> Option<&'a MapTile> {
+    get_tile(map, vx, vy)
 }
 
 /// Build a glTF JSON string representing the terrain mesh.
@@ -303,7 +322,8 @@ pub fn build_terrain_gltf(
     let h = parsed_map.header.n_height;
 
     // Step 1: Build vertex grid of (w+1) * (h+1) vertices.
-    // Each vertex at (vx, vy) uses the tile at (vx, vy) for height/color.
+    // Each vertex at (vx, vy) samples tile owner (vx, vy) directly.
+    // Missing/out-of-range owner tiles use default underwater fallback.
     let vw = (w + 1) as usize;
     let vh = (h + 1) as usize;
     let vertex_count = vw * vh;
@@ -314,16 +334,18 @@ pub fn build_terrain_gltf(
 
     for vy in 0..vh {
         for vx in 0..vw {
-            // Tile coords: clamp to valid range
-            let tx = (vx as i32).min(w - 1);
-            let ty = (vy as i32).min(h - 1);
+            // Tile coords: strict owner semantics (no clamping)
+            let tx = vx as i32;
+            let ty = vy as i32;
 
-            let (height, r, g, b) = match get_tile(parsed_map, tx, ty) {
+            let (height, r, g, b) = match get_render_vertex_tile(parsed_map, tx, ty) {
                 Some(tile) => {
                     let (cr, cg, cb) = rgb565_to_float(tile.s_color);
                     (tile_height(tile), cr, cg, cb)
                 }
-                None => (0.0, 0.5, 0.5, 0.5),
+                // Match original client default tile for missing sections:
+                // UNDERWATER_HEIGHT (-2.0) with white vertex color.
+                None => (UNDERWATER_HEIGHT / MAP_VISUAL_SCALE, 1.0, 1.0, 1.0),
             };
 
             // Position: X = vx, Y = height, Z = vy (Y-up, glTF standard)
@@ -357,13 +379,14 @@ pub fn build_terrain_gltf(
         uv
     });
 
-    // Step 2: Build triangle indices for non-empty tiles.
+    // Step 2: Build triangle indices for map tiles that exist in section data.
+    // Missing sections still participate in owner sampling defaults, but we do
+    // not emit visible terrain triangles for them in exported geometry.
     // Each tile at (tx, ty) → 2 triangles using corner vertices.
     let mut indices: Vec<u32> = Vec::new();
 
     for ty in 0..h {
         for tx in 0..w {
-            // Check if this tile has data (section is non-empty)
             if get_tile(parsed_map, tx, ty).is_none() {
                 continue;
             }
@@ -583,9 +606,7 @@ pub fn build_terrain_gltf(
         buffer: gltf::Index::new(idx_buf_idx as u32),
         byte_length: USize64(idx_bytes.len() as u64),
         byte_offset: Some(USize64(0)),
-        target: Some(Checked::Valid(
-            gltf::buffer::Target::ElementArrayBuffer,
-        )),
+        target: Some(Checked::Valid(gltf::buffer::Target::ElementArrayBuffer)),
         byte_stride: None,
         extensions: None,
         extras: None,
@@ -777,7 +798,6 @@ pub fn build_terrain_gltf(
     // Build nodes — all children of a scaled root node for visual sizing.
     // The game uses 1 tile = 1 world unit, but a uniform scale makes the
     // terrain feel more proportional when viewed in the 3D viewer.
-    const MAP_VISUAL_SCALE: f32 = 5.0;
 
     let mut nodes = vec![];
     let mut child_indices = vec![];
@@ -903,7 +923,7 @@ pub fn build_terrain_gltf(
             // Look up terrain height at the object's XZ position
             let terrain_h = get_tile(parsed_map, obj.world_x as i32, obj.world_y as i32)
                 .map(|t| tile_height(t))
-                .unwrap_or(0.0);
+                .unwrap_or(UNDERWATER_HEIGHT / MAP_VISUAL_SCALE);
 
             // Check if we have a loaded mesh for this type-0 object
             let mesh_ref = if obj.obj_type == 0 {
@@ -1102,9 +1122,7 @@ fn build_region_grid(map: &ParsedMap) -> Vec<u8> {
 
     for ty in 0..h {
         for tx in 0..w {
-            let region = get_tile(map, tx, ty)
-                .map(|t| t.s_region)
-                .unwrap_or(0);
+            let region = get_tile(map, tx, ty).map(|t| t.s_region).unwrap_or(0);
             data.extend_from_slice(&region.to_le_bytes());
         }
     }
@@ -1120,9 +1138,7 @@ fn build_area_grid(map: &ParsedMap) -> Vec<u8> {
 
     for ty in 0..h {
         for tx in 0..w {
-            let island = get_tile(map, tx, ty)
-                .map(|t| t.bt_island)
-                .unwrap_or(0);
+            let island = get_tile(map, tx, ty).map(|t| t.bt_island).unwrap_or(0);
             grid[(ty * w + tx) as usize] = island;
         }
     }
@@ -1130,7 +1146,10 @@ fn build_area_grid(map: &ParsedMap) -> Vec<u8> {
     grid
 }
 
-/// Build tile texture grid (dwTileInfo & 0x3F per tile → u8).
+/// Build tile texture grid (bt_tile_info per tile → u8).
+/// This is the base layer (Layer 0) texture ID — the primary terrain texture
+/// for each tile. Used by SeaRenderer for underwater tile detection (ID 22).
+/// Missing sections use 0 sentinel.
 fn build_tile_texture_grid(map: &ParsedMap) -> Vec<u8> {
     let w = map.header.n_width;
     let h = map.header.n_height;
@@ -1139,7 +1158,7 @@ fn build_tile_texture_grid(map: &ParsedMap) -> Vec<u8> {
     for ty in 0..h {
         for tx in 0..w {
             let tex_id = get_tile(map, tx, ty)
-                .map(|t| (t.dw_tile_info & 0x3F) as u8)
+                .map(|t| t.bt_tile_info)
                 .unwrap_or(0);
             grid[(ty * w + tx) as usize] = tex_id;
         }
@@ -1156,9 +1175,7 @@ fn build_tile_color_grid(map: &ParsedMap) -> Vec<u8> {
 
     for ty in 0..h {
         for tx in 0..w {
-            let color = get_tile(map, tx, ty)
-                .map(|t| t.s_color)
-                .unwrap_or(0);
+            let color = get_tile(map, tx, ty).map(|t| t.s_color).unwrap_or(0);
             data.extend_from_slice(&color.to_le_bytes());
         }
     }
@@ -1221,14 +1238,12 @@ fn copy_water_textures(project_dir: &Path, output_dir: &Path) -> Vec<String> {
         if !bmp_path.exists() {
             // Try case-insensitive
             let target = bmp_name.to_lowercase();
-            let found = std::fs::read_dir(&water_dir)
-                .ok()
-                .and_then(|entries| {
-                    entries
-                        .flatten()
-                        .find(|e| e.file_name().to_string_lossy().to_lowercase() == target)
-                        .map(|e| e.path())
-                });
+            let found = std::fs::read_dir(&water_dir).ok().and_then(|entries| {
+                entries
+                    .flatten()
+                    .find(|e| e.file_name().to_string_lossy().to_lowercase() == target)
+                    .map(|e| e.path())
+            });
 
             if let Some(found_path) = found {
                 if let Ok(img) = image::open(&found_path) {
@@ -1291,7 +1306,8 @@ pub fn export_map_for_unity(
     let this_map_info = super::mapinfo::find_map_info(&map_infos, map_name);
 
     // 3d. Load sceneffectinfo for effect_id → .eff filename mapping
-    let effect_info = crate::item::sceneffect::load_scene_effect_info(project_dir).unwrap_or_default();
+    let effect_info =
+        crate::item::sceneffect::load_scene_effect_info(project_dir).unwrap_or_default();
 
     // 4. Bake terrain texture atlas
     let atlas = super::texture::try_bake_atlas(project_dir, &parsed_map);
@@ -1379,13 +1395,19 @@ pub fn export_map_for_unity(
     // Build placements array (buildings, type=0) and effect placements (type=1)
     let mut effect_placements = Vec::new();
     let mut unique_eff_ids: HashSet<u16> = HashSet::new();
+    let valid_building_ids: HashSet<u16> =
+        building_entries.iter().map(|e| e.obj_id as u16).collect();
 
     if let Some(ref obj_file) = objects {
         for obj in &obj_file.objects {
+            if obj.obj_type == 0 && !valid_building_ids.contains(&obj.obj_id) {
+                continue;
+            }
+
             // Look up terrain height at the object's position
             let terrain_h = get_tile(&parsed_map, obj.world_x as i32, obj.world_y as i32)
                 .map(|t| tile_height(t))
-                .unwrap_or(0.0);
+                .unwrap_or(UNDERWATER_HEIGHT / MAP_VISUAL_SCALE);
 
             // Position in Y-up glTF space
             let position = [obj.world_x, terrain_h + obj.world_z, obj.world_y];
@@ -1432,16 +1454,24 @@ pub fn export_map_for_unity(
     for &eff_id in &unique_eff_ids {
         if let Some(eff_info) = effect_info.get(&(eff_id as u32)) {
             if let Some(eff_file) = load_effect_file(project_dir, &eff_info.filename) {
-                if let Ok(serde_json::Value::Object(mut eff_obj)) = serde_json::to_value(&eff_file) {
+                if let Ok(serde_json::Value::Object(mut eff_obj)) = serde_json::to_value(&eff_file)
+                {
                     // Flatten: merge filename into the EffFile object at the top level
                     eff_obj.insert("filename".to_string(), serde_json::json!(eff_info.filename));
-                    effect_definitions.insert(eff_id.to_string(), serde_json::Value::Object(eff_obj));
+                    effect_definitions
+                        .insert(eff_id.to_string(), serde_json::Value::Object(eff_obj));
                 } else {
-                    eprintln!("Warning: effect {} ({}) failed to serialize", eff_id, eff_info.filename);
+                    eprintln!(
+                        "Warning: effect {} ({}) failed to serialize",
+                        eff_id, eff_info.filename
+                    );
                     missing_effect_ids.push(eff_id);
                 }
             } else {
-                eprintln!("Warning: effect {} ({}) .eff file not found or failed to parse", eff_id, eff_info.filename);
+                eprintln!(
+                    "Warning: effect {} ({}) .eff file not found or failed to parse",
+                    eff_id, eff_info.filename
+                );
                 missing_effect_ids.push(eff_id);
             }
         } else {
@@ -1494,12 +1524,13 @@ pub fn export_map_for_unity(
     let water_textures = copy_water_textures(project_dir, output_dir);
 
     // 14b. Export individual terrain textures for runtime blending (Phase E)
-    let terrain_textures = super::texture::export_terrain_textures(project_dir, &parsed_map, output_dir)
-        .unwrap_or_default();
+    let terrain_textures =
+        super::texture::export_terrain_textures(project_dir, &parsed_map, output_dir)
+            .unwrap_or_default();
 
     // 14c. Export alpha mask atlas (Phase E)
-    let alpha_atlas_path = super::texture::export_alpha_atlas(project_dir, output_dir)
-        .unwrap_or(None);
+    let alpha_atlas_path =
+        super::texture::export_alpha_atlas(project_dir, output_dir).unwrap_or(None);
 
     // 14d. Build tile layer grid (Phase E) — 7 bytes per tile
     let tile_layer_bytes = super::texture::build_tile_layer_grid(&parsed_map);
@@ -1514,18 +1545,33 @@ pub fn export_map_for_unity(
     manifest_map.insert("world_scale".into(), serde_json::json!(5.0));
 
     // Map dimensions
-    manifest_map.insert("map_width_tiles".into(), serde_json::json!(parsed_map.header.n_width));
-    manifest_map.insert("map_height_tiles".into(), serde_json::json!(parsed_map.header.n_height));
-    manifest_map.insert("section_width".into(), serde_json::json!(parsed_map.header.n_section_width));
-    manifest_map.insert("section_height".into(), serde_json::json!(parsed_map.header.n_section_height));
+    manifest_map.insert(
+        "map_width_tiles".into(),
+        serde_json::json!(parsed_map.header.n_width),
+    );
+    manifest_map.insert(
+        "map_height_tiles".into(),
+        serde_json::json!(parsed_map.header.n_height),
+    );
+    manifest_map.insert(
+        "section_width".into(),
+        serde_json::json!(parsed_map.header.n_section_width),
+    );
+    manifest_map.insert(
+        "section_height".into(),
+        serde_json::json!(parsed_map.header.n_section_height),
+    );
 
     // Terrain
     manifest_map.insert("terrain_gltf".into(), serde_json::json!("terrain.gltf"));
 
     // Grids (base64-encoded)
-    manifest_map.insert("collision_grid".into(), serde_json::json!({
-        "width": coll_w, "height": coll_h, "tile_size": 0.5, "data": collision_b64,
-    }));
+    manifest_map.insert(
+        "collision_grid".into(),
+        serde_json::json!({
+            "width": coll_w, "height": coll_h, "tile_size": 0.5, "data": collision_b64,
+        }),
+    );
     manifest_map.insert("region_grid".into(), serde_json::json!({
         "width": parsed_map.header.n_width, "height": parsed_map.header.n_height, "data": region_b64,
     }));
@@ -1544,16 +1590,25 @@ pub fn export_map_for_unity(
     manifest_map.insert("placements".into(), serde_json::json!(placements));
 
     // Effects — conditionally inline or sidecar (never both)
-    manifest_map.insert("effect_placements".into(), serde_json::json!(effect_placements));
+    manifest_map.insert(
+        "effect_placements".into(),
+        serde_json::json!(effect_placements),
+    );
     if use_sidecar {
-        manifest_map.insert("effect_definitions_file".into(), serde_json::json!("effect_definitions.json"));
+        manifest_map.insert(
+            "effect_definitions_file".into(),
+            serde_json::json!("effect_definitions.json"),
+        );
     } else {
         manifest_map.insert("effect_definitions".into(), eff_defs_json_value);
     }
     if !missing_effect_ids.is_empty() {
         let mut sorted_missing = missing_effect_ids.clone();
         sorted_missing.sort_unstable();
-        manifest_map.insert("missing_effect_ids".into(), serde_json::json!(sorted_missing));
+        manifest_map.insert(
+            "missing_effect_ids".into(),
+            serde_json::json!(sorted_missing),
+        );
     }
 
     // Areas (from AreaSet.bin, keyed by btIsland value)
@@ -1576,17 +1631,23 @@ pub fn export_map_for_unity(
             .iter()
             .map(|(id, path)| (id.to_string(), serde_json::json!(path)))
             .collect();
-        manifest_map.insert("terrain_textures".into(), serde_json::Value::Object(tex_map));
+        manifest_map.insert(
+            "terrain_textures".into(),
+            serde_json::Value::Object(tex_map),
+        );
     }
     if let Some(ref alpha_path) = alpha_atlas_path {
         manifest_map.insert("alpha_atlas".into(), serde_json::json!(alpha_path));
     }
-    manifest_map.insert("tile_layer_grid".into(), serde_json::json!({
-        "width": parsed_map.header.n_width,
-        "height": parsed_map.header.n_height,
-        "bytes_per_tile": 7,
-        "data": tile_layer_b64,
-    }));
+    manifest_map.insert(
+        "tile_layer_grid".into(),
+        serde_json::json!({
+            "width": parsed_map.header.n_width,
+            "height": parsed_map.header.n_height,
+            "bytes_per_tile": 7,
+            "data": tile_layer_b64,
+        }),
+    );
 
     let manifest = serde_json::Value::Object(manifest_map);
 
@@ -1614,9 +1675,13 @@ pub fn get_metadata(project_dir: &Path, map_name: &str) -> Result<MapMetadata> {
     let parsed_map = parse_map(&map_data)?;
 
     let total_sections = parsed_map.section_offsets.len() as u32;
-    let non_empty = parsed_map.section_offsets.iter().filter(|&&o| o != 0).count() as u32;
-    let total_tiles = non_empty
-        * (parsed_map.header.n_section_width * parsed_map.header.n_section_height) as u32;
+    let non_empty = parsed_map
+        .section_offsets
+        .iter()
+        .filter(|&&o| o != 0)
+        .count() as u32;
+    let total_tiles =
+        non_empty * (parsed_map.header.n_section_width * parsed_map.header.n_section_height) as u32;
 
     // Count objects if .obj file exists
     let obj_path = project_dir.join("map").join(format!("{}.obj", map_name));
@@ -1793,6 +1858,167 @@ mod tests {
         assert!((h2 - (-0.1)).abs() < 0.01, "height={}", h2);
     }
 
+    fn make_tile(c_height: i8) -> MapTile {
+        MapTile {
+            dw_tile_info: 0,
+            bt_tile_info: 0,
+            s_color: 0,
+            c_height,
+            s_region: 0,
+            bt_island: 0,
+            bt_block: [0; 4],
+        }
+    }
+
+    #[test]
+    fn render_vertex_tile_uses_strict_owner_semantics() {
+        let parsed = ParsedMap {
+            header: MapHeader {
+                n_map_flag: CUR_VERSION_NO,
+                n_width: 2,
+                n_height: 1,
+                n_section_width: 1,
+                n_section_height: 1,
+            },
+            section_cnt_x: 2,
+            section_cnt_y: 1,
+            section_offsets: vec![0, 0],
+            sections: vec![
+                Some(MapSection {
+                    tiles: vec![make_tile(10)],
+                }),
+                None,
+            ],
+        };
+
+        // Vertex owner (1,0) maps to missing section tile and must not
+        // borrow adjacent visible tile(0,0).
+        assert!(get_render_vertex_tile(&parsed, 1, 0).is_none());
+    }
+
+    #[test]
+    fn render_vertex_tile_none_when_owner_out_of_bounds() {
+        let parsed = ParsedMap {
+            header: MapHeader {
+                n_map_flag: CUR_VERSION_NO,
+                n_width: 1,
+                n_height: 1,
+                n_section_width: 1,
+                n_section_height: 1,
+            },
+            section_cnt_x: 1,
+            section_cnt_y: 1,
+            section_offsets: vec![0],
+            sections: vec![Some(MapSection {
+                tiles: vec![make_tile(10)],
+            })],
+        };
+
+        assert!(get_render_vertex_tile(&parsed, 1, 0).is_none());
+        assert!(get_render_vertex_tile(&parsed, 0, 1).is_none());
+    }
+
+    #[test]
+    fn build_gltf_uses_underwater_default_for_edge_owner_vertices() {
+        let parsed = ParsedMap {
+            header: MapHeader {
+                n_map_flag: CUR_VERSION_NO,
+                n_width: 1,
+                n_height: 1,
+                n_section_width: 1,
+                n_section_height: 1,
+            },
+            section_cnt_x: 1,
+            section_cnt_y: 1,
+            section_offsets: vec![0],
+            sections: vec![Some(MapSection {
+                tiles: vec![make_tile(10)],
+            })],
+        };
+
+        let gltf_json = build_terrain_gltf(&parsed, None, None, None).expect("gltf build");
+        let root: serde_json::Value = serde_json::from_str(&gltf_json).expect("json parse");
+
+        let pos_acc_idx = root["meshes"][0]["primitives"][0]["attributes"]["POSITION"]
+            .as_u64()
+            .expect("position accessor") as usize;
+        let accessor = &root["accessors"][pos_acc_idx];
+        let bv_idx = accessor["bufferView"].as_u64().expect("buffer view") as usize;
+        let count = accessor["count"].as_u64().expect("count") as usize;
+
+        let bv = &root["bufferViews"][bv_idx];
+        let buf_idx = bv["buffer"].as_u64().expect("buffer") as usize;
+        let bv_off = bv["byteOffset"].as_u64().unwrap_or(0) as usize;
+        let acc_off = accessor["byteOffset"].as_u64().unwrap_or(0) as usize;
+        let base_off = bv_off + acc_off;
+
+        let uri = root["buffers"][buf_idx]["uri"]
+            .as_str()
+            .expect("buffer uri");
+        let payload = uri
+            .strip_prefix("data:application/octet-stream;base64,")
+            .expect("embedded data uri");
+        let bytes = BASE64_STANDARD.decode(payload).expect("base64 decode");
+
+        let mut y_values = Vec::with_capacity(count);
+        for i in 0..count {
+            let off = base_off + i * 12;
+            let y = f32::from_le_bytes(bytes[off + 4..off + 8].try_into().expect("y bytes"));
+            y_values.push(y);
+        }
+
+        // Vertex order for 1x1 grid: (0,0), (1,0), (0,1), (1,1)
+        // Owner tile semantics => only (0,0) samples real tile; others are
+        // out-of-range owners and therefore default underwater.
+        let expected = [
+            0.2f32,
+            UNDERWATER_HEIGHT / MAP_VISUAL_SCALE,
+            UNDERWATER_HEIGHT / MAP_VISUAL_SCALE,
+            UNDERWATER_HEIGHT / MAP_VISUAL_SCALE,
+        ];
+        for (actual, exp) in y_values.iter().zip(expected.iter()) {
+            assert!(
+                (actual - exp).abs() < 0.0001,
+                "expected {exp}, got {actual}"
+            );
+        }
+    }
+
+    #[test]
+    fn build_gltf_skips_missing_section_tiles() {
+        let parsed = ParsedMap {
+            header: MapHeader {
+                n_map_flag: CUR_VERSION_NO,
+                n_width: 2,
+                n_height: 1,
+                n_section_width: 1,
+                n_section_height: 1,
+            },
+            section_cnt_x: 2,
+            section_cnt_y: 1,
+            section_offsets: vec![0, 0],
+            sections: vec![
+                Some(MapSection {
+                    tiles: vec![make_tile(10)],
+                }),
+                None,
+            ],
+        };
+
+        let gltf_json = build_terrain_gltf(&parsed, None, None, None).expect("gltf build");
+        let root: serde_json::Value = serde_json::from_str(&gltf_json).expect("json parse");
+        let idx_acc_idx = root["meshes"][0]["primitives"][0]["indices"]
+            .as_u64()
+            .expect("indices accessor") as usize;
+        let index_count = root["accessors"][idx_acc_idx]["count"]
+            .as_u64()
+            .expect("index count") as usize;
+
+        // Width=2, height=1 with one missing tile => 1 rendered tile.
+        // 1 tile => 2 triangles => 6 indices.
+        assert_eq!(index_count, 6);
+    }
+
     #[test]
     fn parse_real_map() {
         let map_path = std::path::Path::new("../top-client/map/garner.map");
@@ -1827,10 +2053,16 @@ mod tests {
     fn sidecar_threshold_inline_when_small() {
         // Small effect_definitions should be inlined
         let mut defs = serde_json::Map::new();
-        defs.insert("1".into(), serde_json::json!({"filename": "test.eff", "subEffects": []}));
+        defs.insert(
+            "1".into(),
+            serde_json::json!({"filename": "test.eff", "subEffects": []}),
+        );
         let eff_value = serde_json::Value::Object(defs);
         let size = serde_json::to_string(&eff_value).unwrap().len();
-        assert!(size < super::SIDECAR_THRESHOLD, "test data should be below 5MB");
+        assert!(
+            size < super::SIDECAR_THRESHOLD,
+            "test data should be below 5MB"
+        );
 
         // Simulate manifest assembly with use_sidecar=false
         let mut manifest_map = serde_json::Map::new();
@@ -1845,10 +2077,16 @@ mod tests {
         // Simulate sidecar mode: effect_definitions_file present, effect_definitions absent
         let mut manifest_map = serde_json::Map::new();
         // In sidecar mode, only effect_definitions_file is inserted
-        manifest_map.insert("effect_definitions_file".into(), serde_json::json!("effect_definitions.json"));
+        manifest_map.insert(
+            "effect_definitions_file".into(),
+            serde_json::json!("effect_definitions.json"),
+        );
         assert!(!manifest_map.contains_key("effect_definitions"));
         assert!(manifest_map.contains_key("effect_definitions_file"));
-        assert_eq!(manifest_map["effect_definitions_file"], "effect_definitions.json");
+        assert_eq!(
+            manifest_map["effect_definitions_file"],
+            "effect_definitions.json"
+        );
     }
 
     #[test]
@@ -1859,8 +2097,10 @@ mod tests {
         if !missing.is_empty() {
             manifest_map.insert("missing_effect_ids".into(), serde_json::json!(missing));
         }
-        assert!(!manifest_map.contains_key("missing_effect_ids"),
-            "empty missing_effect_ids should be omitted");
+        assert!(
+            !manifest_map.contains_key("missing_effect_ids"),
+            "empty missing_effect_ids should be omitted"
+        );
     }
 
     #[test]
@@ -1904,8 +2144,10 @@ mod tests {
             assert!(eff_obj.contains_key("subEffects")); // camelCase from serde rename
             assert!(eff_obj.contains_key("idxTech"));
             // "data" key must NOT exist (flat, not nested)
-            assert!(!eff_obj.contains_key("data"),
-                "effect definition should be flat, not nested under 'data'");
+            assert!(
+                !eff_obj.contains_key("data"),
+                "effect definition should be flat, not nested under 'data'"
+            );
         } else {
             panic!("EffFile should serialize to a JSON object");
         }
