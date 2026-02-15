@@ -34,24 +34,37 @@ pub fn find_lmo_path(project_dir: &Path, filename: &str) -> Option<std::path::Pa
             .join("model")
             .join("scene")
             .join(filename.to_lowercase()),
-        project_dir
-            .join("model")
-            .join(filename.to_lowercase()),
+        project_dir.join("model").join(filename.to_lowercase()),
     ];
     candidates.into_iter().find(|p| p.exists())
 }
 
 // ============================================================================
 // Coordinate transform: Game Z-up → glTF Y-up
-// (x, y, z) → (x, z, -y)
+// (x, y, z) → (x, z, y)
+//
+// Terrain uses Z = +tileY (south = positive). Building meshes must match:
+// PKO Y (south) → glTF Z (positive), no negation.
 // ============================================================================
 
 fn transform_position(p: [f32; 3]) -> [f32; 3] {
-    [p[0], p[2], -p[1]]
+    [p[0], p[2], p[1]]
 }
 
 fn transform_normal(n: [f32; 3]) -> [f32; 3] {
-    [n[0], n[2], -n[1]]
+    [n[0], n[2], n[1]]
+}
+
+/// Reverse triangle winding order: (i0, i1, i2) → (i0, i2, i1).
+/// Required because the Y-up transform `(x,y,z)→(x,z,y)` is a reflection
+/// (det = -1), which flips triangle facing. Reversing winding restores
+/// correct front-face orientation in glTF (CCW).
+fn reverse_winding(indices: &[u32]) -> Vec<u32> {
+    let mut out = indices.to_vec();
+    for tri in out.chunks_exact_mut(3) {
+        tri.swap(1, 2);
+    }
+    out
 }
 
 /// Check if a 4x4 matrix is identity.
@@ -251,7 +264,13 @@ fn find_texture_file(project_dir: &Path, tex_name: &str) -> Option<std::path::Pa
         .map(|i| &tex_name[..i])
         .unwrap_or(tex_name);
 
-    let dirs = ["texture/scene", "texture/model", "texture/item", "texture/character", "texture"];
+    let dirs = [
+        "texture/scene",
+        "texture/model",
+        "texture/item",
+        "texture/character",
+        "texture",
+    ];
     let exts = ["bmp", "tga", "dds", "png"];
 
     for dir in &dirs {
@@ -261,7 +280,10 @@ fn find_texture_file(project_dir: &Path, tex_name: &str) -> Option<std::path::Pa
                 return Some(candidate);
             }
             // Try lowercase
-            let candidate_lc = project_dir.join(dir).join(format!("{}.{}", stem.to_lowercase(), ext));
+            let candidate_lc =
+                project_dir
+                    .join(dir)
+                    .join(format!("{}.{}", stem.to_lowercase(), ext));
             if candidate_lc.exists() {
                 return Some(candidate_lc);
             }
@@ -277,7 +299,11 @@ fn load_texture_as_data_uri(path: &Path) -> Option<String> {
     let img = match image::load_from_memory(&decoded) {
         Ok(img) => img,
         Err(e) => {
-            eprintln!("Warning: failed to decode texture {}: {}", path.display(), e);
+            eprintln!(
+                "Warning: failed to decode texture {}: {}",
+                path.display(),
+                e
+            );
             return None;
         }
     };
@@ -304,10 +330,20 @@ fn build_lmo_material(
         mat.opacity.clamp(0.0, 1.0),
     ];
 
-    let alpha_mode = if mat.opacity < 0.99 {
+    let alpha_mode = if mat.alpha_test_enabled {
+        Checked::Valid(gltf_json::material::AlphaMode::Mask)
+    } else if mat.opacity < 0.99 {
         Checked::Valid(gltf_json::material::AlphaMode::Blend)
     } else {
         Checked::Valid(gltf_json::material::AlphaMode::Opaque)
+    };
+
+    let alpha_cutoff = if mat.alpha_test_enabled {
+        Some(gltf_json::material::AlphaCutoff(
+            (mat.alpha_ref as f32 / 255.0).clamp(0.0, 1.0),
+        ))
+    } else {
+        None
     };
 
     // Try to load and embed the texture (skipped for map batch loading)
@@ -315,57 +351,57 @@ fn build_lmo_material(
         None
     } else {
         mat.tex_filename
-        .as_deref()
-        .filter(|f| !f.is_empty())
-        .and_then(|tex_name| find_texture_file(project_dir, tex_name))
-        .and_then(|tex_path| {
-            let data_uri = load_texture_as_data_uri(&tex_path)?;
-            let tex_stem = tex_path
-                .file_stem()
-                .map(|s| s.to_string_lossy().to_string())
-                .unwrap_or_else(|| name.to_string());
+            .as_deref()
+            .filter(|f| !f.is_empty())
+            .and_then(|tex_name| find_texture_file(project_dir, tex_name))
+            .and_then(|tex_path| {
+                let data_uri = load_texture_as_data_uri(&tex_path)?;
+                let tex_stem = tex_path
+                    .file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_else(|| name.to_string());
 
-            let image_index = builder.images.len() as u32;
-            builder.images.push(gltf_json::Image {
-                name: Some(tex_stem.clone()),
-                buffer_view: None,
-                extensions: None,
-                mime_type: Some(gltf_json::image::MimeType("image/png".to_string())),
-                extras: None,
-                uri: Some(data_uri),
-            });
+                let image_index = builder.images.len() as u32;
+                builder.images.push(gltf_json::Image {
+                    name: Some(tex_stem.clone()),
+                    buffer_view: None,
+                    extensions: None,
+                    mime_type: Some(gltf_json::image::MimeType("image/png".to_string())),
+                    extras: None,
+                    uri: Some(data_uri),
+                });
 
-            let sampler_index = builder.samplers.len() as u32;
-            builder.samplers.push(gltf_json::texture::Sampler {
-                mag_filter: Some(Checked::Valid(gltf_json::texture::MagFilter::Linear)),
-                min_filter: Some(Checked::Valid(
-                    gltf_json::texture::MinFilter::LinearMipmapLinear,
-                )),
-                wrap_s: Checked::Valid(gltf_json::texture::WrappingMode::Repeat),
-                wrap_t: Checked::Valid(gltf_json::texture::WrappingMode::Repeat),
-                ..Default::default()
-            });
+                let sampler_index = builder.samplers.len() as u32;
+                builder.samplers.push(gltf_json::texture::Sampler {
+                    mag_filter: Some(Checked::Valid(gltf_json::texture::MagFilter::Linear)),
+                    min_filter: Some(Checked::Valid(
+                        gltf_json::texture::MinFilter::LinearMipmapLinear,
+                    )),
+                    wrap_s: Checked::Valid(gltf_json::texture::WrappingMode::Repeat),
+                    wrap_t: Checked::Valid(gltf_json::texture::WrappingMode::Repeat),
+                    ..Default::default()
+                });
 
-            let texture_index = builder.textures.len() as u32;
-            builder.textures.push(gltf_json::Texture {
-                name: Some(tex_stem),
-                sampler: Some(gltf_json::Index::new(sampler_index)),
-                source: gltf_json::Index::new(image_index),
-                extensions: None,
-                extras: None,
-            });
+                let texture_index = builder.textures.len() as u32;
+                builder.textures.push(gltf_json::Texture {
+                    name: Some(tex_stem),
+                    sampler: Some(gltf_json::Index::new(sampler_index)),
+                    source: gltf_json::Index::new(image_index),
+                    extensions: None,
+                    extras: None,
+                });
 
-            Some(gltf_json::texture::Info {
-                index: gltf_json::Index::new(texture_index),
-                tex_coord: 0,
-                extensions: None,
-                extras: None,
+                Some(gltf_json::texture::Info {
+                    index: gltf_json::Index::new(texture_index),
+                    tex_coord: 0,
+                    extensions: None,
+                    extras: None,
+                })
             })
-        })
     };
 
     builder.materials.push(gltf_json::Material {
-        alpha_cutoff: None,
+        alpha_cutoff,
         alpha_mode,
         double_sided: true,
         pbr_metallic_roughness: gltf_json::material::PbrMetallicRoughness {
@@ -472,7 +508,11 @@ fn build_geom_primitives(
     };
 
     let uv_acc = if !geom.texcoords.is_empty() {
-        let uv_data: Vec<f32> = geom.texcoords.iter().flat_map(|t| t.iter().copied()).collect();
+        let uv_data: Vec<f32> = geom
+            .texcoords
+            .iter()
+            .flat_map(|t| t.iter().copied())
+            .collect();
         Some(builder.add_accessor_f32(
             &uv_data,
             &format!("{}_uv", prefix),
@@ -488,7 +528,8 @@ fn build_geom_primitives(
     // Build primitives per subset (each subset maps to a material)
     if geom.subsets.is_empty() {
         // No subsets — single primitive with all indices
-        let idx_acc = builder.add_index_accessor(&geom.indices, &format!("{}_idx", prefix));
+        let reversed = reverse_winding(&geom.indices);
+        let idx_acc = builder.add_index_accessor(&reversed, &format!("{}_idx", prefix));
 
         let mut attributes = std::collections::BTreeMap::new();
         attributes.insert(
@@ -529,11 +570,9 @@ fn build_geom_primitives(
                 continue;
             }
 
-            let sub_indices: Vec<u32> = geom.indices[start..end].to_vec();
-            let idx_acc = builder.add_index_accessor(
-                &sub_indices,
-                &format!("{}_idx_s{}", prefix, si),
-            );
+            let sub_indices = reverse_winding(&geom.indices[start..end]);
+            let idx_acc =
+                builder.add_index_accessor(&sub_indices, &format!("{}_idx_s{}", prefix, si));
 
             let mut attributes = std::collections::BTreeMap::new();
             attributes.insert(
@@ -632,7 +671,9 @@ fn build_animations(
         );
 
         // Build translation output: Vec3 per frame with Z→Y coordinate transform
-        let translations: Vec<f32> = anim.translations.iter()
+        let translations: Vec<f32> = anim
+            .translations
+            .iter()
             .flat_map(|t| {
                 let yt = z_up_to_y_up_vec3(*t);
                 yt.into_iter()
@@ -649,7 +690,9 @@ fn build_animations(
         );
 
         // Build rotation output: Vec4 quaternion per frame with Z→Y transform
-        let rotations: Vec<f32> = anim.rotations.iter()
+        let rotations: Vec<f32> = anim
+            .rotations
+            .iter()
             .flat_map(|r| {
                 let yr = z_up_to_y_up_quat(*r);
                 yr.into_iter()
@@ -752,6 +795,8 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
                     diffuse: [0.7, 0.7, 0.7, 1.0],
                     ambient: [0.3, 0.3, 0.3, 1.0],
                     opacity: 1.0,
+                    alpha_test_enabled: false,
+                    alpha_ref: 0,
                     tex_filename: None,
                 },
                 &format!("{}_default_mat", prefix),
@@ -772,7 +817,11 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
 
         let has_animation = geom.animation.is_some();
         let primitives = build_geom_primitives(
-            &mut builder, geom, &prefix, material_base_idx, has_animation,
+            &mut builder,
+            geom,
+            &prefix,
+            material_base_idx,
+            has_animation,
         );
 
         if primitives.is_empty() {
@@ -908,7 +957,13 @@ pub fn load_scene_models(
             Ok(m) => m,
             Err(_) => continue,
         };
-        add_model_to_builder(&mut builder, &mut model_mesh_map, obj_id, &model, project_dir);
+        add_model_to_builder(
+            &mut builder,
+            &mut model_mesh_map,
+            obj_id,
+            &model,
+            project_dir,
+        );
     }
 
     Ok(LoadedSceneModels {
@@ -945,6 +1000,8 @@ fn add_model_to_builder(
                     diffuse: [0.7, 0.7, 0.7, 1.0],
                     ambient: [0.3, 0.3, 0.3, 1.0],
                     opacity: 1.0,
+                    alpha_test_enabled: false,
+                    alpha_ref: 0,
                     tex_filename: None,
                 },
                 &format!("{}_mat", prefix),
@@ -1001,16 +1058,8 @@ mod tests {
                     [0.0, 0.0, 1.0, 0.0],
                     [0.0, 0.0, 0.0, 1.0],
                 ],
-                vertices: vec![
-                    [0.0, 0.0, 0.0],
-                    [1.0, 0.0, 0.0],
-                    [0.0, 1.0, 0.0],
-                ],
-                normals: vec![
-                    [0.0, 0.0, 1.0],
-                    [0.0, 0.0, 1.0],
-                    [0.0, 0.0, 1.0],
-                ],
+                vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+                normals: vec![[0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0]],
                 texcoords: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
                 vertex_colors: vec![],
                 indices: vec![0, 1, 2],
@@ -1024,6 +1073,8 @@ mod tests {
                     diffuse: [0.8, 0.2, 0.1, 1.0],
                     ambient: [0.3, 0.3, 0.3, 1.0],
                     opacity: 1.0,
+                    alpha_test_enabled: false,
+                    alpha_ref: 0,
                     tex_filename: Some("wall.bmp".to_string()),
                 }],
                 animation: None,
@@ -1033,10 +1084,18 @@ mod tests {
 
     #[test]
     fn coordinate_transform_z_up_to_y_up() {
-        // Game: Z-up → glTF: Y-up: (x, y, z) → (x, z, -y)
-        assert_eq!(transform_position([1.0, 2.0, 3.0]), [1.0, 3.0, -2.0]);
+        // Game: Z-up → glTF: Y-up: (x, y, z) → (x, z, y)
+        // Y is NOT negated so building Z matches terrain Z (south = positive).
+        assert_eq!(transform_position([1.0, 2.0, 3.0]), [1.0, 3.0, 2.0]);
         assert_eq!(transform_position([0.0, 0.0, 0.0]), [0.0, 0.0, 0.0]);
         assert_eq!(transform_normal([0.0, 0.0, 1.0]), [0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn reverse_winding_swaps_triangle_indices() {
+        let indices = vec![0, 1, 2, 3, 4, 5];
+        let reversed = reverse_winding(&indices);
+        assert_eq!(reversed, vec![0, 2, 1, 3, 5, 4]);
     }
 
     #[test]
@@ -1090,6 +1149,8 @@ mod tests {
             diffuse: [0.5, 0.6, 0.7, 1.0],
             ambient: [0.1, 0.1, 0.1, 1.0],
             opacity: 1.0,
+            alpha_test_enabled: false,
+            alpha_ref: 0,
             tex_filename: None,
         };
         let mut builder = GltfBuilder::new();
@@ -1111,6 +1172,8 @@ mod tests {
             diffuse: [0.5, 0.6, 0.7, 1.0],
             ambient: [0.1, 0.1, 0.1, 1.0],
             opacity: 0.5,
+            alpha_test_enabled: false,
+            alpha_ref: 0,
             tex_filename: None,
         };
         let mut builder = GltfBuilder::new();
@@ -1123,6 +1186,33 @@ mod tests {
         );
         let bc = gltf_mat.pbr_metallic_roughness.base_color_factor.0;
         assert!((bc[3] - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn build_material_alpha_mask_from_alpha_test() {
+        let mat = lmo::LmoMaterial {
+            diffuse: [0.5, 0.6, 0.7, 1.0],
+            ambient: [0.1, 0.1, 0.1, 1.0],
+            opacity: 1.0,
+            alpha_test_enabled: true,
+            alpha_ref: 129,
+            tex_filename: None,
+        };
+        let mut builder = GltfBuilder::new();
+        let tmp = std::env::temp_dir();
+        build_lmo_material(&mut builder, &mat, "test", &tmp, false);
+        let gltf_mat = &builder.materials[0];
+
+        assert_eq!(
+            gltf_mat.alpha_mode,
+            Checked::Valid(gltf_json::material::AlphaMode::Mask)
+        );
+
+        let cutoff = gltf_mat
+            .alpha_cutoff
+            .expect("alpha cutoff should be set for alpha-test materials")
+            .0;
+        assert!((cutoff - (129.0 / 255.0)).abs() < 1e-6);
     }
 
     #[test]
@@ -1275,7 +1365,10 @@ mod tests {
         let _ = std::fs::create_dir_all(&tmp_dir);
 
         let result = load_scene_models(&tmp_dir, &obj_info, &objects).unwrap();
-        assert!(result.model_mesh_map.is_empty(), "effects should be skipped");
+        assert!(
+            result.model_mesh_map.is_empty(),
+            "effects should be skipped"
+        );
 
         let _ = std::fs::remove_dir_all(&tmp_dir);
     }
@@ -1333,7 +1426,7 @@ mod tests {
             }
         }
         push_zeros(&mut buf, 16); // rcci
-        push_zeros(&mut buf, 8);  // state_ctrl
+        push_zeros(&mut buf, 8); // state_ctrl
         push_u32(&mut buf, mtl_size as u32);
         push_u32(&mut buf, mesh_size as u32);
         push_u32(&mut buf, 0); // helper_size
@@ -1345,13 +1438,17 @@ mod tests {
             for mat in &geom.materials {
                 push_f32(&mut buf, mat.opacity);
                 push_u32(&mut buf, 0); // transp_type
-                for &c in &mat.diffuse { push_f32(&mut buf, c); }
-                for &c in &mat.ambient { push_f32(&mut buf, c); }
+                for &c in &mat.diffuse {
+                    push_f32(&mut buf, c);
+                }
+                for &c in &mat.ambient {
+                    push_f32(&mut buf, c);
+                }
                 push_zeros(&mut buf, 16); // specular
                 push_zeros(&mut buf, 16); // emissive
                 push_f32(&mut buf, 0.0); // power
                 push_zeros(&mut buf, 8 * 12); // rs_set
-                // tex_seq[4]
+                                              // tex_seq[4]
                 for ti in 0..4 {
                     push_zeros(&mut buf, 11 * 4); // stage..colorkey
                     let mut fname = [0u8; 64];
@@ -1381,16 +1478,22 @@ mod tests {
         push_zeros(&mut buf, MESH_RS_NUM * 12);
 
         for v in &geom.vertices {
-            for &c in v { push_f32(&mut buf, c); }
+            for &c in v {
+                push_f32(&mut buf, c);
+            }
         }
         if has_normals {
             for n in &geom.normals {
-                for &c in n { push_f32(&mut buf, c); }
+                for &c in n {
+                    push_f32(&mut buf, c);
+                }
             }
         }
         if has_texcoords {
             for t in &geom.texcoords {
-                for &c in t { push_f32(&mut buf, c); }
+                for &c in t {
+                    push_f32(&mut buf, c);
+                }
             }
         }
         if has_colors {
@@ -1517,7 +1620,10 @@ mod tests {
         }
 
         // by-bd014-1 is a known version-0 file with MTLTEX_VERSION0000
-        let lmo_path = project_dir.join("model").join("scene").join("by-bd014-1.lmo");
+        let lmo_path = project_dir
+            .join("model")
+            .join("scene")
+            .join("by-bd014-1.lmo");
         if !lmo_path.exists() {
             return;
         }
@@ -1532,10 +1638,7 @@ mod tests {
         let images = parsed["images"].as_array();
         if let Some(imgs) = images {
             eprintln!("Version-0 LMO generated {} texture images", imgs.len());
-            assert!(
-                !imgs.is_empty(),
-                "version-0 LMO should have texture images"
-            );
+            assert!(!imgs.is_empty(), "version-0 LMO should have texture images");
         }
     }
 }
