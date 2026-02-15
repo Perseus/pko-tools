@@ -315,10 +315,20 @@ fn build_lmo_material(
         mat.opacity.clamp(0.0, 1.0),
     ];
 
-    let alpha_mode = if mat.opacity < 0.99 {
+    let alpha_mode = if mat.alpha_test_enabled {
+        Checked::Valid(gltf_json::material::AlphaMode::Mask)
+    } else if mat.opacity < 0.99 {
         Checked::Valid(gltf_json::material::AlphaMode::Blend)
     } else {
         Checked::Valid(gltf_json::material::AlphaMode::Opaque)
+    };
+
+    let alpha_cutoff = if mat.alpha_test_enabled {
+        Some(gltf_json::material::AlphaCutoff(
+            (mat.alpha_ref as f32 / 255.0).clamp(0.0, 1.0),
+        ))
+    } else {
+        None
     };
 
     // Try to load and embed the texture (skipped for map batch loading)
@@ -376,7 +386,7 @@ fn build_lmo_material(
     };
 
     builder.materials.push(gltf_json::Material {
-        alpha_cutoff: None,
+        alpha_cutoff,
         alpha_mode,
         double_sided: true,
         pbr_metallic_roughness: gltf_json::material::PbrMetallicRoughness {
@@ -1152,6 +1162,33 @@ mod tests {
         );
         let bc = gltf_mat.pbr_metallic_roughness.base_color_factor.0;
         assert!((bc[3] - 0.5).abs() < 0.01);
+    }
+
+    #[test]
+    fn build_material_alpha_mask_from_alpha_test() {
+        let mat = lmo::LmoMaterial {
+            diffuse: [0.5, 0.6, 0.7, 1.0],
+            ambient: [0.1, 0.1, 0.1, 1.0],
+            opacity: 1.0,
+            alpha_test_enabled: true,
+            alpha_ref: 129,
+            tex_filename: None,
+        };
+        let mut builder = GltfBuilder::new();
+        let tmp = std::env::temp_dir();
+        build_lmo_material(&mut builder, &mat, "test", &tmp, false);
+        let gltf_mat = &builder.materials[0];
+
+        assert_eq!(
+            gltf_mat.alpha_mode,
+            Checked::Valid(gltf_json::material::AlphaMode::Mask)
+        );
+
+        let cutoff = gltf_mat
+            .alpha_cutoff
+            .expect("alpha cutoff should be set for alpha-test materials")
+            .0;
+        assert!((cutoff - (129.0 / 255.0)).abs() < 1e-6);
     }
 
     #[test]
