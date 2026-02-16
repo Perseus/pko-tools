@@ -68,3 +68,19 @@ pub struct BuildingExportEntry {
     pub filename: String,
     pub gltf_path: String,
 }
+
+/// Options controlling the map export format.
+#[derive(Debug, Clone)]
+pub struct ExportOptions {
+    /// Manifest version: 2 = legacy binary grids + JSON glTF,
+    /// 3 = PNG grids + GLB terrain/buildings + slim manifest.
+    pub manifest_version: u32,
+}
+
+impl Default for ExportOptions {
+    fn default() -> Self {
+        Self {
+            manifest_version: 3,
+        }
+    }
+}

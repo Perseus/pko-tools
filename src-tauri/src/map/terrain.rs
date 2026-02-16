@@ -1991,16 +1991,19 @@ fn copy_water_textures(project_dir: &Path, output_dir: &Path) -> Vec<String> {
     copied
 }
 
-/// Export a map as three separate pieces for Unity (or similar engines):
-/// 1. Terrain-only glTF (no buildings embedded)
-/// 2. Individual building glTFs (one per unique building type, with textures + animations)
-/// 3. Manifest v2 JSON (grids, placements, effects, areas, environment)
+/// Export a map for Unity (or similar engines).
+///
+/// When `options.manifest_version == 2` (legacy): binary grids + JSON glTF + v2 manifest.
+/// When `options.manifest_version == 3` (default): PNG grids + GLB terrain/buildings + slim v3 manifest.
 pub fn export_map_for_unity(
     project_dir: &Path,
     map_name: &str,
     output_dir: &Path,
+    options: &super::ExportOptions,
 ) -> Result<super::MapForUnityExportResult> {
     use std::collections::HashSet;
+
+    let v3 = options.manifest_version >= 3;
 
     // 1. Parse .map file
     let map_path = project_dir.join("map").join(format!("{}.map", map_name));
@@ -2017,224 +2020,18 @@ pub fn export_map_for_unity(
         None
     };
 
-    // 3. Load sceneobjinfo for obj_id → filename mapping
+    // 3. Load metadata
     let obj_info = super::scene_obj_info::load_scene_obj_info(project_dir).unwrap_or_default();
-
-    // 3b. Load AreaSet.bin for per-area definitions
     let area_defs = super::area_set::load_area_set(project_dir).unwrap_or_default();
-
-    // 3c. Load mapinfo.bin for spawn point and per-map settings
     let map_infos = super::mapinfo::load_mapinfo(project_dir).unwrap_or_default();
     let this_map_info = super::mapinfo::find_map_info(&map_infos, map_name);
-
-    // 3d. Load sceneffectinfo for effect_id → .eff filename mapping
     let effect_info =
         crate::item::sceneffect::load_scene_effect_info(project_dir).unwrap_or_default();
 
     // 4. Bake terrain texture atlas
     let atlas = super::texture::try_bake_atlas(project_dir, &parsed_map);
 
-    // 5. Build terrain-only glTF (no buildings)
-    let terrain_gltf_json = build_terrain_gltf(&parsed_map, None, atlas.as_ref(), None)?;
-
-    // 6. Write terrain glTF
-    std::fs::create_dir_all(output_dir)?;
-    let terrain_gltf_path = output_dir.join("terrain.gltf");
-    std::fs::write(&terrain_gltf_path, terrain_gltf_json.as_bytes())?;
-
-    // 7. Collect unique building obj_ids (type=0 only)
-    let unique_obj_ids: HashSet<u16> = objects
-        .as_ref()
-        .map(|obj_file| {
-            obj_file
-                .objects
-                .iter()
-                .filter(|o| o.obj_type == 0)
-                .map(|o| o.obj_id)
-                .collect()
-        })
-        .unwrap_or_default();
-
-    // 8. Export each unique building as its own glTF
-    let buildings_dir = output_dir.join("buildings");
-    std::fs::create_dir_all(&buildings_dir)?;
-
-    let mut building_entries = Vec::new();
-
-    for &obj_id in &unique_obj_ids {
-        let info = match obj_info.get(&(obj_id as u32)) {
-            Some(info) => info,
-            None => continue, // Unknown obj_id, skip
-        };
-
-        let lmo_path = match super::scene_model::find_lmo_path(project_dir, &info.filename) {
-            Some(p) => p,
-            None => continue, // LMO not found, skip
-        };
-
-        let gltf_json = match super::scene_model::build_gltf_from_lmo(&lmo_path, project_dir) {
-            Ok(json) => json,
-            Err(_) => continue, // Failed to convert, skip
-        };
-
-        let stem = info
-            .filename
-            .strip_suffix(".lmo")
-            .or_else(|| info.filename.strip_suffix(".LMO"))
-            .unwrap_or(&info.filename);
-        let gltf_filename = format!("{}.gltf", stem);
-        let gltf_path = buildings_dir.join(&gltf_filename);
-        std::fs::write(&gltf_path, gltf_json.as_bytes())?;
-
-        building_entries.push(super::BuildingExportEntry {
-            obj_id: obj_id as u32,
-            filename: info.filename.clone(),
-            gltf_path: gltf_path.to_string_lossy().to_string(),
-        });
-    }
-
-    // 9. Build placement manifest JSON
-    let mut placements = Vec::new();
-    let mut buildings_map = serde_json::Map::new();
-
-    // Build the buildings lookup in manifest
-    for entry in &building_entries {
-        let stem = entry
-            .filename
-            .strip_suffix(".lmo")
-            .or_else(|| entry.filename.strip_suffix(".LMO"))
-            .unwrap_or(&entry.filename);
-
-        buildings_map.insert(
-            entry.obj_id.to_string(),
-            serde_json::json!({
-                "gltf": format!("buildings/{}.gltf", stem),
-                "filename": entry.filename,
-            }),
-        );
-    }
-
-    // Build placements array (buildings, type=0) and effect placements (type=1)
-    let mut effect_placements = Vec::new();
-    let mut unique_eff_ids: HashSet<u16> = HashSet::new();
-    let valid_building_ids: HashSet<u16> =
-        building_entries.iter().map(|e| e.obj_id as u16).collect();
-
-    if let Some(ref obj_file) = objects {
-        for obj in &obj_file.objects {
-            if obj.obj_type == 0 && !valid_building_ids.contains(&obj.obj_id) {
-                continue;
-            }
-
-            // Look up terrain height at the object's position
-            let terrain_h = get_tile(&parsed_map, obj.world_x as i32, obj.world_y as i32)
-                .map(|t| tile_height(t))
-                .unwrap_or(UNDERWATER_HEIGHT / MAP_VISUAL_SCALE);
-
-            // Position in Y-up glTF space
-            let position = [obj.world_x, terrain_h + obj.world_z, obj.world_y];
-
-            if obj.obj_type == 0 {
-                // Building placement
-                placements.push(serde_json::json!({
-                    "obj_id": obj.obj_id,
-                    "position": position,
-                    "rotation_y_degrees": obj.yaw_angle,
-                    "scale": obj.scale,
-                }));
-            } else if obj.obj_type == 1 {
-                // Effect placement
-                effect_placements.push(serde_json::json!({
-                    "eff_id": obj.obj_id,
-                    "position": position,
-                    "rotation_y_degrees": obj.yaw_angle,
-                    "scale": obj.scale,
-                }));
-                unique_eff_ids.insert(obj.obj_id);
-            }
-        }
-    }
-
-    // 10. Build grids
-    let (collision_bytes, coll_w, coll_h) = build_collision_grid(&parsed_map);
-    let (obj_height_bytes, obj_h_w, obj_h_h) = build_obj_height_grid(&parsed_map);
-    let region_bytes = build_region_grid(&parsed_map);
-    let area_bytes = build_area_grid(&parsed_map);
-    let tile_tex_bytes = build_tile_texture_grid(&parsed_map);
-    let tile_color_bytes = build_tile_color_grid(&parsed_map);
-
-    // Write grids as binary sidecar files (avoids 372MB base64-in-JSON for large maps)
-    let grids_dir = output_dir.join("grids");
-    std::fs::create_dir_all(&grids_dir)?;
-
-    std::fs::write(grids_dir.join("collision.bin"), &collision_bytes)?;
-    std::fs::write(grids_dir.join("obj_height.bin"), &obj_height_bytes)?;
-    std::fs::write(grids_dir.join("region.bin"), &region_bytes)?;
-    std::fs::write(grids_dir.join("area.bin"), &area_bytes)?;
-    std::fs::write(grids_dir.join("tile_texture.bin"), &tile_tex_bytes)?;
-    std::fs::write(grids_dir.join("tile_color.bin"), &tile_color_bytes)?;
-
-    // 11. Build effect definitions from .eff files
-    // Canonical schema: each effect's EffFile fields are flattened to the top level
-    // alongside "filename", matching the plan's manifest v2 spec.
-    let mut effect_definitions = serde_json::Map::new();
-    let mut missing_effect_ids: Vec<u16> = Vec::new();
-    for &eff_id in &unique_eff_ids {
-        if let Some(eff_info) = effect_info.get(&(eff_id as u32)) {
-            if let Some(eff_file) = load_effect_file(project_dir, &eff_info.filename) {
-                if let Ok(serde_json::Value::Object(mut eff_obj)) = serde_json::to_value(&eff_file)
-                {
-                    // Flatten: merge filename into the EffFile object at the top level
-                    eff_obj.insert("filename".to_string(), serde_json::json!(eff_info.filename));
-                    effect_definitions
-                        .insert(eff_id.to_string(), serde_json::Value::Object(eff_obj));
-                } else {
-                    eprintln!(
-                        "Warning: effect {} ({}) failed to serialize",
-                        eff_id, eff_info.filename
-                    );
-                    missing_effect_ids.push(eff_id);
-                }
-            } else {
-                eprintln!(
-                    "Warning: effect {} ({}) .eff file not found or failed to parse",
-                    eff_id, eff_info.filename
-                );
-                missing_effect_ids.push(eff_id);
-            }
-        } else {
-            eprintln!("Warning: effect {} not found in sceneffectinfo", eff_id);
-            missing_effect_ids.push(eff_id);
-        }
-    }
-
-    // 11b. Check effect_definitions size — if >5MB, export as sidecar file
-    let eff_defs_json_value = serde_json::Value::Object(effect_definitions.clone());
-    let eff_defs_size = serde_json::to_string(&eff_defs_json_value)
-        .map(|s| s.len())
-        .unwrap_or(0);
-    // Defined at module scope as SIDECAR_THRESHOLD
-
-    let use_sidecar = eff_defs_size > SIDECAR_THRESHOLD;
-
-    if use_sidecar {
-        let sidecar_path = output_dir.join("effect_definitions.json");
-        let sidecar_json = serde_json::to_string_pretty(&eff_defs_json_value)?;
-        std::fs::write(&sidecar_path, sidecar_json.as_bytes())?;
-    }
-
-    // 12. Build areas dict from AreaSet.bin
-    let areas_json = super::area_set::areas_to_json(&area_defs);
-
-    // 13. Build spawn point and environment from mapinfo.bin
-    let spawn_point = this_map_info.map(|info| {
-        serde_json::json!({
-            "tile_x": info.init_x,
-            "tile_y": info.init_y,
-        })
-    });
-
-    // Default environment settings (from original PKO engine)
+    // 5. Environment settings
     let light_direction = this_map_info
         .map(|info| info.light_dir)
         .unwrap_or([-1.0, -1.0, -1.0]);
@@ -2247,106 +2044,398 @@ pub fn export_map_for_unity(
             ]
         })
         .unwrap_or([0.6, 0.6, 0.6]);
+    let areas_json = super::area_set::areas_to_json(&area_defs);
+    let spawn_point_tiles = this_map_info.map(|info| [info.init_x, info.init_y]);
 
-    // 14. Copy water textures
+    // 6. Collect unique building obj_ids (type=0 only)
+    let unique_obj_ids: HashSet<u16> = objects
+        .as_ref()
+        .map(|obj_file| {
+            obj_file
+                .objects
+                .iter()
+                .filter(|o| o.obj_type == 0)
+                .map(|o| o.obj_id)
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // 7. Export buildings — glTF (v2) or GLB (v3)
+    std::fs::create_dir_all(output_dir)?;
+    let buildings_dir = output_dir.join("buildings");
+    std::fs::create_dir_all(&buildings_dir)?;
+
+    let mut building_entries = Vec::new();
+    let ext = if v3 { "glb" } else { "gltf" };
+
+    for &obj_id in &unique_obj_ids {
+        let info = match obj_info.get(&(obj_id as u32)) {
+            Some(info) => info,
+            None => continue,
+        };
+
+        let lmo_path = match super::scene_model::find_lmo_path(project_dir, &info.filename) {
+            Some(p) => p,
+            None => continue,
+        };
+
+        let stem = info
+            .filename
+            .strip_suffix(".lmo")
+            .or_else(|| info.filename.strip_suffix(".LMO"))
+            .unwrap_or(&info.filename);
+        let out_filename = format!("{}.{}", stem, ext);
+        let out_path = buildings_dir.join(&out_filename);
+
+        if v3 {
+            match super::scene_model::build_glb_from_lmo(&lmo_path, project_dir) {
+                Ok((json, bin)) => {
+                    super::glb::write_glb(&json, &bin, &out_path)?;
+                }
+                Err(_) => continue,
+            }
+        } else {
+            match super::scene_model::build_gltf_from_lmo(&lmo_path, project_dir) {
+                Ok(json) => {
+                    std::fs::write(&out_path, json.as_bytes())?;
+                }
+                Err(_) => continue,
+            }
+        }
+
+        building_entries.push(super::BuildingExportEntry {
+            obj_id: obj_id as u32,
+            filename: info.filename.clone(),
+            gltf_path: out_path.to_string_lossy().to_string(),
+        });
+    }
+
+    // 8. Build placements + effects
+    let mut placements = Vec::new();
+    let mut building_glb_placements: Vec<(u32, [f32; 3], f32, f32, String)> = Vec::new();
+    let mut effect_placements = Vec::new();
+    let mut unique_eff_ids: HashSet<u16> = HashSet::new();
+    let valid_building_ids: HashSet<u16> =
+        building_entries.iter().map(|e| e.obj_id as u16).collect();
+
+    // Build the buildings lookup for manifest
+    let mut buildings_map = serde_json::Map::new();
+    for entry in &building_entries {
+        let stem = entry
+            .filename
+            .strip_suffix(".lmo")
+            .or_else(|| entry.filename.strip_suffix(".LMO"))
+            .unwrap_or(&entry.filename);
+
+        buildings_map.insert(
+            entry.obj_id.to_string(),
+            serde_json::json!({
+                "glb": format!("buildings/{}.{}", stem, ext),
+                "filename": entry.filename,
+            }),
+        );
+    }
+
+    if let Some(ref obj_file) = objects {
+        for obj in &obj_file.objects {
+            if obj.obj_type == 0 && !valid_building_ids.contains(&obj.obj_id) {
+                continue;
+            }
+
+            let terrain_h = get_tile(&parsed_map, obj.world_x as i32, obj.world_y as i32)
+                .map(|t| tile_height(t))
+                .unwrap_or(UNDERWATER_HEIGHT / MAP_VISUAL_SCALE);
+            let position = [obj.world_x, terrain_h + obj.world_z, obj.world_y];
+
+            if obj.obj_type == 0 {
+                placements.push(serde_json::json!({
+                    "obj_id": obj.obj_id,
+                    "position": position,
+                    "rotation_y_degrees": obj.yaw_angle,
+                    "scale": obj.scale,
+                }));
+
+                // For v3 terrain GLB: collect placement data for empty nodes
+                if v3 {
+                    let info = obj_info.get(&(obj.obj_id as u32));
+                    let stem = info
+                        .map(|i| {
+                            i.filename
+                                .strip_suffix(".lmo")
+                                .or_else(|| i.filename.strip_suffix(".LMO"))
+                                .unwrap_or(&i.filename)
+                        })
+                        .unwrap_or("unknown");
+                    building_glb_placements.push((
+                        obj.obj_id as u32,
+                        position,
+                        obj.yaw_angle as f32,
+                        obj.scale as f32,
+                        format!("buildings/{}.glb", stem),
+                    ));
+                }
+            } else if obj.obj_type == 1 {
+                effect_placements.push(serde_json::json!({
+                    "eff_id": obj.obj_id,
+                    "position": position,
+                    "rotation_y_degrees": obj.yaw_angle,
+                    "scale": obj.scale,
+                }));
+                unique_eff_ids.insert(obj.obj_id);
+            }
+        }
+    }
+
+    // 9. Build grids
+    let collision = build_collision_grid(&parsed_map);
+    let obj_height = build_obj_height_grid(&parsed_map);
+    let region_bytes = build_region_grid(&parsed_map);
+    let area_bytes = build_area_grid(&parsed_map);
+    let tile_tex_bytes = build_tile_texture_grid(&parsed_map);
+    let tile_color_bytes = build_tile_color_grid(&parsed_map);
+    let tile_layer_bytes = super::texture::build_tile_layer_grid(&parsed_map);
+
+    let grids_dir = output_dir.join("grids");
+    std::fs::create_dir_all(&grids_dir)?;
+
+    if v3 {
+        // Write PNG grids
+        super::grid_images::encode_all_grids(
+            &collision,
+            &obj_height,
+            &region_bytes,
+            &area_bytes,
+            &tile_tex_bytes,
+            &tile_color_bytes,
+            &tile_layer_bytes,
+            parsed_map.header.n_width,
+            parsed_map.header.n_height,
+            &grids_dir,
+        )?;
+    } else {
+        // Write binary grids (v2 legacy)
+        std::fs::write(grids_dir.join("collision.bin"), &collision.0)?;
+        std::fs::write(grids_dir.join("obj_height.bin"), &obj_height.0)?;
+        std::fs::write(grids_dir.join("region.bin"), &region_bytes)?;
+        std::fs::write(grids_dir.join("area.bin"), &area_bytes)?;
+        std::fs::write(grids_dir.join("tile_texture.bin"), &tile_tex_bytes)?;
+        std::fs::write(grids_dir.join("tile_color.bin"), &tile_color_bytes)?;
+        std::fs::write(grids_dir.join("tile_layer.bin"), &tile_layer_bytes)?;
+    }
+
+    // 10. Build effect definitions
+    let mut effect_definitions = serde_json::Map::new();
+    let mut missing_effect_ids: Vec<u16> = Vec::new();
+    for &eff_id in &unique_eff_ids {
+        if let Some(eff_info) = effect_info.get(&(eff_id as u32)) {
+            if let Some(eff_file) = load_effect_file(project_dir, &eff_info.filename) {
+                if let Ok(serde_json::Value::Object(mut eff_obj)) = serde_json::to_value(&eff_file)
+                {
+                    eff_obj.insert("filename".to_string(), serde_json::json!(eff_info.filename));
+                    effect_definitions
+                        .insert(eff_id.to_string(), serde_json::Value::Object(eff_obj));
+                } else {
+                    missing_effect_ids.push(eff_id);
+                }
+            } else {
+                missing_effect_ids.push(eff_id);
+            }
+        } else {
+            missing_effect_ids.push(eff_id);
+        }
+    }
+
+    let eff_defs_json_value = serde_json::Value::Object(effect_definitions.clone());
+    let eff_defs_size = serde_json::to_string(&eff_defs_json_value)
+        .map(|s| s.len())
+        .unwrap_or(0);
+    let use_sidecar = eff_defs_size > SIDECAR_THRESHOLD;
+    if use_sidecar {
+        let sidecar_path = output_dir.join("effect_definitions.json");
+        let sidecar_json = serde_json::to_string_pretty(&eff_defs_json_value)?;
+        std::fs::write(&sidecar_path, sidecar_json.as_bytes())?;
+    }
+
+    // 11. Write terrain
+    let terrain_file_path;
+    if v3 {
+        // Build terrain GLB with metadata
+        let glb_metadata = TerrainGlbMetadata {
+            map_name,
+            areas_json: &areas_json,
+            spawn_point: spawn_point_tiles,
+            light_direction,
+            light_color,
+            ambient: [0.4, 0.4, 0.4],
+            background_color: [10, 10, 125],
+            building_placements: building_glb_placements,
+        };
+
+        let (json, bin) = build_terrain_glb(&parsed_map, atlas.as_ref(), &glb_metadata)?;
+        terrain_file_path = output_dir.join("terrain.glb");
+        super::glb::write_glb(&json, &bin, &terrain_file_path)?;
+    } else {
+        // Build terrain JSON glTF (v2 legacy)
+        let terrain_gltf_json = build_terrain_gltf(&parsed_map, None, atlas.as_ref(), None)?;
+        terrain_file_path = output_dir.join("terrain.gltf");
+        std::fs::write(&terrain_file_path, terrain_gltf_json.as_bytes())?;
+    }
+
+    // 12. Copy water textures + terrain textures + alpha atlas
     let water_textures = copy_water_textures(project_dir, output_dir);
-
-    // 14b. Export individual terrain textures for runtime blending (Phase E)
     let terrain_textures =
         super::texture::export_terrain_textures(project_dir, &parsed_map, output_dir)
             .unwrap_or_default();
-
-    // 14c. Export alpha mask atlas (Phase E)
     let alpha_atlas_path =
         super::texture::export_alpha_atlas(project_dir, output_dir).unwrap_or(None);
 
-    // 14d. Build tile layer grid (Phase E) — 7 bytes per tile
-    let tile_layer_bytes = super::texture::build_tile_layer_grid(&parsed_map);
-    std::fs::write(grids_dir.join("tile_layer.bin"), &tile_layer_bytes)?;
-
-    // 15. Build manifest v2 JSON
-    // Build manifest as a Map so we can conditionally include/omit keys
+    // 13. Build manifest
     let mut manifest_map = serde_json::Map::new();
-    manifest_map.insert("version".into(), serde_json::json!(2));
-    manifest_map.insert("map_name".into(), serde_json::json!(map_name));
-    manifest_map.insert("coordinate_system".into(), serde_json::json!("y_up"));
-    manifest_map.insert("world_scale".into(), serde_json::json!(MAP_VISUAL_SCALE));
-    manifest_map.insert(
-        "unit_scale_contract".into(),
-        serde_json::json!("pko_1unit_to_unity_1unit_v1"),
-    );
 
-    // Map dimensions
-    manifest_map.insert(
-        "map_width_tiles".into(),
-        serde_json::json!(parsed_map.header.n_width),
-    );
-    manifest_map.insert(
-        "map_height_tiles".into(),
-        serde_json::json!(parsed_map.header.n_height),
-    );
-    manifest_map.insert(
-        "section_width".into(),
-        serde_json::json!(parsed_map.header.n_section_width),
-    );
-    manifest_map.insert(
-        "section_height".into(),
-        serde_json::json!(parsed_map.header.n_section_height),
-    );
+    if v3 {
+        // ----- Manifest v3 (slim) -----
+        manifest_map.insert("version".into(), serde_json::json!(3));
+        manifest_map.insert(
+            "unit_scale_contract".into(),
+            serde_json::json!("pko_1unit_to_unity_1unit_v1"),
+        );
+        manifest_map.insert("terrain_glb".into(), serde_json::json!("terrain.glb"));
 
-    // Terrain
-    manifest_map.insert("terrain_gltf".into(), serde_json::json!("terrain.gltf"));
+        // Grid file references with format metadata
+        manifest_map.insert(
+            "grids".into(),
+            serde_json::json!({
+                "collision": {
+                    "file": "grids/collision.png", "scale": 2,
+                    "format": "u8_threshold128",
+                    "decode": "pixel < 128 = walkable, >= 128 = blocked"
+                },
+                "obj_height": {
+                    "file": "grids/obj_height.png", "scale": 2,
+                    "format": "i16_rgb8_offset"
+                },
+                "region": {
+                    "file": "grids/region.png", "scale": 1,
+                    "format": "i16_rgb8_offset"
+                },
+                "area": {
+                    "file": "grids/area.png", "scale": 1,
+                    "format": "u8_direct"
+                },
+                "tile_texture": {
+                    "file": "grids/tile_texture.png", "scale": 1,
+                    "format": "u8_direct"
+                },
+                "tile_color": {
+                    "file": "grids/tile_color.png", "scale": 1,
+                    "format": "rgb8_color"
+                },
+                "tile_layer_tex": {
+                    "file": "grids/tile_layer_tex.png", "scale": 1,
+                    "format": "rgba8_indices"
+                },
+                "tile_layer_alpha": {
+                    "file": "grids/tile_layer_alpha.png", "scale": 1,
+                    "format": "rgb8_indices"
+                }
+            }),
+        );
 
-    // Grids (binary sidecar files)
-    manifest_map.insert(
-        "collision_grid".into(),
-        serde_json::json!({
+        // Buildings (GLB paths)
+        manifest_map.insert(
+            "buildings".into(),
+            serde_json::Value::Object(buildings_map),
+        );
+    } else {
+        // ----- Manifest v2 (full, legacy) -----
+        manifest_map.insert("version".into(), serde_json::json!(2));
+        manifest_map.insert("map_name".into(), serde_json::json!(map_name));
+        manifest_map.insert("coordinate_system".into(), serde_json::json!("y_up"));
+        manifest_map.insert("world_scale".into(), serde_json::json!(MAP_VISUAL_SCALE));
+        manifest_map.insert(
+            "unit_scale_contract".into(),
+            serde_json::json!("pko_1unit_to_unity_1unit_v1"),
+        );
+        manifest_map.insert(
+            "map_width_tiles".into(),
+            serde_json::json!(parsed_map.header.n_width),
+        );
+        manifest_map.insert(
+            "map_height_tiles".into(),
+            serde_json::json!(parsed_map.header.n_height),
+        );
+        manifest_map.insert(
+            "section_width".into(),
+            serde_json::json!(parsed_map.header.n_section_width),
+        );
+        manifest_map.insert(
+            "section_height".into(),
+            serde_json::json!(parsed_map.header.n_section_height),
+        );
+        manifest_map.insert("terrain_gltf".into(), serde_json::json!("terrain.gltf"));
+
+        // Binary grid metadata
+        let (coll_w, coll_h) = (collision.1, collision.2);
+        let (obj_h_w, obj_h_h) = (obj_height.1, obj_height.2);
+        manifest_map.insert("collision_grid".into(), serde_json::json!({
             "width": coll_w, "height": coll_h, "tile_size": 0.5,
             "file": "grids/collision.bin",
-        }),
-    );
-    manifest_map.insert(
-        "obj_height_grid".into(),
-        serde_json::json!({
+        }));
+        manifest_map.insert("obj_height_grid".into(), serde_json::json!({
             "width": obj_h_w, "height": obj_h_h, "tile_size": 0.5,
             "encoding": "i16_le_millimeters",
             "file": "grids/obj_height.bin",
-        }),
-    );
-    manifest_map.insert(
-        "region_grid".into(),
-        serde_json::json!({
+        }));
+        manifest_map.insert("region_grid".into(), serde_json::json!({
             "width": parsed_map.header.n_width, "height": parsed_map.header.n_height,
             "file": "grids/region.bin",
-        }),
-    );
-    manifest_map.insert(
-        "area_grid".into(),
-        serde_json::json!({
+        }));
+        manifest_map.insert("area_grid".into(), serde_json::json!({
             "width": parsed_map.header.n_width, "height": parsed_map.header.n_height,
             "file": "grids/area.bin",
-        }),
-    );
-    manifest_map.insert(
-        "tile_texture_grid".into(),
-        serde_json::json!({
+        }));
+        manifest_map.insert("tile_texture_grid".into(), serde_json::json!({
             "width": parsed_map.header.n_width, "height": parsed_map.header.n_height,
             "file": "grids/tile_texture.bin",
-        }),
-    );
-    manifest_map.insert(
-        "tile_color_grid".into(),
-        serde_json::json!({
+        }));
+        manifest_map.insert("tile_color_grid".into(), serde_json::json!({
             "width": parsed_map.header.n_width, "height": parsed_map.header.n_height,
             "file": "grids/tile_color.bin",
-        }),
-    );
+        }));
+        manifest_map.insert("tile_layer_grid".into(), serde_json::json!({
+            "width": parsed_map.header.n_width, "height": parsed_map.header.n_height,
+            "bytes_per_tile": 7,
+            "file": "grids/tile_layer.bin",
+        }));
 
-    // Buildings
-    manifest_map.insert("buildings".into(), serde_json::Value::Object(buildings_map));
-    manifest_map.insert("placements".into(), serde_json::json!(placements));
+        // Buildings + placements (in manifest for v2)
+        manifest_map.insert(
+            "buildings".into(),
+            serde_json::Value::Object(buildings_map),
+        );
+        manifest_map.insert("placements".into(), serde_json::json!(placements));
 
-    // Effects — conditionally inline or sidecar (never both)
+        // Areas + map settings (in manifest for v2; in GLB scene.extras for v3)
+        manifest_map.insert("areas".into(), areas_json);
+        manifest_map.insert(
+            "spawn_point".into(),
+            serde_json::json!(spawn_point_tiles.map(|sp| serde_json::json!({
+                "tile_x": sp[0], "tile_y": sp[1]
+            }))),
+        );
+        manifest_map.insert(
+            "light_direction".into(),
+            serde_json::json!(light_direction),
+        );
+        manifest_map.insert("light_color".into(), serde_json::json!(light_color));
+        manifest_map.insert("ambient".into(), serde_json::json!([0.4, 0.4, 0.4]));
+        manifest_map.insert(
+            "background_color".into(),
+            serde_json::json!([10, 10, 125]),
+        );
+    }
+
+    // Shared manifest entries (both v2 and v3)
     manifest_map.insert(
         "effect_placements".into(),
         serde_json::json!(effect_placements),
@@ -2367,23 +2456,8 @@ pub fn export_map_for_unity(
             serde_json::json!(sorted_missing),
         );
     }
-
-    // Areas (from AreaSet.bin, keyed by btIsland value)
-    manifest_map.insert("areas".into(), areas_json);
-
-    // Map settings
-    manifest_map.insert("spawn_point".into(), serde_json::json!(spawn_point));
-    manifest_map.insert("light_direction".into(), serde_json::json!(light_direction));
-    manifest_map.insert("light_color".into(), serde_json::json!(light_color));
-    manifest_map.insert("ambient".into(), serde_json::json!([0.4, 0.4, 0.4]));
-    manifest_map.insert("background_color".into(), serde_json::json!([10, 10, 125]));
-
-    // Water textures (paths relative to output dir)
     manifest_map.insert("water_textures".into(), serde_json::json!(water_textures));
-
-    // Terrain blending data (Phase E)
     if !terrain_textures.is_empty() {
-        // terrain_textures dict: tex_id (string) → relative path
         let tex_map: serde_json::Map<String, serde_json::Value> = terrain_textures
             .iter()
             .map(|(id, path)| (id.to_string(), serde_json::json!(path)))
@@ -2396,25 +2470,15 @@ pub fn export_map_for_unity(
     if let Some(ref alpha_path) = alpha_atlas_path {
         manifest_map.insert("alpha_atlas".into(), serde_json::json!(alpha_path));
     }
-    manifest_map.insert(
-        "tile_layer_grid".into(),
-        serde_json::json!({
-            "width": parsed_map.header.n_width,
-            "height": parsed_map.header.n_height,
-            "bytes_per_tile": 7,
-            "file": "grids/tile_layer.bin",
-        }),
-    );
 
     let manifest = serde_json::Value::Object(manifest_map);
-
     let manifest_path = output_dir.join("manifest.json");
     let manifest_json = serde_json::to_string_pretty(&manifest)?;
     std::fs::write(&manifest_path, manifest_json.as_bytes())?;
 
     Ok(super::MapForUnityExportResult {
         output_dir: output_dir.to_string_lossy().to_string(),
-        terrain_gltf_path: terrain_gltf_path.to_string_lossy().to_string(),
+        terrain_gltf_path: terrain_file_path.to_string_lossy().to_string(),
         building_gltf_paths: building_entries,
         manifest_path: manifest_path.to_string_lossy().to_string(),
         total_buildings_exported: unique_obj_ids.len() as u32,
@@ -2494,6 +2558,7 @@ pub struct BatchExportMapResult {
 pub fn batch_export_for_unity(
     project_dir: &Path,
     output_base_dir: &Path,
+    options: &super::ExportOptions,
 ) -> Result<BatchExportResult> {
     let maps = scan_maps(project_dir)?;
     let total = maps.len();
@@ -2505,7 +2570,7 @@ pub fn batch_export_for_unity(
         let map_name = &map_entry.name;
         let output_dir = output_base_dir.join(map_name);
 
-        match export_map_for_unity(project_dir, map_name, &output_dir) {
+        match export_map_for_unity(project_dir, map_name, &output_dir, options) {
             Ok(result) => {
                 results.push(BatchExportMapResult {
                     map_name: map_name.clone(),

@@ -56,6 +56,7 @@ pub async fn export_map_to_gltf(
 pub async fn export_map_for_unity(
     project_id: String,
     map_name: String,
+    format: Option<String>,
 ) -> Result<MapForUnityExportResult, String> {
     let project_id =
         uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
@@ -68,13 +69,19 @@ pub async fn export_map_for_unity(
         .join("map")
         .join(&map_name);
 
-    terrain::export_map_for_unity(project.project_directory.as_ref(), &map_name, &exports_dir)
+    let options = match format.as_deref() {
+        Some("v2") => super::ExportOptions { manifest_version: 2 },
+        _ => super::ExportOptions::default(),
+    };
+
+    terrain::export_map_for_unity(project.project_directory.as_ref(), &map_name, &exports_dir, &options)
         .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 pub async fn batch_export_maps_for_unity(
     project_id: String,
+    format: Option<String>,
 ) -> Result<super::terrain::BatchExportResult, String> {
     let project_id =
         uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
@@ -86,7 +93,12 @@ pub async fn batch_export_maps_for_unity(
         .join("exports")
         .join("map");
 
-    terrain::batch_export_for_unity(project.project_directory.as_ref(), &output_base_dir)
+    let options = match format.as_deref() {
+        Some("v2") => super::ExportOptions { manifest_version: 2 },
+        _ => super::ExportOptions::default(),
+    };
+
+    terrain::batch_export_for_unity(project.project_directory.as_ref(), &output_base_dir, &options)
         .map_err(|e| e.to_string())
 }
 

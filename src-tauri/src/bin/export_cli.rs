@@ -14,11 +14,12 @@ fn main() {
 
     if args.len() < 4 {
         eprintln!("Usage:");
-        eprintln!("  export_cli <client_dir> <output_dir> <map_name>");
+        eprintln!("  export_cli <client_dir> <output_dir> <map_name> [--format v2|v3]");
         eprintln!("  export_cli --dump-scene-obj-info <client_dir> [map_name]");
         eprintln!();
         eprintln!("Examples:");
         eprintln!("  export_cli ./top-client ./unity-export 07xmas2");
+        eprintln!("  export_cli ./top-client ./unity-export 07xmas2 --format v2");
         eprintln!("  export_cli --dump-scene-obj-info ./top-client");
         eprintln!("  export_cli --dump-scene-obj-info ./top-client 07xmas2");
         std::process::exit(1);
@@ -28,11 +29,35 @@ fn main() {
     let output_dir = PathBuf::from(&args[2]).join(&args[3]);
     let map_name = &args[3];
 
-    eprintln!("Exporting map '{}' ...", map_name);
+    // Parse optional --format flag
+    let mut options = pko_tools_lib::map::ExportOptions::default();
+    let mut i = 4;
+    while i < args.len() {
+        if args[i] == "--format" {
+            if let Some(val) = args.get(i + 1) {
+                match val.as_str() {
+                    "v2" => options.manifest_version = 2,
+                    "v3" => options.manifest_version = 3,
+                    other => {
+                        eprintln!("Unknown format '{}', expected v2 or v3", other);
+                        std::process::exit(1);
+                    }
+                }
+                i += 2;
+            } else {
+                eprintln!("--format requires a value (v2 or v3)");
+                std::process::exit(1);
+            }
+        } else {
+            i += 1;
+        }
+    }
+
+    eprintln!("Exporting map '{}' (manifest v{}) ...", map_name, options.manifest_version);
     eprintln!("  Client dir: {}", client_dir.display());
     eprintln!("  Output dir: {}", output_dir.display());
 
-    match pko_tools_lib::map::terrain::export_map_for_unity(&client_dir, map_name, &output_dir) {
+    match pko_tools_lib::map::terrain::export_map_for_unity(&client_dir, map_name, &output_dir, &options) {
         Ok(result) => {
             eprintln!("Export complete!");
             eprintln!("  Terrain glTF: {}", result.terrain_gltf_path);
