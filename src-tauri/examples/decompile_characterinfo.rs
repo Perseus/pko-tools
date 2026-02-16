@@ -12,7 +12,9 @@ fn main() {
     if args.len() != 3 {
         eprintln!("Usage: {} <input.bin> <output.txt>", args[0]);
         eprintln!("\nExample:");
-        eprintln!("  cargo run --example decompile_characterinfo CharacterInfo.bin CharacterInfo.txt");
+        eprintln!(
+            "  cargo run --example decompile_characterinfo CharacterInfo.bin CharacterInfo.txt"
+        );
         std::process::exit(1);
     }
 

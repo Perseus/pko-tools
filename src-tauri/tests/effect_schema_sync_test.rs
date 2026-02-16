@@ -55,7 +55,8 @@ fn all_effects_produce_valid_json() {
             .unwrap_or_else(|e| panic!("Failed to reparse JSON for {}: {}", path.display(), e));
 
         assert_eq!(
-            eff, reparsed,
+            eff,
+            reparsed,
             "JSON round-trip mismatch for {}",
             path.display()
         );

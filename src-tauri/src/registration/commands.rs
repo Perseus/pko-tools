@@ -5,10 +5,7 @@ use serde::Serialize;
 use crate::projects::project::Project;
 
 #[tauri::command]
-pub async fn check_model_id_available(
-    project_id: String,
-    model_id: u32,
-) -> Result<bool, String> {
+pub async fn check_model_id_available(project_id: String, model_id: u32) -> Result<bool, String> {
     let project_id =
         uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
@@ -18,9 +15,7 @@ pub async fn check_model_id_available(
 }
 
 #[tauri::command]
-pub async fn get_next_available_model_id(
-    project_id: String,
-) -> Result<u32, String> {
+pub async fn get_next_available_model_id(project_id: String) -> Result<u32, String> {
     let project_id =
         uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;

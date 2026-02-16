@@ -26,7 +26,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, value::RawValue};
 
 use super::{
-    helper::{HelperData}, mesh::CharacterMeshInfo, texture::CharMaterialTextureInfo,
+    helper::HelperData, mesh::CharacterMeshInfo, texture::CharMaterialTextureInfo,
     GLTFFieldsToAggregate,
 };
 
@@ -213,7 +213,12 @@ impl CharacterGeometricModel {
         y_up: bool,
     ) -> anyhow::Result<gltf::mesh::Primitive> {
         let mesh_info = self.mesh_info.as_ref().unwrap();
-        let primitive = mesh_info.get_gltf_primitive(project_dir, fields_to_aggregate, &self.material_seq, y_up);
+        let primitive = mesh_info.get_gltf_primitive(
+            project_dir,
+            fields_to_aggregate,
+            &self.material_seq,
+            y_up,
+        );
 
         Ok(primitive)
     }
@@ -230,8 +235,16 @@ impl CharacterGeometricModel {
 
         // Dummy points (attachment points for effects, items, etc.)
         for dummy in helper_data.dummy_seq.iter() {
-            let mat = if y_up { math::z_up_to_y_up_mat4(dummy.mat.to_slice()) } else { dummy.mat.to_slice() };
-            let mat_local = if y_up { math::z_up_to_y_up_mat4(dummy.mat_local.to_slice()) } else { dummy.mat_local.to_slice() };
+            let mat = if y_up {
+                math::z_up_to_y_up_mat4(dummy.mat.to_slice())
+            } else {
+                dummy.mat.to_slice()
+            };
+            let mat_local = if y_up {
+                math::z_up_to_y_up_mat4(dummy.mat_local.to_slice())
+            } else {
+                dummy.mat_local.to_slice()
+            };
             let mat_local_json = serde_json::to_string(&mat_local).unwrap_or_default();
             let node = gltf::Node {
                 camera: None,
@@ -258,9 +271,21 @@ impl CharacterGeometricModel {
 
         // Bounding spheres
         for bsphere in helper_data.bsphere_seq.iter() {
-            let mat = if y_up { math::z_up_to_y_up_mat4(bsphere.mat.to_slice()) } else { bsphere.mat.to_slice() };
-            let center = [bsphere.sphere.c.0.x, bsphere.sphere.c.0.y, bsphere.sphere.c.0.z];
-            let center = if y_up { math::z_up_to_y_up_vec3(center) } else { center };
+            let mat = if y_up {
+                math::z_up_to_y_up_mat4(bsphere.mat.to_slice())
+            } else {
+                bsphere.mat.to_slice()
+            };
+            let center = [
+                bsphere.sphere.c.0.x,
+                bsphere.sphere.c.0.y,
+                bsphere.sphere.c.0.z,
+            ];
+            let center = if y_up {
+                math::z_up_to_y_up_vec3(center)
+            } else {
+                center
+            };
             let node = gltf::Node{
                 camera: None,
                 children: None,
@@ -301,18 +326,17 @@ impl CharacterGeometricModel {
 
     pub fn from_file(file_path: PathBuf) -> anyhow::Result<Self> {
         use std::io::{Seek, SeekFrom};
-        
-        let file = File::open(&file_path)
-            .map_err(|e| anyhow::anyhow!("Failed to open LGO file '{}': {}", file_path.display(), e))?;
-        
-        let file_size = file.metadata()
-            .map(|m| m.len())
-            .unwrap_or(0);
-        
+
+        let file = File::open(&file_path).map_err(|e| {
+            anyhow::anyhow!("Failed to open LGO file '{}': {}", file_path.display(), e)
+        })?;
+
+        let file_size = file.metadata().map(|m| m.len()).unwrap_or(0);
+
         let mut reader = std::io::BufReader::new(file);
-        
-        let geom: CharacterGeometricModel = BinRead::read_options(&mut reader, binrw::Endian::Little, ())
-            .map_err(|e| {
+
+        let geom: CharacterGeometricModel =
+            BinRead::read_options(&mut reader, binrw::Endian::Little, ()).map_err(|e| {
                 let bytes_read = reader.stream_position().unwrap_or(0);
                 anyhow::anyhow!(
                     "Failed to parse LGO file '{}': {}\n\
@@ -324,7 +348,7 @@ impl CharacterGeometricModel {
                     bytes_read
                 )
             })?;
-        
+
         Ok(geom)
     }
 
@@ -335,7 +359,8 @@ impl CharacterGeometricModel {
         model_id: u32,
         bone_file: &crate::animation::character::LwBoneFile,
     ) -> anyhow::Result<Self> {
-        let material_seq = texture::CharMaterialTextureInfo::from_gltf(gltf, buffers, images, model_id)?;
+        let material_seq =
+            texture::CharMaterialTextureInfo::from_gltf(gltf, buffers, images, model_id)?;
         let mtl_size = {
             let mut size = 0;
             for material in material_seq.iter() {
@@ -352,7 +377,7 @@ impl CharacterGeometricModel {
             size
         };
         let mesh = CharacterMeshInfo::from_gltf(gltf, buffers, images, bone_file)?;
-        let mut helper_data = HelperData{
+        let mut helper_data = HelperData {
             _type: 32,
             bsphere_num: 0,
             bsphere_seq: vec![],
@@ -385,27 +410,39 @@ impl CharacterGeometricModel {
                             // Get the full transformation matrix from the node
                             let mat_array: [[f32; 4]; 4] = node.transform().matrix();
                             let mat = LwMatrix44(Matrix4::new(
-                                mat_array[0][0], mat_array[0][1], mat_array[0][2], mat_array[0][3],
-                                mat_array[1][0], mat_array[1][1], mat_array[1][2], mat_array[1][3],
-                                mat_array[2][0], mat_array[2][1], mat_array[2][2], mat_array[2][3],
-                                mat_array[3][0], mat_array[3][1], mat_array[3][2], mat_array[3][3],
+                                mat_array[0][0],
+                                mat_array[0][1],
+                                mat_array[0][2],
+                                mat_array[0][3],
+                                mat_array[1][0],
+                                mat_array[1][1],
+                                mat_array[1][2],
+                                mat_array[1][3],
+                                mat_array[2][0],
+                                mat_array[2][1],
+                                mat_array[2][2],
+                                mat_array[2][3],
+                                mat_array[3][0],
+                                mat_array[3][1],
+                                mat_array[3][2],
+                                mat_array[3][3],
                             ));
-                            
+
                             helper_data.bsphere_num += 1;
-                            helper_data.bsphere_seq.push(BoundingSphereInfo{
+                            helper_data.bsphere_seq.push(BoundingSphereInfo {
                                 id: extras_data.id,
-                                sphere: LwSphere{
+                                sphere: LwSphere {
                                     c: LwVector3(Vector3::new(
                                         extras_data.center[0],
                                         extras_data.center[1],
-                                        extras_data.center[2]
+                                        extras_data.center[2],
                                     )),
                                     r: extras_data.radius,
                                 },
                                 mat,
                             });
-                        },
-                        "bounding_box" => {},
+                        }
+                        "bounding_box" => {}
                         _ => {}
                     };
                 }
@@ -459,9 +496,13 @@ impl CharacterGeometricModel {
         // For multi-part models, each part gets its own material
         // The material is determined by the primitive's material index
         let material_seq = texture::CharMaterialTextureInfo::from_gltf_primitive(
-            gltf, buffers, images, model_id, primitive_index
+            gltf,
+            buffers,
+            images,
+            model_id,
+            primitive_index,
         )?;
-        
+
         let mtl_size = {
             let mut size = 0;
             for material in material_seq.iter() {
@@ -476,11 +517,15 @@ impl CharacterGeometricModel {
             }
             size
         };
-        
+
         let mesh = super::mesh::CharacterMeshInfo::from_gltf_primitive(
-            gltf, buffers, images, bone_file, primitive_index
+            gltf,
+            buffers,
+            images,
+            bone_file,
+            primitive_index,
         )?;
-        
+
         // Extract helper data for this primitive index (treating primitive index as mesh index)
         let helper_data = Self::extract_helper_data_for_mesh(gltf, primitive_index);
 
@@ -528,9 +573,9 @@ impl CharacterGeometricModel {
     ) -> anyhow::Result<Self> {
         // Get material from the mesh's first primitive
         let material_seq = texture::CharMaterialTextureInfo::from_gltf_mesh(
-            gltf, buffers, images, model_id, mesh_index
+            gltf, buffers, images, model_id, mesh_index,
         )?;
-        
+
         let mtl_size = {
             let mut size = 0;
             for material in material_seq.iter() {
@@ -545,11 +590,11 @@ impl CharacterGeometricModel {
             }
             size
         };
-        
+
         let mesh = super::mesh::CharacterMeshInfo::from_gltf_mesh(
-            gltf, buffers, images, bone_file, mesh_index
+            gltf, buffers, images, bone_file, mesh_index,
         )?;
-        
+
         // Extract helper data (bounding spheres, etc.) for this specific mesh
         let helper_data = Self::extract_helper_data_for_mesh(gltf, mesh_index);
 
@@ -583,7 +628,7 @@ impl CharacterGeometricModel {
             helper_data: Some(helper_data),
         })
     }
-    
+
     /// Extract helper data (bounding spheres, boxes, etc.) for a specific mesh index
     fn extract_helper_data_for_mesh(gltf: &Document, mesh_index: usize) -> HelperData {
         let mut helper_data = HelperData {
@@ -614,25 +659,38 @@ impl CharacterGeometricModel {
             if let Some(extras) = node.extras() {
                 if let Ok(extras_data) = serde_json::from_str::<HelperDataExtras>(extras.get()) {
                     // Only include helpers that belong to this mesh (or have no mesh_index for backwards compatibility)
-                    let belongs_to_mesh = extras_data.mesh_index
+                    let belongs_to_mesh = extras_data
+                        .mesh_index
                         .map(|idx| idx == mesh_index)
                         .unwrap_or(mesh_index == 0); // Default to mesh 0 for legacy files
-                    
+
                     if !belongs_to_mesh {
                         continue;
                     }
-                    
+
                     match extras_data.r#type.as_str() {
                         "bounding_sphere" => {
                             // Get the full transformation matrix from the node
                             let mat_array: [[f32; 4]; 4] = node.transform().matrix();
                             let mat = LwMatrix44(Matrix4::new(
-                                mat_array[0][0], mat_array[0][1], mat_array[0][2], mat_array[0][3],
-                                mat_array[1][0], mat_array[1][1], mat_array[1][2], mat_array[1][3],
-                                mat_array[2][0], mat_array[2][1], mat_array[2][2], mat_array[2][3],
-                                mat_array[3][0], mat_array[3][1], mat_array[3][2], mat_array[3][3],
+                                mat_array[0][0],
+                                mat_array[0][1],
+                                mat_array[0][2],
+                                mat_array[0][3],
+                                mat_array[1][0],
+                                mat_array[1][1],
+                                mat_array[1][2],
+                                mat_array[1][3],
+                                mat_array[2][0],
+                                mat_array[2][1],
+                                mat_array[2][2],
+                                mat_array[2][3],
+                                mat_array[3][0],
+                                mat_array[3][1],
+                                mat_array[3][2],
+                                mat_array[3][3],
                             ));
-                            
+
                             helper_data.bsphere_num += 1;
                             helper_data.bsphere_seq.push(BoundingSphereInfo {
                                 id: extras_data.id,
@@ -640,16 +698,16 @@ impl CharacterGeometricModel {
                                     c: LwVector3(Vector3::new(
                                         extras_data.center[0],
                                         extras_data.center[1],
-                                        extras_data.center[2]
+                                        extras_data.center[2],
                                     )),
                                     r: extras_data.radius,
                                 },
                                 mat,
                             });
-                        },
+                        }
                         "bounding_box" => {
                             // TODO: Add bounding box support if needed
-                        },
+                        }
                         _ => {}
                     }
                 }

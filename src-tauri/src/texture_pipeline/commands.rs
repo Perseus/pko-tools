@@ -38,8 +38,10 @@ pub async fn preview_texture_conversion(
     let max_dim = 2048u32;
     if final_width > max_dim || final_height > max_dim {
         let scale = max_dim as f32 / final_width.max(final_height) as f32;
-        final_width = resizer::prev_power_of_two(((final_width as f32 * scale) as u32).max(1)).max(1);
-        final_height = resizer::prev_power_of_two(((final_height as f32 * scale) as u32).max(1)).max(1);
+        final_width =
+            resizer::prev_power_of_two(((final_width as f32 * scale) as u32).max(1)).max(1);
+        final_height =
+            resizer::prev_power_of_two(((final_height as f32 * scale) as u32).max(1)).max(1);
     }
 
     let was_resized = final_width != original_width || final_height != original_height;

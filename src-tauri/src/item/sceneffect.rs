@@ -213,7 +213,8 @@ mod tests {
 
     #[test]
     fn parse_basic_entry() {
-        let input = "100\teffect_fire.par\tFire Effect\tfire_photo\t3\t1\t1,2,3\t-1\t0.5\t10.0\t5\t2\n";
+        let input =
+            "100\teffect_fire.par\tFire Effect\tfire_photo\t3\t1\t1,2,3\t-1\t0.5\t10.0\t5\t2\n";
         let map = parse_scene_effect_info(input);
 
         assert_eq!(map.len(), 1);

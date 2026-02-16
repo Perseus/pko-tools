@@ -125,10 +125,7 @@ pub fn compute_bounding_spheres(
         for (i, (c, r)) in extra.into_iter().enumerate() {
             spheres.push(BoundingSphereInfo {
                 id: (i + 1) as u32,
-                sphere: LwSphere {
-                    c: LwVector3(c),
-                    r,
-                },
+                sphere: LwSphere { c: LwVector3(c), r },
                 mat: LwMatrix44::from_translation_scale(c, r),
             });
         }
@@ -152,12 +149,24 @@ fn compute_axis_subdivided_spheres(
     let mut min = points[0];
     let mut max = points[0];
     for p in points.iter() {
-        if p.x < min.x { min.x = p.x; }
-        if p.y < min.y { min.y = p.y; }
-        if p.z < min.z { min.z = p.z; }
-        if p.x > max.x { max.x = p.x; }
-        if p.y > max.y { max.y = p.y; }
-        if p.z > max.z { max.z = p.z; }
+        if p.x < min.x {
+            min.x = p.x;
+        }
+        if p.y < min.y {
+            min.y = p.y;
+        }
+        if p.z < min.z {
+            min.z = p.z;
+        }
+        if p.x > max.x {
+            max.x = p.x;
+        }
+        if p.y > max.y {
+            max.y = p.y;
+        }
+        if p.z > max.z {
+            max.z = p.z;
+        }
     }
 
     let extents = max - min;
@@ -231,10 +240,7 @@ mod tests {
 
     #[test]
     fn two_points_sphere() {
-        let points = vec![
-            Vector3::new(0.0, 0.0, 0.0),
-            Vector3::new(2.0, 0.0, 0.0),
-        ];
+        let points = vec![Vector3::new(0.0, 0.0, 0.0), Vector3::new(2.0, 0.0, 0.0)];
         let (center, radius) = ritter_bounding_sphere(&points);
         assert!((center.x - 1.0).abs() < 0.001);
         assert!((radius - 1.0).abs() < 0.001);
@@ -256,7 +262,12 @@ mod tests {
 
         // Radius should be at least half the diagonal: sqrt(3)/2 ≈ 0.866
         let half_diag = (3.0f32).sqrt() / 2.0;
-        assert!(radius >= half_diag - 0.01, "radius {} >= {}", radius, half_diag);
+        assert!(
+            radius >= half_diag - 0.01,
+            "radius {} >= {}",
+            radius,
+            half_diag
+        );
 
         // All points must be inside the sphere
         for p in &points {
@@ -264,7 +275,9 @@ mod tests {
             assert!(
                 dist <= radius + 0.001,
                 "point {:?} is outside sphere (dist={}, r={})",
-                p, dist, radius
+                p,
+                dist,
+                radius
             );
         }
     }

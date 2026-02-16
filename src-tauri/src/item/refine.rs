@@ -410,7 +410,12 @@ mod tests {
     // parse_refine_effects (ItemRefineEffectInfo.bin) tests
     // ========================================================================
 
-    fn build_refine_effect_entry(id: i32, light_id: i32, effect_ids: &[i16; 16], dummy_ids: &[i8; 4]) -> Vec<u8> {
+    fn build_refine_effect_entry(
+        id: i32,
+        light_id: i32,
+        effect_ids: &[i16; 16],
+        dummy_ids: &[i8; 4],
+    ) -> Vec<u8> {
         let entry_size = 164usize;
         let mut buf = vec![0u8; entry_size];
 
@@ -420,7 +425,7 @@ mod tests {
         buf[100..104].copy_from_slice(&id.to_le_bytes());
 
         let d = RAW_DATA_INFO_SIZE; // 108
-        // nLightID
+                                    // nLightID
         buf[d..d + 4].copy_from_slice(&light_id.to_le_bytes());
         // sEffectID: short[16] at offset d+4
         for (j, &eid) in effect_ids.iter().enumerate() {
@@ -501,7 +506,7 @@ mod tests {
         buf[100..104].copy_from_slice(&id.to_le_bytes());
 
         let d = RAW_DATA_INFO_SIZE; // 108
-        // Value: short[14] at offset d
+                                    // Value: short[14] at offset d
         for (j, &v) in values.iter().enumerate() {
             let off = d + j * 2;
             buf[off..off + 2].copy_from_slice(&v.to_le_bytes());

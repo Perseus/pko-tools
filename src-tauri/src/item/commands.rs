@@ -6,12 +6,7 @@ use crate::{projects::project::Project, AppState};
 
 use super::{
     info::{get_all_items, get_item},
-    lit,
-    model,
-    refine,
-    sceneffect,
-    workbench,
-    Item, ItemMetadata,
+    lit, model, refine, sceneffect, workbench, Item, ItemMetadata,
 };
 
 #[tauri::command]
@@ -23,10 +18,7 @@ pub async fn get_item_list(project_id: String) -> Result<Vec<Item>, String> {
 }
 
 #[tauri::command]
-pub async fn load_item_model(
-    project_id: String,
-    model_id: String,
-) -> Result<String, String> {
+pub async fn load_item_model(project_id: String, model_id: String) -> Result<String, String> {
     let project_id =
         uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
@@ -75,11 +67,14 @@ pub async fn load_lit_texture_bytes(
         uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
 
-    let texture_path = project.project_directory.join("texture/lit").join(&texture_name);
+    let texture_path = project
+        .project_directory
+        .join("texture/lit")
+        .join(&texture_name);
 
     // Case-insensitive file lookup
-    let resolved = resolve_case_insensitive(texture_path.to_str().unwrap_or(""))
-        .unwrap_or(texture_path);
+    let resolved =
+        resolve_case_insensitive(texture_path.to_str().unwrap_or("")).unwrap_or(texture_path);
 
     let bytes = std::fs::read(&resolved)
         .map_err(|e| format!("Failed to read lit texture {}: {}", resolved.display(), e))?;
@@ -198,8 +193,13 @@ pub async fn import_item_from_gltf(
         return Err(format!("File not found: {}", file_path));
     }
 
-    let result = model::import_item_from_gltf(gltf_path, &model_id, &import_dir, scale_factor.unwrap_or(1.0))
-        .map_err(|e| format!("Import failed: {}", e))?;
+    let result = model::import_item_from_gltf(
+        gltf_path,
+        &model_id,
+        &import_dir,
+        scale_factor.unwrap_or(1.0),
+    )
+    .map_err(|e| format!("Import failed: {}", e))?;
 
     Ok(ItemImportResult {
         lgo_file: result.lgo_file.to_string_lossy().to_string(),
@@ -217,27 +217,31 @@ pub async fn import_item_from_gltf(
 // ============================================================================
 
 #[tauri::command]
-pub async fn load_model_preview(lgo_path: String, has_overlay: Option<bool>) -> Result<String, String> {
-  let path = std::path::Path::new(&lgo_path);
-  if !path.exists() {
-    return Err(format!("LGO file not found: {}", lgo_path));
-  }
+pub async fn load_model_preview(
+    lgo_path: String,
+    has_overlay: Option<bool>,
+) -> Result<String, String> {
+    let path = std::path::Path::new(&lgo_path);
+    if !path.exists() {
+        return Err(format!("LGO file not found: {}", lgo_path));
+    }
 
     // Use the LGO's grandparent directory as texture search dir.
     // For imports at `imports/item/model/{id}.lgo`, textures are at
     // `imports/item/texture/{name}.bmp` — build_single_material searches
     // `project_dir/texture/` which matches this layout when project_dir = `imports/item/`.
     let texture_search_dir = path
-        .parent()  // imports/item/model/
-        .and_then(|p| p.parent())  // imports/item/
+        .parent() // imports/item/model/
+        .and_then(|p| p.parent()) // imports/item/
         .unwrap_or(path);
 
-  let use_overlay = has_overlay.unwrap_or(false);
-  if use_overlay {
-    model::build_gltf_from_lgo_with_overlay(path, texture_search_dir, true).map_err(|e| e.to_string())
-  } else {
-    model::build_gltf_from_lgo(path, texture_search_dir).map_err(|e| e.to_string())
-  }
+    let use_overlay = has_overlay.unwrap_or(false);
+    if use_overlay {
+        model::build_gltf_from_lgo_with_overlay(path, texture_search_dir, true)
+            .map_err(|e| e.to_string())
+    } else {
+        model::build_gltf_from_lgo(path, texture_search_dir).map_err(|e| e.to_string())
+    }
 }
 
 // ============================================================================
@@ -481,7 +485,10 @@ pub async fn get_forge_effect_preview(
         lit_info.and_then(|info| {
             // Select lit entry by effect level/tier
             let tier = effect_level as usize;
-            info.lits.get(tier).cloned().or_else(|| info.lits.first().cloned())
+            info.lits
+                .get(tier)
+                .cloned()
+                .or_else(|| info.lits.first().cloned())
         })
     } else {
         None
@@ -508,11 +515,7 @@ pub async fn get_forge_effect_preview(
     // At higher levels more entries exist → more tiers appear.
     for tier in 0..4 {
         let flat_idx = char_idx * 4 + tier;
-        let base_id = effect_entry
-            .effect_ids
-            .get(flat_idx)
-            .copied()
-            .unwrap_or(0);
+        let base_id = effect_entry.effect_ids.get(flat_idx).copied().unwrap_or(0);
         if base_id == 0 {
             continue;
         }
@@ -641,10 +644,7 @@ pub async fn add_glow_overlay(lgo_path: String) -> Result<String, String> {
     workbench::add_glow_overlay(path).map_err(|e| e.to_string())?;
 
     // Return regenerated glTF preview
-    let texture_search_dir = path
-        .parent()
-        .and_then(|p| p.parent())
-        .unwrap_or(path);
+    let texture_search_dir = path.parent().and_then(|p| p.parent()).unwrap_or(path);
 
     model::build_gltf_from_lgo_with_overlay(path, texture_search_dir, true)
         .map_err(|e| e.to_string())
@@ -665,12 +665,8 @@ pub async fn export_item(
         return Err(format!("LGO file not found: {}", lgo_path));
     }
 
-    workbench::export_item(
-        project.project_directory.as_ref(),
-        path,
-        &target_model_id,
-    )
-    .map_err(|e| e.to_string())
+    workbench::export_item(project.project_directory.as_ref(), path, &target_model_id)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -708,7 +704,9 @@ pub async fn rescale_item(
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
 
     let db = project.db_arc();
-    let conn = db.lock().map_err(|_| "Could not lock database".to_string())?;
+    let conn = db
+        .lock()
+        .map_err(|_| "Could not lock database".to_string())?;
 
     conn.execute(
         "UPDATE workbenches SET scale_factor = scale_factor * ?1, modified_at = ?2 WHERE model_id = ?3",
@@ -743,7 +741,9 @@ pub async fn create_workbench(
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
 
     let db = project.db_arc();
-    let conn = db.lock().map_err(|_| "Could not lock database".to_string())?;
+    let conn = db
+        .lock()
+        .map_err(|_| "Could not lock database".to_string())?;
 
     workbench::create_workbench(
         &conn,
@@ -767,7 +767,9 @@ pub async fn load_workbench(
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
 
     let db = project.db_arc();
-    let conn = db.lock().map_err(|_| "Could not lock database".to_string())?;
+    let conn = db
+        .lock()
+        .map_err(|_| "Could not lock database".to_string())?;
 
     workbench::load_workbench(&conn, &model_id).map_err(|e| e.to_string())
 }
@@ -782,7 +784,9 @@ pub async fn save_workbench(
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
 
     let db = project.db_arc();
-    let conn = db.lock().map_err(|_| "Could not lock database".to_string())?;
+    let conn = db
+        .lock()
+        .map_err(|_| "Could not lock database".to_string())?;
 
     workbench::save_workbench(&conn, &state).map_err(|e| e.to_string())
 }
@@ -796,22 +800,23 @@ pub async fn list_workbenches(
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
 
     let db = project.db_arc();
-    let conn = db.lock().map_err(|_| "Could not lock database".to_string())?;
+    let conn = db
+        .lock()
+        .map_err(|_| "Could not lock database".to_string())?;
 
     workbench::list_workbenches(&conn).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
-pub async fn delete_workbench(
-    project_id: String,
-    model_id: String,
-) -> Result<(), String> {
+pub async fn delete_workbench(project_id: String, model_id: String) -> Result<(), String> {
     let project_id =
         uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
 
     let db = project.db_arc();
-    let conn = db.lock().map_err(|_| "Could not lock database".to_string())?;
+    let conn = db
+        .lock()
+        .map_err(|_| "Could not lock database".to_string())?;
 
     workbench::delete_workbench(&conn, &model_id).map_err(|e| e.to_string())
 }
@@ -829,8 +834,7 @@ pub async fn update_dummies(
     }
 
     // Update LGO and get regenerated glTF
-    let gltf_json = workbench::update_dummies(path, dummies.clone())
-        .map_err(|e| e.to_string())?;
+    let gltf_json = workbench::update_dummies(path, dummies.clone()).map_err(|e| e.to_string())?;
 
     // Also persist dummies to database
     let project_id =
@@ -838,13 +842,16 @@ pub async fn update_dummies(
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
 
     let db = project.db_arc();
-    let conn = db.lock().map_err(|_| "Could not lock database".to_string())?;
+    let conn = db
+        .lock()
+        .map_err(|_| "Could not lock database".to_string())?;
 
     // Update dummies in the database
     conn.execute(
         "DELETE FROM workbench_dummies WHERE model_id = ?1",
         rusqlite::params![model_id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     for dummy in &dummies {
         conn.execute(
@@ -872,7 +879,8 @@ pub async fn update_dummies(
     conn.execute(
         "UPDATE workbenches SET modified_at = ?1 WHERE model_id = ?2",
         rusqlite::params![now, model_id],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     Ok(gltf_json)
 }
@@ -888,7 +896,9 @@ pub async fn generate_item_info_entry(
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
 
     let db = project.db_arc();
-    let conn = db.lock().map_err(|_| "Could not lock database".to_string())?;
+    let conn = db
+        .lock()
+        .map_err(|_| "Could not lock database".to_string())?;
 
     let state = workbench::load_workbench(&conn, &model_id).map_err(|e| e.to_string())?;
 
@@ -908,7 +918,9 @@ pub async fn register_item(
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
 
     let db = project.db_arc();
-    let conn = db.lock().map_err(|_| "Could not lock database".to_string())?;
+    let conn = db
+        .lock()
+        .map_err(|_| "Could not lock database".to_string())?;
 
     workbench::register_item(
         project.project_directory.as_ref(),
@@ -990,7 +1002,14 @@ mod tests {
         let mut prev = compute_forge_alpha(0);
         for level in 1..=12 {
             let cur = compute_forge_alpha(level);
-            assert!(cur >= prev, "alpha should increase: level {} ({}) >= level {} ({})", level, cur, level - 1, prev);
+            assert!(
+                cur >= prev,
+                "alpha should increase: level {} ({}) >= level {} ({})",
+                level,
+                cur,
+                level - 1,
+                prev
+            );
             prev = cur;
         }
     }
@@ -1000,7 +1019,10 @@ mod tests {
         use std::path::PathBuf;
 
         let project_dir = PathBuf::from("../top-client");
-        if !project_dir.join("scripts/table/ItemRefineInfo.bin").exists() {
+        if !project_dir
+            .join("scripts/table/ItemRefineInfo.bin")
+            .exists()
+        {
             return;
         }
 
@@ -1034,7 +1056,11 @@ mod tests {
 
         let scene_effect_id = (base_id as u32) * 10 + effect_level;
         let resolved = scene_effects.get(&scene_effect_id);
-        assert!(resolved.is_some(), "scene effect {} should exist", scene_effect_id);
+        assert!(
+            resolved.is_some(),
+            "scene effect {} should exist",
+            scene_effect_id
+        );
         assert!(resolved.unwrap().filename.ends_with(".par"));
     }
 
@@ -1061,32 +1087,65 @@ mod tests {
         // Verify rotation fields are present and serializable
         // The .eff file should have rotating = true for forge effects (swirly animation)
         let json = serde_json::to_value(&eff).unwrap();
-        assert!(json.get("rotating").is_some(), "rotating field should serialize");
-        assert!(json.get("rotaVec").is_some(), "rotaVec field should serialize");
-        assert!(json.get("rotaVel").is_some(), "rotaVel field should serialize");
+        assert!(
+            json.get("rotating").is_some(),
+            "rotating field should serialize"
+        );
+        assert!(
+            json.get("rotaVec").is_some(),
+            "rotaVec field should serialize"
+        );
+        assert!(
+            json.get("rotaVel").is_some(),
+            "rotaVel field should serialize"
+        );
 
         // Check sub-effect rotation fields
         let sub_json = &json["subEffects"][0];
-        assert!(sub_json.get("rotaLoop").is_some(), "rotaLoop field should serialize");
-        assert!(sub_json.get("rotaLoopVec").is_some(), "rotaLoopVec field should serialize");
+        assert!(
+            sub_json.get("rotaLoop").is_some(),
+            "rotaLoop field should serialize"
+        );
+        assert!(
+            sub_json.get("rotaLoopVec").is_some(),
+            "rotaLoopVec field should serialize"
+        );
 
         // Dump full sub-effect keyframe data for debugging
-        eprintln!("eff rotating={}, rotaVec={:?}, rotaVel={}, subEffects={}",
-            eff.rotating, eff.rota_vec, eff.rota_vel, eff.sub_effects.len());
+        eprintln!(
+            "eff rotating={}, rotaVec={:?}, rotaVel={}, subEffects={}",
+            eff.rotating,
+            eff.rota_vec,
+            eff.rota_vel,
+            eff.sub_effects.len()
+        );
         for (i, sub) in eff.sub_effects.iter().enumerate() {
-            eprintln!("  sub[{}]: model='{}' tex='{}' type={} bb={} rb={} rl={}",
-                i, sub.model_name, sub.tex_name, sub.effect_type,
-                sub.billboard, sub.rota_board, sub.rota_loop);
+            eprintln!(
+                "  sub[{}]: model='{}' tex='{}' type={} bb={} rb={} rl={}",
+                i,
+                sub.model_name,
+                sub.tex_name,
+                sub.effect_type,
+                sub.billboard,
+                sub.rota_board,
+                sub.rota_loop
+            );
             if sub.frame_count > 0 {
-                eprintln!("    pos[0]={:?} scale[0]={:?} angle[0]={:?} color[0]={:?}",
-                    sub.frame_positions[0], sub.frame_sizes[0],
-                    sub.frame_angles[0], sub.frame_colors[0]);
+                eprintln!(
+                    "    pos[0]={:?} scale[0]={:?} angle[0]={:?} color[0]={:?}",
+                    sub.frame_positions[0],
+                    sub.frame_sizes[0],
+                    sub.frame_angles[0],
+                    sub.frame_colors[0]
+                );
             }
             if sub.rota_loop {
                 eprintln!("    rotaLoopVec={:?}", sub.rota_loop_vec);
             }
-            eprintln!("    cylinder: segs={} h={:.2} topR={:.2} botR={:.2}",
-                sub.segments, sub.height, sub.top_radius, sub.bot_radius);
+            eprintln!(
+                "    cylinder: segs={} h={:.2} topR={:.2} botR={:.2}",
+                sub.segments, sub.height, sub.top_radius, sub.bot_radius
+            );
         }
     }
 
@@ -1108,11 +1167,26 @@ mod tests {
         eprintln!("Dummy points for item model 01010027:");
         for dummy in &helper.dummy_seq {
             let m = &dummy.mat;
-            eprintln!("  Dummy {}: parent_type={} parent_id={}", dummy.id, dummy.parent_type, dummy.parent_id);
-            eprintln!("    mat row0: [{:.3}, {:.3}, {:.3}, {:.3}]", m.0.x.x, m.0.x.y, m.0.x.z, m.0.x.w);
-            eprintln!("    mat row1: [{:.3}, {:.3}, {:.3}, {:.3}]", m.0.y.x, m.0.y.y, m.0.y.z, m.0.y.w);
-            eprintln!("    mat row2: [{:.3}, {:.3}, {:.3}, {:.3}]", m.0.z.x, m.0.z.y, m.0.z.z, m.0.z.w);
-            eprintln!("    mat row3: [{:.3}, {:.3}, {:.3}, {:.3}]", m.0.w.x, m.0.w.y, m.0.w.z, m.0.w.w);
+            eprintln!(
+                "  Dummy {}: parent_type={} parent_id={}",
+                dummy.id, dummy.parent_type, dummy.parent_id
+            );
+            eprintln!(
+                "    mat row0: [{:.3}, {:.3}, {:.3}, {:.3}]",
+                m.0.x.x, m.0.x.y, m.0.x.z, m.0.x.w
+            );
+            eprintln!(
+                "    mat row1: [{:.3}, {:.3}, {:.3}, {:.3}]",
+                m.0.y.x, m.0.y.y, m.0.y.z, m.0.y.w
+            );
+            eprintln!(
+                "    mat row2: [{:.3}, {:.3}, {:.3}, {:.3}]",
+                m.0.z.x, m.0.z.y, m.0.z.z, m.0.z.w
+            );
+            eprintln!(
+                "    mat row3: [{:.3}, {:.3}, {:.3}, {:.3}]",
+                m.0.w.x, m.0.w.y, m.0.w.z, m.0.w.w
+            );
         }
     }
 }

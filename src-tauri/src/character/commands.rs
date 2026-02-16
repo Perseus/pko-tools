@@ -1,11 +1,19 @@
-use std::{fs::File, io::Write, path::{Path, PathBuf}, str::FromStr};
+use std::{
+    fs::File,
+    io::Write,
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 use gltf::import;
 use tauri::{AppHandle, Emitter};
 
 use crate::{broadcast::get_broadcaster, AppState};
 
-use super::{get_character_gltf_json, get_character_gltf_json_with_options, get_character_metadata, info::get_all_characters, Character, CharacterMetadata};
+use super::{
+    get_character_gltf_json, get_character_gltf_json_with_options, get_character_metadata,
+    info::get_all_characters, Character, CharacterMetadata,
+};
 
 #[tauri::command]
 pub async fn get_character_list(project_id: String) -> Result<Vec<Character>, String> {
@@ -26,12 +34,13 @@ pub async fn load_character(
     project_id: String,
     character_id: u32,
 ) -> Result<String, String> {
-    let project_id = uuid::Uuid::from_str(&project_id)
-        .map_err(|e| e.to_string())?;
+    let project_id = uuid::Uuid::from_str(&project_id).map_err(|e| e.to_string())?;
 
     // Check cache first
     {
-        let cache = app_state.character_gltf_cache.lock()
+        let cache = app_state
+            .character_gltf_cache
+            .lock()
             .map_err(|e| e.to_string())?;
         if let Some(cached) = cache.get(&(project_id, character_id)) {
             return Ok(cached.clone());
@@ -47,12 +56,14 @@ pub async fn load_character(
         }
     });
 
-    let char_gltf_json = get_character_gltf_json(project_id, character_id)
-        .map_err(|e| e.to_string())?;
+    let char_gltf_json =
+        get_character_gltf_json(project_id, character_id).map_err(|e| e.to_string())?;
 
     // Store in cache
     {
-        let mut cache = app_state.character_gltf_cache.lock()
+        let mut cache = app_state
+            .character_gltf_cache
+            .lock()
             .map_err(|e| e.to_string())?;
         cache.insert((project_id, character_id), char_gltf_json.clone());
     }
@@ -80,15 +91,19 @@ pub async fn export_to_gltf(
     }
 
     let project_id = current_project.unwrap();
-    let project_uuid = uuid::Uuid::from_str(&project_id)
-        .map_err(|_| "Invalid project id".to_string())?;
+    let project_uuid =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
 
     // Get the project to access its directory
     let project = crate::projects::project::Project::get_project(project_uuid)
         .map_err(|e| format!("Failed to get project: {}", e))?;
 
     // Create exports directory in the game client folder
-    let exports_dir = project.project_directory.join("pko-tools").join("exports").join("gltf");
+    let exports_dir = project
+        .project_directory
+        .join("pko-tools")
+        .join("exports")
+        .join("gltf");
     std::fs::create_dir_all(&exports_dir)
         .map_err(|e| format!("Failed to create exports directory: {}", e))?;
 
@@ -138,37 +153,45 @@ pub async fn import_character_from_gltf(
         tauri::async_runtime::spawn(async move {
             while let Ok(message) = receiver.recv().await {
                 app.emit("import_character_from_gltf_update", message)
-                    .unwrap_or_else(|e| eprintln!("Error emitting import_character_from_gltf_update: {}", e));
+                    .unwrap_or_else(|e| {
+                        eprintln!("Error emitting import_character_from_gltf_update: {}", e)
+                    });
             }
         });
 
-
         let file = File::open(file_path.clone());
         if file.is_err() {
-            return Err(format!("Failed to open file: {}, error: {}", file_path, file.err().unwrap()));
+            return Err(format!(
+                "Failed to open file: {}, error: {}",
+                file_path,
+                file.err().unwrap()
+            ));
         }
 
         let gltf_data = import(PathBuf::from(file_path));
         if gltf_data.is_err() {
-            return Err(format!("Failed to import glTF data: {}", gltf_data.err().unwrap()));
+            return Err(format!(
+                "Failed to import glTF data: {}",
+                gltf_data.err().unwrap()
+            ));
         }
 
-        let (
-            gltf,
-            buffers,
-            images
-        ) = gltf_data.unwrap();
+        let (gltf, buffers, images) = gltf_data.unwrap();
 
         let character = Character::import_gltf_with_char_id(gltf, buffers, images, model_id);
         if character.is_err() {
-            return Err(format!("Something failed while parsing the glTF file: {}", character.err().unwrap()));
+            return Err(format!(
+                "Something failed while parsing the glTF file: {}",
+                character.err().unwrap()
+            ));
         }
 
         let (animation_file_name, mesh_file_name) = character.unwrap();
-        return Ok(format!("glTF data imported successfully. Animation file: {}, Mesh file: {}", animation_file_name, mesh_file_name));
+        return Ok(format!(
+            "glTF data imported successfully. Animation file: {}, Mesh file: {}",
+            animation_file_name, mesh_file_name
+        ));
     }
-
-
 
     Err("Invalid project id".to_string())
 }
@@ -179,7 +202,9 @@ pub async fn invalidate_character_cache(
     project_id: Option<String>,
     character_id: Option<u32>,
 ) -> Result<(), String> {
-    let mut cache = app_state.character_gltf_cache.lock()
+    let mut cache = app_state
+        .character_gltf_cache
+        .lock()
         .map_err(|e| e.to_string())?;
 
     match (project_id, character_id) {
@@ -200,11 +225,10 @@ pub async fn get_character_metadata_cmd(
     project_id: String,
     character_id: u32,
 ) -> Result<CharacterMetadata, String> {
-    let project_id = uuid::Uuid::from_str(&project_id)
-        .map_err(|_| "Invalid project id".to_string())?;
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
 
-    let metadata = get_character_metadata(project_id, character_id)
-        .map_err(|e| e.to_string())?;
+    let metadata = get_character_metadata(project_id, character_id).map_err(|e| e.to_string())?;
 
     Ok(metadata)
 }

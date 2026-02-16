@@ -89,11 +89,14 @@ impl LwQuaternion {
         // Ensure we take the shortest path by checking dot product
         // If dot < 0, negate one quaternion to take shorter arc
         let mut q1 = other.0;
-        let dot = self.0.s * other.0.s + self.0.v.x * other.0.v.x + self.0.v.y * other.0.v.y + self.0.v.z * other.0.v.z;
+        let dot = self.0.s * other.0.s
+            + self.0.v.x * other.0.v.x
+            + self.0.v.y * other.0.v.y
+            + self.0.v.z * other.0.v.z;
         if dot < 0.0 {
             q1 = Quaternion::new(-q1.s, -q1.v.x, -q1.v.y, -q1.v.z);
         }
-        
+
         let result = self.0.slerp(q1, t);
         LwQuaternion(result.normalize())
     }
@@ -118,7 +121,7 @@ impl LwQuaternion {
             p1_adj = Quaternion::new(-p1.0.s, -p1.0.v.x, -p1.0.v.y, -p1.0.v.z);
             m1_adj = Quaternion::new(-m1.0.s, -m1.0.v.x, -m1.0.v.y, -m1.0.v.z);
         }
-        
+
         let t2 = t * t;
         let t3 = t2 * t;
 
@@ -129,10 +132,8 @@ impl LwQuaternion {
         let h11 = t3 - t2;
 
         // Apply to each component, scale tangents by delta_time per glTF spec
-        let s = h00 * p0.0.s
-            + h10 * delta_time * m0.0.s
-            + h01 * p1_adj.s
-            + h11 * delta_time * m1_adj.s;
+        let s =
+            h00 * p0.0.s + h10 * delta_time * m0.0.s + h01 * p1_adj.s + h11 * delta_time * m1_adj.s;
         let vx = h00 * p0.0.v.x
             + h10 * delta_time * m0.0.v.x
             + h01 * p1_adj.v.x
@@ -218,10 +219,8 @@ pub struct LwMatrix44(
 impl LwMatrix44 {
     pub fn from_slice(s: &[f32; 16]) -> Self {
         LwMatrix44(Matrix4::new(
-            s[0], s[1], s[2], s[3],
-            s[4], s[5], s[6], s[7],
-            s[8], s[9], s[10], s[11],
-            s[12], s[13], s[14], s[15],
+            s[0], s[1], s[2], s[3], s[4], s[5], s[6], s[7], s[8], s[9], s[10], s[11], s[12], s[13],
+            s[14], s[15],
         ))
     }
 
@@ -394,26 +393,18 @@ pub fn z_up_to_y_up_quat(q: [f32; 4]) -> [f32; 4] {
 /// M' = B * M * B^(-1) where B maps (x,y,z) → (x,z,-y).
 pub fn z_up_to_y_up_mat4(m: [f32; 16]) -> [f32; 16] {
     let mat = Matrix4::new(
-        m[0], m[1], m[2], m[3],
-        m[4], m[5], m[6], m[7],
-        m[8], m[9], m[10], m[11],
-        m[12], m[13], m[14], m[15],
+        m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13],
+        m[14], m[15],
     );
 
     // B: maps (x,y,z) → (x,z,-y)
     let b = Matrix4::new(
-        1.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, -1.0, 0.0,
-        0.0, 1.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 1.0,
+        1.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
     );
 
     // B^(-1): maps (x,y,z) → (x,-z,y) (orthogonal, so B^(-1) = B^T)
     let b_inv = Matrix4::new(
-        1.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 1.0, 0.0,
-        0.0, -1.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 1.0,
+        1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
     );
 
     let result = b * mat * b_inv;

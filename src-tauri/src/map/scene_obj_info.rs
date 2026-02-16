@@ -77,9 +77,7 @@ pub fn parse_scene_obj_info_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, Scen
 }
 
 /// Load and parse sceneobjinfo.bin from a project directory.
-pub fn load_scene_obj_info(
-    project_dir: &Path,
-) -> anyhow::Result<HashMap<u32, SceneObjModelInfo>> {
+pub fn load_scene_obj_info(project_dir: &Path) -> anyhow::Result<HashMap<u32, SceneObjModelInfo>> {
     let bin_path = project_dir.join("scripts/table/sceneobjinfo.bin");
     if bin_path.exists() {
         let data = std::fs::read(&bin_path)?;
@@ -104,8 +102,7 @@ mod tests {
 
     #[test]
     fn parse_bin_real_data() {
-        let bin_path =
-            std::path::PathBuf::from("../top-client/scripts/table/sceneobjinfo.bin");
+        let bin_path = std::path::PathBuf::from("../top-client/scripts/table/sceneobjinfo.bin");
         if !bin_path.exists() {
             return;
         }

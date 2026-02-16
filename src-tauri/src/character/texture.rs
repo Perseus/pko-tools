@@ -61,7 +61,10 @@ impl TryFrom<u32> for MaterialTextureInfoTransparencyType {
             6 => Ok(Self::Subtractive1),
             7 => Ok(Self::Subtractive2),
             8 => Ok(Self::Subtractive3),
-            _ => Err(format!("Invalid MaterialTextureInfoTransparencyType: {}", v)),
+            _ => Err(format!(
+                "Invalid MaterialTextureInfoTransparencyType: {}",
+                v
+            )),
         }
     }
 }
@@ -362,7 +365,10 @@ impl CharMaterialTextureInfo {
 
             let texture = base_color_texture.texture();
             let image_data = images.get(texture.source().index()).unwrap();
-            let output_path = std::path::PathBuf::from(format!("./imports/character/texture/character/{}.bmp", model_id));
+            let output_path = std::path::PathBuf::from(format!(
+                "./imports/character/texture/character/{}.bmp",
+                model_id
+            ));
             converter::convert_gltf_image_to_bmp(
                 image_data,
                 &output_path,
@@ -403,7 +409,7 @@ impl CharMaterialTextureInfo {
                     b: base_color_factor[2],
                     a: base_color_factor[3],
                 },
-                amb: ColorValue4F{
+                amb: ColorValue4F {
                     r: 1.0,
                     g: 1.0,
                     b: 1.0,
@@ -422,7 +428,7 @@ impl CharMaterialTextureInfo {
         material_seq.push(material);
         Ok(material_seq)
     }
-    
+
     /// Import material for a specific primitive from a glTF document
     /// This is used for multi-part models where each primitive may have its own material
     pub fn from_gltf_primitive(
@@ -440,7 +446,7 @@ impl CharMaterialTextureInfo {
         // Find the specific primitive and get its material
         let mut current_idx = 0;
         let mut found_material = None;
-        
+
         for mesh in gltf.meshes() {
             for primitive in mesh.primitives() {
                 if current_idx == primitive_index {
@@ -453,23 +459,24 @@ impl CharMaterialTextureInfo {
                 break;
             }
         }
-        
+
         // Generate file name based on model_id and primitive_index
         // e.g., model 725, primitive 1 -> 0725000001.bmp
         let file_id = format!("{:0>10}", model_id * 1000000 + primitive_index as u32);
-        
+
         if let Some(gltf_mat) = found_material {
             let roughness = gltf_mat.pbr_metallic_roughness();
-            
+
             if let Some(base_color_texture) = roughness.base_color_texture() {
                 let base_color_factor = roughness.base_color_factor();
                 let emissive_factor = gltf_mat.emissive_factor();
 
                 let texture = base_color_texture.texture();
                 let image_data = images.get(texture.source().index()).unwrap();
-                let output_path = std::path::PathBuf::from(
-                    format!("./imports/character/texture/character/{}.bmp", file_id)
-                );
+                let output_path = std::path::PathBuf::from(format!(
+                    "./imports/character/texture/character/{}.bmp",
+                    file_id
+                ));
                 converter::convert_gltf_image_to_bmp(
                     image_data,
                     &output_path,
@@ -565,28 +572,29 @@ impl CharMaterialTextureInfo {
         material.opacity = 1.0;
 
         // Get the mesh and its first primitive's material
-        let gltf_mesh = gltf.meshes().nth(mesh_index)
-            .ok_or_else(|| anyhow::anyhow!("Mesh index {} not found in glTF document", mesh_index))?;
-        
-        let found_material = gltf_mesh.primitives().next()
-            .map(|p| p.material());
-        
+        let gltf_mesh = gltf.meshes().nth(mesh_index).ok_or_else(|| {
+            anyhow::anyhow!("Mesh index {} not found in glTF document", mesh_index)
+        })?;
+
+        let found_material = gltf_mesh.primitives().next().map(|p| p.material());
+
         // Generate file name based on model_id and mesh_index
         // e.g., model 725, mesh 1 -> 0725000001.bmp
         let file_id = format!("{:0>10}", model_id * 1000000 + mesh_index as u32);
-        
+
         if let Some(gltf_mat) = found_material {
             let roughness = gltf_mat.pbr_metallic_roughness();
-            
+
             if let Some(base_color_texture) = roughness.base_color_texture() {
                 let base_color_factor = roughness.base_color_factor();
                 let emissive_factor = gltf_mat.emissive_factor();
 
                 let texture = base_color_texture.texture();
                 let image_data = images.get(texture.source().index()).unwrap();
-                let output_path = std::path::PathBuf::from(
-                    format!("./imports/character/texture/character/{}.bmp", file_id)
-                );
+                let output_path = std::path::PathBuf::from(format!(
+                    "./imports/character/texture/character/{}.bmp",
+                    file_id
+                ));
                 converter::convert_gltf_image_to_bmp(
                     image_data,
                     &output_path,
@@ -900,7 +908,7 @@ impl BinWrite for CharMaterialTextureInfo {
         for tex in self.tex_seq.iter() {
             TextureInfo::write_le(tex, writer)?;
         }
-        
+
         Ok(())
     }
 }

@@ -33,33 +33,147 @@ impl PkoStandardSkeleton {
     /// The canonical PKO bone list in depth-first order.
     /// This represents the most common PKO character skeleton.
     pub const BONES: &'static [PkoBone] = &[
-        PkoBone { name: "Bip01",              parent: None,                    region: BodyRegion::Root,     depth_order: 0 },
-        PkoBone { name: "Bip01 Pelvis",        parent: Some("Bip01"),           region: BodyRegion::Root,     depth_order: 1 },
-        PkoBone { name: "Bip01 Spine",         parent: Some("Bip01 Pelvis"),    region: BodyRegion::Spine,    depth_order: 2 },
-        PkoBone { name: "Bip01 Spine1",        parent: Some("Bip01 Spine"),     region: BodyRegion::Spine,    depth_order: 3 },
-        PkoBone { name: "Bip01 Neck",          parent: Some("Bip01 Spine1"),    region: BodyRegion::Head,     depth_order: 4 },
-        PkoBone { name: "Bip01 Head",          parent: Some("Bip01 Neck"),      region: BodyRegion::Head,     depth_order: 5 },
-        PkoBone { name: "Bip01 L Clavicle",    parent: Some("Bip01 Spine1"),    region: BodyRegion::LeftArm,  depth_order: 6 },
-        PkoBone { name: "Bip01 L UpperArm",    parent: Some("Bip01 L Clavicle"),region: BodyRegion::LeftArm,  depth_order: 7 },
-        PkoBone { name: "Bip01 L Forearm",     parent: Some("Bip01 L UpperArm"),region: BodyRegion::LeftArm,  depth_order: 8 },
-        PkoBone { name: "Bip01 L Hand",        parent: Some("Bip01 L Forearm"), region: BodyRegion::LeftArm,  depth_order: 9 },
-        PkoBone { name: "Bip01 R Clavicle",    parent: Some("Bip01 Spine1"),    region: BodyRegion::RightArm, depth_order: 10 },
-        PkoBone { name: "Bip01 R UpperArm",    parent: Some("Bip01 R Clavicle"),region: BodyRegion::RightArm, depth_order: 11 },
-        PkoBone { name: "Bip01 R Forearm",     parent: Some("Bip01 R UpperArm"),region: BodyRegion::RightArm, depth_order: 12 },
-        PkoBone { name: "Bip01 R Hand",        parent: Some("Bip01 R Forearm"), region: BodyRegion::RightArm, depth_order: 13 },
-        PkoBone { name: "Bip01 L Thigh",       parent: Some("Bip01 Pelvis"),    region: BodyRegion::LeftLeg,  depth_order: 14 },
-        PkoBone { name: "Bip01 L Calf",        parent: Some("Bip01 L Thigh"),   region: BodyRegion::LeftLeg,  depth_order: 15 },
-        PkoBone { name: "Bip01 L Foot",        parent: Some("Bip01 L Calf"),    region: BodyRegion::LeftLeg,  depth_order: 16 },
-        PkoBone { name: "Bip01 L Toe0",        parent: Some("Bip01 L Foot"),    region: BodyRegion::LeftLeg,  depth_order: 17 },
-        PkoBone { name: "Bip01 R Thigh",       parent: Some("Bip01 Pelvis"),    region: BodyRegion::RightLeg, depth_order: 18 },
-        PkoBone { name: "Bip01 R Calf",        parent: Some("Bip01 R Thigh"),   region: BodyRegion::RightLeg, depth_order: 19 },
-        PkoBone { name: "Bip01 R Foot",        parent: Some("Bip01 R Calf"),    region: BodyRegion::RightLeg, depth_order: 20 },
-        PkoBone { name: "Bip01 R Toe0",        parent: Some("Bip01 R Foot"),    region: BodyRegion::RightLeg, depth_order: 21 },
+        PkoBone {
+            name: "Bip01",
+            parent: None,
+            region: BodyRegion::Root,
+            depth_order: 0,
+        },
+        PkoBone {
+            name: "Bip01 Pelvis",
+            parent: Some("Bip01"),
+            region: BodyRegion::Root,
+            depth_order: 1,
+        },
+        PkoBone {
+            name: "Bip01 Spine",
+            parent: Some("Bip01 Pelvis"),
+            region: BodyRegion::Spine,
+            depth_order: 2,
+        },
+        PkoBone {
+            name: "Bip01 Spine1",
+            parent: Some("Bip01 Spine"),
+            region: BodyRegion::Spine,
+            depth_order: 3,
+        },
+        PkoBone {
+            name: "Bip01 Neck",
+            parent: Some("Bip01 Spine1"),
+            region: BodyRegion::Head,
+            depth_order: 4,
+        },
+        PkoBone {
+            name: "Bip01 Head",
+            parent: Some("Bip01 Neck"),
+            region: BodyRegion::Head,
+            depth_order: 5,
+        },
+        PkoBone {
+            name: "Bip01 L Clavicle",
+            parent: Some("Bip01 Spine1"),
+            region: BodyRegion::LeftArm,
+            depth_order: 6,
+        },
+        PkoBone {
+            name: "Bip01 L UpperArm",
+            parent: Some("Bip01 L Clavicle"),
+            region: BodyRegion::LeftArm,
+            depth_order: 7,
+        },
+        PkoBone {
+            name: "Bip01 L Forearm",
+            parent: Some("Bip01 L UpperArm"),
+            region: BodyRegion::LeftArm,
+            depth_order: 8,
+        },
+        PkoBone {
+            name: "Bip01 L Hand",
+            parent: Some("Bip01 L Forearm"),
+            region: BodyRegion::LeftArm,
+            depth_order: 9,
+        },
+        PkoBone {
+            name: "Bip01 R Clavicle",
+            parent: Some("Bip01 Spine1"),
+            region: BodyRegion::RightArm,
+            depth_order: 10,
+        },
+        PkoBone {
+            name: "Bip01 R UpperArm",
+            parent: Some("Bip01 R Clavicle"),
+            region: BodyRegion::RightArm,
+            depth_order: 11,
+        },
+        PkoBone {
+            name: "Bip01 R Forearm",
+            parent: Some("Bip01 R UpperArm"),
+            region: BodyRegion::RightArm,
+            depth_order: 12,
+        },
+        PkoBone {
+            name: "Bip01 R Hand",
+            parent: Some("Bip01 R Forearm"),
+            region: BodyRegion::RightArm,
+            depth_order: 13,
+        },
+        PkoBone {
+            name: "Bip01 L Thigh",
+            parent: Some("Bip01 Pelvis"),
+            region: BodyRegion::LeftLeg,
+            depth_order: 14,
+        },
+        PkoBone {
+            name: "Bip01 L Calf",
+            parent: Some("Bip01 L Thigh"),
+            region: BodyRegion::LeftLeg,
+            depth_order: 15,
+        },
+        PkoBone {
+            name: "Bip01 L Foot",
+            parent: Some("Bip01 L Calf"),
+            region: BodyRegion::LeftLeg,
+            depth_order: 16,
+        },
+        PkoBone {
+            name: "Bip01 L Toe0",
+            parent: Some("Bip01 L Foot"),
+            region: BodyRegion::LeftLeg,
+            depth_order: 17,
+        },
+        PkoBone {
+            name: "Bip01 R Thigh",
+            parent: Some("Bip01 Pelvis"),
+            region: BodyRegion::RightLeg,
+            depth_order: 18,
+        },
+        PkoBone {
+            name: "Bip01 R Calf",
+            parent: Some("Bip01 R Thigh"),
+            region: BodyRegion::RightLeg,
+            depth_order: 19,
+        },
+        PkoBone {
+            name: "Bip01 R Foot",
+            parent: Some("Bip01 R Calf"),
+            region: BodyRegion::RightLeg,
+            depth_order: 20,
+        },
+        PkoBone {
+            name: "Bip01 R Toe0",
+            parent: Some("Bip01 R Foot"),
+            region: BodyRegion::RightLeg,
+            depth_order: 21,
+        },
     ];
 
     /// Get a map from bone name → index for quick lookup
     pub fn bone_index_map() -> HashMap<&'static str, usize> {
-        Self::BONES.iter().enumerate().map(|(i, b)| (b.name, i)).collect()
+        Self::BONES
+            .iter()
+            .enumerate()
+            .map(|(i, b)| (b.name, i))
+            .collect()
     }
 
     /// Get number of standard bones
@@ -107,15 +221,27 @@ pub struct AnalyzedSkeleton {
 /// Detect the skeleton source type from bone names
 pub fn detect_source_type(bone_names: &[String]) -> SkeletonSourceType {
     let has_mixamo = bone_names.iter().any(|n| n.starts_with("mixamorig:"));
-    let has_biped = bone_names.iter().any(|n| n.starts_with("Bip01") || n.starts_with("Bip02"));
-    let has_unreal = bone_names.iter().any(|n| n == "pelvis" || n.starts_with("spine_0") || n.starts_with("clavicle_"));
-    let has_unity = bone_names.iter().any(|n| n == "Hips" || n == "LeftUpLeg" || n == "RightUpLeg");
+    let has_biped = bone_names
+        .iter()
+        .any(|n| n.starts_with("Bip01") || n.starts_with("Bip02"));
+    let has_unreal = bone_names
+        .iter()
+        .any(|n| n == "pelvis" || n.starts_with("spine_0") || n.starts_with("clavicle_"));
+    let has_unity = bone_names
+        .iter()
+        .any(|n| n == "Hips" || n == "LeftUpLeg" || n == "RightUpLeg");
 
-    if has_mixamo { SkeletonSourceType::Mixamo }
-    else if has_biped { SkeletonSourceType::Biped }
-    else if has_unreal { SkeletonSourceType::Unreal }
-    else if has_unity { SkeletonSourceType::Unity }
-    else { SkeletonSourceType::Unknown }
+    if has_mixamo {
+        SkeletonSourceType::Mixamo
+    } else if has_biped {
+        SkeletonSourceType::Biped
+    } else if has_unreal {
+        SkeletonSourceType::Unreal
+    } else if has_unity {
+        SkeletonSourceType::Unity
+    } else {
+        SkeletonSourceType::Unknown
+    }
 }
 
 /// Analyze a skeleton from glTF joint data
@@ -242,10 +368,7 @@ mod tests {
 
     #[test]
     fn test_detect_unknown() {
-        let names = vec![
-            "bone_root".to_string(),
-            "bone_spine".to_string(),
-        ];
+        let names = vec!["bone_root".to_string(), "bone_spine".to_string()];
         assert_eq!(detect_source_type(&names), SkeletonSourceType::Unknown);
     }
 
@@ -262,9 +385,14 @@ mod tests {
             if let Some(parent_name) = bone.parent {
                 let parent_idx = index_map[parent_name];
                 let self_idx = index_map[bone.name];
-                assert!(parent_idx < self_idx,
+                assert!(
+                    parent_idx < self_idx,
                     "Bone '{}' at {} has parent '{}' at {} (should be before)",
-                    bone.name, self_idx, parent_name, parent_idx);
+                    bone.name,
+                    self_idx,
+                    parent_name,
+                    parent_idx
+                );
             }
         }
     }

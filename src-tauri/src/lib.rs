@@ -3,12 +3,12 @@
 pub mod animation;
 mod broadcast;
 pub mod character;
-pub mod effect;
-pub mod item;
-pub mod map;
 mod d3d;
 mod db;
 pub mod decompiler;
+pub mod effect;
+pub mod item;
+pub mod map;
 pub mod math;
 pub mod mesh_processing;
 mod preferences;
@@ -36,7 +36,7 @@ pub fn run() {
         sentry::ClientOptions {
             release: sentry::release_name!(),
             ..Default::default()
-        }
+        },
     ));
 
     tauri::Builder::default()

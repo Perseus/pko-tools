@@ -118,10 +118,23 @@ pub fn parse_mapinfo_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, MapInfo>> {
 
         // Derived fields
         let d = MAP_DERIVED_OFFSET;
-        let display_name = match read_fixed_string(chunk, d, 16) { Some(v) => v, None => continue };
-        let init_x = match read_i32(chunk, d + 16) { Some(v) => v, None => continue };
-        let init_y = match read_i32(chunk, d + 20) { Some(v) => v, None => continue };
-        let light_dir = match (read_f32(chunk, d + 24), read_f32(chunk, d + 28), read_f32(chunk, d + 32)) {
+        let display_name = match read_fixed_string(chunk, d, 16) {
+            Some(v) => v,
+            None => continue,
+        };
+        let init_x = match read_i32(chunk, d + 16) {
+            Some(v) => v,
+            None => continue,
+        };
+        let init_y = match read_i32(chunk, d + 20) {
+            Some(v) => v,
+            None => continue,
+        };
+        let light_dir = match (
+            read_f32(chunk, d + 24),
+            read_f32(chunk, d + 28),
+            read_f32(chunk, d + 32),
+        ) {
             (Some(x), Some(y), Some(z)) => [x, y, z],
             _ => continue,
         };
@@ -129,7 +142,10 @@ pub fn parse_mapinfo_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, MapInfo>> {
             (Some(&r), Some(&g), Some(&b)) => [r, g, b],
             _ => continue,
         };
-        let show_switch = match chunk.get(d + 39) { Some(&v) => v != 0, None => continue };
+        let show_switch = match chunk.get(d + 39) {
+            Some(&v) => v != 0,
+            None => continue,
+        };
 
         map.insert(
             map_id,
@@ -171,16 +187,14 @@ pub fn load_mapinfo(project_dir: &Path) -> anyhow::Result<HashMap<u32, MapInfo>>
 /// Matches against data_name (the szDataName field from CRawDataInfo).
 /// Uses strict matching: exact match or path-suffix match only.
 /// No substring fallback to avoid ambiguity with shared prefixes (garner/garner2).
-pub fn find_map_info<'a>(
-    infos: &'a HashMap<u32, MapInfo>,
-    map_name: &str,
-) -> Option<&'a MapInfo> {
+pub fn find_map_info<'a>(infos: &'a HashMap<u32, MapInfo>, map_name: &str) -> Option<&'a MapInfo> {
     let map_name_lower = map_name.to_lowercase();
 
     // Pass 1: exact match on data_name
-    if let Some(info) = infos.values().find(|info| {
-        info.data_name.to_lowercase() == map_name_lower
-    }) {
+    if let Some(info) = infos
+        .values()
+        .find(|info| info.data_name.to_lowercase() == map_name_lower)
+    {
         return Some(info);
     }
 

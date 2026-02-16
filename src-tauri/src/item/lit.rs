@@ -191,7 +191,7 @@ mod tests {
         // Header: version(4) + type(4) + mask(16) = 24 bytes
         data.extend_from_slice(&1u32.to_le_bytes()); // version
         data.extend_from_slice(&0u32.to_le_bytes()); // type
-        data.extend_from_slice(&[0u8; 16]);          // mask
+        data.extend_from_slice(&[0u8; 16]); // mask
 
         // item_count
         data.extend_from_slice(&(items.len() as u32).to_le_bytes());
@@ -203,13 +203,15 @@ mod tests {
             // descriptor: char[64]
             let mut desc_buf = [0u8; 64];
             let desc_bytes = descriptor.as_bytes();
-            desc_buf[..desc_bytes.len().min(64)].copy_from_slice(&desc_bytes[..desc_bytes.len().min(64)]);
+            desc_buf[..desc_bytes.len().min(64)]
+                .copy_from_slice(&desc_bytes[..desc_bytes.len().min(64)]);
             data.extend_from_slice(&desc_buf);
 
             // file: char[128]
             let mut file_buf = [0u8; 128];
             let file_bytes = file.as_bytes();
-            file_buf[..file_bytes.len().min(128)].copy_from_slice(&file_bytes[..file_bytes.len().min(128)]);
+            file_buf[..file_bytes.len().min(128)]
+                .copy_from_slice(&file_bytes[..file_bytes.len().min(128)]);
             data.extend_from_slice(&file_buf);
 
             // lit_count
@@ -221,7 +223,8 @@ mod tests {
 
                 let mut lit_file_buf = [0u8; 128];
                 let lit_bytes = lit_file.as_bytes();
-                lit_file_buf[..lit_bytes.len().min(128)].copy_from_slice(&lit_bytes[..lit_bytes.len().min(128)]);
+                lit_file_buf[..lit_bytes.len().min(128)]
+                    .copy_from_slice(&lit_bytes[..lit_bytes.len().min(128)]);
                 data.extend_from_slice(&lit_file_buf);
 
                 data.extend_from_slice(&anim_type.to_le_bytes());
@@ -235,11 +238,11 @@ mod tests {
 
     #[test]
     fn parse_single_item_with_one_lit() {
-        let data = build_item_lit_data(&[
-            ("sword_glow", "glow_base.tga", &[
-                ("glow_tier0.tga", 2, 1, 0.8),
-            ]),
-        ]);
+        let data = build_item_lit_data(&[(
+            "sword_glow",
+            "glow_base.tga",
+            &[("glow_tier0.tga", 2, 1, 0.8)],
+        )]);
 
         let items = parse_item_lit(&data).unwrap();
         assert_eq!(items.len(), 1);
@@ -255,13 +258,15 @@ mod tests {
 
     #[test]
     fn parse_item_with_multiple_lits() {
-        let data = build_item_lit_data(&[
-            ("blade", "blade.tga", &[
+        let data = build_item_lit_data(&[(
+            "blade",
+            "blade.tga",
+            &[
                 ("tier0.tga", 1, 0, 1.0),
                 ("tier1.tga", 2, 1, 0.9),
                 ("tier2.tga", 3, 2, 0.7),
-            ]),
-        ]);
+            ],
+        )]);
 
         let items = parse_item_lit(&data).unwrap();
         assert_eq!(items[0].lits.len(), 3);
@@ -341,7 +346,10 @@ mod tests {
         for item in &items {
             eprintln!(
                 "  ItemLit[{}]: descriptor='{}', file='{}', {} lits",
-                item.item_id, item.descriptor, item.file, item.lits.len()
+                item.item_id,
+                item.descriptor,
+                item.file,
+                item.lits.len()
             );
             for lit in &item.lits {
                 eprintln!(
@@ -361,10 +369,15 @@ mod tests {
             eprintln!("  file: '{}'", entry1.file);
             assert!(!entry1.lits.is_empty(), "Entry 1 should have lit entries");
             for lit in &entry1.lits {
-                eprintln!("  lit file: '{}', anim={}, transp={}, opacity={}", lit.file, lit.anim_type, lit.transp_type, lit.opacity);
+                eprintln!(
+                    "  lit file: '{}', anim={}, transp={}, opacity={}",
+                    lit.file, lit.anim_type, lit.transp_type, lit.opacity
+                );
                 // Verify the lit texture file is a .tga
                 assert!(
-                    lit.file.to_lowercase().ends_with(".tga") || lit.file.to_lowercase().ends_with(".dds") || lit.file.to_lowercase().ends_with(".bmp"),
+                    lit.file.to_lowercase().ends_with(".tga")
+                        || lit.file.to_lowercase().ends_with(".dds")
+                        || lit.file.to_lowercase().ends_with(".bmp"),
                     "Lit texture file should be a valid texture format: '{}'",
                     lit.file
                 );

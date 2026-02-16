@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use super::mapper::{auto_map_bones, apply_manual_override, BoneMapping};
+use super::mapper::{apply_manual_override, auto_map_bones, BoneMapping};
 use super::reducer::{plan_bone_reduction, BoneReductionPlan};
 use super::skeleton::{analyze_skeleton, AnalyzedSkeleton};
 
@@ -17,11 +17,12 @@ pub struct AnalyzedModelReport {
 /// Analyze an external glTF model and return skeleton analysis + auto mapping + reduction plan
 #[tauri::command]
 pub fn analyze_external_model(file_path: String) -> Result<AnalyzedModelReport, String> {
-    let (doc, _buffers, _images) = gltf::import(&file_path)
-        .map_err(|e| format!("Failed to load glTF: {}", e))?;
+    let (doc, _buffers, _images) =
+        gltf::import(&file_path).map_err(|e| format!("Failed to load glTF: {}", e))?;
 
-    let skin = doc.skins().next()
-        .ok_or_else(|| "No skin found in glTF file. The model must be skinned (have a skeleton).".to_string())?;
+    let skin = doc.skins().next().ok_or_else(|| {
+        "No skin found in glTF file. The model must be skinned (have a skeleton).".to_string()
+    })?;
 
     let joints: Vec<_> = skin.joints().collect();
 
@@ -34,9 +35,9 @@ pub fn analyze_external_model(file_path: String) -> Result<AnalyzedModelReport, 
         joint_names.push(joint.name().unwrap_or("unnamed").to_string());
 
         // Find parent by checking which other joint has this one as a child
-        let parent = joints.iter().position(|p| {
-            p.children().any(|c| c.index() == joint.index())
-        });
+        let parent = joints
+            .iter()
+            .position(|p| p.children().any(|c| c.index() == joint.index()));
         joint_parents.push(parent);
     }
 
@@ -109,11 +110,13 @@ pub fn validate_bone_mapping(
     let mut warnings = Vec::new();
 
     if mapping.mapped_count == 0 {
-        errors.push("No bones are mapped. At least the root and pelvis must be mapped.".to_string());
+        errors
+            .push("No bones are mapped. At least the root and pelvis must be mapped.".to_string());
     }
 
     if !mapping.has_critical_mappings() {
-        warnings.push("Some critical bones (Bip01, Pelvis, Spine, Spine1) are not mapped.".to_string());
+        warnings
+            .push("Some critical bones (Bip01, Pelvis, Spine, Spine1) are not mapped.".to_string());
     }
 
     if !report.reduction_plan.within_limit {

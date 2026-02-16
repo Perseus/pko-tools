@@ -11,7 +11,8 @@ use super::{model::EffFile, scan_effects_directory};
 
 #[tauri::command]
 pub async fn list_effects(project_id: String) -> Result<Vec<String>, String> {
-    let project_id = uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
 
     scan_effects_directory(project.project_directory.as_ref()).map_err(|e| e.to_string())
@@ -19,12 +20,18 @@ pub async fn list_effects(project_id: String) -> Result<Vec<String>, String> {
 
 #[tauri::command]
 pub async fn load_effect(project_id: String, effect_name: String) -> Result<EffFile, String> {
-    let project_id = uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
     let effect_path = effect_file_path(project.project_directory.as_ref(), &effect_name);
 
-    let bytes = std::fs::read(&effect_path)
-        .map_err(|e| format!("Failed to read effect file {}: {}", effect_path.display(), e))?;
+    let bytes = std::fs::read(&effect_path).map_err(|e| {
+        format!(
+            "Failed to read effect file {}: {}",
+            effect_path.display(),
+            e
+        )
+    })?;
     EffFile::from_bytes(&bytes).map_err(|e| e.to_string())
 }
 
@@ -34,7 +41,8 @@ pub async fn save_effect(
     effect_name: String,
     effect: EffFile,
 ) -> Result<(), String> {
-    let project_id = uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
     let effect_path = effect_file_path(project.project_directory.as_ref(), &effect_name);
 
@@ -44,16 +52,21 @@ pub async fn save_effect(
     }
 
     let bytes = effect.to_bytes().map_err(|e| e.to_string())?;
-    std::fs::write(&effect_path, bytes)
-        .map_err(|e| format!("Failed to write effect file {}: {}", effect_path.display(), e))?;
+    std::fs::write(&effect_path, bytes).map_err(|e| {
+        format!(
+            "Failed to write effect file {}: {}",
+            effect_path.display(),
+            e
+        )
+    })?;
 
     Ok(())
 }
 
 #[tauri::command]
 pub async fn load_texture_bytes(path: String) -> Result<String, String> {
-    let bytes = std::fs::read(&path)
-        .map_err(|e| format!("Failed to read texture {}: {}", path, e))?;
+    let bytes =
+        std::fs::read(&path).map_err(|e| format!("Failed to read texture {}: {}", path, e))?;
     Ok(base64::engine::general_purpose::STANDARD.encode(bytes))
 }
 
@@ -70,8 +83,8 @@ pub struct DecodedTexture {
 #[tauri::command]
 pub async fn decode_texture(path: String) -> Result<DecodedTexture, String> {
     let resolved = resolve_case_insensitive(&path).unwrap_or_else(|| path.clone().into());
-    let bytes = std::fs::read(&resolved)
-        .map_err(|e| format!("Failed to read texture {}: {}", path, e))?;
+    let bytes =
+        std::fs::read(&resolved).map_err(|e| format!("Failed to read texture {}: {}", path, e))?;
 
     // Try standard image decoding first (handles valid TGA, BMP, PNG, etc.)
     let ext = path.rsplit('.').next().unwrap_or("").to_lowercase();
@@ -88,7 +101,11 @@ pub async fn decode_texture(path: String) -> Result<DecodedTexture, String> {
             let rgba = img.to_rgba8();
             let (w, h) = rgba.dimensions();
             let data = base64::engine::general_purpose::STANDARD.encode(rgba.as_raw());
-            return Ok(DecodedTexture { width: w, height: h, data });
+            return Ok(DecodedTexture {
+                width: w,
+                height: h,
+                data,
+            });
         }
     }
     // Also try auto-detection
@@ -96,7 +113,11 @@ pub async fn decode_texture(path: String) -> Result<DecodedTexture, String> {
         let rgba = img.to_rgba8();
         let (w, h) = rgba.dimensions();
         let data = base64::engine::general_purpose::STANDARD.encode(rgba.as_raw());
-        return Ok(DecodedTexture { width: w, height: h, data });
+        return Ok(DecodedTexture {
+            width: w,
+            height: h,
+            data,
+        });
     }
 
     // Fallback: PKO non-standard TGA formats.
@@ -111,8 +132,7 @@ pub async fn decode_texture(path: String) -> Result<DecodedTexture, String> {
     const PKO_TGA_FOOTER_SIZE: usize = 48;
     if bytes.len() > PKO_TGA_FOOTER_SIZE {
         let footer_start = bytes.len() - PKO_TGA_FOOTER_SIZE;
-        let has_tga_footer = bytes[footer_start + 1] <= 1
-            && bytes[footer_start + 2] == 2;
+        let has_tga_footer = bytes[footer_start + 1] <= 1 && bytes[footer_start + 2] == 2;
 
         if has_tga_footer {
             // Variant 1: pixel data is bytes 0..footer_start in ARGB format
@@ -141,12 +161,20 @@ fn try_decode_pko_tga(pixel_data: &[u8]) -> Option<DecodedTexture> {
         let h_pow2 = h.is_power_of_two() && h >= 16;
         let ratio = if w >= h { w / h.max(1) } else { h / w.max(1) };
         let mut s: u32 = 0;
-        if w_pow2 { s += 10; }
-        if h_pow2 { s += 10; }
+        if w_pow2 {
+            s += 10;
+        }
+        if h_pow2 {
+            s += 10;
+        }
         // Prefer smaller aspect ratio (closer to square)
-        if ratio <= 2 { s += 5; }
-        else if ratio <= 4 { s += 3; }
-        else if ratio <= 8 { s += 1; }
+        if ratio <= 2 {
+            s += 5;
+        } else if ratio <= 4 {
+            s += 3;
+        } else if ratio <= 8 {
+            s += 1;
+        }
         s
     };
 
@@ -181,7 +209,7 @@ fn try_decode_pko_tga(pixel_data: &[u8]) -> Option<DecodedTexture> {
             rgba.push(chunk[2]); // R
             rgba.push(chunk[1]); // G
             rgba.push(chunk[0]); // B
-            rgba.push(255);      // A
+            rgba.push(255); // A
         }
     }
 
@@ -203,11 +231,19 @@ fn try_decode_pko_tga_argb(pixel_data: &[u8]) -> Option<DecodedTexture> {
         let h_pow2 = h.is_power_of_two() && h >= 16;
         let ratio = if w >= h { w / h.max(1) } else { h / w.max(1) };
         let mut s: u32 = 0;
-        if w_pow2 { s += 10; }
-        if h_pow2 { s += 10; }
-        if ratio <= 2 { s += 5; }
-        else if ratio <= 4 { s += 3; }
-        else if ratio <= 8 { s += 1; }
+        if w_pow2 {
+            s += 10;
+        }
+        if h_pow2 {
+            s += 10;
+        }
+        if ratio <= 2 {
+            s += 5;
+        } else if ratio <= 4 {
+            s += 3;
+        } else if ratio <= 8 {
+            s += 1;
+        }
         s
     };
 
@@ -244,7 +280,7 @@ fn try_decode_pko_tga_argb(pixel_data: &[u8]) -> Option<DecodedTexture> {
             rgba.push(chunk[0]); // R
             rgba.push(chunk[1]); // G
             rgba.push(chunk[2]); // B
-            rgba.push(255);      // A
+            rgba.push(255); // A
         }
     }
 
@@ -328,7 +364,8 @@ pub async fn save_particles(
     effect_name: String,
     particles: serde_json::Value,
 ) -> Result<(), String> {
-    let project_id = uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
     let path = particles_file_path(project.project_directory.as_ref(), &effect_name);
 
@@ -350,7 +387,8 @@ pub async fn load_particles(
     project_id: String,
     effect_name: String,
 ) -> Result<Option<serde_json::Value>, String> {
-    let project_id = uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
     let path = particles_file_path(project.project_directory.as_ref(), &effect_name);
 
@@ -368,7 +406,8 @@ pub async fn load_particles(
 
 #[tauri::command]
 pub async fn list_texture_files(project_id: String) -> Result<Vec<String>, String> {
-    let project_id = uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
     let project_dir = project.project_directory.as_ref();
 
@@ -393,7 +432,9 @@ pub async fn list_texture_files(project_id: String) -> Result<Vec<String>, Strin
                 if path.is_file() {
                     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                         if extensions.contains(&ext.to_lowercase().as_str()) {
-                            if let Some(name) = path.strip_prefix(project_dir).ok().and_then(|p| p.to_str()) {
+                            if let Some(name) =
+                                path.strip_prefix(project_dir).ok().and_then(|p| p.to_str())
+                            {
                                 files.push(name.to_string());
                             }
                         }
@@ -412,7 +453,8 @@ pub async fn load_path_file(
     project_id: String,
     path_name: String,
 ) -> Result<Vec<[f32; 3]>, String> {
-    let project_id = uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
 
     let file_name = if path_name.ends_with(".csf") {
@@ -422,14 +464,12 @@ pub async fn load_path_file(
     };
 
     let path = project.project_directory.join("effect").join(&file_name);
-    let resolved = resolve_case_insensitive(path.to_str().unwrap_or(""))
-        .unwrap_or(path);
+    let resolved = resolve_case_insensitive(path.to_str().unwrap_or("")).unwrap_or(path);
 
     let bytes = std::fs::read(&resolved)
         .map_err(|e| format!("Failed to read path file {}: {}", resolved.display(), e))?;
 
-    parse_csf_points(&bytes)
-        .map_err(|e| format!("Failed to parse CSF file: {}", e))
+    parse_csf_points(&bytes).map_err(|e| format!("Failed to parse CSF file: {}", e))
 }
 
 /// Parse a .csf path file: "csf" header (3 bytes) + version (i32) + count (i32) + Vec3[count]
@@ -444,10 +484,14 @@ fn parse_csf_points(bytes: &[u8]) -> Result<Vec<[f32; 3]>, String> {
     }
 
     let _version = i32::from_le_bytes(
-        bytes[3..7].try_into().map_err(|_| "Failed to read version")?
+        bytes[3..7]
+            .try_into()
+            .map_err(|_| "Failed to read version")?,
     );
     let count = i32::from_le_bytes(
-        bytes[7..11].try_into().map_err(|_| "Failed to read count")?
+        bytes[7..11]
+            .try_into()
+            .map_err(|_| "Failed to read count")?,
     );
 
     if count < 0 {
@@ -459,16 +503,30 @@ fn parse_csf_points(bytes: &[u8]) -> Result<Vec<[f32; 3]>, String> {
     if bytes.len() < expected_size {
         return Err(format!(
             "File too small: expected {} bytes for {} points, got {}",
-            expected_size, count, bytes.len()
+            expected_size,
+            count,
+            bytes.len()
         ));
     }
 
     let mut points = Vec::with_capacity(count);
     let mut offset = 11;
     for _ in 0..count {
-        let x = f32::from_le_bytes(bytes[offset..offset+4].try_into().map_err(|_| "Failed to read float")?);
-        let y = f32::from_le_bytes(bytes[offset+4..offset+8].try_into().map_err(|_| "Failed to read float")?);
-        let z = f32::from_le_bytes(bytes[offset+8..offset+12].try_into().map_err(|_| "Failed to read float")?);
+        let x = f32::from_le_bytes(
+            bytes[offset..offset + 4]
+                .try_into()
+                .map_err(|_| "Failed to read float")?,
+        );
+        let y = f32::from_le_bytes(
+            bytes[offset + 4..offset + 8]
+                .try_into()
+                .map_err(|_| "Failed to read float")?,
+        );
+        let z = f32::from_le_bytes(
+            bytes[offset + 8..offset + 12]
+                .try_into()
+                .map_err(|_| "Failed to read float")?,
+        );
         points.push([x, y, z]);
         offset += 12;
     }
@@ -478,7 +536,9 @@ fn parse_csf_points(bytes: &[u8]) -> Result<Vec<[f32; 3]>, String> {
 
 fn particles_file_path(project_dir: &std::path::Path, effect_name: &str) -> std::path::PathBuf {
     let base = effect_name.strip_suffix(".eff").unwrap_or(effect_name);
-    project_dir.join("effect").join(format!("{}.particles.json", base))
+    project_dir
+        .join("effect")
+        .join(format!("{}.particles.json", base))
 }
 
 fn effect_file_path(project_dir: &std::path::Path, effect_name: &str) -> std::path::PathBuf {
@@ -583,10 +643,7 @@ fn build_effect_model_gltf(project_dir: &Path, model_name: &str) -> Result<Strin
 }
 
 #[tauri::command]
-pub async fn load_effect_model(
-    project_id: String,
-    model_name: String,
-) -> Result<String, String> {
+pub async fn load_effect_model(project_id: String, model_name: String) -> Result<String, String> {
     let project_id =
         uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;

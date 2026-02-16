@@ -1,6 +1,9 @@
 use core::f32;
 use std::{
-    collections::{BTreeMap, HashMap}, fs::File, io::Seek, path::Path
+    collections::{BTreeMap, HashMap},
+    fs::File,
+    io::Seek,
+    path::Path,
 };
 
 use crate::{
@@ -30,9 +33,9 @@ use serde_json::json;
 
 use super::{
     model::{
-        EXP_OBJ_VERSION, EXP_OBJ_VERSION_0_0_0_0, EXP_OBJ_VERSION_1_0_0_0,
-        EXP_OBJ_VERSION_1_0_0_3, EXP_OBJ_VERSION_1_0_0_4, LW_MAX_TEXTURESTAGE_NUM,
-        MESH_VERSION0000, MESH_VERSION0001, RenderStateSetTemplate, RenderStateValue,
+        RenderStateSetTemplate, RenderStateValue, EXP_OBJ_VERSION, EXP_OBJ_VERSION_0_0_0_0,
+        EXP_OBJ_VERSION_1_0_0_0, EXP_OBJ_VERSION_1_0_0_3, EXP_OBJ_VERSION_1_0_0_4,
+        LW_MAX_TEXTURESTAGE_NUM, MESH_VERSION0000, MESH_VERSION0001,
     },
     texture::{
         CharMaterialTextureInfo, MaterialTextureInfoTransparencyType, RenderStateAtom, TextureInfo,
@@ -533,7 +536,11 @@ impl CharacterMeshInfo {
 
         for vertex in &self.vertex_seq {
             let pos = [vertex.0.x, vertex.0.y, vertex.0.z];
-            let pos = if y_up { math::z_up_to_y_up_vec3(pos) } else { pos };
+            let pos = if y_up {
+                math::z_up_to_y_up_vec3(pos)
+            } else {
+                pos
+            };
             vertex_position_buffer_data.extend_from_slice(&pos[0].to_le_bytes());
             vertex_position_buffer_data.extend_from_slice(&pos[1].to_le_bytes());
             vertex_position_buffer_data.extend_from_slice(&pos[2].to_le_bytes());
@@ -562,12 +569,24 @@ impl CharacterMeshInfo {
             let v = [vertex.0.x, vertex.0.y, vertex.0.z];
             let v = if y_up { math::z_up_to_y_up_vec3(v) } else { v };
 
-            if v[0] < min_x { min_x = v[0]; }
-            if v[1] < min_y { min_y = v[1]; }
-            if v[2] < min_z { min_z = v[2]; }
-            if v[0] > max_x { max_x = v[0]; }
-            if v[1] > max_y { max_y = v[1]; }
-            if v[2] > max_z { max_z = v[2]; }
+            if v[0] < min_x {
+                min_x = v[0];
+            }
+            if v[1] < min_y {
+                min_y = v[1];
+            }
+            if v[2] < min_z {
+                min_z = v[2];
+            }
+            if v[0] > max_x {
+                max_x = v[0];
+            }
+            if v[1] > max_y {
+                max_y = v[1];
+            }
+            if v[2] > max_z {
+                max_z = v[2];
+            }
         }
 
         fields_to_aggregate.buffer.push(vertex_position_buffer);
@@ -610,7 +629,11 @@ impl CharacterMeshInfo {
         accessor_index
     }
 
-    pub fn get_vertex_normal_accessor(&self, fields_to_aggregate: &mut GLTFFieldsToAggregate, y_up: bool) -> usize {
+    pub fn get_vertex_normal_accessor(
+        &self,
+        fields_to_aggregate: &mut GLTFFieldsToAggregate,
+        y_up: bool,
+    ) -> usize {
         let mut vertex_normal_buffer_data = vec![];
 
         let buffer_index = fields_to_aggregate.buffer.len();
@@ -743,7 +766,10 @@ impl CharacterMeshInfo {
         accessor_index
     }
 
-    pub fn get_vertex_index_accessor(&self, fields_to_aggregate: &mut GLTFFieldsToAggregate) -> usize {
+    pub fn get_vertex_index_accessor(
+        &self,
+        fields_to_aggregate: &mut GLTFFieldsToAggregate,
+    ) -> usize {
         let mut indices_buffer_data = vec![];
         let buffer_index = fields_to_aggregate.buffer.len();
         let buffer_view_index = fields_to_aggregate.buffer_view.len();
@@ -803,7 +829,10 @@ impl CharacterMeshInfo {
         accessor_index
     }
 
-    pub fn get_vertex_color_accessor(&self, fields_to_aggregate: &mut GLTFFieldsToAggregate) -> usize {
+    pub fn get_vertex_color_accessor(
+        &self,
+        fields_to_aggregate: &mut GLTFFieldsToAggregate,
+    ) -> usize {
         let mut vertex_color_buffer_data = vec![];
         let buffer_index = fields_to_aggregate.buffer.len();
         let buffer_view_index = fields_to_aggregate.buffer_view.len();
@@ -1050,10 +1079,7 @@ impl CharacterMeshInfo {
             file_name += core::str::from_utf8(&[texture_info.file_name[i]]).unwrap();
         }
 
-        let texture_dirs = [
-            "texture/character",
-            "texture",
-        ];
+        let texture_dirs = ["texture/character", "texture"];
         let mut image_file = None;
         for dir in &texture_dirs {
             let candidate = project_dir.join(dir).join(&file_name).with_extension("bmp");
@@ -1064,15 +1090,26 @@ impl CharacterMeshInfo {
         }
         let mut image_file = image_file.unwrap_or_else(|| {
             // Fallback to character path for error message
-            project_dir.join("texture/character/").join(&file_name).with_extension("bmp")
+            project_dir
+                .join("texture/character/")
+                .join(&file_name)
+                .with_extension("bmp")
         });
         let original_image_reader = ImageReader::open(image_file.clone());
         if original_image_reader.is_err() {
-            panic!("Error opening image file: {:?}, error: {:?}", image_file.to_str(),original_image_reader.err().unwrap());
+            panic!(
+                "Error opening image file: {:?}, error: {:?}",
+                image_file.to_str(),
+                original_image_reader.err().unwrap()
+            );
         }
         let original_image = original_image_reader.unwrap().decode();
         if original_image.is_err() {
-            panic!("Error decoding image file: {:?}, error: {:?}", image_file.to_str(),original_image.err().unwrap());
+            panic!(
+                "Error decoding image file: {:?}, error: {:?}",
+                image_file.to_str(),
+                original_image.err().unwrap()
+            );
         }
         original_image
             .unwrap()
@@ -1172,8 +1209,10 @@ impl CharacterMeshInfo {
         materials: &Option<Vec<CharMaterialTextureInfo>>,
         y_up: bool,
     ) -> gltf::json::mesh::Primitive {
-        let vertex_position_accessor_index = self.get_vertex_position_accessor(fields_to_aggregate, y_up);
-        let vertex_normal_accessor_index = self.get_vertex_normal_accessor(fields_to_aggregate, y_up);
+        let vertex_position_accessor_index =
+            self.get_vertex_position_accessor(fields_to_aggregate, y_up);
+        let vertex_normal_accessor_index =
+            self.get_vertex_normal_accessor(fields_to_aggregate, y_up);
         let vertex_indices_accessor_index = self.get_vertex_index_accessor(fields_to_aggregate);
 
         let material_index =
@@ -1319,14 +1358,12 @@ impl CharacterMeshInfo {
             normal_seq: vec![],
             subset_seq: vec![],
             texcoord_seq: [vec![], vec![], vec![], vec![]],
-            vertex_element_seq: vec![
-                D3DVertexElement9::default(); 6
-            ],
+            vertex_element_seq: vec![D3DVertexElement9::default(); 6],
             vertex_seq: vec![],
             vercol_seq: vec![],
         };
 
-        let mut joint_seq_u16: Vec<[u16; 4]> = vec![];  // LAB bone positions from glTF JOINTS_0
+        let mut joint_seq_u16: Vec<[u16; 4]> = vec![]; // LAB bone positions from glTF JOINTS_0
         let mut weight_seq: Vec<[f32; 4]> = vec![];
 
         for gltf_mesh in doc.meshes() {
@@ -1476,7 +1513,10 @@ impl CharacterMeshInfo {
                         }
                     }
                     _ => {
-                        return Err(anyhow::anyhow!("Unsupported index data type: {:?}", gltf_vi_accessor.data_type()));
+                        return Err(anyhow::anyhow!(
+                            "Unsupported index data type: {:?}",
+                            gltf_vi_accessor.data_type()
+                        ));
                     }
                 }
 
@@ -1492,7 +1532,7 @@ impl CharacterMeshInfo {
         // NOT skin joint positions! This is because the export (line 748) writes:
         //   joint_indices = indices.map(|idx| *self.bone_index_seq.get(idx as usize).unwrap() as u16)
         // So we need to reverse that: convert LAB bone positions back to bone_index_seq indices.
-        
+
         // Step 1: Find all unique LAB bone positions that are referenced by the mesh
         // Include all bones that appear in joint data, even if their weight is 0
         // (the game may still reference them)
@@ -1506,10 +1546,10 @@ impl CharacterMeshInfo {
                 }
             }
         }
-        
+
         // Step 2: bone_index_seq is already built in the order bones first appear
         let bone_index_seq = lab_bones_in_order;
-        
+
         // Build reverse mapping: LAB bone position -> bone_index_seq index
         let mut lab_bone_pos_to_bone_seq_idx = HashMap::<u32, u32>::new();
         for (bone_seq_idx, &lab_bone_pos) in bone_index_seq.iter().enumerate() {
@@ -1521,17 +1561,19 @@ impl CharacterMeshInfo {
         for (vert_idx, joints_u16) in joint_seq_u16.iter().enumerate() {
             let mut joints_u8 = [0u8; 4];
             for (joint_idx, &lab_bone_pos) in joints_u16.iter().enumerate() {
-                if let Some(&bone_seq_idx) = lab_bone_pos_to_bone_seq_idx.get(&(lab_bone_pos as u32)) {
+                if let Some(&bone_seq_idx) =
+                    lab_bone_pos_to_bone_seq_idx.get(&(lab_bone_pos as u32))
+                {
                     joints_u8[joint_idx] = bone_seq_idx as u8;
                 } else {
                     // This happens when weight is 0.0 - just use 0
                     joints_u8[joint_idx] = 0;
                 }
             }
-            
+
             // Pack 4 u8 indices into u32 (little-endian)
             let indexd = u32::from_le_bytes(joints_u8);
-            
+
             mesh.blend_seq.push(CharacterMeshBlendInfo {
                 indexd,
                 weight: weight_seq[vert_idx],
@@ -1575,35 +1617,35 @@ impl CharacterMeshInfo {
         vertex_elements.push(D3DVertexElement9 {
             stream: 0,
             offset,
-            _type: 2,  // D3DDECLTYPE_FLOAT3
+            _type: 2, // D3DDECLTYPE_FLOAT3
             method: 0,
-            usage: 0,  // D3DDECLUSAGE_POSITION
+            usage: 0, // D3DDECLUSAGE_POSITION
             usage_index: 0,
         });
-        offset += 12;  // 3 floats * 4 bytes
+        offset += 12; // 3 floats * 4 bytes
 
         // Blend weights (if skinned): FLOAT4
         if !mesh.blend_seq.is_empty() {
             vertex_elements.push(D3DVertexElement9 {
                 stream: 0,
                 offset,
-                _type: 3,  // D3DDECLTYPE_FLOAT4
+                _type: 3, // D3DDECLTYPE_FLOAT4
                 method: 0,
-                usage: 1,  // D3DDECLUSAGE_BLENDWEIGHT
+                usage: 1, // D3DDECLUSAGE_BLENDWEIGHT
                 usage_index: 0,
             });
-            offset += 16;  // 4 floats * 4 bytes
+            offset += 16; // 4 floats * 4 bytes
 
             // Blend indices: UBYTE4
             vertex_elements.push(D3DVertexElement9 {
                 stream: 0,
                 offset,
-                _type: 4,  // D3DDECLTYPE_UBYTE4 / D3DCOLOR
+                _type: 4, // D3DDECLTYPE_UBYTE4 / D3DCOLOR
                 method: 0,
-                usage: 2,  // D3DDECLUSAGE_BLENDINDICES
+                usage: 2, // D3DDECLUSAGE_BLENDINDICES
                 usage_index: 0,
             });
-            offset += 4;  // 4 bytes
+            offset += 4; // 4 bytes
         }
 
         // Normal (if present): FLOAT3
@@ -1611,12 +1653,12 @@ impl CharacterMeshInfo {
             vertex_elements.push(D3DVertexElement9 {
                 stream: 0,
                 offset,
-                _type: 2,  // D3DDECLTYPE_FLOAT3
+                _type: 2, // D3DDECLTYPE_FLOAT3
                 method: 0,
-                usage: 3,  // D3DDECLUSAGE_NORMAL
+                usage: 3, // D3DDECLUSAGE_NORMAL
                 usage_index: 0,
             });
-            offset += 12;  // 3 floats * 4 bytes
+            offset += 12; // 3 floats * 4 bytes
         }
 
         // Diffuse color (if present): D3DCOLOR
@@ -1624,7 +1666,7 @@ impl CharacterMeshInfo {
             vertex_elements.push(D3DVertexElement9 {
                 stream: 0,
                 offset,
-                _type: 4,  // D3DDECLTYPE_D3DCOLOR
+                _type: 4, // D3DDECLTYPE_D3DCOLOR
                 method: 0,
                 usage: 10, // D3DDECLUSAGE_COLOR
                 usage_index: 0,
@@ -1637,9 +1679,9 @@ impl CharacterMeshInfo {
             vertex_elements.push(D3DVertexElement9 {
                 stream: 0,
                 offset,
-                _type: 1,  // D3DDECLTYPE_FLOAT2
+                _type: 1, // D3DDECLTYPE_FLOAT2
                 method: 0,
-                usage: 5,  // D3DDECLUSAGE_TEXCOORD
+                usage: 5, // D3DDECLUSAGE_TEXCOORD
                 usage_index: 0,
             });
         }
@@ -1653,7 +1695,7 @@ impl CharacterMeshInfo {
             usage: 0,
             usage_index: 0,
         });
-        
+
         mesh.vertex_element_seq = vertex_elements;
         mesh.header.vertex_element_num = mesh.vertex_element_seq.len() as u32;
 
@@ -1692,7 +1734,7 @@ impl CharacterMeshInfo {
         // Find the specific primitive
         let mut current_primitive_idx = 0;
         let mut found_primitive = None;
-        
+
         for gltf_mesh in doc.meshes() {
             for primitive in gltf_mesh.primitives() {
                 if current_primitive_idx == primitive_index {
@@ -1707,7 +1749,10 @@ impl CharacterMeshInfo {
         }
 
         let primitive = found_primitive.ok_or_else(|| {
-            anyhow::anyhow!("Primitive index {} not found in glTF document", primitive_index)
+            anyhow::anyhow!(
+                "Primitive index {} not found in glTF document",
+                primitive_index
+            )
         })?;
 
         // Process the single primitive
@@ -1722,11 +1767,8 @@ impl CharacterMeshInfo {
 
                     let mut reader = std::io::Cursor::new(data_as_slice);
                     for _ in 0..accessor.count() {
-                        let vertex = LwVector3::read_options(
-                            &mut reader,
-                            binrw::Endian::Little,
-                            (),
-                        )?;
+                        let vertex =
+                            LwVector3::read_options(&mut reader, binrw::Endian::Little, ())?;
                         mesh.vertex_seq.push(vertex);
                     }
                 }
@@ -1740,11 +1782,8 @@ impl CharacterMeshInfo {
 
                     let mut reader = std::io::Cursor::new(data_as_slice);
                     for _ in 0..accessor.count() {
-                        let vertex_normal = LwVector3::read_options(
-                            &mut reader,
-                            binrw::Endian::Little,
-                            (),
-                        )?;
+                        let vertex_normal =
+                            LwVector3::read_options(&mut reader, binrw::Endian::Little, ())?;
                         mesh.normal_seq.push(vertex_normal);
                     }
                 }
@@ -1780,8 +1819,7 @@ impl CharacterMeshInfo {
                     for _ in 0..accessor.count() {
                         let mut joints_u16 = [0u16; 4];
                         joints_u16.iter_mut().for_each(|j| {
-                            *j = u16::read_options(&mut reader, binrw::Endian::Little, ())
-                                .unwrap();
+                            *j = u16::read_options(&mut reader, binrw::Endian::Little, ()).unwrap();
                         });
                         joint_seq_u16.push(joints_u16);
                     }
@@ -1798,8 +1836,7 @@ impl CharacterMeshInfo {
                     for _ in 0..accessor.count() {
                         let mut weight = [0.0f32; 4];
                         weight.iter_mut().for_each(|w| {
-                            *w = f32::read_options(&mut reader, binrw::Endian::Little, ())
-                                .unwrap();
+                            *w = f32::read_options(&mut reader, binrw::Endian::Little, ()).unwrap();
                         });
                         weight_seq.push(weight);
                     }
@@ -1850,7 +1887,10 @@ impl CharacterMeshInfo {
                 }
             }
             _ => {
-                return Err(anyhow::anyhow!("Unsupported index data type: {:?}", gltf_vi_accessor.data_type()));
+                return Err(anyhow::anyhow!(
+                    "Unsupported index data type: {:?}",
+                    gltf_vi_accessor.data_type()
+                ));
             }
         }
         mesh.index_seq = index_seq;
@@ -1866,9 +1906,9 @@ impl CharacterMeshInfo {
                 }
             }
         }
-        
+
         let bone_index_seq = lab_bones_in_order;
-        
+
         let mut lab_bone_pos_to_bone_seq_idx = HashMap::<u32, u32>::new();
         for (bone_seq_idx, &lab_bone_pos) in bone_index_seq.iter().enumerate() {
             lab_bone_pos_to_bone_seq_idx.insert(lab_bone_pos, bone_seq_idx as u32);
@@ -1877,15 +1917,17 @@ impl CharacterMeshInfo {
         for (vert_idx, joints_u16) in joint_seq_u16.iter().enumerate() {
             let mut joints_u8 = [0u8; 4];
             for (joint_idx, &lab_bone_pos) in joints_u16.iter().enumerate() {
-                if let Some(&bone_seq_idx) = lab_bone_pos_to_bone_seq_idx.get(&(lab_bone_pos as u32)) {
+                if let Some(&bone_seq_idx) =
+                    lab_bone_pos_to_bone_seq_idx.get(&(lab_bone_pos as u32))
+                {
                     joints_u8[joint_idx] = bone_seq_idx as u8;
                 } else {
                     joints_u8[joint_idx] = 0;
                 }
             }
-            
+
             let indexd = u32::from_le_bytes(joints_u8);
-            
+
             mesh.blend_seq.push(CharacterMeshBlendInfo {
                 indexd,
                 weight: weight_seq[vert_idx],
@@ -2005,13 +2047,13 @@ impl CharacterMeshInfo {
         }
         count
     }
-    
+
     /// Get the number of meshes in a glTF document
     /// Each mesh becomes a separate LGO file (more idiomatic than counting primitives)
     pub fn get_mesh_count(doc: &gltf::Document) -> usize {
         doc.meshes().count()
     }
-    
+
     /// Import a specific mesh from a glTF document (by mesh index)
     /// This is the preferred method - each mesh becomes a separate LGO file
     /// Each mesh is expected to have exactly one primitive (idiomatic glTF structure)
@@ -2022,18 +2064,21 @@ impl CharacterMeshInfo {
         bone_file: &crate::animation::character::LwBoneFile,
         mesh_index: usize,
     ) -> anyhow::Result<Self> {
-        let gltf_mesh = doc.meshes().nth(mesh_index)
-            .ok_or_else(|| anyhow::anyhow!("Mesh index {} not found in glTF document", mesh_index))?;
-        
+        let gltf_mesh = doc.meshes().nth(mesh_index).ok_or_else(|| {
+            anyhow::anyhow!("Mesh index {} not found in glTF document", mesh_index)
+        })?;
+
         // Each mesh should have exactly one primitive in our idiomatic structure
         // If there are multiple primitives, we use only the first one
-        let primitive = gltf_mesh.primitives().next()
+        let primitive = gltf_mesh
+            .primitives()
+            .next()
             .ok_or_else(|| anyhow::anyhow!("Mesh {} has no primitives", mesh_index))?;
-        
+
         // Reuse the existing primitive import logic
         Self::from_gltf_primitive_internal(doc, buffers, images, bone_file, primitive)
     }
-    
+
     /// Internal helper to import from a specific primitive
     fn from_gltf_primitive_internal(
         _doc: &gltf::Document,
@@ -2074,11 +2119,8 @@ impl CharacterMeshInfo {
 
                     let mut reader = std::io::Cursor::new(data_as_slice);
                     for _ in 0..accessor.count() {
-                        let vertex = LwVector3::read_options(
-                            &mut reader,
-                            binrw::Endian::Little,
-                            (),
-                        )?;
+                        let vertex =
+                            LwVector3::read_options(&mut reader, binrw::Endian::Little, ())?;
                         mesh.vertex_seq.push(vertex);
                     }
                 }
@@ -2092,11 +2134,8 @@ impl CharacterMeshInfo {
 
                     let mut reader = std::io::Cursor::new(data_as_slice);
                     for _ in 0..accessor.count() {
-                        let vertex_normal = LwVector3::read_options(
-                            &mut reader,
-                            binrw::Endian::Little,
-                            (),
-                        )?;
+                        let vertex_normal =
+                            LwVector3::read_options(&mut reader, binrw::Endian::Little, ())?;
                         mesh.normal_seq.push(vertex_normal);
                     }
                 }
@@ -2132,8 +2171,7 @@ impl CharacterMeshInfo {
                     for _ in 0..accessor.count() {
                         let mut joints_u16 = [0u16; 4];
                         joints_u16.iter_mut().for_each(|j| {
-                            *j = u16::read_options(&mut reader, binrw::Endian::Little, ())
-                                .unwrap();
+                            *j = u16::read_options(&mut reader, binrw::Endian::Little, ()).unwrap();
                         });
                         joint_seq_u16.push(joints_u16);
                     }
@@ -2150,8 +2188,7 @@ impl CharacterMeshInfo {
                     for _ in 0..accessor.count() {
                         let mut weight = [0.0f32; 4];
                         weight.iter_mut().for_each(|w| {
-                            *w = f32::read_options(&mut reader, binrw::Endian::Little, ())
-                                .unwrap();
+                            *w = f32::read_options(&mut reader, binrw::Endian::Little, ()).unwrap();
                         });
                         weight_seq.push(weight);
                     }
@@ -2202,7 +2239,10 @@ impl CharacterMeshInfo {
                 }
             }
             _ => {
-                return Err(anyhow::anyhow!("Unsupported index data type: {:?}", gltf_vi_accessor.data_type()));
+                return Err(anyhow::anyhow!(
+                    "Unsupported index data type: {:?}",
+                    gltf_vi_accessor.data_type()
+                ));
             }
         }
         mesh.index_seq = index_seq;
@@ -2218,9 +2258,9 @@ impl CharacterMeshInfo {
                 }
             }
         }
-        
+
         let bone_index_seq = lab_bones_in_order;
-        
+
         let mut lab_bone_pos_to_bone_seq_idx = HashMap::<u32, u32>::new();
         for (bone_seq_idx, &lab_bone_pos) in bone_index_seq.iter().enumerate() {
             lab_bone_pos_to_bone_seq_idx.insert(lab_bone_pos, bone_seq_idx as u32);
@@ -2229,15 +2269,17 @@ impl CharacterMeshInfo {
         for (vert_idx, joints_u16) in joint_seq_u16.iter().enumerate() {
             let mut joints_u8 = [0u8; 4];
             for (joint_idx, &lab_bone_pos) in joints_u16.iter().enumerate() {
-                if let Some(&bone_seq_idx) = lab_bone_pos_to_bone_seq_idx.get(&(lab_bone_pos as u32)) {
+                if let Some(&bone_seq_idx) =
+                    lab_bone_pos_to_bone_seq_idx.get(&(lab_bone_pos as u32))
+                {
                     joints_u8[joint_idx] = bone_seq_idx as u8;
                 } else {
                     joints_u8[joint_idx] = 0;
                 }
             }
-            
+
             let indexd = u32::from_le_bytes(joints_u8);
-            
+
             mesh.blend_seq.push(CharacterMeshBlendInfo {
                 indexd,
                 weight: weight_seq[vert_idx],
@@ -2401,7 +2443,9 @@ impl CharacterMeshInfo {
         let ve_size = self.vertex_element_seq.len() * std::mem::size_of::<D3DVertexElement9>();
         let vert_size = self.vertex_seq.len() * std::mem::size_of::<LwVector3>();
         let norm_size = self.normal_seq.len() * std::mem::size_of::<LwVector3>();
-        let tc_size: usize = self.texcoord_seq.iter()
+        let tc_size: usize = self
+            .texcoord_seq
+            .iter()
             .map(|tc| tc.len() * std::mem::size_of::<LwVector2>())
             .sum();
         let col_size = self.vercol_seq.len() * std::mem::size_of::<u32>();
@@ -2409,7 +2453,15 @@ impl CharacterMeshInfo {
         let bone_idx_size = self.bone_index_seq.len() * std::mem::size_of::<u32>();
         let idx_size = self.index_seq.len() * std::mem::size_of::<u32>();
         let sub_size = self.subset_seq.len() * std::mem::size_of::<CharacterMeshSubsetInfo>();
-        (header_size + ve_size + vert_size + norm_size + tc_size + col_size
-            + blend_size + bone_idx_size + idx_size + sub_size) as u32
+        (header_size
+            + ve_size
+            + vert_size
+            + norm_size
+            + tc_size
+            + col_size
+            + blend_size
+            + bone_idx_size
+            + idx_size
+            + sub_size) as u32
     }
 }

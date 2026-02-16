@@ -133,7 +133,8 @@ pub fn validate_normals(has_normals: bool) -> Option<ValidationItem> {
     if !has_normals {
         Some(ValidationItem {
             code: "MISSING_NORMALS".to_string(),
-            message: "Model has no vertex normals. Lighting will not work correctly in game.".to_string(),
+            message: "Model has no vertex normals. Lighting will not work correctly in game."
+                .to_string(),
             severity: ValidationSeverity::Error,
             category: ValidationCategory::Mesh,
             auto_fixable: false,
@@ -163,7 +164,8 @@ pub fn validate_has_texture(has_texture: bool) -> Option<ValidationItem> {
     if !has_texture {
         Some(ValidationItem {
             code: "MISSING_TEXTURE".to_string(),
-            message: "Material has no base color texture. A default texture will be used.".to_string(),
+            message: "Material has no base color texture. A default texture will be used."
+                .to_string(),
             severity: ValidationSeverity::Info,
             category: ValidationCategory::Material,
             auto_fixable: false,

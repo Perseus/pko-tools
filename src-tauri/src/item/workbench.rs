@@ -192,7 +192,11 @@ pub fn rotate_lgo(lgo_path: &Path, x_deg: f32, y_deg: f32, z_deg: f32) -> anyhow
             dummy.mat.0.w.y = rotated.y;
             dummy.mat.0.w.z = rotated.z;
 
-            let pos_local = cgmath::Vector3::new(dummy.mat_local.0.w.x, dummy.mat_local.0.w.y, dummy.mat_local.0.w.z);
+            let pos_local = cgmath::Vector3::new(
+                dummy.mat_local.0.w.x,
+                dummy.mat_local.0.w.y,
+                dummy.mat_local.0.w.z,
+            );
             let rotated_local = rot * pos_local;
             dummy.mat_local.0.w.x = rotated_local.x;
             dummy.mat_local.0.w.y = rotated_local.y;
@@ -316,7 +320,12 @@ pub fn export_item(
         .parent()
         .and_then(|p| p.parent())
         .map(|p| p.join("texture"))
-        .unwrap_or_else(|| source_lgo_path.parent().unwrap_or(Path::new(".")).to_path_buf());
+        .unwrap_or_else(|| {
+            source_lgo_path
+                .parent()
+                .unwrap_or(Path::new("."))
+                .to_path_buf()
+        });
 
     let mut texture_paths: Vec<String> = vec![];
     for (i, orig_name) in original_textures.iter().enumerate() {
@@ -819,8 +828,8 @@ pub fn generate_item_info_entry(
     // Find a template entry of the same item_type from existing ItemInfo.txt.
     // This gives us proper defaults for stat columns, equipable slots, character
     // restrictions, etc. — values that vary by weapon category.
-    let mut fields = find_iteminfo_template_by_type(&lines, &header, state.item_type)
-        .unwrap_or_default();
+    let mut fields =
+        find_iteminfo_template_by_type(&lines, &header, state.item_type).unwrap_or_default();
 
     if fields.is_empty() {
         // No existing entry of this type — build minimal TSV line.
@@ -980,21 +989,39 @@ mod tests {
 
         // Add dummies
         let dummies = vec![
-            WorkbenchDummy { id: 0, label: "Guard".into(), position: [0.0, 0.4, 0.0] },
-            WorkbenchDummy { id: 1, label: "Blade".into(), position: [0.0, 1.2, 0.0] },
-            WorkbenchDummy { id: 2, label: "Tip".into(), position: [0.0, 2.0, 0.0] },
+            WorkbenchDummy {
+                id: 0,
+                label: "Guard".into(),
+                position: [0.0, 0.4, 0.0],
+            },
+            WorkbenchDummy {
+                id: 1,
+                label: "Blade".into(),
+                position: [0.0, 1.2, 0.0],
+            },
+            WorkbenchDummy {
+                id: 2,
+                label: "Tip".into(),
+                position: [0.0, 2.0, 0.0],
+            },
         ];
         apply_dummies_to_lgo(&tmp, dummies).unwrap();
 
         // Read back and verify
         let geom2 = CharacterGeometricModel::from_file(tmp.clone()).unwrap();
-        let helper = geom2.helper_data.as_ref().expect("should have helper data after adding dummies");
+        let helper = geom2
+            .helper_data
+            .as_ref()
+            .expect("should have helper data after adding dummies");
         assert_eq!(helper.dummy_num, 3);
         assert_eq!(helper.dummy_seq.len(), 3);
         assert_eq!(helper.dummy_seq[0].id, 0);
         assert_eq!(helper.dummy_seq[2].id, 2);
         // Vertices should be unchanged
-        assert_eq!(geom2.mesh_info.as_ref().unwrap().vertex_seq.len(), original_vertex_count);
+        assert_eq!(
+            geom2.mesh_info.as_ref().unwrap().vertex_seq.len(),
+            original_vertex_count
+        );
 
         std::fs::remove_file(&tmp).ok();
     }
@@ -1022,8 +1049,16 @@ mod tests {
 
         // Step 2: Add dummies
         let dummies = vec![
-            WorkbenchDummy { id: 0, label: "Guard".into(), position: [0.0, 0.4, 0.0] },
-            WorkbenchDummy { id: 1, label: "Tip".into(), position: [0.0, 2.0, 0.0] },
+            WorkbenchDummy {
+                id: 0,
+                label: "Guard".into(),
+                position: [0.0, 0.4, 0.0],
+            },
+            WorkbenchDummy {
+                id: 1,
+                label: "Tip".into(),
+                position: [0.0, 2.0, 0.0],
+            },
         ];
         apply_dummies_to_lgo(&tmp, dummies).unwrap();
 
@@ -1033,7 +1068,10 @@ mod tests {
         assert_eq!(helper.dummy_num, 2);
         assert_eq!(helper.dummy_seq.len(), 2);
         // Subsets should be unchanged
-        assert_eq!(geom2.mesh_info.as_ref().unwrap().subset_seq.len(), subset_count);
+        assert_eq!(
+            geom2.mesh_info.as_ref().unwrap().subset_seq.len(),
+            subset_count
+        );
 
         std::fs::remove_file(&tmp).ok();
     }
@@ -1054,9 +1092,11 @@ mod tests {
         // Full pipeline: overlay → dummies → rescale
         add_glow_overlay(&tmp).unwrap();
 
-        let dummies = vec![
-            WorkbenchDummy { id: 0, label: "Guard".into(), position: [0.0, 0.4, 0.0] },
-        ];
+        let dummies = vec![WorkbenchDummy {
+            id: 0,
+            label: "Guard".into(),
+            position: [0.0, 0.4, 0.0],
+        }];
         apply_dummies_to_lgo(&tmp, dummies).unwrap();
 
         // Record pre-rescale vertex positions
@@ -1077,7 +1117,11 @@ mod tests {
         let helper = geom_after.helper_data.as_ref().unwrap();
         assert_eq!(helper.dummy_num, 1);
         let dummy_y = helper.dummy_seq[0].mat.0.w.y;
-        assert!((dummy_y - 0.2).abs() < 1e-5, "dummy Y should be 0.4 * 0.5 = 0.2, got {}", dummy_y);
+        assert!(
+            (dummy_y - 0.2).abs() < 1e-5,
+            "dummy Y should be 0.4 * 0.5 = 0.2, got {}",
+            dummy_y
+        );
 
         std::fs::remove_file(&tmp).ok();
     }
@@ -1107,11 +1151,20 @@ mod tests {
         let v0_after = &geom_after.mesh_info.as_ref().unwrap().vertex_seq[0];
 
         // X should be unchanged
-        assert!((v0_after.0.x - v0_before.0.x).abs() < 1e-4, "X should be unchanged");
+        assert!(
+            (v0_after.0.x - v0_before.0.x).abs() < 1e-4,
+            "X should be unchanged"
+        );
         // Y should become -Z_before
-        assert!((v0_after.0.y - (-v0_before.0.z)).abs() < 1e-4, "Y should be -Z_before");
+        assert!(
+            (v0_after.0.y - (-v0_before.0.z)).abs() < 1e-4,
+            "Y should be -Z_before"
+        );
         // Z should become Y_before
-        assert!((v0_after.0.z - v0_before.0.y).abs() < 1e-4, "Z should be Y_before");
+        assert!(
+            (v0_after.0.z - v0_before.0.y).abs() < 1e-4,
+            "Z should be Y_before"
+        );
 
         std::fs::remove_file(&tmp).ok();
     }

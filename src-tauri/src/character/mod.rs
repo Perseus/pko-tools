@@ -244,12 +244,13 @@ impl Character {
         // Each mesh has one primitive and is named after the LGO file
         let mut meshes: Vec<gltf::Mesh> = vec![];
         for (i, model) in models.iter().enumerate() {
-            let primitive = model.get_gltf_mesh_primitive(project_dir, &mut fields_to_aggregate, y_up)?;
+            let primitive =
+                model.get_gltf_mesh_primitive(project_dir, &mut fields_to_aggregate, y_up)?;
             let model_id_base = self.model as u32 * 1000000;
             let suit_id = self.suit_id as u32 * 10000;
             let model_id = model_id_base + suit_id + i as u32;
             let mesh_name = format!("{:0>10}", model_id);
-            
+
             meshes.push(gltf::Mesh {
                 name: Some(mesh_name),
                 primitives: vec![primitive],
@@ -258,9 +259,10 @@ impl Character {
                 extras: None,
             });
         }
-        
+
         let mesh_count = meshes.len();
-        let (skin, nodes) = animation.to_gltf_skin_and_nodes_multi(&mut fields_to_aggregate, mesh_count, y_up);
+        let (skin, nodes) =
+            animation.to_gltf_skin_and_nodes_multi(&mut fields_to_aggregate, mesh_count, y_up);
         fields_to_aggregate.skin.push(skin);
         fields_to_aggregate.nodes.extend(nodes);
 
@@ -278,12 +280,13 @@ impl Character {
 
         // Build scene node indices: root bone, skinned mesh nodes, and all helper nodes
         let mut scene_nodes = vec![
-            Index::new(0),  // Root bone
+            Index::new(0), // Root bone
         ];
-        
+
         // Add skinned mesh node indices (one per mesh, created by to_gltf_skin_and_nodes_multi)
         // These nodes are at indices: (nodes.len() - total_helper_nodes - mesh_count) to (nodes.len() - total_helper_nodes - 1)
-        let skinned_mesh_start_idx = fields_to_aggregate.nodes.len() - total_helper_nodes - mesh_count;
+        let skinned_mesh_start_idx =
+            fields_to_aggregate.nodes.len() - total_helper_nodes - mesh_count;
         for i in 0..mesh_count {
             scene_nodes.push(Index::new((skinned_mesh_start_idx + i) as u32));
         }
@@ -333,7 +336,8 @@ impl Character {
         let mut writer = BufWriter::new(file);
         animation_data.write_options(&mut writer, binrw::Endian::Little, ())?;
 
-        let mesh_data = CharacterGeometricModel::from_gltf(&gltf, &buffers, &images, 1, &animation_data)?;
+        let mesh_data =
+            CharacterGeometricModel::from_gltf(&gltf, &buffers, &images, 1, &animation_data)?;
         let file = File::create("./test_artifacts/test.lgo")?;
         let mut writer = BufWriter::new(file);
         mesh_data.write_options(&mut writer, binrw::Endian::Little, ())?;
@@ -349,43 +353,52 @@ impl Character {
     ) -> anyhow::Result<(String, String)> {
         let animation_data =
             super::animation::character::LwBoneFile::from_gltf(&gltf, &buffers, &images)?;
-        
+
         // Count meshes in the glTF - each mesh becomes a separate LGO file
         let mesh_count = mesh::CharacterMeshInfo::get_mesh_count(&gltf);
-        
+
         let animation_file_name = format!("{:0>4}.lab", model_id);
-        
+
         // Write animation file
-        let file = File::create(format!("./imports/character/animation/{}", animation_file_name))?;
+        let file = File::create(format!(
+            "./imports/character/animation/{}",
+            animation_file_name
+        ))?;
         let mut writer = BufWriter::new(file);
         animation_data.write_options(&mut writer, binrw::Endian::Little, ())?;
-        
+
         // Write each mesh as a separate LGO file
         let mut mesh_file_names = Vec::new();
         for mesh_idx in 0..mesh_count {
             let mesh_data = CharacterGeometricModel::from_gltf_mesh(
-                &gltf, &buffers, &images, model_id, &animation_data, mesh_idx
+                &gltf,
+                &buffers,
+                &images,
+                model_id,
+                &animation_data,
+                mesh_idx,
             )?;
-            
+
             // File naming: model_id * 1000000 + mesh_idx
             // e.g., model 725: 0725000000.lgo, 0725000001.lgo
             let mesh_file_name = format!("{:0>10}.lgo", model_id * 1000000 + mesh_idx as u32);
-            
+
             let file = File::create(format!("./imports/character/model/{}", mesh_file_name))?;
             let mut writer = BufWriter::new(file);
             mesh_data.write_options(&mut writer, binrw::Endian::Little, ())?;
-            
+
             mesh_file_names.push(mesh_file_name);
         }
-        
+
         // Return the first mesh file name for backwards compatibility
-        let mesh_file_name = mesh_file_names.first()
+        let mesh_file_name = mesh_file_names
+            .first()
             .cloned()
             .unwrap_or_else(|| format!("{:0>10}.lgo", model_id * 1000000));
 
         Ok((animation_file_name, mesh_file_name))
     }
-    
+
     /// Import a glTF file and return detailed results including all generated files
     pub fn import_gltf_with_char_id_detailed(
         gltf: Document,
@@ -395,30 +408,38 @@ impl Character {
     ) -> anyhow::Result<ImportResult> {
         let animation_data =
             super::animation::character::LwBoneFile::from_gltf(&gltf, &buffers, &images)?;
-        
+
         // Count meshes in the glTF - each mesh becomes a separate LGO file
         let mesh_count = mesh::CharacterMeshInfo::get_mesh_count(&gltf);
-        
+
         let animation_file_name = format!("{:0>4}.lab", model_id);
-        
+
         // Write animation file
-        let file = File::create(format!("./imports/character/animation/{}", animation_file_name))?;
+        let file = File::create(format!(
+            "./imports/character/animation/{}",
+            animation_file_name
+        ))?;
         let mut writer = BufWriter::new(file);
         animation_data.write_options(&mut writer, binrw::Endian::Little, ())?;
-        
+
         // Write each mesh as a separate LGO file
         let mut mesh_file_names = Vec::new();
         for mesh_idx in 0..mesh_count {
             let mesh_data = CharacterGeometricModel::from_gltf_mesh(
-                &gltf, &buffers, &images, model_id, &animation_data, mesh_idx
+                &gltf,
+                &buffers,
+                &images,
+                model_id,
+                &animation_data,
+                mesh_idx,
             )?;
-            
+
             let mesh_file_name = format!("{:0>10}.lgo", model_id * 1000000 + mesh_idx as u32);
-            
+
             let file = File::create(format!("./imports/character/model/{}", mesh_file_name))?;
             let mut writer = BufWriter::new(file);
             mesh_data.write_options(&mut writer, binrw::Endian::Little, ())?;
-            
+
             mesh_file_names.push(mesh_file_name);
         }
 
@@ -483,8 +504,7 @@ mod test {
     #[test]
     #[ignore = "relies on local test_artifacts/test.gltf"]
     fn is_able_to_parse_gltf() {
-        let (gltf, buffers, images) =
-            import(PathBuf::from("./test_artifacts/test.gltf")).unwrap();
+        let (gltf, buffers, images) = import(PathBuf::from("./test_artifacts/test.gltf")).unwrap();
         let character = Character::from_gltf(gltf, buffers, images).unwrap();
         println!("{:?}", character);
     }

@@ -17,22 +17,86 @@ pub struct DummyDefinition {
 /// The 16 standard dummy points used by PKO characters.
 /// Additional dummy points 16-23 exist but are less commonly used.
 pub const STANDARD_DUMMIES: &[DummyDefinition] = &[
-    DummyDefinition { id: 0,  name: "dummy_base",          parent_bone: "Bip01" },
-    DummyDefinition { id: 1,  name: "dummy_head",          parent_bone: "Bip01 Head" },
-    DummyDefinition { id: 2,  name: "dummy_chest",         parent_bone: "Bip01 Spine1" },
-    DummyDefinition { id: 3,  name: "dummy_pelvis",        parent_bone: "Bip01 Pelvis" },
-    DummyDefinition { id: 4,  name: "dummy_l_clavicle",    parent_bone: "Bip01 L Clavicle" },
-    DummyDefinition { id: 5,  name: "dummy_l_arm",         parent_bone: "Bip01 L UpperArm" },
-    DummyDefinition { id: 6,  name: "dummy_l_hand",        parent_bone: "Bip01 L Hand" },
-    DummyDefinition { id: 7,  name: "dummy_r_clavicle",    parent_bone: "Bip01 R Clavicle" },
-    DummyDefinition { id: 8,  name: "dummy_r_arm",         parent_bone: "Bip01 R UpperArm" },
-    DummyDefinition { id: 9,  name: "dummy_r_hand",        parent_bone: "Bip01 R Hand" },
-    DummyDefinition { id: 10, name: "dummy_l_thigh",       parent_bone: "Bip01 L Thigh" },
-    DummyDefinition { id: 11, name: "dummy_l_calf",        parent_bone: "Bip01 L Calf" },
-    DummyDefinition { id: 12, name: "dummy_l_foot",        parent_bone: "Bip01 L Foot" },
-    DummyDefinition { id: 13, name: "dummy_r_thigh",       parent_bone: "Bip01 R Thigh" },
-    DummyDefinition { id: 14, name: "dummy_r_calf",        parent_bone: "Bip01 R Calf" },
-    DummyDefinition { id: 15, name: "dummy_r_foot",        parent_bone: "Bip01 R Foot" },
+    DummyDefinition {
+        id: 0,
+        name: "dummy_base",
+        parent_bone: "Bip01",
+    },
+    DummyDefinition {
+        id: 1,
+        name: "dummy_head",
+        parent_bone: "Bip01 Head",
+    },
+    DummyDefinition {
+        id: 2,
+        name: "dummy_chest",
+        parent_bone: "Bip01 Spine1",
+    },
+    DummyDefinition {
+        id: 3,
+        name: "dummy_pelvis",
+        parent_bone: "Bip01 Pelvis",
+    },
+    DummyDefinition {
+        id: 4,
+        name: "dummy_l_clavicle",
+        parent_bone: "Bip01 L Clavicle",
+    },
+    DummyDefinition {
+        id: 5,
+        name: "dummy_l_arm",
+        parent_bone: "Bip01 L UpperArm",
+    },
+    DummyDefinition {
+        id: 6,
+        name: "dummy_l_hand",
+        parent_bone: "Bip01 L Hand",
+    },
+    DummyDefinition {
+        id: 7,
+        name: "dummy_r_clavicle",
+        parent_bone: "Bip01 R Clavicle",
+    },
+    DummyDefinition {
+        id: 8,
+        name: "dummy_r_arm",
+        parent_bone: "Bip01 R UpperArm",
+    },
+    DummyDefinition {
+        id: 9,
+        name: "dummy_r_hand",
+        parent_bone: "Bip01 R Hand",
+    },
+    DummyDefinition {
+        id: 10,
+        name: "dummy_l_thigh",
+        parent_bone: "Bip01 L Thigh",
+    },
+    DummyDefinition {
+        id: 11,
+        name: "dummy_l_calf",
+        parent_bone: "Bip01 L Calf",
+    },
+    DummyDefinition {
+        id: 12,
+        name: "dummy_l_foot",
+        parent_bone: "Bip01 L Foot",
+    },
+    DummyDefinition {
+        id: 13,
+        name: "dummy_r_thigh",
+        parent_bone: "Bip01 R Thigh",
+    },
+    DummyDefinition {
+        id: 14,
+        name: "dummy_r_calf",
+        parent_bone: "Bip01 R Calf",
+    },
+    DummyDefinition {
+        id: 15,
+        name: "dummy_r_foot",
+        parent_bone: "Bip01 R Foot",
+    },
 ];
 
 /// Total dummy count matching PKO's LINK_ID_NUM = 24
@@ -50,9 +114,7 @@ pub struct GeneratedDummy {
 ///
 /// `bone_name_to_index` maps PKO bone names to their final array indices.
 /// Generates dummies at the identity transform relative to their parent bones.
-pub fn generate_standard_dummies(
-    bone_name_to_index: &HashMap<String, u32>,
-) -> Vec<GeneratedDummy> {
+pub fn generate_standard_dummies(bone_name_to_index: &HashMap<String, u32>) -> Vec<GeneratedDummy> {
     let mut dummies = Vec::new();
 
     for def in STANDARD_DUMMIES {
@@ -83,14 +145,17 @@ pub fn generate_standard_dummies(
 }
 
 /// Convert generated dummies to the format expected by LwBoneDummyInfo
-pub fn to_bone_dummy_info(dummies: &[GeneratedDummy]) -> Vec<crate::animation::character::LwBoneDummyInfo> {
-    dummies.iter().map(|d| {
-        crate::animation::character::LwBoneDummyInfo {
+pub fn to_bone_dummy_info(
+    dummies: &[GeneratedDummy],
+) -> Vec<crate::animation::character::LwBoneDummyInfo> {
+    dummies
+        .iter()
+        .map(|d| crate::animation::character::LwBoneDummyInfo {
             id: d.id,
             parent_bone_id: d.parent_bone_id,
             mat: d.matrix.clone(),
-        }
-    }).collect()
+        })
+        .collect()
 }
 
 #[cfg(test)]

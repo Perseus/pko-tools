@@ -138,57 +138,72 @@ pub fn gltf_image_to_dynamic(image_data: &gltf::image::Data) -> anyhow::Result<D
             Ok(DynamicImage::ImageRgb8(img))
         }
         gltf::image::Format::R8G8B8A8 => {
-            let img =
-                image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(w, h, pixels.clone())
-                    .ok_or_else(|| anyhow::anyhow!("Failed to create RGBA8 image buffer"))?;
+            let img = image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(w, h, pixels.clone())
+                .ok_or_else(|| anyhow::anyhow!("Failed to create RGBA8 image buffer"))?;
             Ok(DynamicImage::ImageRgba8(img))
         }
         gltf::image::Format::R16G16B16 => {
-            let img =
-                image::ImageBuffer::<image::Rgb<u16>, _>::from_raw(w, h, bytemuck::cast_slice(pixels).to_vec())
-                    .ok_or_else(|| anyhow::anyhow!("Failed to create RGB16 image buffer"))?;
+            let img = image::ImageBuffer::<image::Rgb<u16>, _>::from_raw(
+                w,
+                h,
+                bytemuck::cast_slice(pixels).to_vec(),
+            )
+            .ok_or_else(|| anyhow::anyhow!("Failed to create RGB16 image buffer"))?;
             Ok(DynamicImage::ImageRgb16(img))
         }
         gltf::image::Format::R16G16B16A16 => {
-            let img =
-                image::ImageBuffer::<image::Rgba<u16>, _>::from_raw(w, h, bytemuck::cast_slice(pixels).to_vec())
-                    .ok_or_else(|| anyhow::anyhow!("Failed to create RGBA16 image buffer"))?;
+            let img = image::ImageBuffer::<image::Rgba<u16>, _>::from_raw(
+                w,
+                h,
+                bytemuck::cast_slice(pixels).to_vec(),
+            )
+            .ok_or_else(|| anyhow::anyhow!("Failed to create RGBA16 image buffer"))?;
             Ok(DynamicImage::ImageRgba16(img))
         }
         gltf::image::Format::R8 => {
-            let img =
-                image::ImageBuffer::<image::Luma<u8>, _>::from_raw(w, h, pixels.clone())
-                    .ok_or_else(|| anyhow::anyhow!("Failed to create L8 image buffer"))?;
+            let img = image::ImageBuffer::<image::Luma<u8>, _>::from_raw(w, h, pixels.clone())
+                .ok_or_else(|| anyhow::anyhow!("Failed to create L8 image buffer"))?;
             Ok(DynamicImage::ImageLuma8(img))
         }
         gltf::image::Format::R8G8 => {
-            let img =
-                image::ImageBuffer::<image::LumaA<u8>, _>::from_raw(w, h, pixels.clone())
-                    .ok_or_else(|| anyhow::anyhow!("Failed to create LA8 image buffer"))?;
+            let img = image::ImageBuffer::<image::LumaA<u8>, _>::from_raw(w, h, pixels.clone())
+                .ok_or_else(|| anyhow::anyhow!("Failed to create LA8 image buffer"))?;
             Ok(DynamicImage::ImageLumaA8(img))
         }
         gltf::image::Format::R16 => {
-            let img =
-                image::ImageBuffer::<image::Luma<u16>, _>::from_raw(w, h, bytemuck::cast_slice(pixels).to_vec())
-                    .ok_or_else(|| anyhow::anyhow!("Failed to create L16 image buffer"))?;
+            let img = image::ImageBuffer::<image::Luma<u16>, _>::from_raw(
+                w,
+                h,
+                bytemuck::cast_slice(pixels).to_vec(),
+            )
+            .ok_or_else(|| anyhow::anyhow!("Failed to create L16 image buffer"))?;
             Ok(DynamicImage::ImageLuma16(img))
         }
         gltf::image::Format::R16G16 => {
-            let img =
-                image::ImageBuffer::<image::LumaA<u16>, _>::from_raw(w, h, bytemuck::cast_slice(pixels).to_vec())
-                    .ok_or_else(|| anyhow::anyhow!("Failed to create LA16 image buffer"))?;
+            let img = image::ImageBuffer::<image::LumaA<u16>, _>::from_raw(
+                w,
+                h,
+                bytemuck::cast_slice(pixels).to_vec(),
+            )
+            .ok_or_else(|| anyhow::anyhow!("Failed to create LA16 image buffer"))?;
             Ok(DynamicImage::ImageLumaA16(img))
         }
         gltf::image::Format::R32G32B32FLOAT => {
-            let img =
-                image::ImageBuffer::<image::Rgb<f32>, _>::from_raw(w, h, bytemuck::cast_slice(pixels).to_vec())
-                    .ok_or_else(|| anyhow::anyhow!("Failed to create RGB32F image buffer"))?;
+            let img = image::ImageBuffer::<image::Rgb<f32>, _>::from_raw(
+                w,
+                h,
+                bytemuck::cast_slice(pixels).to_vec(),
+            )
+            .ok_or_else(|| anyhow::anyhow!("Failed to create RGB32F image buffer"))?;
             Ok(DynamicImage::ImageRgb32F(img))
         }
         gltf::image::Format::R32G32B32A32FLOAT => {
-            let img =
-                image::ImageBuffer::<image::Rgba<f32>, _>::from_raw(w, h, bytemuck::cast_slice(pixels).to_vec())
-                    .ok_or_else(|| anyhow::anyhow!("Failed to create RGBA32F image buffer"))?;
+            let img = image::ImageBuffer::<image::Rgba<f32>, _>::from_raw(
+                w,
+                h,
+                bytemuck::cast_slice(pixels).to_vec(),
+            )
+            .ok_or_else(|| anyhow::anyhow!("Failed to create RGBA32F image buffer"))?;
             Ok(DynamicImage::ImageRgba32F(img))
         }
     }
@@ -205,7 +220,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let out = tmp.path().join("test.bmp");
 
-        let result = convert_dynamic_image_to_bmp(&img, &out, &TextureConvertOptions::default()).unwrap();
+        let result =
+            convert_dynamic_image_to_bmp(&img, &out, &TextureConvertOptions::default()).unwrap();
         assert_eq!(result.original_width, 64);
         assert_eq!(result.final_width, 64);
         assert!(!result.alpha_stripped);
@@ -219,7 +235,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let out = tmp.path().join("test.bmp");
 
-        let result = convert_dynamic_image_to_bmp(&img, &out, &TextureConvertOptions::default()).unwrap();
+        let result =
+            convert_dynamic_image_to_bmp(&img, &out, &TextureConvertOptions::default()).unwrap();
         assert!(result.alpha_stripped);
         assert_eq!(result.final_width, 128);
     }
@@ -230,7 +247,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let out = tmp.path().join("test.bmp");
 
-        let result = convert_dynamic_image_to_bmp(&img, &out, &TextureConvertOptions::default()).unwrap();
+        let result =
+            convert_dynamic_image_to_bmp(&img, &out, &TextureConvertOptions::default()).unwrap();
         assert!(result.was_resized);
         assert_eq!(result.final_width, 512);
         assert_eq!(result.final_height, 512);
@@ -242,7 +260,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let out = tmp.path().join("test.bmp");
 
-        let result = convert_dynamic_image_to_bmp(&img, &out, &TextureConvertOptions::default()).unwrap();
+        let result =
+            convert_dynamic_image_to_bmp(&img, &out, &TextureConvertOptions::default()).unwrap();
         assert!(result.was_resized);
         assert!(result.final_width <= 2048);
         assert!(result.final_height <= 2048);
