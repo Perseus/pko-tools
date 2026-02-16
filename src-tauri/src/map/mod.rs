@@ -1,5 +1,6 @@
 pub mod area_set;
 pub mod commands;
+pub mod glb;
 pub mod grid_images;
 pub mod lmo;
 pub mod mapinfo;

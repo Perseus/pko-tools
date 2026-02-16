@@ -896,6 +896,258 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
     Ok(json)
 }
 
+/// Build a GLB-ready building model: returns (glTF JSON string, binary buffer).
+/// Uses the same mesh/material/animation logic as `build_gltf_from_lmo`, but
+/// packs all buffer data into a single binary buffer for GLB writing.
+pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String, Vec<u8>)> {
+    let model = lmo::load_lmo(lmo_path)?;
+
+    if model.geom_objects.is_empty() {
+        return Err(anyhow!("LMO file has no geometry objects"));
+    }
+
+    // Build using the same GltfBuilder approach as build_gltf_from_lmo
+    let mut builder = GltfBuilder::new();
+    let mut child_indices = Vec::new();
+    let mut animated_nodes: Vec<(u32, &LmoGeomObject)> = Vec::new();
+
+    for (gi, geom) in model.geom_objects.iter().enumerate() {
+        let prefix = format!("geom{}", gi);
+        let material_base_idx = builder.materials.len() as u32;
+
+        if geom.materials.is_empty() {
+            build_lmo_material(
+                &mut builder,
+                &lmo::LmoMaterial {
+                    diffuse: [0.7, 0.7, 0.7, 1.0],
+                    ambient: [0.3, 0.3, 0.3, 1.0],
+                    opacity: 1.0,
+                    alpha_test_enabled: false,
+                    alpha_ref: 0,
+                    tex_filename: None,
+                },
+                &format!("{}_default_mat", prefix),
+                project_dir,
+                true,
+            );
+        } else {
+            for (mi, mat) in geom.materials.iter().enumerate() {
+                build_lmo_material(
+                    &mut builder,
+                    mat,
+                    &format!("{}_mat{}", prefix, mi),
+                    project_dir,
+                    true,
+                );
+            }
+        }
+
+        let has_animation = geom.animation.is_some();
+        let primitives = build_geom_primitives(
+            &mut builder,
+            geom,
+            &prefix,
+            material_base_idx,
+            has_animation,
+        );
+
+        if primitives.is_empty() {
+            continue;
+        }
+
+        let mesh_idx = builder.meshes.len() as u32;
+        builder.meshes.push(gltf_json::Mesh {
+            name: Some(format!("geom_{}", gi)),
+            primitives,
+            weights: None,
+            extensions: None,
+            extras: None,
+        });
+
+        let node_idx = builder.nodes.len() as u32;
+        builder.nodes.push(gltf_json::Node {
+            mesh: Some(gltf_json::Index::new(mesh_idx)),
+            name: Some(format!("geom_node_{}", gi)),
+            ..Default::default()
+        });
+        child_indices.push(gltf_json::Index::new(node_idx));
+
+        if has_animation {
+            animated_nodes.push((node_idx, geom));
+        }
+    }
+
+    if child_indices.is_empty() {
+        return Err(anyhow!("No renderable geometry in LMO file"));
+    }
+
+    let animations = build_animations(&mut builder, &animated_nodes);
+
+    let root_idx = builder.nodes.len() as u32;
+    builder.nodes.push(gltf_json::Node {
+        name: Some("building_root".to_string()),
+        children: Some(child_indices),
+        ..Default::default()
+    });
+
+    // Convert data-URI buffers into a single GLB binary buffer, then append
+    // image data as additional buffer views.
+    let (mut bin, _single_buffer, mut buffer_views_out) =
+        merge_data_uri_buffers(&builder.buffers, &builder.buffer_views)?;
+
+    let mut images_out = Vec::new();
+    for img in &builder.images {
+        if let Some(ref uri) = img.uri {
+            if let Some((mime, data)) = decode_data_uri_with_mime(uri) {
+                let pad = (4 - (bin.len() % 4)) % 4;
+                bin.extend(std::iter::repeat(0u8).take(pad));
+                let offset = bin.len();
+                bin.extend_from_slice(&data);
+
+                let bv_idx = buffer_views_out.len();
+                buffer_views_out.push(gltf_json::buffer::View {
+                    buffer: gltf_json::Index::new(0),
+                    byte_length: USize64(data.len() as u64),
+                    byte_offset: Some(USize64(offset as u64)),
+                    target: None,
+                    byte_stride: None,
+                    extensions: None,
+                    extras: None,
+                    name: img.name.as_ref().map(|n| format!("{}_view", n)),
+                });
+
+                images_out.push(gltf_json::Image {
+                    buffer_view: Some(gltf_json::Index::new(bv_idx as u32)),
+                    mime_type: Some(gltf_json::image::MimeType(mime)),
+                    uri: None,
+                    name: img.name.clone(),
+                    extensions: None,
+                    extras: None,
+                });
+            } else {
+                // Keep as-is (shouldn't happen for our generated data)
+                images_out.push(img.clone());
+            }
+        } else {
+            images_out.push(img.clone());
+        }
+    }
+
+    let final_buffer = gltf_json::Buffer {
+        byte_length: USize64(bin.len() as u64),
+        extensions: None,
+        extras: None,
+        name: Some("building_buffer".into()),
+        uri: None,
+    };
+
+    let root = gltf_json::Root {
+        asset: gltf_json::Asset {
+            version: "2.0".to_string(),
+            generator: Some("pko-tools".to_string()),
+            ..Default::default()
+        },
+        nodes: builder.nodes,
+        scenes: vec![gltf_json::Scene {
+            nodes: vec![gltf_json::Index::new(root_idx)],
+            name: Some("BuildingScene".to_string()),
+            extensions: None,
+            extras: None,
+        }],
+        scene: Some(gltf_json::Index::new(0)),
+        accessors: builder.accessors,
+        buffers: vec![final_buffer],
+        buffer_views: buffer_views_out,
+        meshes: builder.meshes,
+        materials: builder.materials,
+        images: images_out,
+        samplers: builder.samplers,
+        textures: builder.textures,
+        animations,
+        ..Default::default()
+    };
+
+    let json = serde_json::to_string(&root)?;
+    Ok((json, bin))
+}
+
+/// Decode a data URI (e.g., "data:application/octet-stream;base64,...") to bytes.
+fn decode_data_uri(uri: &str) -> Option<Vec<u8>> {
+    let prefix = "data:";
+    if !uri.starts_with(prefix) {
+        return None;
+    }
+    let rest = &uri[prefix.len()..];
+    let base64_marker = ";base64,";
+    let base64_pos = rest.find(base64_marker)?;
+    let encoded = &rest[base64_pos + base64_marker.len()..];
+    BASE64_STANDARD.decode(encoded).ok()
+}
+
+/// Decode a data URI returning (mime_type, bytes).
+fn decode_data_uri_with_mime(uri: &str) -> Option<(String, Vec<u8>)> {
+    let prefix = "data:";
+    if !uri.starts_with(prefix) {
+        return None;
+    }
+    let rest = &uri[prefix.len()..];
+    let base64_marker = ";base64,";
+    let base64_pos = rest.find(base64_marker)?;
+    let mime = rest[..base64_pos].to_string();
+    let encoded = &rest[base64_pos + base64_marker.len()..];
+    let data = BASE64_STANDARD.decode(encoded).ok()?;
+    Some((mime, data))
+}
+
+/// Merge multiple data-URI buffers into a single binary buffer.
+/// Returns (merged_bytes, single_buffer, adjusted_buffer_views).
+/// All buffer views are re-indexed to reference buffer 0.
+fn merge_data_uri_buffers(
+    buffers: &[gltf_json::Buffer],
+    views: &[gltf_json::buffer::View],
+) -> Result<(Vec<u8>, gltf_json::Buffer, Vec<gltf_json::buffer::View>)> {
+    // Decode each buffer's data URI to bytes, track offsets
+    let mut merged = Vec::new();
+    let mut buffer_offsets: Vec<usize> = Vec::new();
+
+    for buf in buffers {
+        let data = buf
+            .uri
+            .as_ref()
+            .and_then(|u| decode_data_uri(u))
+            .unwrap_or_default();
+
+        // Pad to 4-byte alignment
+        let pad = (4 - (merged.len() % 4)) % 4;
+        merged.extend(std::iter::repeat(0u8).take(pad));
+        buffer_offsets.push(merged.len());
+        merged.extend_from_slice(&data);
+    }
+
+    // Adjust buffer views to reference single buffer 0 with global offsets
+    let mut new_views = Vec::with_capacity(views.len());
+    for bv in views {
+        let buf_idx = bv.buffer.value() as usize;
+        let base_offset = buffer_offsets.get(buf_idx).copied().unwrap_or(0);
+        let local_offset = bv.byte_offset.map(|o| o.0 as usize).unwrap_or(0);
+
+        let mut new_bv = bv.clone();
+        new_bv.buffer = gltf_json::Index::new(0);
+        new_bv.byte_offset = Some(USize64((base_offset + local_offset) as u64));
+        new_views.push(new_bv);
+    }
+
+    let single_buffer = gltf_json::Buffer {
+        byte_length: USize64(merged.len() as u64),
+        extensions: None,
+        extras: None,
+        name: Some("merged_buffer".into()),
+        uri: None,
+    };
+
+    Ok((merged, single_buffer, new_views))
+}
+
 // ============================================================================
 // Public API: batch load scene models for map integration
 // ============================================================================

@@ -1002,6 +1002,661 @@ pub fn build_terrain_gltf(
     Ok(gltf_json)
 }
 
+/// Metadata for the v3 terrain GLB scene extras and placement nodes.
+pub struct TerrainGlbMetadata<'a> {
+    pub map_name: &'a str,
+    pub areas_json: &'a serde_json::Value,
+    pub spawn_point: Option<[i32; 2]>,
+    pub light_direction: [f32; 3],
+    pub light_color: [f32; 3],
+    pub ambient: [f32; 3],
+    pub background_color: [u8; 3],
+    /// Building placements: (obj_id, position [x,y,z], rotation_y_degrees, scale, source_glb_relative_path)
+    pub building_placements: Vec<(u32, [f32; 3], f32, f32, String)>,
+}
+
+/// Build a GLB-ready terrain mesh: returns (glTF JSON string, binary buffer).
+/// Unlike `build_terrain_gltf` (which uses data URIs for the viewer), this
+/// function packs all buffer data into a single `Vec<u8>` for GLB writing.
+/// Also adds scene.extras metadata, KHR_lights_punctual, SpawnPoint, and
+/// building placement nodes for v3 export.
+pub fn build_terrain_glb(
+    parsed_map: &ParsedMap,
+    atlas: Option<&RgbImage>,
+    metadata: &TerrainGlbMetadata,
+) -> Result<(String, Vec<u8>)> {
+    let w = parsed_map.header.n_width;
+    let h = parsed_map.header.n_height;
+
+    // ----- Step 1: Build vertex data (same geometry as build_terrain_gltf) -----
+    let vw = (w + 1) as usize;
+    let vh = (h + 1) as usize;
+    let vertex_count = vw * vh;
+
+    let mut positions: Vec<f32> = Vec::with_capacity(vertex_count * 3);
+    let mut colors: Vec<f32> = Vec::with_capacity(vertex_count * 4);
+
+    for vy in 0..vh {
+        for vx in 0..vw {
+            let tx = vx as i32;
+            let ty = vy as i32;
+
+            let (height, r, g, b) = match get_render_vertex_tile(parsed_map, tx, ty) {
+                Some(tile) => {
+                    let (cr, cg, cb) = rgb565_to_float(tile.s_color);
+                    (tile_height(tile), cr, cg, cb)
+                }
+                None => (UNDERWATER_HEIGHT / MAP_VISUAL_SCALE, 1.0, 1.0, 1.0),
+            };
+
+            positions.push(vx as f32);
+            positions.push(height);
+            positions.push(vy as f32);
+
+            colors.push(r);
+            colors.push(g);
+            colors.push(b);
+            colors.push(1.0);
+        }
+    }
+
+    // UV coordinates
+    let uvs: Option<Vec<f32>> = atlas.map(|_| {
+        let mut uv = Vec::with_capacity(vertex_count * 2);
+        let fw = w as f32;
+        let fh = h as f32;
+        for vy in 0..vh {
+            for vx in 0..vw {
+                uv.push(vx as f32 / fw);
+                uv.push(vy as f32 / fh);
+            }
+        }
+        uv
+    });
+
+    // ----- Step 2: Build triangle indices -----
+    let mut indices: Vec<u32> = Vec::new();
+    for ty in 0..h {
+        for tx in 0..w {
+            if get_tile(parsed_map, tx, ty).is_none() {
+                continue;
+            }
+            let v00 = (ty as u32) * (vw as u32) + (tx as u32);
+            let v10 = v00 + 1;
+            let v01 = v00 + vw as u32;
+            let v11 = v01 + 1;
+
+            indices.push(v00);
+            indices.push(v01);
+            indices.push(v10);
+            indices.push(v10);
+            indices.push(v01);
+            indices.push(v11);
+        }
+    }
+
+    if indices.is_empty() {
+        return Err(anyhow!("Map has no visible terrain tiles"));
+    }
+
+    // ----- Step 3: Compute normals -----
+    let mut normals = vec![[0.0f32; 3]; vertex_count];
+    for tri in indices.chunks(3) {
+        let i0 = tri[0] as usize;
+        let i1 = tri[1] as usize;
+        let i2 = tri[2] as usize;
+
+        let p0 = [positions[i0*3], positions[i0*3+1], positions[i0*3+2]];
+        let p1 = [positions[i1*3], positions[i1*3+1], positions[i1*3+2]];
+        let p2 = [positions[i2*3], positions[i2*3+1], positions[i2*3+2]];
+
+        let e1 = [p1[0]-p0[0], p1[1]-p0[1], p1[2]-p0[2]];
+        let e2 = [p2[0]-p0[0], p2[1]-p0[1], p2[2]-p0[2]];
+
+        let n = [
+            e1[1]*e2[2] - e1[2]*e2[1],
+            e1[2]*e2[0] - e1[0]*e2[2],
+            e1[0]*e2[1] - e1[1]*e2[0],
+        ];
+
+        for &idx in &[i0, i1, i2] {
+            normals[idx][0] += n[0];
+            normals[idx][1] += n[1];
+            normals[idx][2] += n[2];
+        }
+    }
+    for n in &mut normals {
+        let len = (n[0]*n[0] + n[1]*n[1] + n[2]*n[2]).sqrt();
+        if len > 1e-8 {
+            n[0] /= len; n[1] /= len; n[2] /= len;
+        } else {
+            *n = [0.0, 1.0, 0.0];
+        }
+    }
+
+    // ----- Step 4: Pack all data into a single binary buffer -----
+    // Each segment is 4-byte aligned for GLB spec compliance.
+    let mut bin = Vec::new();
+    let mut buffer_views = vec![];
+    let mut accessors = vec![];
+
+    // Position min/max
+    let mut pos_min = [f32::MAX; 3];
+    let mut pos_max = [f32::MIN; 3];
+    for i in 0..vertex_count {
+        for c in 0..3 {
+            let v = positions[i * 3 + c];
+            pos_min[c] = pos_min[c].min(v);
+            pos_max[c] = pos_max[c].max(v);
+        }
+    }
+
+    // Helper: append f32 slice to bin, return (offset, byte_length)
+    fn append_f32_data(bin: &mut Vec<u8>, data: &[f32]) -> (usize, usize) {
+        // Pad to 4-byte boundary (f32 data is naturally aligned)
+        let pad = (4 - (bin.len() % 4)) % 4;
+        bin.extend(std::iter::repeat(0u8).take(pad));
+        let offset = bin.len();
+        let bytes: Vec<u8> = data.iter().flat_map(|f| f.to_le_bytes()).collect();
+        bin.extend_from_slice(&bytes);
+        (offset, bytes.len())
+    }
+
+    fn append_u32_data(bin: &mut Vec<u8>, data: &[u32]) -> (usize, usize) {
+        let pad = (4 - (bin.len() % 4)) % 4;
+        bin.extend(std::iter::repeat(0u8).take(pad));
+        let offset = bin.len();
+        let bytes: Vec<u8> = data.iter().flat_map(|i| i.to_le_bytes()).collect();
+        bin.extend_from_slice(&bytes);
+        (offset, bytes.len())
+    }
+
+    // Positions
+    let (pos_off, pos_len) = append_f32_data(&mut bin, &positions);
+    let pos_bv_idx = buffer_views.len();
+    buffer_views.push(gltf::buffer::View {
+        buffer: gltf::Index::new(0),
+        byte_length: USize64(pos_len as u64),
+        byte_offset: Some(USize64(pos_off as u64)),
+        target: Some(Checked::Valid(gltf::buffer::Target::ArrayBuffer)),
+        byte_stride: None, extensions: None, extras: None,
+        name: Some("positions_view".into()),
+    });
+    let pos_acc_idx = accessors.len();
+    accessors.push(gltf::Accessor {
+        buffer_view: Some(gltf::Index::new(pos_bv_idx as u32)),
+        byte_offset: Some(USize64(0)),
+        component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
+        count: USize64(vertex_count as u64),
+        type_: Checked::Valid(gltf::accessor::Type::Vec3),
+        min: Some(serde_json::to_value(pos_min)?),
+        max: Some(serde_json::to_value(pos_max)?),
+        name: Some("position_accessor".into()),
+        normalized: false, sparse: None, extensions: None, extras: None,
+    });
+
+    // Normals
+    let normal_data: Vec<f32> = normals.iter().flat_map(|n| n.iter().copied()).collect();
+    let (norm_off, norm_len) = append_f32_data(&mut bin, &normal_data);
+    let norm_bv_idx = buffer_views.len();
+    buffer_views.push(gltf::buffer::View {
+        buffer: gltf::Index::new(0),
+        byte_length: USize64(norm_len as u64),
+        byte_offset: Some(USize64(norm_off as u64)),
+        target: Some(Checked::Valid(gltf::buffer::Target::ArrayBuffer)),
+        byte_stride: None, extensions: None, extras: None,
+        name: Some("normals_view".into()),
+    });
+    let norm_acc_idx = accessors.len();
+    accessors.push(gltf::Accessor {
+        buffer_view: Some(gltf::Index::new(norm_bv_idx as u32)),
+        byte_offset: Some(USize64(0)),
+        component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
+        count: USize64(vertex_count as u64),
+        type_: Checked::Valid(gltf::accessor::Type::Vec3),
+        min: None, max: None,
+        name: Some("normal_accessor".into()),
+        normalized: false, sparse: None, extensions: None, extras: None,
+    });
+
+    // Colors (VEC4)
+    let (col_off, col_len) = append_f32_data(&mut bin, &colors);
+    let col_bv_idx = buffer_views.len();
+    buffer_views.push(gltf::buffer::View {
+        buffer: gltf::Index::new(0),
+        byte_length: USize64(col_len as u64),
+        byte_offset: Some(USize64(col_off as u64)),
+        target: Some(Checked::Valid(gltf::buffer::Target::ArrayBuffer)),
+        byte_stride: None, extensions: None, extras: None,
+        name: Some("colors_view".into()),
+    });
+    let col_acc_idx = accessors.len();
+    accessors.push(gltf::Accessor {
+        buffer_view: Some(gltf::Index::new(col_bv_idx as u32)),
+        byte_offset: Some(USize64(0)),
+        component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
+        count: USize64(vertex_count as u64),
+        type_: Checked::Valid(gltf::accessor::Type::Vec4),
+        min: None, max: None,
+        name: Some("color_accessor".into()),
+        normalized: false, sparse: None, extensions: None, extras: None,
+    });
+
+    // Indices
+    let (idx_off, idx_len) = append_u32_data(&mut bin, &indices);
+    let idx_bv_idx = buffer_views.len();
+    buffer_views.push(gltf::buffer::View {
+        buffer: gltf::Index::new(0),
+        byte_length: USize64(idx_len as u64),
+        byte_offset: Some(USize64(idx_off as u64)),
+        target: Some(Checked::Valid(gltf::buffer::Target::ElementArrayBuffer)),
+        byte_stride: None, extensions: None, extras: None,
+        name: Some("indices_view".into()),
+    });
+    let idx_acc_idx = accessors.len();
+    accessors.push(gltf::Accessor {
+        buffer_view: Some(gltf::Index::new(idx_bv_idx as u32)),
+        byte_offset: Some(USize64(0)),
+        component_type: Checked::Valid(GenericComponentType(ComponentType::U32)),
+        count: USize64(indices.len() as u64),
+        type_: Checked::Valid(gltf::accessor::Type::Scalar),
+        min: None, max: None,
+        name: Some("index_accessor".into()),
+        normalized: false, sparse: None, extensions: None, extras: None,
+    });
+
+    // UVs (optional, if atlas provided)
+    let uv_acc_idx = if let Some(ref uv_data) = uvs {
+        let (uv_off, uv_len) = append_f32_data(&mut bin, uv_data);
+        let uv_bv_idx = buffer_views.len();
+        buffer_views.push(gltf::buffer::View {
+            buffer: gltf::Index::new(0),
+            byte_length: USize64(uv_len as u64),
+            byte_offset: Some(USize64(uv_off as u64)),
+            target: Some(Checked::Valid(gltf::buffer::Target::ArrayBuffer)),
+            byte_stride: None, extensions: None, extras: None,
+            name: Some("uv_view".into()),
+        });
+        let uv_acc = accessors.len();
+        accessors.push(gltf::Accessor {
+            buffer_view: Some(gltf::Index::new(uv_bv_idx as u32)),
+            byte_offset: Some(USize64(0)),
+            component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
+            count: USize64(vertex_count as u64),
+            type_: Checked::Valid(gltf::accessor::Type::Vec2),
+            min: None, max: None,
+            name: Some("uv_accessor".into()),
+            normalized: false, sparse: None, extensions: None, extras: None,
+        });
+        Some(uv_acc)
+    } else {
+        None
+    };
+
+    // ----- Step 5: Atlas texture (embedded in binary buffer) -----
+    let mut images = vec![];
+    let mut textures = vec![];
+    let mut samplers = vec![];
+
+    let base_color_texture = if let Some(atlas_img) = atlas {
+        // Encode atlas as JPEG
+        let mut jpg_buf = std::io::Cursor::new(Vec::new());
+        let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpg_buf, 85);
+        atlas_img.write_with_encoder(encoder)
+            .map_err(|e| anyhow!("Failed to encode atlas JPEG: {}", e))?;
+        let jpg_bytes = jpg_buf.into_inner();
+
+        // Append JPEG bytes to binary buffer
+        let pad = (4 - (bin.len() % 4)) % 4;
+        bin.extend(std::iter::repeat(0u8).take(pad));
+        let img_offset = bin.len();
+        bin.extend_from_slice(&jpg_bytes);
+
+        let img_bv_idx = buffer_views.len();
+        buffer_views.push(gltf::buffer::View {
+            buffer: gltf::Index::new(0),
+            byte_length: USize64(jpg_bytes.len() as u64),
+            byte_offset: Some(USize64(img_offset as u64)),
+            target: None, // image buffer views have no target
+            byte_stride: None, extensions: None, extras: None,
+            name: Some("atlas_image_view".into()),
+        });
+
+        images.push(gltf::Image {
+            buffer_view: Some(gltf::Index::new(img_bv_idx as u32)),
+            mime_type: Some(gltf::image::MimeType("image/jpeg".to_string())),
+            uri: None, // embedded in GLB binary
+            name: Some("terrain_atlas".into()),
+            extensions: None, extras: None,
+        });
+
+        samplers.push(gltf::texture::Sampler {
+            mag_filter: Some(Checked::Valid(gltf::texture::MagFilter::Linear)),
+            min_filter: Some(Checked::Valid(gltf::texture::MinFilter::Linear)),
+            wrap_s: Checked::Valid(gltf::texture::WrappingMode::ClampToEdge),
+            wrap_t: Checked::Valid(gltf::texture::WrappingMode::ClampToEdge),
+            name: Some("terrain_sampler".into()),
+            extensions: None, extras: None,
+        });
+
+        textures.push(gltf::Texture {
+            sampler: Some(gltf::Index::new(0)),
+            source: gltf::Index::new(0),
+            name: Some("terrain_texture".into()),
+            extensions: None, extras: None,
+        });
+
+        Some(gltf::texture::Info {
+            index: gltf::Index::new(0),
+            tex_coord: 0,
+            extensions: None, extras: None,
+        })
+    } else {
+        None
+    };
+
+    // ----- Step 6: Build mesh primitive and material -----
+    let mut attributes = std::collections::BTreeMap::new();
+    attributes.insert(
+        Checked::Valid(gltf::mesh::Semantic::Positions),
+        gltf::Index::new(pos_acc_idx as u32),
+    );
+    attributes.insert(
+        Checked::Valid(gltf::mesh::Semantic::Normals),
+        gltf::Index::new(norm_acc_idx as u32),
+    );
+    attributes.insert(
+        Checked::Valid(gltf::mesh::Semantic::Colors(0)),
+        gltf::Index::new(col_acc_idx as u32),
+    );
+    if let Some(uv_acc) = uv_acc_idx {
+        attributes.insert(
+            Checked::Valid(gltf::mesh::Semantic::TexCoords(0)),
+            gltf::Index::new(uv_acc as u32),
+        );
+    }
+
+    let material = gltf::Material {
+        alpha_cutoff: None,
+        alpha_mode: Checked::Valid(gltf::material::AlphaMode::Opaque),
+        double_sided: true,
+        pbr_metallic_roughness: gltf::material::PbrMetallicRoughness {
+            base_color_factor: gltf::material::PbrBaseColorFactor([1.0, 1.0, 1.0, 1.0]),
+            base_color_texture,
+            metallic_factor: gltf::material::StrengthFactor(0.0),
+            roughness_factor: gltf::material::StrengthFactor(1.0),
+            metallic_roughness_texture: None,
+            extensions: None, extras: None,
+        },
+        normal_texture: None, occlusion_texture: None, emissive_texture: None,
+        emissive_factor: gltf::material::EmissiveFactor([0.0, 0.0, 0.0]),
+        extensions: None, extras: None,
+        name: Some("terrain_material".into()),
+    };
+
+    let primitive = gltf::mesh::Primitive {
+        attributes,
+        indices: Some(gltf::Index::new(idx_acc_idx as u32)),
+        material: Some(gltf::Index::new(0)),
+        mode: Checked::Valid(gltf::mesh::Mode::Triangles),
+        targets: None, extensions: None, extras: None,
+    };
+
+    let mesh = gltf::Mesh {
+        name: Some("terrain".into()),
+        primitives: vec![primitive],
+        weights: None, extensions: None, extras: None,
+    };
+
+    // ----- Step 7: Build scene nodes -----
+    let mut nodes = vec![];
+    let mut root_children = vec![];
+
+    // Terrain mesh node (index 0)
+    nodes.push(gltf::Node {
+        mesh: Some(gltf::Index::new(0)),
+        name: Some("terrain_mesh".into()),
+        ..Default::default()
+    });
+    root_children.push(gltf::Index::new(0));
+
+    // SpawnPoint empty node
+    if let Some([sx, sy]) = metadata.spawn_point {
+        let spawn_node_idx = nodes.len() as u32;
+        // Look up terrain height at spawn tile
+        let terrain_h = get_tile(parsed_map, sx, sy)
+            .map(|t| tile_height(t))
+            .unwrap_or(UNDERWATER_HEIGHT / MAP_VISUAL_SCALE);
+
+        nodes.push(gltf::Node {
+            name: Some("SpawnPoint".into()),
+            translation: Some([sx as f32, terrain_h, sy as f32]),
+            ..Default::default()
+        });
+        root_children.push(gltf::Index::new(spawn_node_idx));
+    }
+
+    // Building placement nodes under a "Buildings" parent
+    if !metadata.building_placements.is_empty() {
+        let buildings_parent_idx = nodes.len() as u32;
+        let mut building_child_indices = vec![];
+
+        for (i, (obj_id, position, rotation_y_deg, scale, source_glb)) in
+            metadata.building_placements.iter().enumerate()
+        {
+            let child_idx = nodes.len() as u32 + 1 + i as u32; // +1 for parent node
+
+            let rotation = if *rotation_y_deg != 0.0 {
+                let angle_rad = rotation_y_deg.to_radians();
+                let half = angle_rad / 2.0;
+                Some(gltf::scene::UnitQuaternion([0.0, half.sin(), 0.0, half.cos()]))
+            } else {
+                None
+            };
+
+            let scale_arr = if (*scale - 1.0).abs() > 1e-6 {
+                Some([*scale, *scale, *scale])
+            } else {
+                None
+            };
+
+            let extras_json = serde_json::to_string(&serde_json::json!({
+                "obj_id": obj_id,
+                "source_glb": source_glb,
+            }))?;
+
+            // We push these after the parent, so indices need adjustment
+            building_child_indices.push(gltf::Index::new(child_idx));
+            // Temporarily store - will push after parent
+            let _ = (position, rotation, scale_arr, extras_json);
+        }
+
+        // Push parent node first
+        nodes.push(gltf::Node {
+            name: Some("Buildings".into()),
+            children: Some(building_child_indices),
+            ..Default::default()
+        });
+        root_children.push(gltf::Index::new(buildings_parent_idx));
+
+        // Now push all building child nodes
+        for (obj_id, position, rotation_y_deg, scale, source_glb) in
+            &metadata.building_placements
+        {
+            let rotation = if *rotation_y_deg != 0.0 {
+                let angle_rad = rotation_y_deg.to_radians();
+                let half = angle_rad / 2.0;
+                Some(gltf::scene::UnitQuaternion([0.0, half.sin(), 0.0, half.cos()]))
+            } else {
+                None
+            };
+
+            let scale_arr = if (*scale - 1.0).abs() > 1e-6 {
+                Some([*scale, *scale, *scale])
+            } else {
+                None
+            };
+
+            let extras_json = serde_json::to_string(&serde_json::json!({
+                "obj_id": obj_id,
+                "source_glb": source_glb,
+            }))?;
+
+            nodes.push(gltf::Node {
+                name: Some(format!("building_{}", obj_id)),
+                translation: Some(*position),
+                rotation,
+                scale: scale_arr,
+                extras: Some(RawValue::from_string(extras_json)?),
+                ..Default::default()
+            });
+        }
+    }
+
+    // ----- Step 8: KHR_lights_punctual -----
+    // Convert PKO light direction vector to a node rotation quaternion.
+    // In glTF, KHR_lights_punctual directional lights shine along -Z of their node.
+    // We need a quaternion that rotates -Z to the PKO light direction.
+    let light_dir = metadata.light_direction;
+    let light_node_idx = nodes.len() as u32;
+
+    // Normalize light direction
+    let ld_len = (light_dir[0]*light_dir[0] + light_dir[1]*light_dir[1] + light_dir[2]*light_dir[2]).sqrt();
+    let ld = if ld_len > 1e-8 {
+        [light_dir[0]/ld_len, light_dir[1]/ld_len, light_dir[2]/ld_len]
+    } else {
+        [0.0, -1.0, 0.0] // default downward
+    };
+
+    // Compute quaternion from -Z to ld using axis-angle
+    // from = [0, 0, -1], to = ld
+    // axis = cross(from, to), angle = acos(dot(from, to))
+    let from = [0.0f32, 0.0, -1.0];
+    let dot = from[0]*ld[0] + from[1]*ld[1] + from[2]*ld[2];
+    let light_rotation = if dot > 0.9999 {
+        // Same direction, identity quaternion
+        [0.0, 0.0, 0.0, 1.0]
+    } else if dot < -0.9999 {
+        // Opposite direction, rotate 180° around Y
+        [0.0, 1.0, 0.0, 0.0]
+    } else {
+        let axis = [
+            from[1]*ld[2] - from[2]*ld[1],
+            from[2]*ld[0] - from[0]*ld[2],
+            from[0]*ld[1] - from[1]*ld[0],
+        ];
+        let axis_len = (axis[0]*axis[0] + axis[1]*axis[1] + axis[2]*axis[2]).sqrt();
+        let axis = [axis[0]/axis_len, axis[1]/axis_len, axis[2]/axis_len];
+        let angle = dot.acos();
+        let half = angle / 2.0;
+        let s = half.sin();
+        [axis[0]*s, axis[1]*s, axis[2]*s, half.cos()]
+    };
+
+    nodes.push(gltf::Node {
+        name: Some("DirectionalLight".into()),
+        rotation: Some(gltf::scene::UnitQuaternion(light_rotation)),
+        extensions: Some(gltf::extensions::scene::Node {
+            khr_lights_punctual: Some(
+                gltf::extensions::scene::khr_lights_punctual::KhrLightsPunctual {
+                    light: gltf::Index::new(0),
+                },
+            ),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    root_children.push(gltf::Index::new(light_node_idx));
+
+    // Root node
+    let root_node_idx = nodes.len() as u32;
+    nodes.push(gltf::Node {
+        name: Some("map_root".into()),
+        children: Some(root_children),
+        ..Default::default()
+    });
+
+    // ----- Step 9: Build scene with extras -----
+    let scene_extras = serde_json::json!({
+        "version": 3,
+        "map_name": metadata.map_name,
+        "coordinate_system": "y_up",
+        "world_scale": MAP_VISUAL_SCALE,
+        "unit_scale_contract": "pko_1unit_to_unity_1unit_v1",
+        "map_width_tiles": w,
+        "map_height_tiles": h,
+        "section_width": parsed_map.header.n_section_width,
+        "section_height": parsed_map.header.n_section_height,
+        "areas": metadata.areas_json,
+        "ambient": metadata.ambient,
+        "background_color": metadata.background_color,
+    });
+
+    let scene = gltf::Scene {
+        nodes: vec![gltf::Index::new(root_node_idx)],
+        name: Some("MapScene".into()),
+        extensions: None,
+        extras: Some(RawValue::from_string(serde_json::to_string(&scene_extras)?)?),
+    };
+
+    // ----- Step 10: Assemble glTF root -----
+    // KHR_lights_punctual light definition
+    let lc = metadata.light_color;
+
+    // Build KHR_lights_punctual light definition using typed API
+    use gltf::extensions::scene::khr_lights_punctual;
+    let sun_light = khr_lights_punctual::Light {
+        color: [lc[0], lc[1], lc[2]],
+        intensity: 1.0,
+        name: Some("sun".into()),
+        type_: Checked::Valid(khr_lights_punctual::Type::Directional),
+        range: None,
+        spot: None,
+        extensions: None,
+        extras: Default::default(),
+    };
+
+    let root_ext = gltf::extensions::root::Root {
+        khr_lights_punctual: Some(gltf::extensions::root::KhrLightsPunctual {
+            lights: vec![sun_light],
+        }),
+        ..Default::default()
+    };
+
+    // Single buffer covering all binary data
+    let buffer = gltf::Buffer {
+        byte_length: USize64(bin.len() as u64),
+        extensions: None, extras: None,
+        name: Some("terrain_buffer".into()),
+        uri: None, // embedded in GLB
+    };
+
+    let root = gltf::Root {
+        asset: gltf::Asset {
+            version: "2.0".into(),
+            generator: Some("pko-tools".into()),
+            ..Default::default()
+        },
+        nodes,
+        scenes: vec![scene],
+        scene: Some(gltf::Index::new(0)),
+        accessors,
+        buffers: vec![buffer],
+        buffer_views,
+        meshes: vec![mesh],
+        materials: vec![material],
+        images,
+        textures,
+        samplers,
+        extensions_used: vec!["KHR_lights_punctual".into()],
+        extensions: Some(root_ext),
+        ..Default::default()
+    };
+
+    let gltf_json = serde_json::to_string(&root)?;
+    Ok((gltf_json, bin))
+}
+
 /// Export terrain as glTF file to disk (separate .gltf + .bin).
 pub fn export_terrain_gltf(
     project_dir: &Path,
