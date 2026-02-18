@@ -44,7 +44,9 @@ pub fn plan_bone_reduction(
     parents: &[Option<usize>],
     vertex_weights: Option<&[Vec<(usize, f32)>]>,
 ) -> BoneReductionPlan {
-    let mapped_indices: HashSet<usize> = mapping.entries.iter()
+    let mapped_indices: HashSet<usize> = mapping
+        .entries
+        .iter()
         .filter(|e| e.target_index.is_some())
         .map(|e| e.source_index)
         .collect();
@@ -58,21 +60,20 @@ pub fn plan_bone_reduction(
             continue; // Already mapped, keep it
         }
 
-        let merge_target = find_closest_mapped_ancestor(
-            entry.source_index,
-            parents,
-            &mapped_indices,
-        );
+        let merge_target =
+            find_closest_mapped_ancestor(entry.source_index, parents, &mapped_indices);
 
         if let Some(target_idx) = merge_target {
-            let target_name = mapping.entries.iter()
+            let target_name = mapping
+                .entries
+                .iter()
                 .find(|e| e.source_index == target_idx)
                 .map(|e| e.source_name.clone())
                 .unwrap_or_else(|| format!("bone_{}", target_idx));
 
-            let affected = vertex_weights.map(|vw| {
-                count_affected_vertices(entry.source_index, vw)
-            }).unwrap_or(0);
+            let affected = vertex_weights
+                .map(|vw| count_affected_vertices(entry.source_index, vw))
+                .unwrap_or(0);
 
             merges.push(BoneMergeAction {
                 source_index: entry.source_index,
@@ -112,7 +113,8 @@ fn find_closest_mapped_ancestor(
 
 /// Count how many vertices are influenced by a given bone
 fn count_affected_vertices(bone_index: usize, vertex_weights: &[Vec<(usize, f32)>]) -> u32 {
-    vertex_weights.iter()
+    vertex_weights
+        .iter()
         .filter(|vw| vw.iter().any(|(bi, w)| *bi == bone_index && *w > 0.0))
         .count() as u32
 }
@@ -126,7 +128,9 @@ pub fn apply_weight_redistribution(
     plan: &BoneReductionPlan,
 ) {
     // Build merge map: source_bone_index → target_bone_index
-    let merge_map: HashMap<usize, usize> = plan.merges.iter()
+    let merge_map: HashMap<usize, usize> = plan
+        .merges
+        .iter()
         .map(|m| (m.source_index, m.target_index))
         .collect();
 
@@ -147,9 +151,7 @@ pub fn apply_weight_redistribution(
         // Normalize weights
         let total: f32 = merged.values().sum();
         if total > 0.0 {
-            *weights = merged.into_iter()
-                .map(|(bi, w)| (bi, w / total))
-                .collect();
+            *weights = merged.into_iter().map(|(bi, w)| (bi, w / total)).collect();
         } else {
             *weights = merged.into_iter().collect();
         }
@@ -163,9 +165,7 @@ pub fn apply_weight_redistribution(
 ///
 /// Takes the set of remaining bone indices (those that survived reduction)
 /// and creates a mapping from old index → new contiguous index.
-pub fn create_index_remap(
-    mapping: &BoneMapping,
-) -> HashMap<usize, usize> {
+pub fn create_index_remap(mapping: &BoneMapping) -> HashMap<usize, usize> {
     let pko_index_map = PkoStandardSkeleton::bone_index_map();
     let mut remap = HashMap::new();
 
@@ -184,8 +184,8 @@ pub fn create_index_remap(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::retarget::skeleton::analyze_skeleton;
     use crate::retarget::mapper::auto_map_bones;
+    use crate::retarget::skeleton::analyze_skeleton;
 
     #[test]
     fn test_bone_reduction_plan() {
@@ -194,8 +194,8 @@ mod tests {
             "mixamorig:Hips".to_string(),
             "mixamorig:Spine".to_string(),
             "mixamorig:LeftUpLeg".to_string(),
-            "mixamorig:LeftHandRing1".to_string(),  // Finger with "ring" - won't match PKO
-            "mixamorig:LeftHandRing2".to_string(),  // Finger with "ring" - won't match PKO
+            "mixamorig:LeftHandRing1".to_string(), // Finger with "ring" - won't match PKO
+            "mixamorig:LeftHandRing2".to_string(), // Finger with "ring" - won't match PKO
         ];
         let parents = vec![None, Some(0), Some(0), Some(2), Some(3)];
         let skeleton = analyze_skeleton(&names, &parents);
@@ -214,21 +214,19 @@ mod tests {
     #[test]
     fn test_weight_redistribution() {
         let mut weights = vec![
-            vec![(0, 0.5), (1, 0.3), (2, 0.2)],  // vertex 0
-            vec![(1, 0.8), (2, 0.2)],              // vertex 1
-            vec![(0, 1.0)],                        // vertex 2
+            vec![(0, 0.5), (1, 0.3), (2, 0.2)], // vertex 0
+            vec![(1, 0.8), (2, 0.2)],           // vertex 1
+            vec![(0, 1.0)],                     // vertex 2
         ];
 
         let plan = BoneReductionPlan {
-            merges: vec![
-                BoneMergeAction {
-                    source_index: 2,
-                    source_name: "extra_bone".to_string(),
-                    target_index: 1,
-                    target_name: "parent_bone".to_string(),
-                    affected_vertices: 2,
-                },
-            ],
+            merges: vec![BoneMergeAction {
+                source_index: 2,
+                source_name: "extra_bone".to_string(),
+                target_index: 1,
+                target_name: "parent_bone".to_string(),
+                affected_vertices: 2,
+            }],
             final_bone_count: 2,
             original_bone_count: 3,
             within_limit: true,
@@ -238,7 +236,11 @@ mod tests {
 
         // Vertex 0: bone 2 (weight 0.2) merged into bone 1 (weight 0.3) → bone 1 has 0.5
         assert_eq!(weights[0].len(), 2); // now only bones 0 and 1
-        let bone_1_weight: f32 = weights[0].iter().filter(|(bi, _)| *bi == 1).map(|(_, w)| w).sum();
+        let bone_1_weight: f32 = weights[0]
+            .iter()
+            .filter(|(bi, _)| *bi == 1)
+            .map(|(_, w)| w)
+            .sum();
         assert!((bone_1_weight - 0.5).abs() < 0.01);
 
         // Vertex 1: bone 2 (weight 0.2) merged into bone 1 (weight 0.8) → bone 1 has 1.0
@@ -253,9 +255,7 @@ mod tests {
 
     #[test]
     fn test_weight_normalization() {
-        let mut weights = vec![
-            vec![(0, 0.6), (1, 0.2), (2, 0.2)],
-        ];
+        let mut weights = vec![vec![(0, 0.6), (1, 0.2), (2, 0.2)]];
 
         let plan = BoneReductionPlan {
             merges: vec![

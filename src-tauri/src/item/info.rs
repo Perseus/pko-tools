@@ -133,7 +133,10 @@ mod tests {
         assert!(!items.is_empty(), "Expected at least one item to be parsed");
 
         let first = &items[0];
-        eprintln!("First item: id={}, name='{}', type={}, model_ground='{}'", first.id, first.name, first.item_type, first.model_ground);
+        eprintln!(
+            "First item: id={}, name='{}', type={}, model_ground='{}'",
+            first.id, first.name, first.item_type, first.model_ground
+        );
         assert_eq!(first.id, 1);
         assert_eq!(first.name, "Short Sword");
         assert_eq!(first.model_ground, "10100001");
@@ -169,6 +172,10 @@ mod tests {
             Ok(json) => eprintln!("glTF JSON length: {} bytes", json.len()),
             Err(e) => eprintln!("Error: {}", e),
         }
-        assert!(result.is_ok(), "Should produce valid glTF: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Should produce valid glTF: {:?}",
+            result.err()
+        );
     }
 }

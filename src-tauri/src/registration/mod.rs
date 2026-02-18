@@ -88,11 +88,7 @@ fn get_next_character_id(project_dir: &Path) -> anyhow::Result<u32> {
 /// Creates a minimal entry with the given model_id and name.
 /// The entry uses default values for most fields - the user can
 /// customize via the game's data editor tools.
-pub fn register_character(
-    project_dir: &Path,
-    model_id: u32,
-    name: &str,
-) -> anyhow::Result<u32> {
+pub fn register_character(project_dir: &Path, model_id: u32, name: &str) -> anyhow::Result<u32> {
     let char_info_path = project_dir.join("scripts/table/CharacterInfo.txt");
 
     if !char_info_path.exists() {
@@ -101,10 +97,7 @@ pub fn register_character(
 
     // Check model ID is available
     if !is_model_id_available(project_dir, model_id)? {
-        return Err(anyhow::anyhow!(
-            "Model ID {} is already in use",
-            model_id
-        ));
+        return Err(anyhow::anyhow!("Model ID {} is already in use", model_id));
     }
 
     let character_id = get_next_character_id(project_dir)?;
@@ -114,23 +107,23 @@ pub fn register_character(
     //         Part0-7, FeffID, EeffID, EffActionID, Shadow, ActionID,
     //         then 131 remaining fields (all 0s for defaults).
     let mut fields: Vec<String> = Vec::with_capacity(154);
-    fields.push(character_id.to_string());     // ID
-    fields.push(name.to_string());              // Name
-    fields.push(String::new());                 // IconName
-    fields.push("4".to_string());               // ModelType (4 = NPC-like)
-    fields.push("1".to_string());               // CtrlType
-    fields.push(model_id.to_string());          // Model (Framework Number)
-    fields.push("0".to_string());               // SuitID
-    fields.push("1".to_string());               // SuitNum
-    fields.push("1".to_string());               // Part0 (has at least 1 mesh)
+    fields.push(character_id.to_string()); // ID
+    fields.push(name.to_string()); // Name
+    fields.push(String::new()); // IconName
+    fields.push("4".to_string()); // ModelType (4 = NPC-like)
+    fields.push("1".to_string()); // CtrlType
+    fields.push(model_id.to_string()); // Model (Framework Number)
+    fields.push("0".to_string()); // SuitID
+    fields.push("1".to_string()); // SuitNum
+    fields.push("1".to_string()); // Part0 (has at least 1 mesh)
     for _ in 0..7 {
-        fields.push("0".to_string());           // Part1-7
+        fields.push("0".to_string()); // Part1-7
     }
-    fields.push("0,0".to_string());             // FeffID
-    fields.push("0".to_string());               // EeffID
-    fields.push("0".to_string());               // EffActionID
-    fields.push("0".to_string());               // Shadow
-    fields.push("1".to_string());               // ActionID
+    fields.push("0,0".to_string()); // FeffID
+    fields.push("0".to_string()); // EeffID
+    fields.push("0".to_string()); // EffActionID
+    fields.push("0".to_string()); // Shadow
+    fields.push("1".to_string()); // ActionID
 
     // Fill remaining fields with zeros to match expected column count
     while fields.len() < 154 {

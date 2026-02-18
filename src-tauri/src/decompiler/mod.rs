@@ -233,9 +233,8 @@ pub fn decompile_rawdataset_to_tsv(
         if records_total > 0 {
             let first_chunk = &record_data[..entry_size.min(record_data.len())];
             // Check if bExist at offset 0 looks reasonable when unencrypted (0 or 1)
-            let b_exist_raw = u32::from_le_bytes(
-                first_chunk[..4].try_into().unwrap_or([0, 0, 0, 0]),
-            );
+            let b_exist_raw =
+                u32::from_le_bytes(first_chunk[..4].try_into().unwrap_or([0, 0, 0, 0]));
             if b_exist_raw <= 1 {
                 GameVersion::V1
             } else {
@@ -466,7 +465,11 @@ mod tests {
         let mut data = Vec::new();
         data.extend_from_slice(&(entry_size as u32).to_le_bytes());
         for entry in entries {
-            assert_eq!(entry.len(), entry_size, "entry must be exactly entry_size bytes");
+            assert_eq!(
+                entry.len(),
+                entry_size,
+                "entry must be exactly entry_size bytes"
+            );
             data.extend_from_slice(entry);
         }
         data
@@ -734,7 +737,10 @@ mod tests {
 
         let structure = structures::create_item_refine_info();
         let result = decompile_rawdataset_to_tsv(&test_file, &output_file, &structure).unwrap();
-        println!("ItemRefineInfo: {} written, {} skipped", result.records_written, result.records_skipped);
+        println!(
+            "ItemRefineInfo: {} written, {} skipped",
+            result.records_written, result.records_skipped
+        );
 
         let output = std::fs::read_to_string(&output_file).unwrap();
         for line in output.lines().take(5) {
@@ -760,7 +766,10 @@ mod tests {
 
         let structure = structures::create_item_refine_effect_info();
         let result = decompile_rawdataset_to_tsv(&test_file, &output_file, &structure).unwrap();
-        println!("ItemRefineEffectInfo: {} written, {} skipped", result.records_written, result.records_skipped);
+        println!(
+            "ItemRefineEffectInfo: {} written, {} skipped",
+            result.records_written, result.records_skipped
+        );
 
         let output = std::fs::read_to_string(&output_file).unwrap();
         for line in output.lines().take(5) {
@@ -786,7 +795,10 @@ mod tests {
 
         let structure = structures::create_scene_effect_info();
         let result = decompile_rawdataset_to_tsv(&test_file, &output_file, &structure).unwrap();
-        println!("sceneffectinfo: {} written, {} skipped", result.records_written, result.records_skipped);
+        println!(
+            "sceneffectinfo: {} written, {} skipped",
+            result.records_written, result.records_skipped
+        );
 
         let output = std::fs::read_to_string(&output_file).unwrap();
         for line in output.lines().take(5) {
@@ -812,7 +824,10 @@ mod tests {
 
         let structure = structures::create_stone_info();
         let result = decompile_rawdataset_to_tsv(&test_file, &output_file, &structure).unwrap();
-        println!("StoneInfo: {} written, {} skipped", result.records_written, result.records_skipped);
+        println!(
+            "StoneInfo: {} written, {} skipped",
+            result.records_written, result.records_skipped
+        );
 
         let output = std::fs::read_to_string(&output_file).unwrap();
         for line in output.lines().take(5) {

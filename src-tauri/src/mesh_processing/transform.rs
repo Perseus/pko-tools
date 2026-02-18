@@ -43,12 +43,24 @@ pub fn analyze_scale(vertices: &[LwVector3]) -> ScaleAnalysis {
     let mut max = vertices[0].0;
 
     for v in vertices.iter() {
-        if v.0.x < min.x { min.x = v.0.x; }
-        if v.0.y < min.y { min.y = v.0.y; }
-        if v.0.z < min.z { min.z = v.0.z; }
-        if v.0.x > max.x { max.x = v.0.x; }
-        if v.0.y > max.y { max.y = v.0.y; }
-        if v.0.z > max.z { max.z = v.0.z; }
+        if v.0.x < min.x {
+            min.x = v.0.x;
+        }
+        if v.0.y < min.y {
+            min.y = v.0.y;
+        }
+        if v.0.z < min.z {
+            min.z = v.0.z;
+        }
+        if v.0.x > max.x {
+            max.x = v.0.x;
+        }
+        if v.0.y > max.y {
+            max.y = v.0.y;
+        }
+        if v.0.z > max.z {
+            max.z = v.0.z;
+        }
     }
 
     let model_height = max.y - min.y;
@@ -90,9 +102,24 @@ pub fn analyze_gltf_scale(file_path: &Path) -> anyhow::Result<ScaleAnalysis> {
                 for i in 0..accessor.count() {
                     let base = offset + i * stride;
                     if base + 12 <= buf.len() {
-                        let x = f32::from_le_bytes([buf[base], buf[base + 1], buf[base + 2], buf[base + 3]]);
-                        let y = f32::from_le_bytes([buf[base + 4], buf[base + 5], buf[base + 6], buf[base + 7]]);
-                        let z = f32::from_le_bytes([buf[base + 8], buf[base + 9], buf[base + 10], buf[base + 11]]);
+                        let x = f32::from_le_bytes([
+                            buf[base],
+                            buf[base + 1],
+                            buf[base + 2],
+                            buf[base + 3],
+                        ]);
+                        let y = f32::from_le_bytes([
+                            buf[base + 4],
+                            buf[base + 5],
+                            buf[base + 6],
+                            buf[base + 7],
+                        ]);
+                        let z = f32::from_le_bytes([
+                            buf[base + 8],
+                            buf[base + 9],
+                            buf[base + 10],
+                            buf[base + 11],
+                        ]);
                         all_vertices.push(LwVector3(Vector3::new(x, y, z)));
                     }
                 }

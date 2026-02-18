@@ -1,5 +1,6 @@
 use base64::prelude::*;
 use cgmath::{InnerSpace, Matrix3, Matrix4, Quaternion, SquareMatrix, Vector3};
+use core::f32;
 use gltf::{
     animation::Property,
     buffer, image,
@@ -15,10 +16,7 @@ use gltf::{
 };
 use ptree::{print_tree, TreeBuilder};
 use serde_json::{json, value::RawValue};
-use core::f32;
-use std::{
-    collections::HashMap, fs::File, path::PathBuf, sync::Mutex,
-};
+use std::{collections::HashMap, fs::File, path::PathBuf, sync::Mutex};
 
 #[derive(Debug, Clone)]
 struct MinimalBone {
@@ -33,7 +31,11 @@ struct MinimalBone {
 use binrw::{binrw, BinRead, BinResult, BinWrite, VecArgs};
 use std::io::{Read, Seek};
 
-use crate::{broadcast::BroadcastMessage, character::GLTFFieldsToAggregate, math::{self, matrix4_to_quaternion, LwMatrix43, LwMatrix44, LwQuaternion, LwVector3}};
+use crate::{
+    broadcast::BroadcastMessage,
+    character::GLTFFieldsToAggregate,
+    math::{self, matrix4_to_quaternion, LwMatrix43, LwMatrix44, LwQuaternion, LwVector3},
+};
 
 // Constants
 pub const LW_MAX_NAME: usize = 64;
@@ -102,7 +104,7 @@ pub struct LwBoneBaseInfo {
 
     pub id: u32,
     pub parent_id: u32,
-    
+
     // Field to track original glTF node index during processing
     // Not written to file - used for inverse bind matrix matching
     #[br(ignore)]
@@ -288,13 +290,12 @@ impl BinRead for LwBoneFile {
         let total_parsing_steps = 6;
         let mut current_step = 1;
 
-        let _ = crate::broadcast::get_broadcaster()
-            .send(BroadcastMessage::ModelLoadingUpdate(
-                "Loading animations".to_string(),
-                "Fetching version".to_string(),
-                current_step,
-                total_parsing_steps,
-            )); 
+        let _ = crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate(
+            "Loading animations".to_string(),
+            "Fetching version".to_string(),
+            current_step,
+            total_parsing_steps,
+        ));
         this.version = u32::read_options(reader, opts, ())?;
 
         if this.version == 0 {
@@ -303,23 +304,21 @@ impl BinRead for LwBoneFile {
 
         current_step += 1;
 
-        let _ = crate::broadcast::get_broadcaster()
-            .send(BroadcastMessage::ModelLoadingUpdate(
-                "Loading animations".to_string(),
-                "Reading header".to_string(),
-                current_step,
-                total_parsing_steps,
-            ));
+        let _ = crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate(
+            "Loading animations".to_string(),
+            "Reading header".to_string(),
+            current_step,
+            total_parsing_steps,
+        ));
         this.header = LwBoneInfoHeader::read_options(reader, opts, ())?;
 
         current_step += 1;
-        let _ = crate::broadcast::get_broadcaster()
-            .send(BroadcastMessage::ModelLoadingUpdate(
-                "Loading animations".to_string(),
-                "Reading bone hierarchy".to_string(),
-                current_step,
-                total_parsing_steps,
-            ));
+        let _ = crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate(
+            "Loading animations".to_string(),
+            "Reading bone hierarchy".to_string(),
+            current_step,
+            total_parsing_steps,
+        ));
 
         this.base_seq = Vec::read_options(
             reader,
@@ -331,13 +330,12 @@ impl BinRead for LwBoneFile {
         )?;
 
         current_step += 1;
-        let _ = crate::broadcast::get_broadcaster()
-            .send(BroadcastMessage::ModelLoadingUpdate(
-                "Loading animations".to_string(),
-                "Reading inverse bind matrices".to_string(),
-                current_step,
-                total_parsing_steps,
-            ));
+        let _ = crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate(
+            "Loading animations".to_string(),
+            "Reading inverse bind matrices".to_string(),
+            current_step,
+            total_parsing_steps,
+        ));
 
         this.invmat_seq = Vec::read_options(
             reader,
@@ -349,13 +347,12 @@ impl BinRead for LwBoneFile {
         )?;
 
         current_step += 1;
-        let _ = crate::broadcast::get_broadcaster()
-            .send(BroadcastMessage::ModelLoadingUpdate(
-                "Loading animations".to_string(),
-                "Reading dummy information".to_string(),
-                current_step,
-                total_parsing_steps,
-            ));
+        let _ = crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate(
+            "Loading animations".to_string(),
+            "Reading dummy information".to_string(),
+            current_step,
+            total_parsing_steps,
+        ));
 
         this.dummy_seq = Vec::read_options(
             reader,
@@ -367,13 +364,12 @@ impl BinRead for LwBoneFile {
         )?;
 
         current_step += 1;
-        let _ = crate::broadcast::get_broadcaster()
-            .send(BroadcastMessage::ModelLoadingUpdate(
-                "Loading animations".to_string(),
-                "Reading animation keyframe data".to_string(),
-                current_step,
-                total_parsing_steps,
-            ));
+        let _ = crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate(
+            "Loading animations".to_string(),
+            "Reading animation keyframe data".to_string(),
+            current_step,
+            total_parsing_steps,
+        ));
 
         let mut key_infos = Vec::with_capacity(this.header.bone_num as usize);
         for i in 0..this.header.bone_num {
@@ -515,11 +511,9 @@ impl LwBoneFile {
         for i in 0..keyframe_count {
             if is_cubic {
                 // CUBICSPLINE: read in_tangent, value, out_tangent
-                let in_tangent =
-                    LwVector3::read_options(&mut reader, binrw::Endian::Little, ())?;
+                let in_tangent = LwVector3::read_options(&mut reader, binrw::Endian::Little, ())?;
                 let value = LwVector3::read_options(&mut reader, binrw::Endian::Little, ())?;
-                let out_tangent =
-                    LwVector3::read_options(&mut reader, binrw::Endian::Little, ())?;
+                let out_tangent = LwVector3::read_options(&mut reader, binrw::Endian::Little, ())?;
                 keyframes.push(Keyframe {
                     time: times[i],
                     value,
@@ -694,7 +688,9 @@ impl LwBoneFile {
 
                 match channel.interpolation {
                     gltf::animation::Interpolation::Step => prev_kf.value.clone(),
-                    gltf::animation::Interpolation::Linear => prev_kf.value.slerp(&next_kf.value, t),
+                    gltf::animation::Interpolation::Linear => {
+                        prev_kf.value.slerp(&next_kf.value, t)
+                    }
                     gltf::animation::Interpolation::CubicSpline => {
                         let out_tangent = prev_kf
                             .tangents
@@ -731,7 +727,7 @@ impl LwBoneFile {
         // Default to 1 mesh for backwards compatibility
         self.to_gltf_skin_and_nodes_multi(fields_to_aggregate, 1, false)
     }
-    
+
     /// Create glTF skin and nodes with support for multiple meshes
     /// Each mesh gets its own skinned mesh node referencing the shared skeleton
     pub fn to_gltf_skin_and_nodes_multi(
@@ -750,11 +746,22 @@ impl LwBoneFile {
             let node_index = i;
 
             bone_id_to_node_index.insert(base_info.id, node_index);
-            let (rotation, translation, scale) = self.get_node_rot_and_translation_and_scale(node_index, 0).unwrap();
+            let (rotation, translation, scale) = self
+                .get_node_rot_and_translation_and_scale(node_index, 0)
+                .unwrap();
             let rot = LwQuaternion(rotation.0.normalize());
-            let rot_slice = if y_up { math::z_up_to_y_up_quat(rot.to_slice()) } else { rot.to_slice() };
-            let trans_slice = if y_up { math::z_up_to_y_up_vec3(translation.to_slice()) } else { translation.to_slice() };
-            let bone_extras = RawValue::from_string(format!(r#"{{"bone_id":{}}}"#, base_info.id)).unwrap();
+            let rot_slice = if y_up {
+                math::z_up_to_y_up_quat(rot.to_slice())
+            } else {
+                rot.to_slice()
+            };
+            let trans_slice = if y_up {
+                math::z_up_to_y_up_vec3(translation.to_slice())
+            } else {
+                translation.to_slice()
+            };
+            let bone_extras =
+                RawValue::from_string(format!(r#"{{"bone_id":{}}}"#, base_info.id)).unwrap();
             let node = Node {
                 camera: None,
                 children: None,
@@ -780,11 +787,17 @@ impl LwBoneFile {
             let dummy_info = &self.dummy_seq[i];
             let node_index = i + bone_num;
 
-            let dummy_extras = RawValue::from_string(
-                format!(r#"{{"dummy":true,"id":{},"parent_bone_id":{}}}"#, dummy_info.id, dummy_info.parent_bone_id)
-            ).unwrap();
+            let dummy_extras = RawValue::from_string(format!(
+                r#"{{"dummy":true,"id":{},"parent_bone_id":{}}}"#,
+                dummy_info.id, dummy_info.parent_bone_id
+            ))
+            .unwrap();
 
-            let mat = if y_up { math::z_up_to_y_up_mat4(dummy_info.mat.to_slice()) } else { dummy_info.mat.to_slice() };
+            let mat = if y_up {
+                math::z_up_to_y_up_mat4(dummy_info.mat.to_slice())
+            } else {
+                dummy_info.mat.to_slice()
+            };
             let node = Node {
                 camera: None,
                 children: None,
@@ -846,7 +859,9 @@ impl LwBoneFile {
 
         for i in 0..bone_num {
             let mut mat = self.invmat_seq[i].to_slice();
-            if y_up { mat = math::z_up_to_y_up_mat4(mat); }
+            if y_up {
+                mat = math::z_up_to_y_up_mat4(mat);
+            }
             let mat_bytes = bytemuck::cast_slice(&mat);
 
             buffer_data.extend_from_slice(mat_bytes);
@@ -854,7 +869,9 @@ impl LwBoneFile {
 
         for i in 0..dummy_num {
             let mut mat = self.dummy_seq[i].mat.to_slice();
-            if y_up { mat = math::z_up_to_y_up_mat4(mat); }
+            if y_up {
+                mat = math::z_up_to_y_up_mat4(mat);
+            }
             let mat_bytes = bytemuck::cast_slice(&mat);
 
             buffer_data.extend_from_slice(mat_bytes);
@@ -920,8 +937,9 @@ impl LwBoneFile {
         let skin_extras = RawValue::from_string(format!(
             r#"{{"lab_version":{},"lab_old_version":{}}}"#,
             self.version, self.old_version
-        )).unwrap();
-        
+        ))
+        .unwrap();
+
         let skin = Skin {
             inverse_bind_matrices: Some(Index::new(ibm_accessor_index as u32)),
             skeleton: root_nodes.first().cloned(),
@@ -950,7 +968,11 @@ impl LwBoneFile {
             .collect()
     }
 
-    pub fn to_gltf_animations_and_sampler(&self, fields_to_aggregate: &mut GLTFFieldsToAggregate, y_up: bool) {
+    pub fn to_gltf_animations_and_sampler(
+        &self,
+        fields_to_aggregate: &mut GLTFFieldsToAggregate,
+        y_up: bool,
+    ) {
         let mut channels: Vec<Channel> = Vec::new();
         let mut samplers: Vec<Sampler> = Vec::new();
 
@@ -1055,13 +1077,22 @@ impl LwBoneFile {
                 let frame_translation = translation.get(j as usize).unwrap();
                 let frame_rotation = rotation.get(j as usize).unwrap();
 
-                let t = [frame_translation.0.x, frame_translation.0.y, frame_translation.0.z];
+                let t = [
+                    frame_translation.0.x,
+                    frame_translation.0.y,
+                    frame_translation.0.z,
+                ];
                 let t = if y_up { math::z_up_to_y_up_vec3(t) } else { t };
                 keyframe_translation_buffer_data.extend_from_slice(&t[0].to_le_bytes());
                 keyframe_translation_buffer_data.extend_from_slice(&t[1].to_le_bytes());
                 keyframe_translation_buffer_data.extend_from_slice(&t[2].to_le_bytes());
 
-                let r = [frame_rotation.0.v.x, frame_rotation.0.v.y, frame_rotation.0.v.z, frame_rotation.0.s];
+                let r = [
+                    frame_rotation.0.v.x,
+                    frame_rotation.0.v.y,
+                    frame_rotation.0.v.z,
+                    frame_rotation.0.s,
+                ];
                 let r = if y_up { math::z_up_to_y_up_quat(r) } else { r };
                 keyframe_rotation_buffer_data.extend_from_slice(&r[0].to_le_bytes());
                 keyframe_rotation_buffer_data.extend_from_slice(&r[1].to_le_bytes());
@@ -1233,16 +1264,15 @@ impl LwBoneFile {
     }
     pub fn from_file(file_path: PathBuf) -> anyhow::Result<Self> {
         use std::io::{Seek, SeekFrom};
-        
-        let file = File::open(&file_path)
-            .map_err(|e| anyhow::anyhow!("Failed to open LAB file '{}': {}", file_path.display(), e))?;
-        
-        let file_size = file.metadata()
-            .map(|m| m.len())
-            .unwrap_or(0);
-        
+
+        let file = File::open(&file_path).map_err(|e| {
+            anyhow::anyhow!("Failed to open LAB file '{}': {}", file_path.display(), e)
+        })?;
+
+        let file_size = file.metadata().map(|m| m.len()).unwrap_or(0);
+
         let mut reader = std::io::BufReader::new(file);
-        
+
         let anim: LwBoneFile = BinRead::read_options(&mut reader, binrw::Endian::Little, ())
             .map_err(|e| {
                 let bytes_read = reader.stream_position().unwrap_or(0);
@@ -1256,7 +1286,7 @@ impl LwBoneFile {
                     bytes_read
                 )
             })?;
-        
+
         Ok(anim)
     }
 
@@ -1381,9 +1411,7 @@ impl LwBoneFile {
     // along with the bones, the inverse bind matrices are also stored in that order
     // this returns a vector of tuples, where the first element is the original index of the bone/dummy
     // and the second element is the new index of the bone/dummy
-    fn get_ideal_bone_order(
-        bones: &Vec<LwBoneBaseInfo>,
-    ) -> Vec<(u32, u32)> {
+    fn get_ideal_bone_order(bones: &Vec<LwBoneBaseInfo>) -> Vec<(u32, u32)> {
         let mut min_bones: Vec<MinimalBone> = vec![];
 
         for (idx, bone) in bones.clone().iter().enumerate() {
@@ -1438,18 +1466,27 @@ impl LwBoneFile {
 
         // BUG FIX #4: Use skin.joints() as single source of truth for bones
         // This ensures LAB and LGO reference the same skeleton
-        let skin = gltf.skins().nth(0)
+        let skin = gltf
+            .skins()
+            .nth(0)
             .ok_or(anyhow::anyhow!("No skin found in glTF file"))?;
-        
+
         // Extract LAB version info from skin extras if available
         let (lab_version, lab_old_version) = if let Some(extras) = skin.extras() {
             let extras_str = extras.get();
-            let parsed: serde_json::Value = serde_json::from_str(extras_str).unwrap_or(serde_json::json!({}));
-            let version = parsed.get("lab_version").and_then(|v| v.as_u64()).unwrap_or(4101) as u32;
-            let old_version = parsed.get("lab_old_version").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
+            let parsed: serde_json::Value =
+                serde_json::from_str(extras_str).unwrap_or(serde_json::json!({}));
+            let version = parsed
+                .get("lab_version")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(4101) as u32;
+            let old_version = parsed
+                .get("lab_old_version")
+                .and_then(|v| v.as_u64())
+                .unwrap_or(0) as u32;
             (version, old_version)
         } else {
-            (4101, 0)  // Default values if not found
+            (4101, 0) // Default values if not found
         };
 
         let mut bones: Vec<LwBoneBaseInfo> = vec![];
@@ -1457,53 +1494,69 @@ impl LwBoneFile {
         let mut node_index_to_bone_array_pos = HashMap::<u32, u32>::new();
         let mut dummies: Vec<LwBoneDummyInfo> = vec![];
         let mut dummy_idx_to_bone_idx = HashMap::<u32, u32>::new();
-        let mut dummy_node_indices: Vec<u32> = vec![];  // Track node index for each dummy
+        let mut dummy_node_indices: Vec<u32> = vec![]; // Track node index for each dummy
         let mut idx_to_node = HashMap::<u32, gltf::Node>::new();
         let mut dummy_num = 0;
 
         // Extract bones from skin.joints() only
         for joint in skin.joints() {
             idx_to_node.insert(joint.index() as u32, joint.clone());
-            
+
             // Skip dummy nodes (they go in dummy_seq)
             if let Some(extras) = joint.extras() {
                 let extra = extras.get();
                 if extra.contains("dummy") {
                     // Parse dummy ID and matrix from extras
-                    let parsed: serde_json::Value = serde_json::from_str(extra).unwrap_or(serde_json::json!({}));
-                    let dummy_id = parsed.get("id").and_then(|v| v.as_u64()).unwrap_or(joint.index() as u64) as u32;
-                    
+                    let parsed: serde_json::Value =
+                        serde_json::from_str(extra).unwrap_or(serde_json::json!({}));
+                    let dummy_id = parsed
+                        .get("id")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(joint.index() as u64) as u32;
+
                     // Extract matrix from node transform
                     let transform = joint.transform();
                     let mat_array: [[f32; 4]; 4] = transform.matrix();
                     let mat = LwMatrix44(Matrix4::new(
-                        mat_array[0][0], mat_array[0][1], mat_array[0][2], mat_array[0][3],
-                        mat_array[1][0], mat_array[1][1], mat_array[1][2], mat_array[1][3],
-                        mat_array[2][0], mat_array[2][1], mat_array[2][2], mat_array[2][3],
-                        mat_array[3][0], mat_array[3][1], mat_array[3][2], mat_array[3][3],
+                        mat_array[0][0],
+                        mat_array[0][1],
+                        mat_array[0][2],
+                        mat_array[0][3],
+                        mat_array[1][0],
+                        mat_array[1][1],
+                        mat_array[1][2],
+                        mat_array[1][3],
+                        mat_array[2][0],
+                        mat_array[2][1],
+                        mat_array[2][2],
+                        mat_array[2][3],
+                        mat_array[3][0],
+                        mat_array[3][1],
+                        mat_array[3][2],
+                        mat_array[3][3],
                     ));
-                    
+
                     let dummy_info = LwBoneDummyInfo {
                         id: dummy_id,
                         parent_bone_id: LW_INVALID_INDEX,
                         mat,
                     };
                     dummies.push(dummy_info);
-                    dummy_node_indices.push(joint.index() as u32);  // Store node index
+                    dummy_node_indices.push(joint.index() as u32); // Store node index
                     dummy_idx_to_bone_idx.insert(joint.index() as u32, dummy_num);
                     dummy_num += 1;
                     continue;
                 }
             }
-            
+
             let array_pos = bones.len() as u32;
             let bone = LwBoneBaseInfo {
-                id: joint.index() as u32,  // Temporary: node index
-                parent_id: LW_INVALID_INDEX,  // Will be set below
+                id: joint.index() as u32,    // Temporary: node index
+                parent_id: LW_INVALID_INDEX, // Will be set below
                 name: joint.name().unwrap_or("unnamed").to_string(),
                 original_node_index: joint.index() as u32,
             };
-            
+
             bones.push(bone);
             bone_idx_to_vec_idx.insert(joint.index() as u32, array_pos);
             node_index_to_bone_array_pos.insert(joint.index() as u32, array_pos);
@@ -1513,19 +1566,24 @@ impl LwBoneFile {
         // NOT node indices - this is critical for game engine
         for (bone_array_pos, bone) in bones.iter_mut().enumerate() {
             let node = idx_to_node.get(&bone.original_node_index).unwrap();
-            
+
             // Find this node's parent in skin.joints()
-            let parent_joint = skin.joints().find(|j| {
-                j.children().any(|c| c.index() == node.index())
-            });
-            
+            let parent_joint = skin
+                .joints()
+                .find(|j| j.children().any(|c| c.index() == node.index()));
+
             if let Some(parent) = parent_joint {
                 // Convert parent node index → parent bone array position
-                if let Some(parent_array_pos) = node_index_to_bone_array_pos.get(&(parent.index() as u32)) {
+                if let Some(parent_array_pos) =
+                    node_index_to_bone_array_pos.get(&(parent.index() as u32))
+                {
                     bone.parent_id = *parent_array_pos;
                 } else {
-                    eprintln!("Warning: Bone '{}' has parent node {} which is not in skeleton", 
-                              bone.name, parent.index());
+                    eprintln!(
+                        "Warning: Bone '{}' has parent node {} which is not in skeleton",
+                        bone.name,
+                        parent.index()
+                    );
                     bone.parent_id = LW_INVALID_INDEX;
                 }
             }
@@ -1537,12 +1595,14 @@ impl LwBoneFile {
             let dummy_node_idx = dummy_node_indices[i];
             let dummy_node = idx_to_node.get(&dummy_node_idx);
             if let Some(node) = dummy_node {
-                let parent_joint = skin.joints().find(|j| {
-                    j.children().any(|c| c.index() == node.index())
-                });
-                
+                let parent_joint = skin
+                    .joints()
+                    .find(|j| j.children().any(|c| c.index() == node.index()));
+
                 if let Some(parent) = parent_joint {
-                    if let Some(parent_array_pos) = node_index_to_bone_array_pos.get(&(parent.index() as u32)) {
+                    if let Some(parent_array_pos) =
+                        node_index_to_bone_array_pos.get(&(parent.index() as u32))
+                    {
                         dummy.parent_bone_id = *parent_array_pos;
                     }
                 }
@@ -1575,7 +1635,8 @@ impl LwBoneFile {
         // Update parent IDs to reflect new positions after reordering
         reordered_bones.iter_mut().for_each(|bone| {
             if bone.parent_id != LW_INVALID_INDEX {
-                bone.parent_id = *old_pos_to_new_pos.get(&bone.parent_id)
+                bone.parent_id = *old_pos_to_new_pos
+                    .get(&bone.parent_id)
                     .expect("Parent bone should have been reordered");
             }
         });
@@ -1586,7 +1647,10 @@ impl LwBoneFile {
                 assert!(
                     bone.parent_id < idx as u32,
                     "Bone {} '{}': parent_id {} should be < {} (depth-first ordering violated)",
-                    bone.id, bone.name, bone.parent_id, idx
+                    bone.id,
+                    bone.name,
+                    bone.parent_id,
+                    idx
                 );
             }
         }
@@ -1594,7 +1658,8 @@ impl LwBoneFile {
         // Update dummy parent IDs
         dummies.iter_mut().for_each(|d| {
             if d.parent_bone_id != LW_INVALID_INDEX {
-                d.parent_bone_id = *orig_bone_id_to_new_id.get(&d.parent_bone_id)
+                d.parent_bone_id = *orig_bone_id_to_new_id
+                    .get(&d.parent_bone_id)
                     .expect("Dummy parent bone should exist");
             }
         });
@@ -1615,13 +1680,13 @@ impl LwBoneFile {
         let ibm_start = ibm.offset() + ibm_accessor.offset();
         let ibm_data_raw = &ibm_buffer_as_slice[ibm_start..];
         let mut reader = std::io::Cursor::new(ibm_data_raw);
-        
+
         // Step 1: Read all IBMs and store them by glTF node index
         let mut ibm_by_node_index = std::collections::HashMap::<u32, LwMatrix44>::new();
         for joint in skin.joints() {
             let ibm = LwMatrix44::read_options(&mut reader, binrw::Endian::Little, ()).unwrap();
             let node_index = joint.index() as u32;
-            
+
             // Handle dummies
             if let Some(extras) = joint.extras() {
                 let extra = extras.get();
@@ -1633,10 +1698,10 @@ impl LwBoneFile {
                     continue; // Don't store IBM for dummies
                 }
             }
-            
+
             ibm_by_node_index.insert(node_index, ibm);
         }
-        
+
         // Step 2: Assign IBMs to final bone array by matching original_node_index
         let mut ibm_data: Vec<LwMatrix44> =
             vec![LwMatrix44(Matrix4::<f32>::identity(),); bones.len()];
@@ -1644,8 +1709,10 @@ impl LwBoneFile {
             if let Some(ibm) = ibm_by_node_index.get(&bone.original_node_index) {
                 ibm_data[final_pos] = ibm.clone();
             } else {
-                panic!("No inverse bind matrix found for bone {} '{}' with original_node_index {}",
-                       bone.id, bone.name, bone.original_node_index);
+                panic!(
+                    "No inverse bind matrix found for bone {} '{}' with original_node_index {}",
+                    bone.id, bone.name, bone.original_node_index
+                );
             }
         }
 
@@ -1692,12 +1759,13 @@ impl LwBoneFile {
             let times = Self::read_keyframe_times(&sampler, buffers)?;
 
             // Get or create bone animation data
-            let bone_data = bone_anim_data
-                .entry(new_node_idx)
-                .or_insert_with(|| BoneAnimationData {
-                    translation: None,
-                    rotation: None,
-                });
+            let bone_data =
+                bone_anim_data
+                    .entry(new_node_idx)
+                    .or_insert_with(|| BoneAnimationData {
+                        translation: None,
+                        rotation: None,
+                    });
 
             match property {
                 Property::Translation => {
@@ -1757,7 +1825,9 @@ impl LwBoneFile {
                             let rest_rot = match node {
                                 Some(n) => {
                                     let (_, r, _) = n.transform().decomposed();
-                                    LwQuaternion(Quaternion::new(r[3], r[0], r[1], r[2]).normalize())
+                                    LwQuaternion(
+                                        Quaternion::new(r[3], r[0], r[1], r[2]).normalize(),
+                                    )
                                 }
                                 None => LwQuaternion(Quaternion::new(1.0, 0.0, 0.0, 0.0)),
                             };

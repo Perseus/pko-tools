@@ -51,7 +51,8 @@ pub struct BoneMapping {
 impl BoneMapping {
     /// Get the target bone index for a given source bone index
     pub fn get_target_index(&self, source_index: usize) -> Option<usize> {
-        self.entries.iter()
+        self.entries
+            .iter()
             .find(|e| e.source_index == source_index)
             .and_then(|e| e.target_index)
     }
@@ -61,7 +62,8 @@ impl BoneMapping {
         let critical_pko_bones = ["Bip01", "Bip01 Pelvis", "Bip01 Spine", "Bip01 Spine1"];
         critical_pko_bones.iter().all(|name| {
             self.entries.iter().any(|e| {
-                e.target_name.as_deref() == Some(name) && e.confidence != MappingConfidence::Unmapped
+                e.target_name.as_deref() == Some(name)
+                    && e.confidence != MappingConfidence::Unmapped
             })
         })
     }
@@ -70,84 +72,84 @@ impl BoneMapping {
 /// Mixamo bone name → PKO bone name mapping table
 fn mixamo_mapping_table() -> HashMap<&'static str, &'static str> {
     HashMap::from([
-        ("mixamorig:Hips",             "Bip01 Pelvis"),
-        ("mixamorig:Spine",            "Bip01 Spine"),
-        ("mixamorig:Spine1",           "Bip01 Spine1"),
-        ("mixamorig:Spine2",           "Bip01 Spine1"),  // Merge into Spine1
-        ("mixamorig:Neck",             "Bip01 Neck"),
-        ("mixamorig:Head",             "Bip01 Head"),
-        ("mixamorig:LeftShoulder",     "Bip01 L Clavicle"),
-        ("mixamorig:LeftArm",          "Bip01 L UpperArm"),
-        ("mixamorig:LeftForeArm",      "Bip01 L Forearm"),
-        ("mixamorig:LeftHand",         "Bip01 L Hand"),
-        ("mixamorig:RightShoulder",    "Bip01 R Clavicle"),
-        ("mixamorig:RightArm",         "Bip01 R UpperArm"),
-        ("mixamorig:RightForeArm",     "Bip01 R Forearm"),
-        ("mixamorig:RightHand",        "Bip01 R Hand"),
-        ("mixamorig:LeftUpLeg",        "Bip01 L Thigh"),
-        ("mixamorig:LeftLeg",          "Bip01 L Calf"),
-        ("mixamorig:LeftFoot",         "Bip01 L Foot"),
-        ("mixamorig:LeftToeBase",      "Bip01 L Toe0"),
-        ("mixamorig:RightUpLeg",       "Bip01 R Thigh"),
-        ("mixamorig:RightLeg",         "Bip01 R Calf"),
-        ("mixamorig:RightFoot",        "Bip01 R Foot"),
-        ("mixamorig:RightToeBase",     "Bip01 R Toe0"),
+        ("mixamorig:Hips", "Bip01 Pelvis"),
+        ("mixamorig:Spine", "Bip01 Spine"),
+        ("mixamorig:Spine1", "Bip01 Spine1"),
+        ("mixamorig:Spine2", "Bip01 Spine1"), // Merge into Spine1
+        ("mixamorig:Neck", "Bip01 Neck"),
+        ("mixamorig:Head", "Bip01 Head"),
+        ("mixamorig:LeftShoulder", "Bip01 L Clavicle"),
+        ("mixamorig:LeftArm", "Bip01 L UpperArm"),
+        ("mixamorig:LeftForeArm", "Bip01 L Forearm"),
+        ("mixamorig:LeftHand", "Bip01 L Hand"),
+        ("mixamorig:RightShoulder", "Bip01 R Clavicle"),
+        ("mixamorig:RightArm", "Bip01 R UpperArm"),
+        ("mixamorig:RightForeArm", "Bip01 R Forearm"),
+        ("mixamorig:RightHand", "Bip01 R Hand"),
+        ("mixamorig:LeftUpLeg", "Bip01 L Thigh"),
+        ("mixamorig:LeftLeg", "Bip01 L Calf"),
+        ("mixamorig:LeftFoot", "Bip01 L Foot"),
+        ("mixamorig:LeftToeBase", "Bip01 L Toe0"),
+        ("mixamorig:RightUpLeg", "Bip01 R Thigh"),
+        ("mixamorig:RightLeg", "Bip01 R Calf"),
+        ("mixamorig:RightFoot", "Bip01 R Foot"),
+        ("mixamorig:RightToeBase", "Bip01 R Toe0"),
     ])
 }
 
 /// Unity Mecanim bone name → PKO bone name mapping table
 fn unity_mapping_table() -> HashMap<&'static str, &'static str> {
     HashMap::from([
-        ("Hips",            "Bip01 Pelvis"),
-        ("Spine",           "Bip01 Spine"),
-        ("Chest",           "Bip01 Spine1"),
-        ("UpperChest",      "Bip01 Spine1"),
-        ("Neck",            "Bip01 Neck"),
-        ("Head",            "Bip01 Head"),
-        ("LeftShoulder",    "Bip01 L Clavicle"),
-        ("LeftUpperArm",    "Bip01 L UpperArm"),
-        ("LeftLowerArm",    "Bip01 L Forearm"),
-        ("LeftHand",        "Bip01 L Hand"),
-        ("RightShoulder",   "Bip01 R Clavicle"),
-        ("RightUpperArm",   "Bip01 R UpperArm"),
-        ("RightLowerArm",   "Bip01 R Forearm"),
-        ("RightHand",       "Bip01 R Hand"),
-        ("LeftUpLeg",       "Bip01 L Thigh"),
-        ("LeftLeg",         "Bip01 L Calf"),
-        ("LeftFoot",        "Bip01 L Foot"),
-        ("LeftToes",        "Bip01 L Toe0"),
-        ("RightUpLeg",      "Bip01 R Thigh"),
-        ("RightLeg",        "Bip01 R Calf"),
-        ("RightFoot",       "Bip01 R Foot"),
-        ("RightToes",       "Bip01 R Toe0"),
+        ("Hips", "Bip01 Pelvis"),
+        ("Spine", "Bip01 Spine"),
+        ("Chest", "Bip01 Spine1"),
+        ("UpperChest", "Bip01 Spine1"),
+        ("Neck", "Bip01 Neck"),
+        ("Head", "Bip01 Head"),
+        ("LeftShoulder", "Bip01 L Clavicle"),
+        ("LeftUpperArm", "Bip01 L UpperArm"),
+        ("LeftLowerArm", "Bip01 L Forearm"),
+        ("LeftHand", "Bip01 L Hand"),
+        ("RightShoulder", "Bip01 R Clavicle"),
+        ("RightUpperArm", "Bip01 R UpperArm"),
+        ("RightLowerArm", "Bip01 R Forearm"),
+        ("RightHand", "Bip01 R Hand"),
+        ("LeftUpLeg", "Bip01 L Thigh"),
+        ("LeftLeg", "Bip01 L Calf"),
+        ("LeftFoot", "Bip01 L Foot"),
+        ("LeftToes", "Bip01 L Toe0"),
+        ("RightUpLeg", "Bip01 R Thigh"),
+        ("RightLeg", "Bip01 R Calf"),
+        ("RightFoot", "Bip01 R Foot"),
+        ("RightToes", "Bip01 R Toe0"),
     ])
 }
 
 /// Unreal Engine bone name → PKO bone name mapping table
 fn unreal_mapping_table() -> HashMap<&'static str, &'static str> {
     HashMap::from([
-        ("pelvis",          "Bip01 Pelvis"),
-        ("spine_01",        "Bip01 Spine"),
-        ("spine_02",        "Bip01 Spine1"),
-        ("spine_03",        "Bip01 Spine1"),
-        ("neck_01",         "Bip01 Neck"),
-        ("head",            "Bip01 Head"),
-        ("clavicle_l",      "Bip01 L Clavicle"),
-        ("upperarm_l",      "Bip01 L UpperArm"),
-        ("lowerarm_l",      "Bip01 L Forearm"),
-        ("hand_l",          "Bip01 L Hand"),
-        ("clavicle_r",      "Bip01 R Clavicle"),
-        ("upperarm_r",      "Bip01 R UpperArm"),
-        ("lowerarm_r",      "Bip01 R Forearm"),
-        ("hand_r",          "Bip01 R Hand"),
-        ("thigh_l",         "Bip01 L Thigh"),
-        ("calf_l",          "Bip01 L Calf"),
-        ("foot_l",          "Bip01 L Foot"),
-        ("ball_l",          "Bip01 L Toe0"),
-        ("thigh_r",         "Bip01 R Thigh"),
-        ("calf_r",          "Bip01 R Calf"),
-        ("foot_r",          "Bip01 R Foot"),
-        ("ball_r",          "Bip01 R Toe0"),
+        ("pelvis", "Bip01 Pelvis"),
+        ("spine_01", "Bip01 Spine"),
+        ("spine_02", "Bip01 Spine1"),
+        ("spine_03", "Bip01 Spine1"),
+        ("neck_01", "Bip01 Neck"),
+        ("head", "Bip01 Head"),
+        ("clavicle_l", "Bip01 L Clavicle"),
+        ("upperarm_l", "Bip01 L UpperArm"),
+        ("lowerarm_l", "Bip01 L Forearm"),
+        ("hand_l", "Bip01 L Hand"),
+        ("clavicle_r", "Bip01 R Clavicle"),
+        ("upperarm_r", "Bip01 R UpperArm"),
+        ("lowerarm_r", "Bip01 R Forearm"),
+        ("hand_r", "Bip01 R Hand"),
+        ("thigh_l", "Bip01 L Thigh"),
+        ("calf_l", "Bip01 L Calf"),
+        ("foot_l", "Bip01 L Foot"),
+        ("ball_l", "Bip01 L Toe0"),
+        ("thigh_r", "Bip01 R Thigh"),
+        ("calf_r", "Bip01 R Calf"),
+        ("foot_r", "Bip01 R Foot"),
+        ("ball_r", "Bip01 R Toe0"),
     ])
 }
 
@@ -217,10 +219,16 @@ fn generic_keyword_match(name: &str) -> Option<(&'static str, MappingConfidence)
 
     // Left leg chain
     if contains_left(&lower) {
-        if lower.contains("thigh") || (lower.contains("upper") && lower.contains("leg")) || lower.contains("upleg") {
+        if lower.contains("thigh")
+            || (lower.contains("upper") && lower.contains("leg"))
+            || lower.contains("upleg")
+        {
             return Some(("Bip01 L Thigh", MappingConfidence::Medium));
         }
-        if lower.contains("calf") || lower.contains("shin") || (lower.contains("lower") && lower.contains("leg")) {
+        if lower.contains("calf")
+            || lower.contains("shin")
+            || (lower.contains("lower") && lower.contains("leg"))
+        {
             return Some(("Bip01 L Calf", MappingConfidence::Medium));
         }
         if lower.contains("toe") {
@@ -233,10 +241,16 @@ fn generic_keyword_match(name: &str) -> Option<(&'static str, MappingConfidence)
 
     // Right leg chain
     if contains_right(&lower) {
-        if lower.contains("thigh") || (lower.contains("upper") && lower.contains("leg")) || lower.contains("upleg") {
+        if lower.contains("thigh")
+            || (lower.contains("upper") && lower.contains("leg"))
+            || lower.contains("upleg")
+        {
             return Some(("Bip01 R Thigh", MappingConfidence::Medium));
         }
-        if lower.contains("calf") || lower.contains("shin") || (lower.contains("lower") && lower.contains("leg")) {
+        if lower.contains("calf")
+            || lower.contains("shin")
+            || (lower.contains("lower") && lower.contains("leg"))
+        {
             return Some(("Bip01 R Calf", MappingConfidence::Medium));
         }
         if lower.contains("toe") {
@@ -254,13 +268,21 @@ fn generic_keyword_match(name: &str) -> Option<(&'static str, MappingConfidence)
 }
 
 fn contains_left(s: &str) -> bool {
-    s.contains("left") || s.contains("_l_") || s.starts_with("l_") || s.ends_with("_l")
-        || s.contains(".l") || s.starts_with("l.")
+    s.contains("left")
+        || s.contains("_l_")
+        || s.starts_with("l_")
+        || s.ends_with("_l")
+        || s.contains(".l")
+        || s.starts_with("l.")
 }
 
 fn contains_right(s: &str) -> bool {
-    s.contains("right") || s.contains("_r_") || s.starts_with("r_") || s.ends_with("_r")
-        || s.contains(".r") || s.starts_with("r.")
+    s.contains("right")
+        || s.contains("_r_")
+        || s.starts_with("r_")
+        || s.ends_with("_r")
+        || s.contains(".r")
+        || s.starts_with("r.")
 }
 
 /// Auto-map bones from an analyzed external skeleton to the PKO standard skeleton.
@@ -274,7 +296,7 @@ pub fn auto_map_bones(skeleton: &AnalyzedSkeleton) -> BoneMapping {
         SkeletonSourceType::Mixamo => Some(mixamo_mapping_table()),
         SkeletonSourceType::Unity => Some(unity_mapping_table()),
         SkeletonSourceType::Unreal => Some(unreal_mapping_table()),
-        SkeletonSourceType::Biped => None, // Identity mapping
+        SkeletonSourceType::Biped => None,   // Identity mapping
         SkeletonSourceType::Unknown => None, // Generic keyword matching
     };
 
@@ -306,20 +328,21 @@ pub fn auto_map_bones(skeleton: &AnalyzedSkeleton) -> BoneMapping {
         };
 
         // Resolve target index and handle duplicate mappings
-        let (final_target_name, final_target_index, final_confidence) = if let Some(ref name) = target_name {
-            if mapped_targets.contains_key(name) {
-                // Duplicate mapping - keep the first one, mark this as unmapped
-                (None, None, MappingConfidence::Unmapped)
-            } else {
-                let idx = pko_index_map.get(name.as_str()).copied();
-                if idx.is_some() {
-                    mapped_targets.insert(name.clone(), bone.index);
+        let (final_target_name, final_target_index, final_confidence) =
+            if let Some(ref name) = target_name {
+                if mapped_targets.contains_key(name) {
+                    // Duplicate mapping - keep the first one, mark this as unmapped
+                    (None, None, MappingConfidence::Unmapped)
+                } else {
+                    let idx = pko_index_map.get(name.as_str()).copied();
+                    if idx.is_some() {
+                        mapped_targets.insert(name.clone(), bone.index);
+                    }
+                    (Some(name.clone()), idx, confidence)
                 }
-                (Some(name.clone()), idx, confidence)
-            }
-        } else {
-            (None, None, MappingConfidence::Unmapped)
-        };
+            } else {
+                (None, None, MappingConfidence::Unmapped)
+            };
 
         entries.push(BoneMappingEntry {
             source_name: bone.name.clone(),
@@ -351,7 +374,11 @@ pub fn apply_manual_override(
 ) {
     let pko_index_map = PkoStandardSkeleton::bone_index_map();
 
-    if let Some(entry) = mapping.entries.iter_mut().find(|e| e.source_index == source_index) {
+    if let Some(entry) = mapping
+        .entries
+        .iter_mut()
+        .find(|e| e.source_index == source_index)
+    {
         entry.target_name = target_name.clone();
         entry.target_index = target_name
             .as_deref()
@@ -364,10 +391,16 @@ pub fn apply_manual_override(
     }
 
     // Recount
-    mapping.mapped_count = mapping.entries.iter().filter(|e| e.target_index.is_some()).count();
+    mapping.mapped_count = mapping
+        .entries
+        .iter()
+        .filter(|e| e.target_index.is_some())
+        .count();
     mapping.unmapped_count = mapping.entries.len() - mapping.mapped_count;
 
-    let mapped_targets: std::collections::HashSet<_> = mapping.entries.iter()
+    let mapped_targets: std::collections::HashSet<_> = mapping
+        .entries
+        .iter()
         .filter_map(|e| e.target_name.as_ref())
         .collect();
     mapping.missing_target_count = PkoStandardSkeleton::bone_count() - mapped_targets.len();
@@ -404,11 +437,28 @@ mod tests {
             "mixamorig:RightToeBase".to_string(),
         ];
         let parents = vec![
-            None, Some(0), Some(1), Some(2), Some(3), Some(4),
-            Some(3), Some(6), Some(7), Some(8),
-            Some(3), Some(10), Some(11), Some(12),
-            Some(0), Some(14), Some(15), Some(16),
-            Some(0), Some(18), Some(19), Some(20),
+            None,
+            Some(0),
+            Some(1),
+            Some(2),
+            Some(3),
+            Some(4),
+            Some(3),
+            Some(6),
+            Some(7),
+            Some(8),
+            Some(3),
+            Some(10),
+            Some(11),
+            Some(12),
+            Some(0),
+            Some(14),
+            Some(15),
+            Some(16),
+            Some(0),
+            Some(18),
+            Some(19),
+            Some(20),
         ];
         analyze_skeleton(&names, &parents)
     }
@@ -424,11 +474,19 @@ mod tests {
         assert!(mapping.mapped_count >= 20);
 
         // Check specific critical mappings
-        let hips = mapping.entries.iter().find(|e| e.source_name == "mixamorig:Hips").unwrap();
+        let hips = mapping
+            .entries
+            .iter()
+            .find(|e| e.source_name == "mixamorig:Hips")
+            .unwrap();
         assert_eq!(hips.target_name.as_deref(), Some("Bip01 Pelvis"));
         assert_eq!(hips.confidence, MappingConfidence::High);
 
-        let head = mapping.entries.iter().find(|e| e.source_name == "mixamorig:Head").unwrap();
+        let head = mapping
+            .entries
+            .iter()
+            .find(|e| e.source_name == "mixamorig:Head")
+            .unwrap();
         assert_eq!(head.target_name.as_deref(), Some("Bip01 Head"));
     }
 
@@ -450,7 +508,10 @@ mod tests {
         assert_eq!(mapping.mapped_count, 6);
 
         for entry in &mapping.entries {
-            assert_eq!(entry.target_name.as_deref(), Some(entry.source_name.as_str()));
+            assert_eq!(
+                entry.target_name.as_deref(),
+                Some(entry.source_name.as_str())
+            );
             assert_eq!(entry.confidence, MappingConfidence::Exact);
         }
     }
@@ -467,16 +528,32 @@ mod tests {
         let skeleton = analyze_skeleton(&names, &parents);
         let mapping = auto_map_bones(&skeleton);
 
-        let root = mapping.entries.iter().find(|e| e.source_name == "root").unwrap();
+        let root = mapping
+            .entries
+            .iter()
+            .find(|e| e.source_name == "root")
+            .unwrap();
         assert_eq!(root.target_name.as_deref(), Some("Bip01"));
 
-        let arm = mapping.entries.iter().find(|e| e.source_name == "left_upper_arm").unwrap();
+        let arm = mapping
+            .entries
+            .iter()
+            .find(|e| e.source_name == "left_upper_arm")
+            .unwrap();
         assert_eq!(arm.target_name.as_deref(), Some("Bip01 L UpperArm"));
 
-        let foot = mapping.entries.iter().find(|e| e.source_name == "right_foot").unwrap();
+        let foot = mapping
+            .entries
+            .iter()
+            .find(|e| e.source_name == "right_foot")
+            .unwrap();
         assert_eq!(foot.target_name.as_deref(), Some("Bip01 R Foot"));
 
-        let unknown = mapping.entries.iter().find(|e| e.source_name == "random_bone_xyz").unwrap();
+        let unknown = mapping
+            .entries
+            .iter()
+            .find(|e| e.source_name == "random_bone_xyz")
+            .unwrap();
         assert_eq!(unknown.confidence, MappingConfidence::Unmapped);
     }
 
@@ -491,7 +568,10 @@ mod tests {
 
         apply_manual_override(&mut mapping, 0, Some("Bip01 Head".to_string()));
 
-        assert_eq!(mapping.entries[0].target_name.as_deref(), Some("Bip01 Head"));
+        assert_eq!(
+            mapping.entries[0].target_name.as_deref(),
+            Some("Bip01 Head")
+        );
         assert_eq!(mapping.entries[0].confidence, MappingConfidence::Manual);
         assert_eq!(mapping.mapped_count, 1);
     }

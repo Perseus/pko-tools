@@ -2,7 +2,7 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use super::report::{ValidationReport, ValidationItem, ValidationSeverity, ValidationCategory};
+use super::report::{ValidationCategory, ValidationItem, ValidationReport, ValidationSeverity};
 use super::rules;
 use crate::mesh_processing::analysis;
 
@@ -25,8 +25,8 @@ pub async fn validate_model_for_import(
         return Err(format!("File not found: {}", file_path));
     }
 
-    let mesh_report = analysis::analyze_gltf_file(path)
-        .map_err(|e| format!("Failed to analyze model: {}", e))?;
+    let mesh_report =
+        analysis::analyze_gltf_file(path).map_err(|e| format!("Failed to analyze model: {}", e))?;
 
     let mut report = ValidationReport::new();
 

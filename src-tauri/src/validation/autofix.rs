@@ -1,14 +1,20 @@
-use super::report::{ValidationItem, ValidationReport, ValidationSeverity, ValidationCategory};
+use super::report::{ValidationCategory, ValidationItem, ValidationReport, ValidationSeverity};
 
 /// Reduce blend weights per vertex to the maximum allowed (4).
 ///
 /// Takes weights as [f32; N] per vertex, keeps only the top 4 and renormalizes.
-pub fn fix_blend_weights(weights: &mut Vec<[f32; 4]>, indices: &mut Vec<[u16; 4]>, raw_weights: &[[f32; 8]], raw_indices: &[[u16; 8]]) -> u32 {
+pub fn fix_blend_weights(
+    weights: &mut Vec<[f32; 4]>,
+    indices: &mut Vec<[u16; 4]>,
+    raw_weights: &[[f32; 8]],
+    raw_indices: &[[u16; 8]],
+) -> u32 {
     let mut fixed_count = 0u32;
 
     for (i, (rw, ri)) in raw_weights.iter().zip(raw_indices.iter()).enumerate() {
         // Collect all non-zero weight/index pairs
-        let mut pairs: Vec<(f32, u16)> = rw.iter()
+        let mut pairs: Vec<(f32, u16)> = rw
+            .iter()
             .zip(ri.iter())
             .filter(|(&w, _)| w > 0.0)
             .map(|(&w, &idx)| (w, idx))

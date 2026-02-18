@@ -7,6 +7,7 @@ use anyhow::{anyhow, Result};
 // ============================================================================
 
 const OBJ_FILE_VER600: i32 = 600;
+const FIXED16_ONE: f32 = 65536.0;
 
 /// A scene object placed on the map.
 #[derive(Debug, Clone)]
@@ -37,6 +38,74 @@ pub struct ParsedObjFile {
     pub section_width: i32,
     pub section_height: i32,
     pub objects: Vec<SceneObject>,
+}
+
+fn decode_fixed16_section_relative(
+    nx: i32,
+    ny: i32,
+    section_index_x: i32,
+    section_index_y: i32,
+    section_width_tiles: i32,
+    section_height_tiles: i32,
+) -> Option<(f32, f32)> {
+    let rel_x_tiles = nx as f32 / FIXED16_ONE;
+    let rel_y_tiles = ny as f32 / FIXED16_ONE;
+
+    if !(0.0..(section_width_tiles as f32)).contains(&rel_x_tiles)
+        || !(0.0..(section_height_tiles as f32)).contains(&rel_y_tiles)
+    {
+        return None;
+    }
+
+    let world_x_tiles = section_index_x as f32 * section_width_tiles as f32 + rel_x_tiles;
+    let world_y_tiles = section_index_y as f32 * section_height_tiles as f32 + rel_y_tiles;
+    Some((world_x_tiles, world_y_tiles))
+}
+
+fn decode_legacy_section_relative_cm(
+    nx: i32,
+    ny: i32,
+    section_index_x: i32,
+    section_index_y: i32,
+    section_width_tiles: i32,
+    section_height_tiles: i32,
+) -> Option<(f32, f32)> {
+    // Legacy editor format stores section-local centimeters.
+    let max_x_cm = section_width_tiles * 100;
+    let max_y_cm = section_height_tiles * 100;
+    if !(0..max_x_cm).contains(&nx) || !(0..max_y_cm).contains(&ny) {
+        return None;
+    }
+
+    let section_x_cm = section_index_x * section_width_tiles * 100;
+    let section_y_cm = section_index_y * section_height_tiles * 100;
+
+    let abs_x_cm = nx + section_x_cm;
+    let abs_y_cm = ny + section_y_cm;
+    Some((abs_x_cm as f32 / 100.0, abs_y_cm as f32 / 100.0))
+}
+
+fn sanitize_yaw_degrees(raw_yaw: i16) -> i16 {
+    let mut yaw = raw_yaw as i32;
+    if yaw.abs() > 360 {
+        yaw %= 360;
+    }
+    yaw as i16
+}
+
+/// Safe abs for i16 that handles i16::MIN without overflow.
+fn safe_abs_i16(v: i16) -> i32 {
+    (v as i32).abs()
+}
+
+fn sanitize_scale(raw_scale: i16) -> i16 {
+    // Scale is usually 0 (default) or an int16 percentage.
+    // Garbage values appear in some .obj files; clamp to default.
+    if safe_abs_i16(raw_scale) > 2000 {
+        0
+    } else {
+        raw_scale
+    }
 }
 
 // ============================================================================
@@ -108,34 +177,71 @@ pub fn parse_obj_file(data: &[u8]) -> Result<ParsedObjFile> {
 
         cursor.set_position(offset as u64);
 
-        // Section coordinates in centimeters
-        let section_x = (section_no as i32 % section_cnt_x) * section_width * 100;
-        let section_y = (section_no as i32 / section_cnt_x) * section_height * 100;
+        let section_index_x = section_no as i32 % section_cnt_x;
+        let section_index_y = section_no as i32 / section_cnt_x;
 
         for _ in 0..count {
+            // SSceneObjInfo is 20 bytes with default MSVC alignment (no #pragma pack):
+            //   offset 0: sTypeID (short, 2 bytes)
+            //   offset 2: 2 bytes padding (for int alignment)
+            //   offset 4: nX (int, 4 bytes)
+            //   offset 8: nY (int, 4 bytes)
+            //   offset 12: sHeightOff (short, 2 bytes)
+            //   offset 14: sYawAngle (short, 2 bytes)
+            //   offset 16: sScale (short, 2 bytes)
+            //   offset 18: 2 bytes trailing padding (struct alignment to 4)
             let raw_type_id = read_i16(&mut cursor)?;
+            let mut _pad = [0u8; 2];
+            cursor.read_exact(&mut _pad)?; // alignment padding after short
             let nx = read_i32(&mut cursor)?;
             let ny = read_i32(&mut cursor)?;
             let s_height_off = read_i16(&mut cursor)?;
             let s_yaw_angle = read_i16(&mut cursor)?;
             let s_scale = read_i16(&mut cursor)?;
-
-            // In version 600, coordinates are section-relative.
-            // The client's ReadSectionObjInfo adds section offset back:
-            //   SSceneObj[i].nX += nSectionX
-            //   SSceneObj[i].nY += nSectionY
-            let abs_x = nx + section_x;
-            let abs_y = ny + section_y;
-
-            // Convert centimeters to world units (divide by 100)
-            let world_x = abs_x as f32 / 100.0;
-            let world_y = abs_y as f32 / 100.0;
-            let world_z = s_height_off as f32 / 100.0;
+            cursor.read_exact(&mut _pad)?; // trailing struct padding
 
             // Extract type and ID from sTypeID
             // Top 2 bits = type (0=model, 1=effect), lower 14 = ID
             let obj_type = ((raw_type_id as u16) >> 14) as u8;
             let obj_id = (raw_type_id as u16) & 0x3FFF;
+
+            // Drop invalid placeholder records early.
+            if obj_id == 0 || obj_type > 1 {
+                continue;
+            }
+
+            // Height offset is centimeters in original client code.
+            // Reject obvious garbage rows that produce absurd vertical offsets.
+            if safe_abs_i16(s_height_off) > 2000 {
+                continue;
+            }
+
+            // Support two real-world encodings observed in version 600 files:
+            // 1) fixed16 section-relative tile coordinates
+            // 2) legacy section-relative centimeter coordinates
+            let (world_x, world_y) = if let Some(p) = decode_fixed16_section_relative(
+                nx,
+                ny,
+                section_index_x,
+                section_index_y,
+                section_width,
+                section_height,
+            ) {
+                p
+            } else if let Some(p) = decode_legacy_section_relative_cm(
+                nx,
+                ny,
+                section_index_x,
+                section_index_y,
+                section_width,
+                section_height,
+            ) {
+                p
+            } else {
+                continue;
+            };
+
+            let world_z = s_height_off as f32 / 100.0;
 
             objects.push(SceneObject {
                 raw_type_id,
@@ -144,8 +250,8 @@ pub fn parse_obj_file(data: &[u8]) -> Result<ParsedObjFile> {
                 world_x,
                 world_y,
                 world_z,
-                yaw_angle: s_yaw_angle,
-                scale: s_scale,
+                yaw_angle: sanitize_yaw_degrees(s_yaw_angle),
+                scale: sanitize_scale(s_scale),
             });
         }
     }
@@ -194,6 +300,35 @@ mod tests {
         );
     }
 
+    /// Verify 20-byte struct alignment produces many more objects than 16-byte would.
+    /// The xmas2 .obj file has ~3247 model placements with correct alignment.
+    #[test]
+    fn parse_real_obj_file_xmas2_alignment_check() {
+        let obj_path = std::path::Path::new("../top-client/map/07xmas2.obj");
+        if !obj_path.exists() {
+            return;
+        }
+
+        let data = std::fs::read(obj_path).unwrap();
+        let parsed = parse_obj_file(&data).unwrap();
+
+        let model_count = parsed.objects.iter().filter(|o| o.obj_type == 0).count();
+
+        eprintln!(
+            "xmas2 .obj: {} total objects, {} models",
+            parsed.objects.len(),
+            model_count
+        );
+
+        // With correct 20-byte alignment we get ~3247 models.
+        // With wrong 16-byte alignment we only got ~289.
+        assert!(
+            model_count > 1000,
+            "Expected >1000 model placements with correct struct alignment, got {}",
+            model_count
+        );
+    }
+
     #[test]
     fn type_id_extraction() {
         // Model type (type=0) with ID 100
@@ -209,5 +344,32 @@ mod tests {
         let obj_id2 = (raw2 as u16) & 0x3FFF;
         assert_eq!(obj_type2, 1);
         assert_eq!(obj_id2, 50);
+    }
+
+    #[test]
+    fn decode_fixed16_section_relative_validates_bounds() {
+        // Section (2,3), section size 8x8 tiles, rel=(1.5,2.25)
+        let nx = (1.5 * FIXED16_ONE) as i32;
+        let ny = (2.25 * FIXED16_ONE) as i32;
+        let (x, y) = decode_fixed16_section_relative(nx, ny, 2, 3, 8, 8).unwrap();
+        assert!((x - 17.5).abs() < 0.001);
+        assert!((y - 26.25).abs() < 0.001);
+
+        // Outside section-local range should be rejected.
+        assert!(
+            decode_fixed16_section_relative((8.0 * FIXED16_ONE) as i32, ny, 2, 3, 8, 8).is_none()
+        );
+    }
+
+    #[test]
+    fn decode_legacy_section_relative_cm_validates_bounds() {
+        // Section (1,2), section size 8x8 tiles. Local cm=(250,375)
+        let (x, y) = decode_legacy_section_relative_cm(250, 375, 1, 2, 8, 8).unwrap();
+        assert!((x - 10.5).abs() < 0.001);
+        assert!((y - 19.75).abs() < 0.001);
+
+        // Out of local section cm range rejected.
+        assert!(decode_legacy_section_relative_cm(1200, 10, 1, 2, 8, 8).is_none());
+        assert!(decode_legacy_section_relative_cm(10, 900, 1, 2, 8, 8).is_none());
     }
 }

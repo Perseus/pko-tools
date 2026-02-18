@@ -114,15 +114,34 @@ pub fn parse_area_set_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, AreaDefini
 
         // Derived fields — need at least offset d+28 (29 bytes from d)
         let d = AREA_DERIVED_OFFSET;
-        let dw_color = match read_u32(chunk, d) { Some(v) => v, None => continue };
-        let n_music = match read_i32(chunk, d + 4) { Some(v) => v, None => continue };
-        let dw_env_color = match read_u32(chunk, d + 8) { Some(v) => v, None => continue };
-        let dw_light_color = match read_u32(chunk, d + 12) { Some(v) => v, None => continue };
-        let light_dir = match (read_f32(chunk, d + 16), read_f32(chunk, d + 20), read_f32(chunk, d + 24)) {
+        let dw_color = match read_u32(chunk, d) {
+            Some(v) => v,
+            None => continue,
+        };
+        let n_music = match read_i32(chunk, d + 4) {
+            Some(v) => v,
+            None => continue,
+        };
+        let dw_env_color = match read_u32(chunk, d + 8) {
+            Some(v) => v,
+            None => continue,
+        };
+        let dw_light_color = match read_u32(chunk, d + 12) {
+            Some(v) => v,
+            None => continue,
+        };
+        let light_dir = match (
+            read_f32(chunk, d + 16),
+            read_f32(chunk, d + 20),
+            read_f32(chunk, d + 24),
+        ) {
             (Some(x), Some(y), Some(z)) => [x, y, z],
             _ => continue,
         };
-        let ch_type = match chunk.get(d + 28) { Some(&v) => v, None => continue };
+        let ch_type = match chunk.get(d + 28) {
+            Some(&v) => v,
+            None => continue,
+        };
 
         map.insert(
             area_id,
@@ -238,22 +257,29 @@ mod tests {
 
         // Basic sanity: colors should have reasonable values
         for area in map.values() {
-            assert!(area.zone_type <= 1, "zone_type should be 0 or 1, got {}", area.zone_type);
+            assert!(
+                area.zone_type <= 1,
+                "zone_type should be 0 or 1, got {}",
+                area.zone_type
+            );
         }
     }
 
     #[test]
     fn areas_to_json_format() {
         let mut areas = HashMap::new();
-        areas.insert(1, AreaDefinition {
-            area_id: 1,
-            color: [140, 220, 180, 255],
-            music: 3,
-            env_color: [255, 255, 255],
-            light_color: [153, 153, 153],
-            light_dir: [-1.0, -1.0, -1.0],
-            zone_type: 1,
-        });
+        areas.insert(
+            1,
+            AreaDefinition {
+                area_id: 1,
+                color: [140, 220, 180, 255],
+                music: 3,
+                env_color: [255, 255, 255],
+                light_color: [153, 153, 153],
+                light_dir: [-1.0, -1.0, -1.0],
+                zone_type: 1,
+            },
+        );
 
         let json = areas_to_json(&areas);
         assert!(json.is_object());

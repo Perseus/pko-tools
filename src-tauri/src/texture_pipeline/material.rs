@@ -1,6 +1,4 @@
-use crate::character::texture::{
-    CharMaterial, ColorValue4F, MaterialTextureInfoTransparencyType,
-};
+use crate::character::texture::{CharMaterial, ColorValue4F, MaterialTextureInfoTransparencyType};
 
 /// Convert PBR metallic-roughness material parameters to PKO's D3D fixed-function material.
 ///
@@ -67,9 +65,7 @@ pub fn pbr_to_d3d_material(
 }
 
 /// Extract PBR parameters from a gltf::Material.
-pub fn extract_pbr_params(
-    material: &::gltf::Material,
-) -> ([f32; 4], [f32; 3], f32, f32, String) {
+pub fn extract_pbr_params(material: &::gltf::Material) -> ([f32; 4], [f32; 3], f32, f32, String) {
     let pbr = material.pbr_metallic_roughness();
     let base_color = pbr.base_color_factor();
     let emissive = material.emissive_factor();
@@ -82,7 +78,13 @@ pub fn extract_pbr_params(
         ::gltf::material::AlphaMode::Blend => "BLEND",
     };
 
-    (base_color, emissive, metallic, roughness, alpha_mode.to_string())
+    (
+        base_color,
+        emissive,
+        metallic,
+        roughness,
+        alpha_mode.to_string(),
+    )
 }
 
 #[cfg(test)]
@@ -91,13 +93,8 @@ mod tests {
 
     #[test]
     fn opaque_default_material() {
-        let (mat, transp) = pbr_to_d3d_material(
-            [1.0, 1.0, 1.0, 1.0],
-            [0.0, 0.0, 0.0],
-            0.0,
-            1.0,
-            "OPAQUE",
-        );
+        let (mat, transp) =
+            pbr_to_d3d_material([1.0, 1.0, 1.0, 1.0], [0.0, 0.0, 0.0], 0.0, 1.0, "OPAQUE");
         assert!((mat.dif.r - 1.0).abs() < 0.001);
         assert!((mat.power - 0.0).abs() < 0.001); // roughness=1 → power=0
         assert_eq!(transp, MaterialTextureInfoTransparencyType::Filter);
@@ -105,13 +102,8 @@ mod tests {
 
     #[test]
     fn metallic_shiny_material() {
-        let (mat, _transp) = pbr_to_d3d_material(
-            [0.8, 0.2, 0.1, 1.0],
-            [0.0, 0.0, 0.0],
-            1.0,
-            0.0,
-            "OPAQUE",
-        );
+        let (mat, _transp) =
+            pbr_to_d3d_material([0.8, 0.2, 0.1, 1.0], [0.0, 0.0, 0.0], 1.0, 0.0, "OPAQUE");
         // metallic=1, roughness=0 → high specular, high power
         let spe = mat.spe.unwrap();
         assert!((spe.r - 0.8).abs() < 0.001);
@@ -121,13 +113,8 @@ mod tests {
 
     #[test]
     fn emissive_material() {
-        let (mat, _) = pbr_to_d3d_material(
-            [1.0, 1.0, 1.0, 1.0],
-            [1.0, 0.5, 0.0],
-            0.0,
-            0.5,
-            "OPAQUE",
-        );
+        let (mat, _) =
+            pbr_to_d3d_material([1.0, 1.0, 1.0, 1.0], [1.0, 0.5, 0.0], 0.0, 0.5, "OPAQUE");
         let emi = mat.emi.unwrap();
         assert!((emi.r - 1.0).abs() < 0.001);
         assert!((emi.g - 0.5).abs() < 0.001);
@@ -136,13 +123,8 @@ mod tests {
 
     #[test]
     fn blend_alpha_mode() {
-        let (_, transp) = pbr_to_d3d_material(
-            [1.0, 1.0, 1.0, 0.5],
-            [0.0, 0.0, 0.0],
-            0.0,
-            1.0,
-            "BLEND",
-        );
+        let (_, transp) =
+            pbr_to_d3d_material([1.0, 1.0, 1.0, 0.5], [0.0, 0.0, 0.0], 0.0, 1.0, "BLEND");
         assert_eq!(transp, MaterialTextureInfoTransparencyType::Additive);
     }
 }
