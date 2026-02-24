@@ -133,6 +133,7 @@ pub fn encode_tile_layer_pngs(
 pub fn encode_all_grids(
     collision: &(Vec<u8>, i32, i32),
     obj_height: &(Vec<u8>, i32, i32),
+    terrain_height: &(Vec<u8>, i32, i32),
     region_bytes: &[u8],
     area_bytes: &[u8],
     tile_tex_bytes: &[u8],
@@ -156,6 +157,13 @@ pub fn encode_all_grids(
         obj_height.1,
         obj_height.2,
         &grids_dir.join("obj_height.png"),
+    )?;
+
+    encode_i16_grid_png(
+        &terrain_height.0,
+        terrain_height.1,
+        terrain_height.2,
+        &grids_dir.join("terrain_height.png"),
     )?;
 
     encode_i16_grid_png(
