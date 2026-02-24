@@ -1838,6 +1838,38 @@ fn build_obj_height_grid(map: &ParsedMap) -> (Vec<u8>, i32, i32) {
     (grid, w, h)
 }
 
+/// Build terrain height grid at vertex resolution using tile_height().
+/// Each vertex (vx, vy) samples get_tile(map, vx, vy) directly — strict owner
+/// semantics matching the terrain mesh builder. Edge vertices (vx >= n_width or
+/// vy >= n_height) return None → UNDERWATER_HEIGHT.
+/// Grid dimensions: (n_width+1) × (n_height+1).
+/// Each cell is an i16 in LE encoding representing height in millimeters.
+/// Returns (grid_bytes, width, height).
+fn build_terrain_height_grid(map: &ParsedMap) -> (Vec<u8>, i32, i32) {
+    let vw = map.header.n_width + 1;
+    let vh = map.header.n_height + 1;
+    let mut grid_i16 = vec![0i16; (vw * vh) as usize];
+    let uw = (UNDERWATER_HEIGHT * 1000.0).round() as i16;
+
+    for vy in 0..vh {
+        for vx in 0..vw {
+            let idx = (vy * vw + vx) as usize;
+            grid_i16[idx] = match get_tile(map, vx, vy) {
+                Some(tile) => (tile_height(tile) * 1000.0).round() as i16,
+                None => uw,
+            };
+        }
+    }
+
+    // Convert i16 array to LE bytes
+    let mut grid = Vec::with_capacity((vw * vh * 2) as usize);
+    for val in &grid_i16 {
+        grid.extend_from_slice(&val.to_le_bytes());
+    }
+
+    (grid, vw, vh)
+}
+
 /// Build region grid (sRegion i16 per tile). Returns raw i16 LE bytes.
 fn build_region_grid(map: &ParsedMap) -> Vec<u8> {
     let w = map.header.n_width;
@@ -2189,6 +2221,7 @@ pub fn export_map_for_unity(
     // 9. Build grids
     let collision = build_collision_grid(&parsed_map);
     let obj_height = build_obj_height_grid(&parsed_map);
+    let terrain_height = build_terrain_height_grid(&parsed_map);
     let region_bytes = build_region_grid(&parsed_map);
     let area_bytes = build_area_grid(&parsed_map);
     let tile_tex_bytes = build_tile_texture_grid(&parsed_map);
@@ -2203,6 +2236,7 @@ pub fn export_map_for_unity(
         super::grid_images::encode_all_grids(
             &collision,
             &obj_height,
+            &terrain_height,
             &region_bytes,
             &area_bytes,
             &tile_tex_bytes,
@@ -2288,6 +2322,8 @@ pub fn export_map_for_unity(
             .unwrap_or_default();
     let alpha_atlas_path =
         super::texture::export_alpha_atlas(project_dir, output_dir).unwrap_or(None);
+    let alpha_mask_array =
+        super::texture::export_alpha_mask_array(project_dir, output_dir).unwrap_or(None);
 
     // 13. Build manifest
     let mut manifest_map = serde_json::Map::new();
@@ -2300,6 +2336,26 @@ pub fn export_map_for_unity(
             serde_json::json!("pko_1unit_to_unity_1unit_v1"),
         );
         manifest_map.insert("terrain_glb".into(), serde_json::json!("terrain.glb"));
+        manifest_map.insert("terrain_gltf".into(), serde_json::json!("terrain.glb")); // alias for ManifestShell compat
+        manifest_map.insert("map_name".into(), serde_json::json!(map_name));
+        manifest_map.insert("coordinate_system".into(), serde_json::json!("y_up"));
+        manifest_map.insert("world_scale".into(), serde_json::json!(MAP_VISUAL_SCALE));
+        manifest_map.insert(
+            "map_width_tiles".into(),
+            serde_json::json!(parsed_map.header.n_width),
+        );
+        manifest_map.insert(
+            "map_height_tiles".into(),
+            serde_json::json!(parsed_map.header.n_height),
+        );
+        manifest_map.insert(
+            "section_width".into(),
+            serde_json::json!(parsed_map.header.n_section_width),
+        );
+        manifest_map.insert(
+            "section_height".into(),
+            serde_json::json!(parsed_map.header.n_section_height),
+        );
 
         // Grid file references with format metadata
         manifest_map.insert(
@@ -2337,6 +2393,10 @@ pub fn export_map_for_unity(
                 "tile_layer_alpha": {
                     "file": "grids/tile_layer_alpha.png", "scale": 1,
                     "format": "rgb8_indices"
+                },
+                "terrain_height": {
+                    "file": "grids/terrain_height.png", "scale": 1,
+                    "format": "i16_rgb8_offset"
                 }
             }),
         );
@@ -2345,6 +2405,26 @@ pub fn export_map_for_unity(
         manifest_map.insert(
             "buildings".into(),
             serde_json::Value::Object(buildings_map),
+        );
+
+        // Placements, areas, and map settings (also embedded in GLB scene.extras)
+        manifest_map.insert("placements".into(), serde_json::json!(placements));
+        manifest_map.insert("areas".into(), areas_json.clone());
+        manifest_map.insert(
+            "spawn_point".into(),
+            serde_json::json!(spawn_point_tiles.map(|sp| serde_json::json!({
+                "tile_x": sp[0], "tile_y": sp[1]
+            }))),
+        );
+        manifest_map.insert(
+            "light_direction".into(),
+            serde_json::json!(light_direction),
+        );
+        manifest_map.insert("light_color".into(), serde_json::json!(light_color));
+        manifest_map.insert("ambient".into(), serde_json::json!([0.4, 0.4, 0.4]));
+        manifest_map.insert(
+            "background_color".into(),
+            serde_json::json!([10, 10, 125]),
         );
     } else {
         // ----- Manifest v2 (full, legacy) -----
@@ -2469,6 +2549,9 @@ pub fn export_map_for_unity(
     }
     if let Some(ref alpha_path) = alpha_atlas_path {
         manifest_map.insert("alpha_atlas".into(), serde_json::json!(alpha_path));
+    }
+    if let Some(ref mask_paths) = alpha_mask_array {
+        manifest_map.insert("alpha_masks".into(), serde_json::json!(mask_paths));
     }
 
     let manifest = serde_json::Value::Object(manifest_map);
@@ -3106,6 +3189,97 @@ mod tests {
         assert_eq!(read_i16(1), 0, "0x00 → 0.0 → 0mm");
         assert_eq!(read_i16(2), -50, "0x41 → -0.05 → -50mm");
         assert_eq!(read_i16(3), 3150, "0x3F → 3.15 → 3150mm");
+    }
+
+    #[test]
+    fn terrain_height_grid_encodes_i16_millimeters() {
+        // 2×2 tile map → vertex grid is 3×3
+        let parsed = ParsedMap {
+            header: MapHeader {
+                n_map_flag: CUR_VERSION_NO,
+                n_width: 2,
+                n_height: 2,
+                n_section_width: 2,
+                n_section_height: 2,
+            },
+            section_cnt_x: 1,
+            section_cnt_y: 1,
+            section_offsets: vec![0],
+            sections: vec![Some(MapSection {
+                tiles: vec![
+                    // tile (0,0): c_height = 10 → (10*10)/100 = 1.0 → 1000mm
+                    MapTile {
+                        dw_tile_info: 0,
+                        bt_tile_info: 0,
+                        s_color: 0,
+                        c_height: 10,
+                        s_region: 0,
+                        bt_island: 0,
+                        bt_block: [0; 4],
+                    },
+                    // tile (1,0): c_height = -5 → (-5*10)/100 = -0.5 → -500mm
+                    MapTile {
+                        dw_tile_info: 0,
+                        bt_tile_info: 0,
+                        s_color: 0,
+                        c_height: -5,
+                        s_region: 0,
+                        bt_island: 0,
+                        bt_block: [0; 4],
+                    },
+                    // tile (0,1): c_height = 0 → 0mm
+                    MapTile {
+                        dw_tile_info: 0,
+                        bt_tile_info: 0,
+                        s_color: 0,
+                        c_height: 0,
+                        s_region: 0,
+                        bt_island: 0,
+                        bt_block: [0; 4],
+                    },
+                    // tile (1,1): c_height = 127 → (127*10)/100 = 12.7 → 12700mm
+                    MapTile {
+                        dw_tile_info: 0,
+                        bt_tile_info: 0,
+                        s_color: 0,
+                        c_height: 127,
+                        s_region: 0,
+                        bt_island: 0,
+                        bt_block: [0; 4],
+                    },
+                ],
+            })],
+        };
+
+        let (grid, w, h) = build_terrain_height_grid(&parsed);
+        // Vertex resolution: (2+1) × (2+1) = 3×3
+        assert_eq!(w, 3);
+        assert_eq!(h, 3);
+        assert_eq!(grid.len(), 18); // 9 cells × 2 bytes each
+
+        let read_i16 =
+            |idx: usize| -> i16 { i16::from_le_bytes([grid[idx * 2], grid[idx * 2 + 1]]) };
+
+        // Row 0: vertices (0,0), (1,0), (2,0)
+        // (0,0) → get_tile(0,0) = tile(0,0), c_height=10 → 1000mm
+        assert_eq!(read_i16(0), 1000, "vertex (0,0) → tile (0,0) c_height=10");
+        // (1,0) → get_tile(1,0) = tile(1,0), c_height=-5 → -500mm
+        assert_eq!(read_i16(1), -500, "vertex (1,0) → tile (1,0) c_height=-5");
+        // (2,0) → get_tile(2,0) → out of range (n_width=2) → UNDERWATER_HEIGHT = -2000mm
+        assert_eq!(read_i16(2), -2000, "vertex (2,0) → edge → UNDERWATER_HEIGHT");
+
+        // Row 1: vertices (0,1), (1,1), (2,1)
+        // (0,1) → get_tile(0,1) = tile(0,1), c_height=0 → 0mm
+        assert_eq!(read_i16(3), 0, "vertex (0,1) → tile (0,1) c_height=0");
+        // (1,1) → get_tile(1,1) = tile(1,1), c_height=127 → 12700mm
+        assert_eq!(read_i16(4), 12700, "vertex (1,1) → tile (1,1) c_height=127");
+        // (2,1) → out of range → UNDERWATER_HEIGHT
+        assert_eq!(read_i16(5), -2000, "vertex (2,1) → edge → UNDERWATER_HEIGHT");
+
+        // Row 2: vertices (0,2), (1,2), (2,2) — all edge (vy=2 >= n_height=2)
+        assert_eq!(read_i16(6), -2000, "vertex (0,2) → edge → UNDERWATER_HEIGHT");
+        assert_eq!(read_i16(7), -2000, "vertex (1,2) → edge → UNDERWATER_HEIGHT");
+        assert_eq!(read_i16(8), -2000, "vertex (2,2) → edge → UNDERWATER_HEIGHT");
     }
 
     #[test]

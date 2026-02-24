@@ -495,6 +495,64 @@ pub fn export_alpha_atlas(project_dir: &Path, output_dir: &Path) -> Result<Optio
     Ok(Some("terrain_textures/alpha_atlas.png".to_string()))
 }
 
+/// Export the alpha mask atlas as 16 individual 64x64 PNG slices to
+/// `output_dir/terrain_textures/alpha_mask_N.png`.
+/// Each slice is V-flipped (DirectX top-left origin → Unity bottom-left origin).
+/// Returns a vec of 16 relative paths if successful.
+pub fn export_alpha_mask_array(
+    project_dir: &Path,
+    output_dir: &Path,
+) -> Result<Option<Vec<String>>> {
+    let atlas = match load_alpha_atlas(project_dir) {
+        Some(img) => img,
+        None => {
+            eprintln!(
+                "Warning: alpha mask atlas (total.tga) not found — cannot export mask array"
+            );
+            return Ok(None);
+        }
+    };
+
+    let (aw, ah) = atlas.dimensions();
+    if aw != 256 || ah != 256 {
+        anyhow::bail!(
+            "Alpha atlas unexpected size: {}x{} (expected 256x256)",
+            aw,
+            ah
+        );
+    }
+
+    let tex_dir = output_dir.join("terrain_textures");
+    std::fs::create_dir_all(&tex_dir)?;
+
+    let cell_size: u32 = 64;
+    let mut paths = Vec::with_capacity(16);
+
+    for id in 0u32..16 {
+        // Locate the cell in the atlas using ALPHA_NO_2_UV (DirectX convention, Y=0 at top)
+        let uv = ALPHA_NO_2_UV[id as usize];
+        let cell_x = (uv[0] * aw as f32) as u32; // pixel X origin
+        let cell_y = (uv[1] * ah as f32) as u32; // pixel Y origin (DX: top-down)
+
+        // Crop the 64x64 cell
+        let cell = atlas.crop_imm(cell_x, cell_y, cell_size, cell_size);
+
+        // V-flip for Unity (bottom-left origin)
+        let flipped = image::imageops::flip_vertical(&cell.to_rgba8());
+
+        let png_name = format!("alpha_mask_{}.png", id);
+        let png_path = tex_dir.join(&png_name);
+        flipped
+            .save(&png_path)
+            .map_err(|e| anyhow::anyhow!("Failed to save alpha mask slice {}: {}", id, e))?;
+
+        paths.push(format!("terrain_textures/{}", png_name));
+    }
+
+    eprintln!("Exported 16 alpha mask slices (64x64 each, V-flipped for Unity)");
+    Ok(Some(paths))
+}
+
 /// Build tile layer grid: 7 bytes per tile encoding all 4 texture layers.
 /// Format per tile: [base_tex, L1_tex, L1_alpha, L2_tex, L2_alpha, L3_tex, L3_alpha]
 /// Row-major order (Y outer, X inner), same as other grids.
