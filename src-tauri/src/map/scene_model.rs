@@ -357,8 +357,19 @@ fn build_lmo_material(
     project_dir: &Path,
     load_textures: bool,
 ) {
-    // Canonicalize types 6-8 to type 1 (they are indistinguishable in engine behavior)
-    let effective_transp = if mat.transp_type >= 6 { 1 } else { mat.transp_type };
+    // Canonicalize types 6-8 to type 1 (they fall through to ONE/ONE in engine)
+    // Types > 8 are unknown/corrupt — warn and remap to type 1
+    let effective_transp = match mat.transp_type {
+        0..=5 => mat.transp_type,
+        6..=8 => 1,
+        other => {
+            eprintln!(
+                "WARN: material '{}' has unknown transp_type={}, remapping to type 1",
+                name, other
+            );
+            1
+        }
+    };
     let is_effect = effective_transp != lmo::TRANSP_FILTER;
 
     let base_color = [
@@ -1626,6 +1637,37 @@ mod tests {
             .expect("alpha cutoff should be set for alpha-test materials")
             .0;
         assert!((cutoff - (129.0 / 255.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn build_material_type9_remapped_to_type1() {
+        // Unknown transp_type > 8 should be remapped to type 1 (additive)
+        let mat = lmo::LmoMaterial {
+            diffuse: [1.0, 1.0, 1.0, 1.0],
+            ambient: [0.1, 0.1, 0.1, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
+            opacity: 1.0,
+            transp_type: 9,
+            alpha_test_enabled: false,
+            alpha_ref: 0,
+            src_blend: None,
+            dest_blend: None,
+            tex_filename: None,
+        };
+        let mut builder = GltfBuilder::new();
+        let tmp = std::env::temp_dir();
+        build_lmo_material(&mut builder, &mat, "test_type9", &tmp, false);
+        let gltf_mat = &builder.materials[0];
+        // Type 9 → remapped to 1 → is_effect=true → Opaque alpha mode (no alpha test)
+        assert_eq!(
+            gltf_mat.alpha_mode,
+            Checked::Valid(gltf_json::material::AlphaMode::Opaque)
+        );
+        // Name should have T1 (remapped), not T9
+        assert!(
+            gltf_mat.name.as_ref().unwrap().contains("__PKO_T1_"),
+            "type 9 should be remapped to T1 in suffix"
+        );
     }
 
     #[test]
