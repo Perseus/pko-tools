@@ -397,8 +397,9 @@ fn build_lmo_material(
     };
 
     let alpha_cutoff = if mat.alpha_test_enabled {
+        let ref_value = if mat.alpha_ref == 0 { 129u8 } else { mat.alpha_ref };
         Some(gltf_json::material::AlphaCutoff(
-            (mat.alpha_ref as f32 / 255.0).clamp(0.0, 1.0),
+            (ref_value as f32 / 255.0).clamp(0.0, 1.0),
         ))
     } else {
         None
@@ -430,9 +431,12 @@ fn build_lmo_material(
 
     // Structured material name suffix for blend mode signaling to Unity
     // Encode: T=transp_type, A=alpha_ref (0 if no alpha test), O=opacity as byte 0-255
+    // Engine overrides ALPHAREF to 129 at runtime (RenderStateMgr.cpp _rsa_sceneobj),
+    // so materials with alpha_test_enabled=true but alpha_ref=0 effectively use 129.
     let material_name = if is_effect || mat.alpha_test_enabled {
         let alpha_ref = if mat.alpha_test_enabled {
-            mat.alpha_ref as u32
+            let raw = mat.alpha_ref as u32;
+            if raw == 0 { 129 } else { raw } // Engine default ALPHAREF=129
         } else {
             0
         };
@@ -1667,6 +1671,50 @@ mod tests {
         assert!(
             gltf_mat.name.as_ref().unwrap().contains("__PKO_T1_"),
             "type 9 should be remapped to T1 in suffix"
+        );
+    }
+
+    #[test]
+    fn build_material_alpha_ref_zero_gets_engine_default_129() {
+        // Materials with alpha_test_enabled=true but alpha_ref=0 should use
+        // the engine's default ALPHAREF=129, not encode A0 (which Unity reads as "no alpha test")
+        let mat = lmo::LmoMaterial {
+            diffuse: [0.5, 0.6, 0.7, 1.0],
+            ambient: [0.1, 0.1, 0.1, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
+            opacity: 1.0,
+            transp_type: 0,
+            alpha_test_enabled: true,
+            alpha_ref: 0, // Engine overrides to 129 at runtime
+            src_blend: None,
+            dest_blend: None,
+            tex_filename: None,
+        };
+        let mut builder = GltfBuilder::new();
+        let tmp = std::env::temp_dir();
+        build_lmo_material(&mut builder, &mat, "tree_leaf", &tmp, false);
+        let gltf_mat = &builder.materials[0];
+
+        // Should be Mask (alpha test enabled)
+        assert_eq!(
+            gltf_mat.alpha_mode,
+            Checked::Valid(gltf_json::material::AlphaMode::Mask)
+        );
+
+        // Suffix should have A129 (engine default), not A0
+        let name = gltf_mat.name.as_ref().unwrap();
+        assert!(
+            name.contains("_A129_"),
+            "alpha_ref=0 with alpha_test should encode as A129 (engine default), got: {}",
+            name
+        );
+
+        // Cutoff should be 129/255 ≈ 0.506
+        let cutoff = gltf_mat.alpha_cutoff.as_ref().unwrap().0;
+        assert!(
+            (cutoff - 129.0 / 255.0).abs() < 1e-6,
+            "cutoff should be 129/255, got: {}",
+            cutoff
         );
     }
 
