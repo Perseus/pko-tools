@@ -323,6 +323,8 @@ fn build_lmo_material(
     project_dir: &Path,
     load_textures: bool,
 ) {
+    let is_additive = mat.transp_type == lmo::TRANSP_ADDITIVE;
+
     let base_color = [
         mat.diffuse[0].clamp(0.0, 1.0),
         mat.diffuse[1].clamp(0.0, 1.0),
@@ -330,7 +332,11 @@ fn build_lmo_material(
         mat.opacity.clamp(0.0, 1.0),
     ];
 
-    let alpha_mode = if mat.alpha_test_enabled {
+    // Additive materials: keep Opaque alpha mode — the Unity shader handles blending.
+    // Non-additive: use existing alpha test / opacity logic.
+    let alpha_mode = if is_additive {
+        Checked::Valid(gltf_json::material::AlphaMode::Opaque)
+    } else if mat.alpha_test_enabled {
         Checked::Valid(gltf_json::material::AlphaMode::Mask)
     } else if mat.opacity < 0.99 {
         Checked::Valid(gltf_json::material::AlphaMode::Blend)
@@ -338,12 +344,19 @@ fn build_lmo_material(
         Checked::Valid(gltf_json::material::AlphaMode::Opaque)
     };
 
-    let alpha_cutoff = if mat.alpha_test_enabled {
+    let alpha_cutoff = if !is_additive && mat.alpha_test_enabled {
         Some(gltf_json::material::AlphaCutoff(
             (mat.alpha_ref as f32 / 255.0).clamp(0.0, 1.0),
         ))
     } else {
         None
+    };
+
+    // Material name suffix for blend mode signaling to Unity
+    let material_name = if is_additive {
+        format!("{}__PKO_BLEND_ADD", name)
+    } else {
+        name.to_string()
     };
 
     // Try to load and embed the texture (skipped for map batch loading)
@@ -400,6 +413,13 @@ fn build_lmo_material(
             })
     };
 
+    // Emissive factor — clamp to [0,1] for glTF spec compliance
+    let emissive = [
+        mat.emissive[0].clamp(0.0, 1.0),
+        mat.emissive[1].clamp(0.0, 1.0),
+        mat.emissive[2].clamp(0.0, 1.0),
+    ];
+
     builder.materials.push(gltf_json::Material {
         alpha_cutoff,
         alpha_mode,
@@ -416,10 +436,10 @@ fn build_lmo_material(
         normal_texture: None,
         occlusion_texture: None,
         emissive_texture: None,
-        emissive_factor: gltf_json::material::EmissiveFactor([0.0, 0.0, 0.0]),
+        emissive_factor: gltf_json::material::EmissiveFactor(emissive),
         extensions: None,
         extras: None,
-        name: Some(name.to_string()),
+        name: Some(material_name),
     });
 }
 
@@ -525,6 +545,32 @@ fn build_geom_primitives(
         None
     };
 
+    // Export vertex colors (COLOR_0) if present.
+    // D3DCOLOR is packed as 0xAARRGGBB — extract in correct byte order.
+    let color_acc = if !geom.vertex_colors.is_empty() {
+        let color_data: Vec<f32> = geom
+            .vertex_colors
+            .iter()
+            .flat_map(|&c| {
+                let r = ((c >> 16) & 0xFF) as f32 / 255.0;
+                let g = ((c >> 8) & 0xFF) as f32 / 255.0;
+                let b = (c & 0xFF) as f32 / 255.0;
+                let a = ((c >> 24) & 0xFF) as f32 / 255.0;
+                [r, g, b, a]
+            })
+            .collect();
+        Some(builder.add_accessor_f32(
+            &color_data,
+            &format!("{}_color", prefix),
+            gltf_json::accessor::Type::Vec4,
+            4,
+            None,
+            None,
+        ))
+    } else {
+        None
+    };
+
     // Build primitives per subset (each subset maps to a material)
     if geom.subsets.is_empty() {
         // No subsets — single primitive with all indices
@@ -546,6 +592,12 @@ fn build_geom_primitives(
             attributes.insert(
                 Checked::Valid(gltf_json::mesh::Semantic::TexCoords(0)),
                 gltf_json::Index::new(ua),
+            );
+        }
+        if let Some(ca) = color_acc {
+            attributes.insert(
+                Checked::Valid(gltf_json::mesh::Semantic::Colors(0)),
+                gltf_json::Index::new(ca),
             );
         }
 
@@ -589,6 +641,12 @@ fn build_geom_primitives(
                 attributes.insert(
                     Checked::Valid(gltf_json::mesh::Semantic::TexCoords(0)),
                     gltf_json::Index::new(ua),
+                );
+            }
+            if let Some(ca) = color_acc {
+                attributes.insert(
+                    Checked::Valid(gltf_json::mesh::Semantic::Colors(0)),
+                    gltf_json::Index::new(ca),
                 );
             }
 
@@ -794,9 +852,13 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
                 &lmo::LmoMaterial {
                     diffuse: [0.7, 0.7, 0.7, 1.0],
                     ambient: [0.3, 0.3, 0.3, 1.0],
+                    emissive: [0.0, 0.0, 0.0, 0.0],
                     opacity: 1.0,
+                    transp_type: 0,
                     alpha_test_enabled: false,
                     alpha_ref: 0,
+                    src_blend: None,
+                    dest_blend: None,
                     tex_filename: None,
                 },
                 &format!("{}_default_mat", prefix),
@@ -921,9 +983,13 @@ pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String
                 &lmo::LmoMaterial {
                     diffuse: [0.7, 0.7, 0.7, 1.0],
                     ambient: [0.3, 0.3, 0.3, 1.0],
+                    emissive: [0.0, 0.0, 0.0, 0.0],
                     opacity: 1.0,
+                    transp_type: 0,
                     alpha_test_enabled: false,
                     alpha_ref: 0,
+                    src_blend: None,
+                    dest_blend: None,
                     tex_filename: None,
                 },
                 &format!("{}_default_mat", prefix),
@@ -1251,9 +1317,13 @@ fn add_model_to_builder(
                 &lmo::LmoMaterial {
                     diffuse: [0.7, 0.7, 0.7, 1.0],
                     ambient: [0.3, 0.3, 0.3, 1.0],
+                    emissive: [0.0, 0.0, 0.0, 0.0],
                     opacity: 1.0,
+                    transp_type: 0,
                     alpha_test_enabled: false,
                     alpha_ref: 0,
+                    src_blend: None,
+                    dest_blend: None,
                     tex_filename: None,
                 },
                 &format!("{}_mat", prefix),
@@ -1324,9 +1394,13 @@ mod tests {
                 materials: vec![lmo::LmoMaterial {
                     diffuse: [0.8, 0.2, 0.1, 1.0],
                     ambient: [0.3, 0.3, 0.3, 1.0],
+                    emissive: [0.0, 0.0, 0.0, 0.0],
                     opacity: 1.0,
+                    transp_type: 0,
                     alpha_test_enabled: false,
                     alpha_ref: 0,
+                    src_blend: None,
+                    dest_blend: None,
                     tex_filename: Some("wall.bmp".to_string()),
                 }],
                 animation: None,
@@ -1400,9 +1474,13 @@ mod tests {
         let mat = lmo::LmoMaterial {
             diffuse: [0.5, 0.6, 0.7, 1.0],
             ambient: [0.1, 0.1, 0.1, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
             opacity: 1.0,
+            transp_type: 0,
             alpha_test_enabled: false,
             alpha_ref: 0,
+            src_blend: None,
+            dest_blend: None,
             tex_filename: None,
         };
         let mut builder = GltfBuilder::new();
@@ -1423,9 +1501,13 @@ mod tests {
         let mat = lmo::LmoMaterial {
             diffuse: [0.5, 0.6, 0.7, 1.0],
             ambient: [0.1, 0.1, 0.1, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
             opacity: 0.5,
+            transp_type: 0,
             alpha_test_enabled: false,
             alpha_ref: 0,
+            src_blend: None,
+            dest_blend: None,
             tex_filename: None,
         };
         let mut builder = GltfBuilder::new();
@@ -1445,9 +1527,13 @@ mod tests {
         let mat = lmo::LmoMaterial {
             diffuse: [0.5, 0.6, 0.7, 1.0],
             ambient: [0.1, 0.1, 0.1, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
             opacity: 1.0,
+            transp_type: 0,
             alpha_test_enabled: true,
             alpha_ref: 129,
+            src_blend: None,
+            dest_blend: None,
             tex_filename: None,
         };
         let mut builder = GltfBuilder::new();

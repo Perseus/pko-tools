@@ -49,20 +49,28 @@ const RENDER_STATE_ATOM_SIZE: usize = 12; // state(4) + value0(4) + value1(4)
 
 // D3D9 render state constants used by PKO scene materials/meshes.
 const D3DRS_ALPHATESTENABLE: u32 = 15;
+const D3DRS_SRCBLEND: u32 = 19;
+const D3DRS_DESTBLEND: u32 = 20;
 const D3DRS_ALPHAREF: u32 = 24;
 const D3DRS_ALPHAFUNC: u32 = 25;
 const D3DCMP_GREATER: u32 = 5;
 
+/// Transparency type enum matching lwMtlTexInfoTransparencyTypeEnum.
+pub const TRANSP_FILTER: u32 = 0;
+pub const TRANSP_ADDITIVE: u32 = 1;
+
 #[derive(Debug, Clone, Copy, Default)]
-struct AlphaTestState {
-    enabled: bool,
+struct MaterialRenderState {
+    alpha_enabled: bool,
     alpha_ref: Option<u8>,
     alpha_func: Option<u32>,
+    src_blend: Option<u32>,
+    dest_blend: Option<u32>,
 }
 
-impl AlphaTestState {
-    fn normalized_enabled(self) -> bool {
-        self.enabled && self.alpha_func.map(|f| f == D3DCMP_GREATER).unwrap_or(true)
+impl MaterialRenderState {
+    fn normalized_alpha_enabled(self) -> bool {
+        self.alpha_enabled && self.alpha_func.map(|f| f == D3DCMP_GREATER).unwrap_or(true)
     }
 
     fn effective_alpha_ref(self) -> u8 {
@@ -109,9 +117,13 @@ pub struct LmoSubset {
 pub struct LmoMaterial {
     pub diffuse: [f32; 4],
     pub ambient: [f32; 4],
+    pub emissive: [f32; 4],
     pub opacity: f32,
+    pub transp_type: u32,
     pub alpha_test_enabled: bool,
     pub alpha_ref: u8,
+    pub src_blend: Option<u32>,
+    pub dest_blend: Option<u32>,
     pub tex_filename: Option<String>,
 }
 
@@ -158,8 +170,8 @@ fn read_mat44(cursor: &mut Cursor<&[u8]>) -> Result<[[f32; 4]; 4]> {
 fn read_render_state_atoms(
     cursor: &mut Cursor<&[u8]>,
     atom_count: usize,
-) -> Result<AlphaTestState> {
-    let mut alpha = AlphaTestState::default();
+) -> Result<MaterialRenderState> {
+    let mut rs = MaterialRenderState::default();
     for _ in 0..atom_count {
         let state = read_u32(cursor)?;
         let value0 = read_u32(cursor)?;
@@ -167,18 +179,24 @@ fn read_render_state_atoms(
 
         match state {
             D3DRS_ALPHATESTENABLE => {
-                alpha.enabled = value0 != 0;
+                rs.alpha_enabled = value0 != 0;
             }
             D3DRS_ALPHAREF => {
-                alpha.alpha_ref = Some((value0 & 0xFF) as u8);
+                rs.alpha_ref = Some((value0 & 0xFF) as u8);
             }
             D3DRS_ALPHAFUNC => {
-                alpha.alpha_func = Some(value0);
+                rs.alpha_func = Some(value0);
+            }
+            D3DRS_SRCBLEND => {
+                rs.src_blend = Some(value0);
+            }
+            D3DRS_DESTBLEND => {
+                rs.dest_blend = Some(value0);
             }
             _ => {}
         }
     }
-    Ok(alpha)
+    Ok(rs)
 }
 
 // ============================================================================
@@ -204,12 +222,12 @@ enum MtlFormatVersion {
 ///   - Current: opacity(4) + transp(4) + lwMaterial(68) + lwRenderStateAtom[8](96) + lwTexInfo[4]
 fn read_material(cursor: &mut Cursor<&[u8]>, mtl_ver: MtlFormatVersion) -> Result<LmoMaterial> {
     // Opacity / transp_type — absent in V0000
-    let opacity = if mtl_ver == MtlFormatVersion::V0000 {
-        1.0
+    let (opacity, transp_type) = if mtl_ver == MtlFormatVersion::V0000 {
+        (1.0, TRANSP_FILTER)
     } else {
         let o = read_f32(cursor)?;
-        let _transp_type = read_u32(cursor)?;
-        o
+        let t = read_u32(cursor)?;
+        (o, t)
     };
 
     // CharMaterial: dif(16) + amb(16) + spe(16) + emi(16) + power(4) = 68 bytes
@@ -225,15 +243,20 @@ fn read_material(cursor: &mut Cursor<&[u8]>, mtl_ver: MtlFormatVersion) -> Resul
         read_f32(cursor)?,
         read_f32(cursor)?,
     ];
-    cursor.seek(SeekFrom::Current(16))?; // specular
-    cursor.seek(SeekFrom::Current(16))?; // emissive
+    cursor.seek(SeekFrom::Current(16))?; // specular (skip)
+    let emissive = [
+        read_f32(cursor)?,
+        read_f32(cursor)?,
+        read_f32(cursor)?,
+        read_f32(cursor)?,
+    ];
     cursor.seek(SeekFrom::Current(4))?; // power
 
     // rs_set — old formats use lwRenderStateSetMtl2 (128 bytes), new uses lwRenderStateAtom[8] (96 bytes)
-    let rs_alpha = match mtl_ver {
+    let rs = match mtl_ver {
         MtlFormatVersion::V0000 | MtlFormatVersion::V0001 => {
             cursor.seek(SeekFrom::Current(128))?;
-            AlphaTestState::default()
+            MaterialRenderState::default()
         }
         MtlFormatVersion::Current => read_render_state_atoms(cursor, LW_MTL_RS_NUM)?,
     };
@@ -283,13 +306,17 @@ fn read_material(cursor: &mut Cursor<&[u8]>, mtl_ver: MtlFormatVersion) -> Resul
     Ok(LmoMaterial {
         diffuse,
         ambient,
+        emissive,
         opacity,
-        alpha_test_enabled: rs_alpha.normalized_enabled(),
-        alpha_ref: if rs_alpha.normalized_enabled() {
-            rs_alpha.effective_alpha_ref()
+        transp_type,
+        alpha_test_enabled: rs.normalized_alpha_enabled(),
+        alpha_ref: if rs.normalized_alpha_enabled() {
+            rs.effective_alpha_ref()
         } else {
-            rs_alpha.alpha_ref.unwrap_or(0)
+            rs.alpha_ref.unwrap_or(0)
         },
+        src_blend: rs.src_blend,
+        dest_blend: rs.dest_blend,
         tex_filename,
     })
 }
@@ -312,7 +339,7 @@ fn read_mesh(
     Vec<u32>,
     Vec<u32>,
     Vec<LmoSubset>,
-    AlphaTestState,
+    MaterialRenderState,
 )> {
     // For version 0, the mesh section has an embedded old_version prefix
     let mesh_version = if file_version == EXP_OBJ_VERSION_0_0_0_0 {
@@ -321,7 +348,7 @@ fn read_mesh(
         file_version
     };
 
-    let mut mesh_alpha = AlphaTestState::default();
+    let mut mesh_alpha = MaterialRenderState::default();
 
     // Read mesh header — format depends on version
     let (fvf, vertex_num, index_num, subset_num, bone_index_num, vertex_element_num);
@@ -745,7 +772,7 @@ fn read_geom_object(
     let mut vertex_colors = Vec::new();
     let mut indices = Vec::new();
     let mut subsets = Vec::new();
-    let mut mesh_alpha = AlphaTestState::default();
+    let mut mesh_alpha = MaterialRenderState::default();
 
     if mesh_size > 0 {
         match read_mesh(&mut cursor, file_version) {
@@ -766,7 +793,7 @@ fn read_geom_object(
 
     // Some LMO files store alpha test states at mesh-level rs_set rather than
     // material rs_set. Promote mesh-level state to all materials when needed.
-    if mesh_alpha.normalized_enabled() {
+    if mesh_alpha.normalized_alpha_enabled() {
         let mesh_alpha_ref = mesh_alpha.effective_alpha_ref();
         for mat in &mut materials {
             if !mat.alpha_test_enabled {
