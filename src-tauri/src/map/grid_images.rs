@@ -63,8 +63,9 @@ pub fn encode_i16_grid_png(grid: &[u8], w: i32, h: i32, path: &Path) -> Result<(
         .with_context(|| format!("Failed to write i16 grid PNG: {}", path.display()))
 }
 
-/// Encode a tile color grid (i16 RGB565 LE bytes, 2 bytes per cell) as an RGB8 PNG.
-/// Pre-decodes RGB565 → RGB8 at export time so the PNG is visually meaningful.
+/// Encode a tile color grid (i16 BGR565 LE bytes, 2 bytes per cell) as an RGB8 PNG.
+/// Pre-decodes BGR565 → RGB8 at export time so the PNG is visually correct.
+/// The map format stores blue in the high 5 bits and red in the low 5 bits.
 pub fn encode_tile_color_png(grid: &[u8], w: i32, h: i32, path: &Path) -> Result<()> {
     let (w, h) = (w as u32, h as u32);
     let mut img = RgbImage::new(w, h);
@@ -74,10 +75,10 @@ pub fn encode_tile_color_png(grid: &[u8], w: i32, h: i32, path: &Path) -> Result
             let lo = grid[byte_idx];
             let hi = grid[byte_idx + 1];
             let color = u16::from_le_bytes([lo, hi]);
-            // RGB565 → RGB8 (same formula as PKO engine LW_RGB565TODWORD)
-            let r = ((color & 0xF800) >> 8) as u8; // 5 bits → top 5 of 8
-            let g = ((color & 0x07E0) >> 3) as u8; // 6 bits → top 6 of 8
-            let b = ((color & 0x001F) << 3) as u8; // 5 bits → top 5 of 8
+            // BGR565 → RGB8: high 5 bits = blue, middle 6 = green, low 5 = red
+            let b = ((color & 0xF800) >> 8) as u8;
+            let g = ((color & 0x07E0) >> 3) as u8;
+            let r = ((color & 0x001F) << 3) as u8;
             img.put_pixel(x, y, image::Rgb([r, g, b]));
         }
     }

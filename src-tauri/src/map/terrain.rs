@@ -109,17 +109,20 @@ fn read_i8(cursor: &mut Cursor<&[u8]>) -> Result<i8> {
 // Color conversion
 // ============================================================================
 
-/// Convert RGB565 (stored as i16) to (R, G, B) floats in 0..1.
+/// Convert terrain vertex color (stored as i16) to (R, G, B) floats in 0..1.
 ///
-/// Matches the client's LW_RGB565TODWORD macro:
-///   R = (rgb & 0xf800) >> 8   (5 bits → top of byte)
-///   G = (rgb & 0x07e0) >> 3   (6 bits → top of byte)
-///   B = (rgb & 0x001f) << 3   (5 bits → top of byte)
+/// The map file stores colors in BGR565 format (blue in high 5 bits, red in
+/// low 5 bits). The original engine's LW_RGB565TODWORD macro misleadingly
+/// names the fields "R/G/B" by bit position, but then packs the DWORD as
+/// `R_bits | (G_bits << 8) | (B_bits << 16)` — placing the high-5-bit value
+/// into D3DCOLOR's blue byte and the low-5-bit value into D3DCOLOR's red byte.
+/// The net effect is that the high 5 bits are blue and the low 5 bits are red.
 pub fn rgb565_to_float(color: i16) -> (f32, f32, f32) {
     let c = color as u16;
-    let r = ((c & 0xf800) >> 8) as f32 / 255.0;
+    // High 5 bits = blue, middle 6 bits = green, low 5 bits = red
+    let b = ((c & 0xf800) >> 8) as f32 / 255.0;
     let g = ((c & 0x07e0) >> 3) as f32 / 255.0;
-    let b = ((c & 0x001f) << 3) as f32 / 255.0;
+    let r = ((c & 0x001f) << 3) as f32 / 255.0;
     (r, g, b)
 }
 
@@ -378,18 +381,15 @@ pub fn build_terrain_gltf(
         uv
     });
 
-    // Step 2: Build triangle indices for map tiles that exist in section data.
-    // Missing sections still participate in owner sampling defaults, but we do
-    // not emit visible terrain triangles for them in exported geometry.
-    // Each tile at (tx, ty) → 2 triangles using corner vertices.
+    // Step 2: Build triangle indices for ALL tiles (including missing sections).
+    // Missing sections have vertices at UNDERWATER_HEIGHT with white vertex color
+    // and all-zero tile layer data. The shader detects these via the legacy missing
+    // tile sentinel and renders them with texture 22 (sandy beige), creating a
+    // continuous terrain floor under the sea.
     let mut indices: Vec<u32> = Vec::new();
 
     for ty in 0..h {
         for tx in 0..w {
-            if get_tile(parsed_map, tx, ty).is_none() {
-                continue;
-            }
-
             let v00 = (ty as u32) * (vw as u32) + (tx as u32);
             let v10 = v00 + 1;
             let v01 = v00 + vw as u32;
@@ -1074,13 +1074,12 @@ pub fn build_terrain_glb(
         uv
     });
 
-    // ----- Step 2: Build triangle indices -----
+    // ----- Step 2: Build triangle indices for ALL tiles (including missing sections) -----
+    // Missing sections have vertices at UNDERWATER_HEIGHT with white vertex color.
+    // Emitting triangles creates a continuous terrain floor under the sea.
     let mut indices: Vec<u32> = Vec::new();
     for ty in 0..h {
         for tx in 0..w {
-            if get_tile(parsed_map, tx, ty).is_none() {
-                continue;
-            }
             let v00 = (ty as u32) * (vw as u32) + (tx as u32);
             let v10 = v00 + 1;
             let v01 = v00 + vw as u32;
@@ -2713,17 +2712,17 @@ mod tests {
     }
 
     #[test]
-    fn rgb565_red() {
-        // Pure red in RGB565: 0xF800
+    fn rgb565_pure_blue() {
+        // 0xF800 = high 5 bits set = blue in BGR565
         let (r, g, b) = rgb565_to_float(0xF800u16 as i16);
-        assert!(r > 0.9, "r={}", r);
+        assert!(r < 0.05, "r={}", r);
         assert!(g < 0.05, "g={}", g);
-        assert!(b < 0.05, "b={}", b);
+        assert!(b > 0.9, "b={}", b);
     }
 
     #[test]
     fn rgb565_green() {
-        // Pure green in RGB565: 0x07E0
+        // Pure green in BGR565: 0x07E0
         let (r, g, b) = rgb565_to_float(0x07E0u16 as i16);
         assert!(r < 0.05, "r={}", r);
         assert!(g > 0.9, "g={}", g);
@@ -2731,12 +2730,12 @@ mod tests {
     }
 
     #[test]
-    fn rgb565_blue() {
-        // Pure blue in RGB565: 0x001F
+    fn rgb565_pure_red() {
+        // 0x001F = low 5 bits set = red in BGR565
         let (r, g, b) = rgb565_to_float(0x001Fu16 as i16);
-        assert!(r < 0.05, "r={}", r);
+        assert!(r > 0.9, "r={}", r);
         assert!(g < 0.05, "g={}", g);
-        assert!(b > 0.9, "b={}", b);
+        assert!(b < 0.05, "b={}", b);
     }
 
     #[test]
@@ -2890,7 +2889,7 @@ mod tests {
     }
 
     #[test]
-    fn build_gltf_skips_missing_section_tiles() {
+    fn build_gltf_includes_missing_section_tiles() {
         let parsed = ParsedMap {
             header: MapHeader {
                 n_map_flag: CUR_VERSION_NO,
@@ -2919,9 +2918,9 @@ mod tests {
             .as_u64()
             .expect("index count") as usize;
 
-        // Width=2, height=1 with one missing tile => 1 rendered tile.
-        // 1 tile => 2 triangles => 6 indices.
-        assert_eq!(index_count, 6);
+        // Width=2, height=1 — both tiles emit triangles (including missing section).
+        // 2 tiles => 4 triangles => 12 indices.
+        assert_eq!(index_count, 12);
     }
 
     #[test]

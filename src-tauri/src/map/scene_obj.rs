@@ -7,7 +7,6 @@ use anyhow::{anyhow, Result};
 // ============================================================================
 
 const OBJ_FILE_VER600: i32 = 600;
-const FIXED16_ONE: f32 = 65536.0;
 
 /// A scene object placed on the map.
 #[derive(Debug, Clone)]
@@ -40,7 +39,13 @@ pub struct ParsedObjFile {
     pub objects: Vec<SceneObject>,
 }
 
-fn decode_fixed16_section_relative(
+/// Decode section-relative centimeter coordinates to absolute tile positions.
+///
+/// Version 600 `.obj` files store nX/nY as centimeters relative to the section
+/// origin. The original engine (SceneObjFile.cpp:ReadSectionObjInfo) converts
+/// these to absolute centimeters, then CSceneObj::_UpdatePos() divides by 100
+/// to get tile-space world coordinates.
+fn decode_section_relative_cm(
     nx: i32,
     ny: i32,
     section_index_x: i32,
@@ -48,29 +53,6 @@ fn decode_fixed16_section_relative(
     section_width_tiles: i32,
     section_height_tiles: i32,
 ) -> Option<(f32, f32)> {
-    let rel_x_tiles = nx as f32 / FIXED16_ONE;
-    let rel_y_tiles = ny as f32 / FIXED16_ONE;
-
-    if !(0.0..(section_width_tiles as f32)).contains(&rel_x_tiles)
-        || !(0.0..(section_height_tiles as f32)).contains(&rel_y_tiles)
-    {
-        return None;
-    }
-
-    let world_x_tiles = section_index_x as f32 * section_width_tiles as f32 + rel_x_tiles;
-    let world_y_tiles = section_index_y as f32 * section_height_tiles as f32 + rel_y_tiles;
-    Some((world_x_tiles, world_y_tiles))
-}
-
-fn decode_legacy_section_relative_cm(
-    nx: i32,
-    ny: i32,
-    section_index_x: i32,
-    section_index_y: i32,
-    section_width_tiles: i32,
-    section_height_tiles: i32,
-) -> Option<(f32, f32)> {
-    // Legacy editor format stores section-local centimeters.
     let max_x_cm = section_width_tiles * 100;
     let max_y_cm = section_height_tiles * 100;
     if !(0..max_x_cm).contains(&nx) || !(0..max_y_cm).contains(&ny) {
@@ -216,19 +198,10 @@ pub fn parse_obj_file(data: &[u8]) -> Result<ParsedObjFile> {
                 continue;
             }
 
-            // Support two real-world encodings observed in version 600 files:
-            // 1) fixed16 section-relative tile coordinates
-            // 2) legacy section-relative centimeter coordinates
-            let (world_x, world_y) = if let Some(p) = decode_fixed16_section_relative(
-                nx,
-                ny,
-                section_index_x,
-                section_index_y,
-                section_width,
-                section_height,
-            ) {
-                p
-            } else if let Some(p) = decode_legacy_section_relative_cm(
+            // Version 600 stores nX/nY as section-relative centimeters.
+            // Original engine: SceneObjFile.cpp:ReadSectionObjInfo adds
+            // sectionOrigin_cm then _UpdatePos() divides by 100 for tiles.
+            let (world_x, world_y) = if let Some(p) = decode_section_relative_cm(
                 nx,
                 ny,
                 section_index_x,
@@ -347,29 +320,14 @@ mod tests {
     }
 
     #[test]
-    fn decode_fixed16_section_relative_validates_bounds() {
-        // Section (2,3), section size 8x8 tiles, rel=(1.5,2.25)
-        let nx = (1.5 * FIXED16_ONE) as i32;
-        let ny = (2.25 * FIXED16_ONE) as i32;
-        let (x, y) = decode_fixed16_section_relative(nx, ny, 2, 3, 8, 8).unwrap();
-        assert!((x - 17.5).abs() < 0.001);
-        assert!((y - 26.25).abs() < 0.001);
-
-        // Outside section-local range should be rejected.
-        assert!(
-            decode_fixed16_section_relative((8.0 * FIXED16_ONE) as i32, ny, 2, 3, 8, 8).is_none()
-        );
-    }
-
-    #[test]
-    fn decode_legacy_section_relative_cm_validates_bounds() {
+    fn decode_section_relative_cm_validates_bounds() {
         // Section (1,2), section size 8x8 tiles. Local cm=(250,375)
-        let (x, y) = decode_legacy_section_relative_cm(250, 375, 1, 2, 8, 8).unwrap();
+        let (x, y) = decode_section_relative_cm(250, 375, 1, 2, 8, 8).unwrap();
         assert!((x - 10.5).abs() < 0.001);
         assert!((y - 19.75).abs() < 0.001);
 
         // Out of local section cm range rejected.
-        assert!(decode_legacy_section_relative_cm(1200, 10, 1, 2, 8, 8).is_none());
-        assert!(decode_legacy_section_relative_cm(10, 900, 1, 2, 8, 8).is_none());
+        assert!(decode_section_relative_cm(1200, 10, 1, 2, 8, 8).is_none());
+        assert!(decode_section_relative_cm(10, 900, 1, 2, 8, 8).is_none());
     }
 }
