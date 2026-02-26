@@ -1928,7 +1928,9 @@ fn build_tile_color_grid(map: &ParsedMap) -> Vec<u8> {
 
     for ty in 0..h {
         for tx in 0..w {
-            let color = get_tile(map, tx, ty).map(|t| t.s_color).unwrap_or(0);
+            // Missing sections default to 0xFFFF (near-white in RGB565) = multiplicative identity.
+            // Using 0 would decode to black, causing buildings with shadeFlag to go black.
+            let color = get_tile(map, tx, ty).map(|t| t.s_color).unwrap_or(-1i16);
             data.extend_from_slice(&color.to_le_bytes());
         }
     }
