@@ -1856,6 +1856,7 @@ mod tests {
             SceneObjModelInfo {
                 id: 1,
                 filename: "test.lmo".to_string(),
+                ..Default::default()
             },
         );
         // Object is type 1 (effect) — should be skipped

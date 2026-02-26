@@ -2149,7 +2149,7 @@ pub fn export_map_for_unity(
     let valid_building_ids: HashSet<u16> =
         building_entries.iter().map(|e| e.obj_id as u16).collect();
 
-    // Build the buildings lookup for manifest
+    // Build the buildings lookup for manifest (C3: include semantic fields)
     let mut buildings_map = serde_json::Map::new();
     for entry in &building_entries {
         let stem = entry
@@ -2158,13 +2158,26 @@ pub fn export_map_for_unity(
             .or_else(|| entry.filename.strip_suffix(".LMO"))
             .unwrap_or(&entry.filename);
 
-        buildings_map.insert(
-            entry.obj_id.to_string(),
-            serde_json::json!({
-                "glb": format!("buildings/{}.{}", stem, ext),
-                "filename": entry.filename,
-            }),
-        );
+        let mut bldg_json = serde_json::json!({
+            "glb": format!("buildings/{}.{}", stem, ext),
+            "filename": entry.filename,
+        });
+
+        // C3: Emit semantic fields from sceneobjinfo.bin
+        if let Some(info) = obj_info.get(&entry.obj_id) {
+            let obj = bldg_json.as_object_mut().unwrap();
+            obj.insert("obj_type".into(), serde_json::json!(info.obj_type));
+            obj.insert("shade_flag".into(), serde_json::json!(info.shade_flag));
+            obj.insert("enable_point_light".into(), serde_json::json!(info.enable_point_light));
+            obj.insert("enable_env_light".into(), serde_json::json!(info.enable_env_light));
+            obj.insert("attach_effect_id".into(), serde_json::json!(info.attach_effect_id));
+            obj.insert("style".into(), serde_json::json!(info.style));
+            obj.insert("flag".into(), serde_json::json!(info.flag));
+            obj.insert("size_flag".into(), serde_json::json!(info.size_flag));
+            obj.insert("is_really_big".into(), serde_json::json!(info.is_really_big));
+        }
+
+        buildings_map.insert(entry.obj_id.to_string(), bldg_json);
     }
 
     if let Some(ref obj_file) = objects {
