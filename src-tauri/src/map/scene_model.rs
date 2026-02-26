@@ -433,7 +433,13 @@ fn build_lmo_material(
     // Encode: T=transp_type, A=alpha_ref (0 if no alpha test), O=opacity as byte 0-255
     // Engine overrides ALPHAREF to 129 at runtime (RenderStateMgr.cpp _rsa_sceneobj),
     // so materials with alpha_test_enabled=true but alpha_ref=0 effectively use 129.
-    let material_name = if is_effect || mat.alpha_test_enabled {
+    //
+    // C2 fix: Also emit suffix for type-0 (FILTER) with partial opacity (opacity < 1.0).
+    // Without the suffix, Unity falls through to opaque TOP/StaticMesh — glass, fences,
+    // and translucent surfaces render as solid.
+    let has_partial_opacity = mat.opacity < 0.99;
+    let needs_suffix = is_effect || mat.alpha_test_enabled || has_partial_opacity;
+    let material_name = if needs_suffix {
         let alpha_ref = if mat.alpha_test_enabled {
             let raw = mat.alpha_ref as u32;
             if raw == 0 { 129 } else { raw } // Engine default ALPHAREF=129
@@ -2383,6 +2389,99 @@ mod tests {
         assert_eq!(
             gltf_mat.alpha_mode,
             Checked::Valid(gltf_json::material::AlphaMode::Opaque)
+        );
+    }
+
+    // ---- C2: Type 0 partial opacity tests ----
+
+    #[test]
+    fn build_material_type0_partial_opacity_gets_suffix() {
+        // C2 fix: Type 0 (FILTER) with opacity < 1.0 should get __PKO_T0_A0_O{n}
+        // so Unity routes it to TOP/Effect with SrcAlpha/InvSrcAlpha blend.
+        let mat = lmo::LmoMaterial {
+            diffuse: [0.5, 0.6, 0.7, 1.0],
+            ambient: [0.1, 0.1, 0.1, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
+            opacity: 0.5,
+            transp_type: 0,
+            alpha_test_enabled: false,
+            alpha_ref: 0,
+            src_blend: None,
+            dest_blend: None,
+            tex_filename: None,
+        };
+        let mut builder = GltfBuilder::new();
+        let tmp = std::env::temp_dir();
+        build_lmo_material(&mut builder, &mat, "glass", &tmp, false);
+        let gltf_mat = &builder.materials[0];
+        let name = gltf_mat.name.as_ref().unwrap();
+        // opacity 0.5 * 255 = 127.5 → 128
+        assert!(
+            name.contains("__PKO_T0_A0_O128"),
+            "type 0 partial opacity should have suffix T0_A0_O128, got: {}",
+            name
+        );
+        // Should use Blend alpha mode (not Opaque)
+        assert_eq!(
+            gltf_mat.alpha_mode,
+            Checked::Valid(gltf_json::material::AlphaMode::Blend),
+            "type 0 partial opacity should use Blend alpha mode"
+        );
+    }
+
+    #[test]
+    fn build_material_type0_partial_opacity_with_alpha_test() {
+        // C2 + M4: Type 0 with both partial opacity AND alpha test
+        // The ALPHAREF should be scaled: min(opacity * alphaRef, 129)
+        let mat = lmo::LmoMaterial {
+            diffuse: [0.5, 0.6, 0.7, 1.0],
+            ambient: [0.1, 0.1, 0.1, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
+            opacity: 0.7,
+            transp_type: 0,
+            alpha_test_enabled: true,
+            alpha_ref: 129,
+            src_blend: None,
+            dest_blend: None,
+            tex_filename: None,
+        };
+        let mut builder = GltfBuilder::new();
+        let tmp = std::env::temp_dir();
+        build_lmo_material(&mut builder, &mat, "fence", &tmp, false);
+        let gltf_mat = &builder.materials[0];
+        let name = gltf_mat.name.as_ref().unwrap();
+        // opacity 0.7 * 255 = 178.5 → 179
+        assert!(
+            name.contains("__PKO_T0_A129_O179"),
+            "type 0 with alpha test + partial opacity should encode both, got: {}",
+            name
+        );
+    }
+
+    #[test]
+    fn build_material_type0_full_opacity_still_no_suffix() {
+        // Regression: full opacity (1.0) type 0 without alpha test → no suffix
+        let mat = lmo::LmoMaterial {
+            diffuse: [0.5, 0.6, 0.7, 1.0],
+            ambient: [0.1, 0.1, 0.1, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
+            opacity: 1.0,
+            transp_type: 0,
+            alpha_test_enabled: false,
+            alpha_ref: 0,
+            src_blend: None,
+            dest_blend: None,
+            tex_filename: None,
+        };
+        let mut builder = GltfBuilder::new();
+        let tmp = std::env::temp_dir();
+        build_lmo_material(&mut builder, &mat, "stone", &tmp, false);
+        let gltf_mat = &builder.materials[0];
+        let name = gltf_mat.name.as_ref().unwrap();
+        assert!(
+            !name.contains("__PKO_"),
+            "type 0 full opacity should have no suffix, got: {}",
+            name
         );
     }
 }
