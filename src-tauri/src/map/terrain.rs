@@ -2065,15 +2065,20 @@ fn copy_effect_textures(
                 let dds_out = out_dir.join(&dds_name);
                 std::fs::copy(&src, &dds_out).is_ok()
             } else {
-                // BMP/TGA: PKO decode then save as PNG
-                let raw_data = match std::fs::read(&src) {
-                    Ok(d) => d,
-                    Err(_) => continue,
-                };
-                let decoded = crate::item::model::decode_pko_texture(&raw_data);
-                match image::load_from_memory(&decoded) {
-                    Ok(img) => img.save(&png_path).is_ok(),
-                    Err(_) => false,
+                // TGA/BMP/PNG: try image::open first (handles standard formats),
+                // fall back to PKO decode for PKO-encoded BMPs
+                if let Ok(img) = image::open(&src) {
+                    img.save(&png_path).is_ok()
+                } else {
+                    let raw_data = match std::fs::read(&src) {
+                        Ok(d) => d,
+                        Err(_) => continue,
+                    };
+                    let decoded = crate::item::model::decode_pko_texture(&raw_data);
+                    match image::load_from_memory(&decoded) {
+                        Ok(img) => img.save(&png_path).is_ok(),
+                        Err(_) => false,
+                    }
                 }
             };
 
@@ -2151,16 +2156,21 @@ fn copy_teximg_textures(
                             let dds_out = tex_dir.join(&dds_name);
                             std::fs::copy(&src_path, &dds_out).is_ok()
                         } else {
-                            // BMP/TGA: try PKO decode then save as PNG
-                            let raw_data = match std::fs::read(&src_path) {
-                                Ok(d) => d,
-                                Err(_) => continue,
-                            };
-                            let decoded =
-                                crate::item::model::decode_pko_texture(&raw_data);
-                            match image::load_from_memory(&decoded) {
-                                Ok(img) => img.save(&out_path).is_ok(),
-                                Err(_) => false,
+                            // TGA/BMP/PNG: try image::open first (standard formats),
+                            // fall back to PKO decode for PKO-encoded BMPs
+                            if let Ok(img) = image::open(&src_path) {
+                                img.save(&out_path).is_ok()
+                            } else {
+                                let raw_data = match std::fs::read(&src_path) {
+                                    Ok(d) => d,
+                                    Err(_) => continue,
+                                };
+                                let decoded =
+                                    crate::item::model::decode_pko_texture(&raw_data);
+                                match image::load_from_memory(&decoded) {
+                                    Ok(img) => img.save(&out_path).is_ok(),
+                                    Err(_) => false,
+                                }
                             }
                         };
 
