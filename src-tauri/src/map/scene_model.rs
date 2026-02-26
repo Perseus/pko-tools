@@ -257,7 +257,7 @@ impl GltfBuilder {
 
 /// Try to find a texture file from the PKO project directory.
 /// Scene model textures can be in several directories.
-fn find_texture_file(project_dir: &Path, tex_name: &str) -> Option<std::path::PathBuf> {
+pub fn find_texture_file(project_dir: &Path, tex_name: &str) -> Option<std::path::PathBuf> {
     // Strip extension from the material's texture filename
     let stem = tex_name
         .rfind('.')
@@ -768,6 +768,93 @@ fn build_geom_primitives(
 }
 
 // ============================================================================
+// Texture/opacity animation → glTF node extras
+// ============================================================================
+
+/// Build glTF node extras JSON for texuv/teximg/mtlopac animation data.
+/// Returns None if the geom object has no texture/opacity animations.
+fn build_anim_extras(geom: &LmoGeomObject) -> gltf_json::extras::Extras {
+    if geom.texuv_anims.is_empty()
+        && geom.teximg_anims.is_empty()
+        && geom.mtlopac_anims.is_empty()
+    {
+        return None;
+    }
+
+    let mut extras = serde_json::Map::new();
+
+    // texuv: array of { subset, stage, frame_num, matrices: [[16 floats]...] }
+    if !geom.texuv_anims.is_empty() {
+        let texuv_arr: Vec<serde_json::Value> = geom
+            .texuv_anims
+            .iter()
+            .map(|uv| {
+                // Flatten each 4×4 matrix to 16 floats (row-major)
+                let matrices: Vec<serde_json::Value> = uv
+                    .matrices
+                    .iter()
+                    .map(|m| {
+                        let flat: Vec<f32> = m.iter().flat_map(|row| row.iter().copied()).collect();
+                        serde_json::json!(flat)
+                    })
+                    .collect();
+                serde_json::json!({
+                    "subset": uv.subset,
+                    "stage": uv.stage,
+                    "frame_num": uv.frame_num,
+                    "matrices": matrices,
+                })
+            })
+            .collect();
+        extras.insert("texuv_anims".to_string(), serde_json::json!(texuv_arr));
+    }
+
+    // teximg: array of { subset, stage, textures: ["file1.tga", ...] }
+    if !geom.teximg_anims.is_empty() {
+        let teximg_arr: Vec<serde_json::Value> = geom
+            .teximg_anims
+            .iter()
+            .map(|ti| {
+                serde_json::json!({
+                    "subset": ti.subset,
+                    "stage": ti.stage,
+                    "textures": ti.textures,
+                })
+            })
+            .collect();
+        extras.insert("teximg_anims".to_string(), serde_json::json!(teximg_arr));
+    }
+
+    // mtlopac: array of { subset, keyframes: [{ frame, opacity }...] }
+    if !geom.mtlopac_anims.is_empty() {
+        let mtlopac_arr: Vec<serde_json::Value> = geom
+            .mtlopac_anims
+            .iter()
+            .map(|mo| {
+                let kfs: Vec<serde_json::Value> = mo
+                    .keyframes
+                    .iter()
+                    .map(|kf| {
+                        serde_json::json!({
+                            "frame": kf.frame,
+                            "opacity": kf.opacity,
+                        })
+                    })
+                    .collect();
+                serde_json::json!({
+                    "subset": mo.subset,
+                    "keyframes": kfs,
+                })
+            })
+            .collect();
+        extras.insert("mtlopac_anims".to_string(), serde_json::json!(mtlopac_arr));
+    }
+
+    let json_str = serde_json::to_string(&extras).ok()?;
+    serde_json::value::RawValue::from_string(json_str).ok()
+}
+
+// ============================================================================
 // Animation: convert LMO matrix keyframes → glTF animation tracks
 // ============================================================================
 
@@ -996,9 +1083,11 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         });
 
         let node_idx = builder.nodes.len() as u32;
+        let anim_extras = build_anim_extras(geom);
         builder.nodes.push(gltf_json::Node {
             mesh: Some(gltf_json::Index::new(mesh_idx)),
             name: Some(format!("geom_node_{}", gi)),
+            extras: anim_extras,
             ..Default::default()
         });
         child_indices.push(gltf_json::Index::new(node_idx));
@@ -1127,9 +1216,11 @@ pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String
         });
 
         let node_idx = builder.nodes.len() as u32;
+        let anim_extras = build_anim_extras(geom);
         builder.nodes.push(gltf_json::Node {
             mesh: Some(gltf_json::Index::new(mesh_idx)),
             name: Some(format!("geom_node_{}", gi)),
+            extras: anim_extras,
             ..Default::default()
         });
         child_indices.push(gltf_json::Index::new(node_idx));
@@ -1500,6 +1591,9 @@ mod tests {
                     tex_filename: Some("wall.bmp".to_string()),
                 }],
                 animation: None,
+                texuv_anims: Vec::new(),
+                teximg_anims: Vec::new(),
+                mtlopac_anims: Vec::new(),
             }],
         }
     }

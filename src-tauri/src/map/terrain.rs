@@ -1972,6 +1972,96 @@ fn load_effect_file(project_dir: &Path, eff_filename: &str) -> Option<EffFile> {
     None
 }
 
+/// Copy teximg animation textures referenced by building LMO files.
+/// Loads each LMO file, extracts teximg texture filenames, finds and converts them to PNG.
+/// Returns a map of original filename → relative output path.
+fn copy_teximg_textures(
+    project_dir: &Path,
+    output_dir: &Path,
+    building_entries: &[super::BuildingExportEntry],
+    obj_info: &std::collections::HashMap<u32, super::scene_obj_info::SceneObjModelInfo>,
+) -> std::collections::HashMap<String, String> {
+    let tex_dir = output_dir.join("buildings").join("textures");
+    let mut copied: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+
+    for entry in building_entries {
+        let info = match obj_info.get(&entry.obj_id) {
+            Some(i) => i,
+            None => continue,
+        };
+
+        let lmo_path = match super::scene_model::find_lmo_path(project_dir, &info.filename) {
+            Some(p) => p,
+            None => continue,
+        };
+
+        let model = match super::lmo::load_lmo(&lmo_path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        for geom in &model.geom_objects {
+            for ti in &geom.teximg_anims {
+                for tex_name in &ti.textures {
+                    if tex_name.is_empty() || copied.contains_key(tex_name) {
+                        continue;
+                    }
+
+                    // Find the texture file in the project
+                    if let Some(src_path) =
+                        super::scene_model::find_texture_file(project_dir, tex_name)
+                    {
+                        let _ = std::fs::create_dir_all(&tex_dir);
+                        let stem = tex_name
+                            .rfind('.')
+                            .map(|i| &tex_name[..i])
+                            .unwrap_or(tex_name);
+                        let png_name = format!("{}.png", stem);
+                        let out_path = tex_dir.join(&png_name);
+
+                        // Try to load and convert to PNG (handles BMP/TGA/DDS)
+                        let success = if src_path
+                            .extension()
+                            .is_some_and(|e| e.eq_ignore_ascii_case("dds"))
+                        {
+                            // DDS: just copy as-is
+                            let dds_name = format!("{}.dds", stem);
+                            let dds_out = tex_dir.join(&dds_name);
+                            std::fs::copy(&src_path, &dds_out).is_ok()
+                        } else {
+                            // BMP/TGA: try PKO decode then save as PNG
+                            let raw_data = match std::fs::read(&src_path) {
+                                Ok(d) => d,
+                                Err(_) => continue,
+                            };
+                            let decoded =
+                                crate::item::model::decode_pko_texture(&raw_data);
+                            match image::load_from_memory(&decoded) {
+                                Ok(img) => img.save(&out_path).is_ok(),
+                                Err(_) => false,
+                            }
+                        };
+
+                        if success {
+                            let rel_path = format!("buildings/textures/{}", png_name);
+                            copied.insert(tex_name.clone(), rel_path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !copied.is_empty() {
+        eprintln!(
+            "[export] Copied {} teximg animation textures to buildings/textures/",
+            copied.len()
+        );
+    }
+
+    copied
+}
+
 /// Copy water textures from BMP to PNG format.
 /// Copies ocean_h.01.bmp through ocean_h.30.bmp from the project's water texture directory.
 fn copy_water_textures(project_dir: &Path, output_dir: &Path) -> Vec<String> {
@@ -2058,6 +2148,16 @@ pub fn export_map_for_unity(
     let this_map_info = super::mapinfo::find_map_info(&map_infos, map_name);
     let effect_info =
         crate::item::sceneffect::load_scene_effect_info(project_dir).unwrap_or_default();
+
+    // 3b. Parse lit.tx (lit overlay system)
+    let lit_entries = {
+        let lit_path = project_dir.join("scripts").join("txt").join("lit.tx");
+        if lit_path.exists() {
+            super::lit::parse_lit_tx(&lit_path).unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+    };
 
     // 4. Bake terrain texture atlas
     let atlas = super::texture::try_bake_atlas(project_dir, &parsed_map);
@@ -2175,6 +2275,27 @@ pub fn export_map_for_unity(
             obj.insert("flag".into(), serde_json::json!(info.flag));
             obj.insert("size_flag".into(), serde_json::json!(info.size_flag));
             obj.insert("is_really_big".into(), serde_json::json!(info.is_really_big));
+        }
+
+        // C4: Add lit overlay data if this building has a matching entry in lit.tx
+        let scene_lits: Vec<_> = lit_entries
+            .iter()
+            .filter(|e| e.obj_type == 1 && e.file.eq_ignore_ascii_case(&entry.filename))
+            .collect();
+        if !scene_lits.is_empty() {
+            let lit_json: Vec<serde_json::Value> = scene_lits
+                .iter()
+                .map(|l| {
+                    serde_json::json!({
+                        "anim_type": l.anim_type,
+                        "color_op": l.color_op,
+                        "overlay_texture": l.overlay_texture,
+                        "textures": l.textures,
+                    })
+                })
+                .collect();
+            let obj = bldg_json.as_object_mut().unwrap();
+            obj.insert("lit_overlays".into(), serde_json::json!(lit_json));
         }
 
         buildings_map.insert(entry.obj_id.to_string(), bldg_json);
@@ -2326,6 +2447,14 @@ pub fn export_map_for_unity(
         terrain_file_path = output_dir.join("terrain.gltf");
         std::fs::write(&terrain_file_path, terrain_gltf_json.as_bytes())?;
     }
+
+    // 11b. Copy teximg animation textures for buildings
+    let _teximg_textures = copy_teximg_textures(
+        project_dir,
+        output_dir,
+        &building_entries,
+        &obj_info,
+    );
 
     // 12. Copy water textures + terrain textures + alpha atlas
     let water_textures = copy_water_textures(project_dir, output_dir);

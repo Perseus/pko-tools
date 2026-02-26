@@ -91,6 +91,39 @@ pub struct LmoAnimData {
     pub rotations: Vec<[f32; 4]>,    // per-frame quaternion [x,y,z,w] (Z-up game space)
 }
 
+/// UV animation data — per-frame 4×4 texture coordinate transform matrix.
+/// Stored per (subset_index, stage_index).
+#[derive(Debug, Clone)]
+pub struct LmoTexUvAnim {
+    pub subset: usize,
+    pub stage: usize,
+    pub frame_num: u32,
+    pub matrices: Vec<[[f32; 4]; 4]>, // per-frame 4×4 UV transform matrix
+}
+
+/// Texture image animation — frame-by-frame texture swap.
+/// Stored per (subset_index, stage_index).
+#[derive(Debug, Clone)]
+pub struct LmoTexImgAnim {
+    pub subset: usize,
+    pub stage: usize,
+    pub textures: Vec<String>, // texture filenames per frame
+}
+
+/// Material opacity keyframe — sparse keyed float.
+#[derive(Debug, Clone)]
+pub struct LmoOpacityKeyframe {
+    pub frame: u32,
+    pub opacity: f32,
+}
+
+/// Material opacity animation — sparse keyframes for a single subset.
+#[derive(Debug, Clone)]
+pub struct LmoMtlOpacAnim {
+    pub subset: usize,
+    pub keyframes: Vec<LmoOpacityKeyframe>,
+}
+
 /// A single geometry object within an LMO file.
 #[derive(Debug, Clone)]
 pub struct LmoGeomObject {
@@ -106,6 +139,9 @@ pub struct LmoGeomObject {
     pub subsets: Vec<LmoSubset>,
     pub materials: Vec<LmoMaterial>,
     pub animation: Option<LmoAnimData>,
+    pub texuv_anims: Vec<LmoTexUvAnim>,
+    pub teximg_anims: Vec<LmoTexImgAnim>,
+    pub mtlopac_anims: Vec<LmoMtlOpacAnim>,
 }
 
 /// A mesh subset — defines a range of indices rendered with a specific material.
@@ -603,18 +639,38 @@ fn decompose_matrix43(raw: &[f32; 12]) -> ([f32; 3], [f32; 4]) {
     (translation, rotation)
 }
 
+/// All animation data parsed from a geometry object's animation section.
+struct ParsedAnimations {
+    matrix: Option<LmoAnimData>,
+    texuv: Vec<LmoTexUvAnim>,
+    teximg: Vec<LmoTexImgAnim>,
+    mtlopac: Vec<LmoMtlOpacAnim>,
+}
+
+// sizeof(lwTexInfo) on 32-bit MSVC: 9 DWORDs (36) + colorkey_type(4) + colorkey(4)
+// + file_name[64] + void*(4) + tss_set[8×12=96] = 208 bytes
+const LW_MAX_NAME: usize = 64;
+// Bytes to skip per lwTexInfo entry: 36 (pre-filename) + 8 (colorkey) = 44 before filename,
+// then 100 after filename (void* + tss_set). Total = 44 + 64 + 100 = 208.
+
 /// Read animation data from the animation section of a geometry object.
 ///
-/// The animation section contains a size header table followed by actual data blocks.
-/// We only extract lwAnimDataMatrix (matrix keyframe animation), which is the format
-/// used by building animations (spinning lamps, rotating objects, etc.).
+/// The animation section contains a size header table followed by actual data blocks:
+/// bone, matrix, mtlopac[16], texuv[16][4], teximg[16][4].
 fn read_animation(
     cursor: &mut Cursor<&[u8]>,
     anim_size: usize,
     file_version: u32,
-) -> Result<Option<LmoAnimData>> {
+) -> Result<ParsedAnimations> {
+    let mut result = ParsedAnimations {
+        matrix: None,
+        texuv: Vec::new(),
+        teximg: Vec::new(),
+        mtlopac: Vec::new(),
+    };
+
     if anim_size == 0 {
-        return Ok(None);
+        return Ok(result);
     }
 
     let start_pos = cursor.position();
@@ -629,21 +685,30 @@ fn read_animation(
     let data_mat_size = read_u32(cursor)? as usize;
 
     // mtlopac_size[16] — only present in version >= 0x1005
+    let mut mtlopac_sizes = [0usize; LW_MAX_SUBSET_NUM];
     if file_version >= 0x1005 {
-        for _ in 0..LW_MAX_SUBSET_NUM {
-            let _ = read_u32(cursor)?;
+        for item in &mut mtlopac_sizes {
+            *item = read_u32(cursor)? as usize;
         }
     }
 
     // data_texuv_size[16][4]
-    for _ in 0..(LW_MAX_SUBSET_NUM * LW_MAX_TEXTURESTAGE_NUM) {
-        let _ = read_u32(cursor)?;
+    let mut texuv_sizes = [[0usize; LW_MAX_TEXTURESTAGE_NUM]; LW_MAX_SUBSET_NUM];
+    for i in 0..LW_MAX_SUBSET_NUM {
+        for j in 0..LW_MAX_TEXTURESTAGE_NUM {
+            texuv_sizes[i][j] = read_u32(cursor)? as usize;
+        }
     }
 
     // data_teximg_size[16][4]
-    for _ in 0..(LW_MAX_SUBSET_NUM * LW_MAX_TEXTURESTAGE_NUM) {
-        let _ = read_u32(cursor)?;
+    let mut teximg_sizes = [[0usize; LW_MAX_TEXTURESTAGE_NUM]; LW_MAX_SUBSET_NUM];
+    for i in 0..LW_MAX_SUBSET_NUM {
+        for j in 0..LW_MAX_TEXTURESTAGE_NUM {
+            teximg_sizes[i][j] = read_u32(cursor)? as usize;
+        }
     }
+
+    // --- Data blocks (in order: bone, matrix, mtlopac[16], texuv[16][4], teximg[16][4]) ---
 
     // Skip bone animation data (buildings don't use skeletal animation)
     if data_bone_size > 0 {
@@ -652,38 +717,178 @@ fn read_animation(
 
     // Read matrix animation data
     if data_mat_size > 0 {
+        let mat_start = cursor.position();
         let frame_num = read_u32(cursor)?;
 
-        if frame_num == 0 || frame_num > 100_000 {
-            // Sanity check — skip if 0 or unreasonably large
-            cursor.set_position(end_pos);
-            return Ok(None);
-        }
+        if frame_num > 0 && frame_num <= 100_000 {
+            let mut translations = Vec::with_capacity(frame_num as usize);
+            let mut rotations = Vec::with_capacity(frame_num as usize);
 
-        let mut translations = Vec::with_capacity(frame_num as usize);
-        let mut rotations = Vec::with_capacity(frame_num as usize);
-
-        for _ in 0..frame_num {
-            let mut raw = [0.0f32; 12];
-            for val in &mut raw {
-                *val = read_f32(cursor)?;
+            for _ in 0..frame_num {
+                let mut raw = [0.0f32; 12];
+                for val in &mut raw {
+                    *val = read_f32(cursor)?;
+                }
+                let (t, r) = decompose_matrix43(&raw);
+                translations.push(t);
+                rotations.push(r);
             }
-            let (t, r) = decompose_matrix43(&raw);
-            translations.push(t);
-            rotations.push(r);
+
+            result.matrix = Some(LmoAnimData {
+                frame_num,
+                translations,
+                rotations,
+            });
         }
 
-        cursor.set_position(end_pos);
-        return Ok(Some(LmoAnimData {
-            frame_num,
-            translations,
-            rotations,
-        }));
+        // Always advance past the full mat data block
+        cursor.set_position(mat_start + data_mat_size as u64);
     }
 
-    // No matrix animation
+    // Read mtlopac animation data (per-subset sparse keyframes)
+    if file_version >= 0x1005 {
+        for (subset_idx, &size) in mtlopac_sizes.iter().enumerate() {
+            if size == 0 {
+                continue;
+            }
+            let block_start = cursor.position();
+            match read_mtlopac_block(cursor, subset_idx) {
+                Ok(anim) => result.mtlopac.push(anim),
+                Err(e) => {
+                    eprintln!(
+                        "Warning: failed to read mtlopac anim subset {}: {}",
+                        subset_idx, e
+                    );
+                }
+            }
+            // Always advance past the full block
+            cursor.set_position(block_start + size as u64);
+        }
+    }
+
+    // Read texuv animation data (per-subset, per-stage 4×4 matrix keyframes)
+    for i in 0..LW_MAX_SUBSET_NUM {
+        for j in 0..LW_MAX_TEXTURESTAGE_NUM {
+            let size = texuv_sizes[i][j];
+            if size == 0 {
+                continue;
+            }
+            let block_start = cursor.position();
+            match read_texuv_block(cursor, i, j) {
+                Ok(anim) => result.texuv.push(anim),
+                Err(e) => {
+                    eprintln!(
+                        "Warning: failed to read texuv anim [{},{}]: {}",
+                        i, j, e
+                    );
+                }
+            }
+            cursor.set_position(block_start + size as u64);
+        }
+    }
+
+    // Read teximg animation data (per-subset, per-stage texture filename list)
+    for i in 0..LW_MAX_SUBSET_NUM {
+        for j in 0..LW_MAX_TEXTURESTAGE_NUM {
+            let size = teximg_sizes[i][j];
+            if size == 0 {
+                continue;
+            }
+            let block_start = cursor.position();
+            match read_teximg_block(cursor, i, j) {
+                Ok(anim) => result.teximg.push(anim),
+                Err(e) => {
+                    eprintln!(
+                        "Warning: failed to read teximg anim [{},{}]: {}",
+                        i, j, e
+                    );
+                }
+            }
+            cursor.set_position(block_start + size as u64);
+        }
+    }
+
+    // Ensure we end at the right position
     cursor.set_position(end_pos);
-    Ok(None)
+    Ok(result)
+}
+
+/// Read a texuv animation block: frame_num(4) + frame_num × lwMatrix44(64).
+fn read_texuv_block(
+    cursor: &mut Cursor<&[u8]>,
+    subset: usize,
+    stage: usize,
+) -> Result<LmoTexUvAnim> {
+    let frame_num = read_u32(cursor)?;
+    if frame_num > 100_000 {
+        return Err(anyhow!("texuv frame_num {} unreasonable", frame_num));
+    }
+
+    let mut matrices = Vec::with_capacity(frame_num as usize);
+    for _ in 0..frame_num {
+        matrices.push(read_mat44(cursor)?);
+    }
+
+    Ok(LmoTexUvAnim {
+        subset,
+        stage,
+        frame_num,
+        matrices,
+    })
+}
+
+/// Read a teximg animation block: data_num(4) + data_num × lwTexInfo(208).
+/// We only extract the file_name from each lwTexInfo entry.
+fn read_teximg_block(
+    cursor: &mut Cursor<&[u8]>,
+    subset: usize,
+    stage: usize,
+) -> Result<LmoTexImgAnim> {
+    let data_num = read_u32(cursor)?;
+    if data_num > 1000 {
+        return Err(anyhow!("teximg data_num {} unreasonable", data_num));
+    }
+
+    let mut textures = Vec::with_capacity(data_num as usize);
+    for _ in 0..data_num {
+        // lwTexInfo layout (208 bytes total on 32-bit):
+        // 9 DWORDs (36 bytes): stage, level, usage, format, pool, byte_alignment_flag, type, width, height
+        cursor.seek(SeekFrom::Current(36))?;
+        // colorkey_type(4) + colorkey(4) = 8 bytes
+        cursor.seek(SeekFrom::Current(8))?;
+        // file_name[64]
+        let filename = read_cstr_fixed(cursor, LW_MAX_NAME)?;
+        textures.push(filename);
+        // void*(4) + tss_set[8×12=96] = 100 bytes remaining
+        cursor.seek(SeekFrom::Current(100))?;
+    }
+
+    Ok(LmoTexImgAnim {
+        subset,
+        stage,
+        textures,
+    })
+}
+
+/// Read an mtlopac animation block: num(4) + num × lwKeyFloat(12).
+fn read_mtlopac_block(
+    cursor: &mut Cursor<&[u8]>,
+    subset: usize,
+) -> Result<LmoMtlOpacAnim> {
+    let num = read_u32(cursor)?;
+    if num > 100_000 {
+        return Err(anyhow!("mtlopac keyframe count {} unreasonable", num));
+    }
+
+    let mut keyframes = Vec::with_capacity(num as usize);
+    for _ in 0..num {
+        let frame = read_u32(cursor)?;
+        let _slerp_type = read_u32(cursor)?;
+        let opacity = read_f32(cursor)?;
+        keyframes.push(LmoOpacityKeyframe { frame, opacity });
+    }
+
+    Ok(LmoMtlOpacAnim { subset, keyframes })
 }
 
 // ============================================================================
@@ -811,17 +1016,27 @@ fn read_geom_object(
     }
 
     // Skip helpers, then optionally parse animation
-    let animation = if parse_animations && anim_size > 0 {
+    let parsed_anim = if parse_animations && anim_size > 0 {
         cursor.set_position(anim_offset);
         match read_animation(&mut cursor, anim_size, file_version) {
             Ok(anim) => anim,
             Err(e) => {
                 eprintln!("Warning: failed to read animation: {}", e);
-                None
+                ParsedAnimations {
+                    matrix: None,
+                    texuv: Vec::new(),
+                    teximg: Vec::new(),
+                    mtlopac: Vec::new(),
+                }
             }
         }
     } else {
-        None
+        ParsedAnimations {
+            matrix: None,
+            texuv: Vec::new(),
+            teximg: Vec::new(),
+            mtlopac: Vec::new(),
+        }
     };
 
     Ok(LmoGeomObject {
@@ -836,7 +1051,10 @@ fn read_geom_object(
         indices,
         subsets,
         materials,
-        animation,
+        animation: parsed_anim.matrix,
+        texuv_anims: parsed_anim.texuv,
+        teximg_anims: parsed_anim.teximg,
+        mtlopac_anims: parsed_anim.mtlopac,
     })
 }
 
@@ -1825,5 +2043,174 @@ mod tests {
                 assert!(anim.frame_num > 0);
             }
         }
+    }
+
+    #[test]
+    fn parse_texuv_animation_from_nml_bd201() {
+        // nml-bd201.lmo — small building with texuv animation on subset 0, stage 0
+        let path = std::path::Path::new(
+            "../top-client/corsairs-online-public/client/model/scene/nml-bd201.lmo",
+        );
+        if !path.exists() {
+            return;
+        }
+
+        let model = load_lmo(path).unwrap();
+        assert!(
+            !model.geom_objects.is_empty(),
+            "should have geometry objects"
+        );
+
+        let has_texuv = model
+            .geom_objects
+            .iter()
+            .any(|g| !g.texuv_anims.is_empty());
+        assert!(has_texuv, "nml-bd201 should have texuv animation");
+
+        for (i, geom) in model.geom_objects.iter().enumerate() {
+            for uv in &geom.texuv_anims {
+                eprintln!(
+                    "  geom[{}] id={}: texuv subset={} stage={} frames={}",
+                    i, geom.id, uv.subset, uv.stage, uv.frame_num
+                );
+                assert!(uv.frame_num > 0, "should have frames");
+                assert_eq!(
+                    uv.matrices.len(),
+                    uv.frame_num as usize,
+                    "matrix count must match frame_num"
+                );
+                // First frame's matrix should not be all zeros
+                let first = &uv.matrices[0];
+                let all_zero = first.iter().all(|row| row.iter().all(|&v| v == 0.0));
+                assert!(!all_zero, "first UV matrix should not be all zeros");
+            }
+        }
+    }
+
+    #[test]
+    fn parse_teximg_animation_from_cc_bd065() {
+        // cc-bd065.lmo — v0x1005 building with teximg animation (22KB)
+        let path = std::path::Path::new(
+            "../top-client/corsairs-online-public/client/model/scene/cc-bd065.lmo",
+        );
+        if !path.exists() {
+            return;
+        }
+
+        let model = load_lmo(path).unwrap();
+        assert!(
+            !model.geom_objects.is_empty(),
+            "should have geometry objects"
+        );
+
+        let has_teximg = model
+            .geom_objects
+            .iter()
+            .any(|g| !g.teximg_anims.is_empty());
+        assert!(has_teximg, "cc-bd065 should have teximg animation");
+
+        for (i, geom) in model.geom_objects.iter().enumerate() {
+            for ti in &geom.teximg_anims {
+                eprintln!(
+                    "  geom[{}] id={}: teximg subset={} stage={} textures={}",
+                    i,
+                    geom.id,
+                    ti.subset,
+                    ti.stage,
+                    ti.textures.len()
+                );
+                assert!(!ti.textures.is_empty(), "should have at least one texture");
+                for tex in &ti.textures {
+                    assert!(!tex.is_empty(), "texture filename should not be empty");
+                    eprintln!("    texture: {}", tex);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn parse_mtlopac_animation_from_hdjd_cbd01() {
+        // hdjd-cbd01.lmo — v0x1005 building with mtlopac animation
+        let path = std::path::Path::new(
+            "../top-client/corsairs-online-public/client/model/scene/hdjd-cbd01.lmo",
+        );
+        if !path.exists() {
+            return;
+        }
+
+        let model = load_lmo(path).unwrap();
+        assert!(
+            !model.geom_objects.is_empty(),
+            "should have geometry objects"
+        );
+
+        let has_mtlopac = model
+            .geom_objects
+            .iter()
+            .any(|g| !g.mtlopac_anims.is_empty());
+        assert!(has_mtlopac, "hdjd-cbd01 should have mtlopac animation");
+
+        for (i, geom) in model.geom_objects.iter().enumerate() {
+            for mo in &geom.mtlopac_anims {
+                eprintln!(
+                    "  geom[{}] id={}: mtlopac subset={} keyframes={}",
+                    i,
+                    geom.id,
+                    mo.subset,
+                    mo.keyframes.len()
+                );
+                assert!(
+                    !mo.keyframes.is_empty(),
+                    "should have at least one keyframe"
+                );
+                for kf in &mo.keyframes {
+                    // Opacity should be in [0, 1] range
+                    assert!(
+                        (0.0..=1.0).contains(&kf.opacity),
+                        "opacity {} out of [0,1] range",
+                        kf.opacity
+                    );
+                    eprintln!("    frame={} opacity={:.3}", kf.frame, kf.opacity);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn parse_all_animation_types_roundtrip() {
+        // cc-bd044.lmo — v0x1005, has BOTH texuv + teximg
+        let path = std::path::Path::new(
+            "../top-client/corsairs-online-public/client/model/scene/cc-bd044.lmo",
+        );
+        if !path.exists() {
+            return;
+        }
+
+        let model = load_lmo(path).unwrap();
+        let total_texuv: usize = model.geom_objects.iter().map(|g| g.texuv_anims.len()).sum();
+        let total_teximg: usize = model
+            .geom_objects
+            .iter()
+            .map(|g| g.teximg_anims.len())
+            .sum();
+        let total_mat: usize = model
+            .geom_objects
+            .iter()
+            .filter(|g| g.animation.is_some())
+            .count();
+
+        eprintln!(
+            "cc-bd044: {} geoms, {} mat anims, {} texuv, {} teximg",
+            model.geom_objects.len(),
+            total_mat,
+            total_texuv,
+            total_teximg
+        );
+
+        // cc-bd044 should have teximg (and possibly texuv)
+        assert!(
+            total_texuv > 0 || total_teximg > 0,
+            "should have texuv or teximg animations"
+        );
     }
 }
