@@ -1972,6 +1972,128 @@ fn load_effect_file(project_dir: &Path, eff_filename: &str) -> Option<EffFile> {
     None
 }
 
+/// Copy effect textures referenced by parsed EffFile definitions.
+/// Walks each sub-effect's tex_name and frame_tex_names, finds the source
+/// TGA/BMP in texture/effect/, converts to PNG in effects/textures/.
+/// Returns a map of original filename → relative output path.
+fn copy_effect_textures(
+    project_dir: &Path,
+    output_dir: &Path,
+    effect_definitions: &serde_json::Map<String, serde_json::Value>,
+) -> std::collections::HashMap<String, String> {
+    let mut copied = std::collections::HashMap::new();
+    let out_dir = output_dir.join("effects/textures");
+    let _ = std::fs::create_dir_all(&out_dir);
+
+    let effect_tex_dirs = [
+        "texture/effect",
+        "texture/scene",
+        "texture",
+    ];
+    let exts = ["tga", "bmp", "dds", "png"];
+
+    // Collect all unique texture names from all sub-effects
+    let mut tex_names: Vec<String> = Vec::new();
+    for (_eff_id, def_val) in effect_definitions.iter() {
+        if let Some(subs) = def_val.get("subEffects").and_then(|v| v.as_array()) {
+            for sub in subs {
+                if let Some(name) = sub.get("texName").and_then(|v| v.as_str()) {
+                    if !name.is_empty() {
+                        tex_names.push(name.to_string());
+                    }
+                }
+                if let Some(names) = sub.get("frameTexNames").and_then(|v| v.as_array()) {
+                    for n in names {
+                        if let Some(s) = n.as_str() {
+                            if !s.is_empty() {
+                                tex_names.push(s.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    tex_names.sort();
+    tex_names.dedup();
+
+    for tex_name in &tex_names {
+        if copied.contains_key(tex_name) {
+            continue;
+        }
+
+        let stem = tex_name
+            .rfind('.')
+            .map(|i| &tex_name[..i])
+            .unwrap_or(tex_name);
+
+        // Find the source file
+        let mut source_path = None;
+        for dir in &effect_tex_dirs {
+            for ext in &exts {
+                let candidate = project_dir.join(dir).join(format!("{}.{}", stem, ext));
+                if candidate.exists() {
+                    source_path = Some(candidate);
+                    break;
+                }
+                // Try lowercase
+                let candidate_lc = project_dir
+                    .join(dir)
+                    .join(format!("{}.{}", stem.to_lowercase(), ext));
+                if candidate_lc.exists() {
+                    source_path = Some(candidate_lc);
+                    break;
+                }
+            }
+            if source_path.is_some() {
+                break;
+            }
+        }
+
+        if let Some(src) = source_path {
+            let png_name = format!("{}.png", stem);
+            let png_path = out_dir.join(&png_name);
+
+            // Try to load and convert to PNG (same approach as copy_teximg_textures)
+            let success = if src
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("dds"))
+            {
+                // DDS: just copy as-is
+                let dds_name = format!("{}.dds", stem);
+                let dds_out = out_dir.join(&dds_name);
+                std::fs::copy(&src, &dds_out).is_ok()
+            } else {
+                // BMP/TGA: PKO decode then save as PNG
+                let raw_data = match std::fs::read(&src) {
+                    Ok(d) => d,
+                    Err(_) => continue,
+                };
+                let decoded = crate::item::model::decode_pko_texture(&raw_data);
+                match image::load_from_memory(&decoded) {
+                    Ok(img) => img.save(&png_path).is_ok(),
+                    Err(_) => false,
+                }
+            };
+
+            if success {
+                let rel_path = format!("effects/textures/{}", png_name);
+                copied.insert(tex_name.clone(), rel_path);
+            }
+        }
+    }
+
+    if !copied.is_empty() {
+        eprintln!(
+            "[export] Copied {} effect textures to effects/textures/",
+            copied.len()
+        );
+    }
+
+    copied
+}
+
 /// Copy teximg animation textures referenced by building LMO files.
 /// Loads each LMO file, extracts teximg texture filenames, finds and converts them to PNG.
 /// Returns a map of original filename → relative output path.
@@ -2422,6 +2544,9 @@ pub fn export_map_for_unity(
         let sidecar_json = serde_json::to_string_pretty(&eff_defs_json_value)?;
         std::fs::write(&sidecar_path, sidecar_json.as_bytes())?;
     }
+
+    // 10b. Copy effect textures
+    let _effect_textures = copy_effect_textures(project_dir, output_dir, &effect_definitions);
 
     // 11. Write terrain
     let terrain_file_path;
