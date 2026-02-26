@@ -54,6 +54,7 @@ const D3DRS_DESTBLEND: u32 = 20;
 const D3DRS_ALPHAREF: u32 = 24;
 const D3DRS_ALPHAFUNC: u32 = 25;
 const D3DCMP_GREATER: u32 = 5;
+const LW_INVALID_INDEX: u32 = 0xFFFFFFFF;
 
 /// Transparency type enum matching lwMtlTexInfoTransparencyTypeEnum.
 pub const TRANSP_FILTER: u32 = 0;
@@ -240,6 +241,58 @@ fn read_render_state_atoms(
     Ok(rs)
 }
 
+/// Read render states from the old lwRenderStateSetTemplate<2, N> format (V0000/V0001).
+///
+/// Layout: rsv_seq[2][seq_size], where each lwRenderStateValue = state(DWORD) + value(DWORD).
+/// Total bytes: 2 * seq_size * 8.
+///
+/// The original engine (lwExpObj.cpp) reads only set 0 and converts to lwRenderStateAtom,
+/// force-overriding ALPHAREF→129 and ALPHAFUNC→D3DCMP_GREATER for backwards compatibility.
+fn read_old_render_state_set(
+    cursor: &mut Cursor<&[u8]>,
+    seq_size: usize,
+) -> Result<MaterialRenderState> {
+    let mut rs = MaterialRenderState::default();
+
+    // Read set 0 (the active render states)
+    for _ in 0..seq_size {
+        let state = read_u32(cursor)?;
+        let value = read_u32(cursor)?;
+
+        if state == LW_INVALID_INDEX {
+            // End sentinel — continue reading remaining entries to maintain cursor position
+            continue;
+        }
+
+        // Match original engine: override ALPHAREF and ALPHAFUNC for old formats
+        match state {
+            D3DRS_ALPHATESTENABLE => {
+                rs.alpha_enabled = value != 0;
+            }
+            D3DRS_ALPHAREF => {
+                // Original engine forces 129 for old formats (lwExpObj.cpp lines 70-71, 137-138)
+                rs.alpha_ref = Some(129);
+            }
+            D3DRS_ALPHAFUNC => {
+                // Original engine forces D3DCMP_GREATER for old formats
+                rs.alpha_func = Some(D3DCMP_GREATER);
+            }
+            D3DRS_SRCBLEND => {
+                rs.src_blend = Some(value);
+            }
+            D3DRS_DESTBLEND => {
+                rs.dest_blend = Some(value);
+            }
+            _ => {}
+        }
+    }
+
+    // Skip set 1 (end/restore states — not used for material property extraction)
+    cursor.seek(SeekFrom::Current((seq_size * 8) as i64))?;
+
+    Ok(rs)
+}
+
 // ============================================================================
 // Material parsing
 // ============================================================================
@@ -296,8 +349,9 @@ fn read_material(cursor: &mut Cursor<&[u8]>, mtl_ver: MtlFormatVersion) -> Resul
     // rs_set — old formats use lwRenderStateSetMtl2 (128 bytes), new uses lwRenderStateAtom[8] (96 bytes)
     let rs = match mtl_ver {
         MtlFormatVersion::V0000 | MtlFormatVersion::V0001 => {
-            cursor.seek(SeekFrom::Current(128))?;
-            MaterialRenderState::default()
+            // Old format: lwRenderStateSetTemplate<2, LW_MTL_RS_NUM> = lwRenderStateValue[2][8]
+            // Total: 2 * 8 * 8 = 128 bytes. Extract render states from set 0, skip set 1.
+            read_old_render_state_set(cursor, LW_MTL_RS_NUM)?
         }
         MtlFormatVersion::Current => read_render_state_atoms(cursor, LW_MTL_RS_NUM)?,
     };
@@ -421,9 +475,8 @@ fn read_mesh(
 
         if mesh_version == 0 {
             // MESH_VERSION0000: rs_set is lwRenderStateSetMesh2 = lwRenderStateValue[2][8]
-            // lwRenderStateValue = state(4) + value(4) = 8 bytes
-            // Total: 2 × 8 × 8 = 128 bytes
-            cursor.seek(SeekFrom::Current(128))?;
+            // Total: 2 * 8 * 8 = 128 bytes. Extract render states from set 0.
+            mesh_alpha = read_old_render_state_set(cursor, LW_MESH_RS_NUM)?;
         } else {
             // MESH_VERSION0001 / EXP_OBJ_VERSION_1_0_0_0..3: rs_set is lwRenderStateAtom[8]
             // lwRenderStateAtom = state(4) + value0(4) + value1(4) = 12 bytes
@@ -1830,6 +1883,40 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn parse_version0_lmo_alpha_test() {
+        // nml-bd022.lmo is a version-0 file with leaf textures that need alpha test.
+        // The old lwRenderStateSetMtl2 format stores ALPHATESTENABLE in the 128-byte
+        // render state block that we previously skipped.
+        let path = std::path::Path::new("../top-client/model/scene/nml-bd022.lmo");
+        if !path.exists() {
+            return;
+        }
+
+        let model = load_lmo(path).unwrap();
+        assert_eq!(model.version, 0, "nml-bd022 should be version 0");
+        assert!(!model.geom_objects.is_empty());
+
+        // Check that at least one material has alpha test enabled
+        let mut found_alpha = false;
+        for geom in &model.geom_objects {
+            for mat in &geom.materials {
+                if mat.alpha_test_enabled {
+                    found_alpha = true;
+                    // Old format should force alpha_ref to 129
+                    assert_eq!(
+                        mat.alpha_ref, 129,
+                        "V0000 format should force alpha_ref to 129"
+                    );
+                }
+            }
+        }
+        assert!(
+            found_alpha,
+            "nml-bd022 leaf textures should have alpha_test_enabled=true"
+        );
     }
 
     // ====================================================================

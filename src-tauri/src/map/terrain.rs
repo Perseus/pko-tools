@@ -3852,4 +3852,60 @@ mod tests {
             );
         }
     }
+
+    #[test]
+    fn scolor_distribution_07xmas2() {
+        let map_path = "/Users/anirudh/gamedev/pko-tools/top-client/map/07xmas2.map";
+        let data = match std::fs::read(map_path) {
+            Ok(d) => d,
+            Err(_) => {
+                eprintln!("SKIP: map file not found");
+                return;
+            }
+        };
+        let map = parse_map(&data).expect("can't parse map");
+
+        let mut zero_count = 0u64;
+        let mut nonzero_count = 0u64;
+        let mut samples = Vec::new();
+
+        for ty in 0..map.header.n_height {
+            for tx in 0..map.header.n_width {
+                if let Some(tile) = get_tile(&map, tx, ty) {
+                    if tile.s_color == 0 {
+                        zero_count += 1;
+                    } else {
+                        nonzero_count += 1;
+                        if samples.len() < 10 {
+                            samples.push((tx, ty, tile.s_color));
+                        }
+                    }
+                }
+            }
+        }
+
+        let total = zero_count + nonzero_count;
+        eprintln!("\nsColor distribution for 07xmas2:");
+        eprintln!("  Total tiles with data: {}", total);
+        eprintln!(
+            "  sColor == 0: {} ({:.1}%)",
+            zero_count,
+            zero_count as f64 / total as f64 * 100.0
+        );
+        eprintln!(
+            "  sColor != 0: {} ({:.1}%)",
+            nonzero_count,
+            nonzero_count as f64 / total as f64 * 100.0
+        );
+        for (tx, ty, v) in &samples {
+            let packed = *v as u16;
+            let r = ((packed & 0xF800) >> 8) as f32 / 255.0;
+            let g = ((packed & 0x07E0) >> 3) as f32 / 255.0;
+            let b = ((packed & 0x001F) << 3) as f32 / 255.0;
+            eprintln!(
+                "  tile({},{}) = 0x{:04X} → RGB({:.3}, {:.3}, {:.3})",
+                tx, ty, packed, r, g, b
+            );
+        }
+    }
 }
