@@ -19,7 +19,7 @@ use gltf_json::{
 
 use crate::item::model::decode_pko_texture;
 
-use super::lmo::{self, LmoGeomObject, LmoModel};
+use super::lmo::{self, D3DCULL_NONE, LmoGeomObject, LmoModel};
 use super::scene_obj::SceneObject;
 use super::scene_obj_info::SceneObjModelInfo;
 
@@ -519,7 +519,8 @@ fn build_lmo_material(
     builder.materials.push(gltf_json::Material {
         alpha_cutoff,
         alpha_mode,
-        double_sided: true,
+        // D3D default is D3DCULL_CCW (back-face culling). Only D3DCULL_NONE means double-sided.
+        double_sided: mat.cull_mode == Some(D3DCULL_NONE),
         pbr_metallic_roughness: gltf_json::material::PbrMetallicRoughness {
             base_color_factor: gltf_json::material::PbrBaseColorFactor(base_color),
             base_color_texture,
@@ -1042,6 +1043,7 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
                     alpha_ref: 0,
                     src_blend: None,
                     dest_blend: None,
+                    cull_mode: None,
                     tex_filename: None,
                 },
                 &format!("{}_default_mat", prefix),
@@ -1175,6 +1177,7 @@ pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String
                     alpha_ref: 0,
                     src_blend: None,
                     dest_blend: None,
+                    cull_mode: None,
                     tex_filename: None,
                 },
                 &format!("{}_default_mat", prefix),
@@ -1511,6 +1514,7 @@ fn add_model_to_builder(
                     alpha_ref: 0,
                     src_blend: None,
                     dest_blend: None,
+                    cull_mode: None,
                     tex_filename: None,
                 },
                 &format!("{}_mat", prefix),
@@ -1588,6 +1592,7 @@ mod tests {
                     alpha_ref: 0,
                     src_blend: None,
                     dest_blend: None,
+                    cull_mode: None,
                     tex_filename: Some("wall.bmp".to_string()),
                 }],
                 animation: None,
@@ -1671,6 +1676,7 @@ mod tests {
             alpha_ref: 0,
             src_blend: None,
             dest_blend: None,
+            cull_mode: None,
             tex_filename: None,
         };
         let mut builder = GltfBuilder::new();
@@ -1698,6 +1704,7 @@ mod tests {
             alpha_ref: 0,
             src_blend: None,
             dest_blend: None,
+            cull_mode: None,
             tex_filename: None,
         };
         let mut builder = GltfBuilder::new();
@@ -1724,6 +1731,7 @@ mod tests {
             alpha_ref: 129,
             src_blend: None,
             dest_blend: None,
+            cull_mode: None,
             tex_filename: None,
         };
         let mut builder = GltfBuilder::new();
@@ -1756,6 +1764,7 @@ mod tests {
             alpha_ref: 0,
             src_blend: None,
             dest_blend: None,
+            cull_mode: None,
             tex_filename: None,
         };
         let mut builder = GltfBuilder::new();
@@ -1788,6 +1797,7 @@ mod tests {
             alpha_ref: 0, // Engine overrides to 129 at runtime
             src_blend: None,
             dest_blend: None,
+            cull_mode: None,
             tex_filename: None,
         };
         let mut builder = GltfBuilder::new();
@@ -2316,6 +2326,7 @@ mod tests {
                 alpha_ref: 0,
                 src_blend: None,
                 dest_blend: None,
+                cull_mode: None,
                 tex_filename: None,
             };
             let mut builder = GltfBuilder::new();
@@ -2347,6 +2358,7 @@ mod tests {
             alpha_ref: 0,
             src_blend: None,
             dest_blend: None,
+            cull_mode: None,
             tex_filename: None,
         };
         let mut builder = GltfBuilder::new();
@@ -2375,6 +2387,7 @@ mod tests {
             alpha_ref: 129,
             src_blend: None,
             dest_blend: None,
+            cull_mode: None,
             tex_filename: None,
         };
         let mut builder = GltfBuilder::new();
@@ -2415,6 +2428,7 @@ mod tests {
             alpha_ref: 0,
             src_blend: None,
             dest_blend: None,
+            cull_mode: None,
             tex_filename: None,
         };
         let mut builder = GltfBuilder::new();
@@ -2442,6 +2456,7 @@ mod tests {
             alpha_ref: 129,
             src_blend: None,
             dest_blend: None,
+            cull_mode: None,
             tex_filename: None,
         };
         let mut builder = GltfBuilder::new();
@@ -2468,6 +2483,7 @@ mod tests {
             alpha_ref: 0,
             src_blend: None,
             dest_blend: None,
+            cull_mode: None,
             tex_filename: None,
         };
         let mut builder = GltfBuilder::new();
@@ -2503,6 +2519,7 @@ mod tests {
             alpha_ref: 0,
             src_blend: None,
             dest_blend: None,
+            cull_mode: None,
             tex_filename: None,
         };
         let mut builder = GltfBuilder::new();
@@ -2538,6 +2555,7 @@ mod tests {
             alpha_ref: 129,
             src_blend: None,
             dest_blend: None,
+            cull_mode: None,
             tex_filename: None,
         };
         let mut builder = GltfBuilder::new();
@@ -2566,6 +2584,7 @@ mod tests {
             alpha_ref: 0,
             src_blend: None,
             dest_blend: None,
+            cull_mode: None,
             tex_filename: None,
         };
         let mut builder = GltfBuilder::new();

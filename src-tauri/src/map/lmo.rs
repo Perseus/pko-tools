@@ -52,9 +52,15 @@ const D3DRS_ALPHATESTENABLE: u32 = 15;
 const D3DRS_SRCBLEND: u32 = 19;
 const D3DRS_DESTBLEND: u32 = 20;
 const D3DRS_ALPHAREF: u32 = 24;
+const D3DRS_CULLMODE: u32 = 22;
 const D3DRS_ALPHAFUNC: u32 = 25;
 const D3DCMP_GREATER: u32 = 5;
 const LW_INVALID_INDEX: u32 = 0xFFFFFFFF;
+
+// D3DCULL values
+pub const D3DCULL_NONE: u32 = 1;
+#[allow(dead_code)]
+pub const D3DCULL_CCW: u32 = 2;
 
 /// Transparency type enum matching lwMtlTexInfoTransparencyTypeEnum.
 pub const TRANSP_FILTER: u32 = 0;
@@ -72,6 +78,7 @@ struct MaterialRenderState {
     alpha_func: Option<u32>,
     src_blend: Option<u32>,
     dest_blend: Option<u32>,
+    cull_mode: Option<u32>,
 }
 
 impl MaterialRenderState {
@@ -166,6 +173,7 @@ pub struct LmoMaterial {
     pub alpha_ref: u8,
     pub src_blend: Option<u32>,
     pub dest_blend: Option<u32>,
+    pub cull_mode: Option<u32>,
     pub tex_filename: Option<String>,
 }
 
@@ -223,6 +231,9 @@ fn read_render_state_atoms(
             D3DRS_ALPHATESTENABLE => {
                 rs.alpha_enabled = value0 != 0;
             }
+            D3DRS_CULLMODE => {
+                rs.cull_mode = Some(value0);
+            }
             D3DRS_ALPHAREF => {
                 rs.alpha_ref = Some((value0 & 0xFF) as u8);
             }
@@ -268,6 +279,9 @@ fn read_old_render_state_set(
         match state {
             D3DRS_ALPHATESTENABLE => {
                 rs.alpha_enabled = value != 0;
+            }
+            D3DRS_CULLMODE => {
+                rs.cull_mode = Some(value);
             }
             D3DRS_ALPHAREF => {
                 // Original engine forces 129 for old formats (lwExpObj.cpp lines 70-71, 137-138)
@@ -412,6 +426,7 @@ fn read_material(cursor: &mut Cursor<&[u8]>, mtl_ver: MtlFormatVersion) -> Resul
         },
         src_blend: rs.src_blend,
         dest_blend: rs.dest_blend,
+        cull_mode: rs.cull_mode,
         tex_filename,
     })
 }
