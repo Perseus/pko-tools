@@ -1928,7 +1928,9 @@ fn build_tile_color_grid(map: &ParsedMap) -> Vec<u8> {
 
     for ty in 0..h {
         for tx in 0..w {
-            let color = get_tile(map, tx, ty).map(|t| t.s_color).unwrap_or(0);
+            // Missing sections default to 0xFFFF (near-white in RGB565) = multiplicative identity.
+            // Using 0 would decode to black, causing buildings with shadeFlag to go black.
+            let color = get_tile(map, tx, ty).map(|t| t.s_color).unwrap_or(-1i16);
             data.extend_from_slice(&color.to_le_bytes());
         }
     }
@@ -1970,6 +1972,228 @@ fn load_effect_file(project_dir: &Path, eff_filename: &str) -> Option<EffFile> {
     }
 
     None
+}
+
+/// Copy effect textures referenced by parsed EffFile definitions.
+/// Walks each sub-effect's tex_name and frame_tex_names, finds the source
+/// TGA/BMP in texture/effect/, converts to PNG in effects/textures/.
+/// Returns a map of original filename → relative output path.
+fn copy_effect_textures(
+    project_dir: &Path,
+    output_dir: &Path,
+    effect_definitions: &serde_json::Map<String, serde_json::Value>,
+) -> std::collections::HashMap<String, String> {
+    let mut copied = std::collections::HashMap::new();
+    let out_dir = output_dir.join("effects/textures");
+    let _ = std::fs::create_dir_all(&out_dir);
+
+    let effect_tex_dirs = [
+        "texture/effect",
+        "texture/scene",
+        "texture",
+    ];
+    let exts = ["tga", "bmp", "dds", "png"];
+
+    // Collect all unique texture names from all sub-effects
+    let mut tex_names: Vec<String> = Vec::new();
+    for (_eff_id, def_val) in effect_definitions.iter() {
+        if let Some(subs) = def_val.get("subEffects").and_then(|v| v.as_array()) {
+            for sub in subs {
+                if let Some(name) = sub.get("texName").and_then(|v| v.as_str()) {
+                    if !name.is_empty() {
+                        tex_names.push(name.to_string());
+                    }
+                }
+                if let Some(names) = sub.get("frameTexNames").and_then(|v| v.as_array()) {
+                    for n in names {
+                        if let Some(s) = n.as_str() {
+                            if !s.is_empty() {
+                                tex_names.push(s.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    tex_names.sort();
+    tex_names.dedup();
+
+    for tex_name in &tex_names {
+        if copied.contains_key(tex_name) {
+            continue;
+        }
+
+        let stem = tex_name
+            .rfind('.')
+            .map(|i| &tex_name[..i])
+            .unwrap_or(tex_name);
+
+        // Find the source file
+        let mut source_path = None;
+        for dir in &effect_tex_dirs {
+            for ext in &exts {
+                let candidate = project_dir.join(dir).join(format!("{}.{}", stem, ext));
+                if candidate.exists() {
+                    source_path = Some(candidate);
+                    break;
+                }
+                // Try lowercase
+                let candidate_lc = project_dir
+                    .join(dir)
+                    .join(format!("{}.{}", stem.to_lowercase(), ext));
+                if candidate_lc.exists() {
+                    source_path = Some(candidate_lc);
+                    break;
+                }
+            }
+            if source_path.is_some() {
+                break;
+            }
+        }
+
+        if let Some(src) = source_path {
+            let png_name = format!("{}.png", stem);
+            let png_path = out_dir.join(&png_name);
+
+            // Try to load and convert to PNG (same approach as copy_teximg_textures)
+            let success = if src
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("dds"))
+            {
+                // DDS: just copy as-is
+                let dds_name = format!("{}.dds", stem);
+                let dds_out = out_dir.join(&dds_name);
+                std::fs::copy(&src, &dds_out).is_ok()
+            } else {
+                // TGA/BMP/PNG: try image::open first (handles standard formats),
+                // fall back to PKO decode for PKO-encoded BMPs
+                if let Ok(img) = image::open(&src) {
+                    img.save(&png_path).is_ok()
+                } else {
+                    let raw_data = match std::fs::read(&src) {
+                        Ok(d) => d,
+                        Err(_) => continue,
+                    };
+                    let decoded = crate::item::model::decode_pko_texture(&raw_data);
+                    match image::load_from_memory(&decoded) {
+                        Ok(img) => img.save(&png_path).is_ok(),
+                        Err(_) => false,
+                    }
+                }
+            };
+
+            if success {
+                let rel_path = format!("effects/textures/{}", png_name);
+                copied.insert(tex_name.clone(), rel_path);
+            }
+        }
+    }
+
+    if !copied.is_empty() {
+        eprintln!(
+            "[export] Copied {} effect textures to effects/textures/",
+            copied.len()
+        );
+    }
+
+    copied
+}
+
+/// Copy teximg animation textures referenced by building LMO files.
+/// Loads each LMO file, extracts teximg texture filenames, finds and converts them to PNG.
+/// Returns a map of original filename → relative output path.
+fn copy_teximg_textures(
+    project_dir: &Path,
+    output_dir: &Path,
+    building_entries: &[super::BuildingExportEntry],
+    obj_info: &std::collections::HashMap<u32, super::scene_obj_info::SceneObjModelInfo>,
+) -> std::collections::HashMap<String, String> {
+    let tex_dir = output_dir.join("buildings").join("textures");
+    let mut copied: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+
+    for entry in building_entries {
+        let info = match obj_info.get(&entry.obj_id) {
+            Some(i) => i,
+            None => continue,
+        };
+
+        let lmo_path = match super::scene_model::find_lmo_path(project_dir, &info.filename) {
+            Some(p) => p,
+            None => continue,
+        };
+
+        let model = match super::lmo::load_lmo(&lmo_path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        for geom in &model.geom_objects {
+            for ti in &geom.teximg_anims {
+                for tex_name in &ti.textures {
+                    if tex_name.is_empty() || copied.contains_key(tex_name) {
+                        continue;
+                    }
+
+                    // Find the texture file in the project
+                    if let Some(src_path) =
+                        super::scene_model::find_texture_file(project_dir, tex_name)
+                    {
+                        let _ = std::fs::create_dir_all(&tex_dir);
+                        let stem = tex_name
+                            .rfind('.')
+                            .map(|i| &tex_name[..i])
+                            .unwrap_or(tex_name);
+                        let png_name = format!("{}.png", stem);
+                        let out_path = tex_dir.join(&png_name);
+
+                        // Try to load and convert to PNG (handles BMP/TGA/DDS)
+                        let success = if src_path
+                            .extension()
+                            .is_some_and(|e| e.eq_ignore_ascii_case("dds"))
+                        {
+                            // DDS: just copy as-is
+                            let dds_name = format!("{}.dds", stem);
+                            let dds_out = tex_dir.join(&dds_name);
+                            std::fs::copy(&src_path, &dds_out).is_ok()
+                        } else {
+                            // TGA/BMP/PNG: try image::open first (standard formats),
+                            // fall back to PKO decode for PKO-encoded BMPs
+                            if let Ok(img) = image::open(&src_path) {
+                                img.save(&out_path).is_ok()
+                            } else {
+                                let raw_data = match std::fs::read(&src_path) {
+                                    Ok(d) => d,
+                                    Err(_) => continue,
+                                };
+                                let decoded =
+                                    crate::item::model::decode_pko_texture(&raw_data);
+                                match image::load_from_memory(&decoded) {
+                                    Ok(img) => img.save(&out_path).is_ok(),
+                                    Err(_) => false,
+                                }
+                            }
+                        };
+
+                        if success {
+                            let rel_path = format!("buildings/textures/{}", png_name);
+                            copied.insert(tex_name.clone(), rel_path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !copied.is_empty() {
+        eprintln!(
+            "[export] Copied {} teximg animation textures to buildings/textures/",
+            copied.len()
+        );
+    }
+
+    copied
 }
 
 /// Copy water textures from BMP to PNG format.
@@ -2058,6 +2282,16 @@ pub fn export_map_for_unity(
     let this_map_info = super::mapinfo::find_map_info(&map_infos, map_name);
     let effect_info =
         crate::item::sceneffect::load_scene_effect_info(project_dir).unwrap_or_default();
+
+    // 3b. Parse lit.tx (lit overlay system)
+    let lit_entries = {
+        let lit_path = project_dir.join("scripts").join("txt").join("lit.tx");
+        if lit_path.exists() {
+            super::lit::parse_lit_tx(&lit_path).unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+    };
 
     // 4. Bake terrain texture atlas
     let atlas = super::texture::try_bake_atlas(project_dir, &parsed_map);
@@ -2149,7 +2383,7 @@ pub fn export_map_for_unity(
     let valid_building_ids: HashSet<u16> =
         building_entries.iter().map(|e| e.obj_id as u16).collect();
 
-    // Build the buildings lookup for manifest
+    // Build the buildings lookup for manifest (C3: include semantic fields)
     let mut buildings_map = serde_json::Map::new();
     for entry in &building_entries {
         let stem = entry
@@ -2158,13 +2392,47 @@ pub fn export_map_for_unity(
             .or_else(|| entry.filename.strip_suffix(".LMO"))
             .unwrap_or(&entry.filename);
 
-        buildings_map.insert(
-            entry.obj_id.to_string(),
-            serde_json::json!({
-                "glb": format!("buildings/{}.{}", stem, ext),
-                "filename": entry.filename,
-            }),
-        );
+        let mut bldg_json = serde_json::json!({
+            "glb": format!("buildings/{}.{}", stem, ext),
+            "filename": entry.filename,
+        });
+
+        // C3: Emit semantic fields from sceneobjinfo.bin
+        if let Some(info) = obj_info.get(&entry.obj_id) {
+            let obj = bldg_json.as_object_mut().unwrap();
+            obj.insert("obj_type".into(), serde_json::json!(info.obj_type));
+            obj.insert("shade_flag".into(), serde_json::json!(info.shade_flag));
+            obj.insert("enable_point_light".into(), serde_json::json!(info.enable_point_light));
+            obj.insert("enable_env_light".into(), serde_json::json!(info.enable_env_light));
+            obj.insert("attach_effect_id".into(), serde_json::json!(info.attach_effect_id));
+            obj.insert("style".into(), serde_json::json!(info.style));
+            obj.insert("flag".into(), serde_json::json!(info.flag));
+            obj.insert("size_flag".into(), serde_json::json!(info.size_flag));
+            obj.insert("is_really_big".into(), serde_json::json!(info.is_really_big));
+        }
+
+        // C4: Add lit overlay data if this building has a matching entry in lit.tx
+        let scene_lits: Vec<_> = lit_entries
+            .iter()
+            .filter(|e| e.obj_type == 1 && e.file.eq_ignore_ascii_case(&entry.filename))
+            .collect();
+        if !scene_lits.is_empty() {
+            let lit_json: Vec<serde_json::Value> = scene_lits
+                .iter()
+                .map(|l| {
+                    serde_json::json!({
+                        "anim_type": l.anim_type,
+                        "color_op": l.color_op,
+                        "overlay_texture": l.overlay_texture,
+                        "textures": l.textures,
+                    })
+                })
+                .collect();
+            let obj = bldg_json.as_object_mut().unwrap();
+            obj.insert("lit_overlays".into(), serde_json::json!(lit_json));
+        }
+
+        buildings_map.insert(entry.obj_id.to_string(), bldg_json);
     }
 
     if let Some(ref obj_file) = objects {
@@ -2289,6 +2557,9 @@ pub fn export_map_for_unity(
         std::fs::write(&sidecar_path, sidecar_json.as_bytes())?;
     }
 
+    // 10b. Copy effect textures
+    let _effect_textures = copy_effect_textures(project_dir, output_dir, &effect_definitions);
+
     // 11. Write terrain
     let terrain_file_path;
     if v3 {
@@ -2313,6 +2584,14 @@ pub fn export_map_for_unity(
         terrain_file_path = output_dir.join("terrain.gltf");
         std::fs::write(&terrain_file_path, terrain_gltf_json.as_bytes())?;
     }
+
+    // 11b. Copy teximg animation textures for buildings
+    let _teximg_textures = copy_teximg_textures(
+        project_dir,
+        output_dir,
+        &building_entries,
+        &obj_info,
+    );
 
     // 12. Copy water textures + terrain textures + alpha atlas
     let water_textures = copy_water_textures(project_dir, output_dir);
@@ -3570,6 +3849,62 @@ mod tests {
         } else {
             eprintln!(
                 "INCONCLUSIVE: btBlock has height data but not deeper than terrain at water."
+            );
+        }
+    }
+
+    #[test]
+    fn scolor_distribution_07xmas2() {
+        let map_path = "/Users/anirudh/gamedev/pko-tools/top-client/map/07xmas2.map";
+        let data = match std::fs::read(map_path) {
+            Ok(d) => d,
+            Err(_) => {
+                eprintln!("SKIP: map file not found");
+                return;
+            }
+        };
+        let map = parse_map(&data).expect("can't parse map");
+
+        let mut zero_count = 0u64;
+        let mut nonzero_count = 0u64;
+        let mut samples = Vec::new();
+
+        for ty in 0..map.header.n_height {
+            for tx in 0..map.header.n_width {
+                if let Some(tile) = get_tile(&map, tx, ty) {
+                    if tile.s_color == 0 {
+                        zero_count += 1;
+                    } else {
+                        nonzero_count += 1;
+                        if samples.len() < 10 {
+                            samples.push((tx, ty, tile.s_color));
+                        }
+                    }
+                }
+            }
+        }
+
+        let total = zero_count + nonzero_count;
+        eprintln!("\nsColor distribution for 07xmas2:");
+        eprintln!("  Total tiles with data: {}", total);
+        eprintln!(
+            "  sColor == 0: {} ({:.1}%)",
+            zero_count,
+            zero_count as f64 / total as f64 * 100.0
+        );
+        eprintln!(
+            "  sColor != 0: {} ({:.1}%)",
+            nonzero_count,
+            nonzero_count as f64 / total as f64 * 100.0
+        );
+        for (tx, ty, v) in &samples {
+            let packed = *v as u16;
+            let r = ((packed & 0xF800) >> 8) as f32 / 255.0;
+            let g = ((packed & 0x07E0) >> 3) as f32 / 255.0;
+            let b = ((packed & 0x001F) << 3) as f32 / 255.0;
+            eprintln!(
+                "  tile({},{}) = 0x{:04X} → RGB({:.3}, {:.3}, {:.3})",
+                tx, ty, packed, r, g, b
             );
         }
     }

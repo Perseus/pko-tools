@@ -2,6 +2,7 @@ pub mod area_set;
 pub mod commands;
 pub mod glb;
 pub mod grid_images;
+pub mod lit;
 pub mod lmo;
 pub mod mapinfo;
 pub mod scene_model;
