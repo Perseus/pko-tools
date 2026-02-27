@@ -20,6 +20,7 @@ use gltf_json::{
 use crate::item::model::decode_pko_texture;
 
 use super::lmo::{self, D3DCULL_NONE, LmoGeomObject, LmoModel};
+use super::lmo_loader;
 use super::scene_obj::SceneObject;
 use super::scene_obj_info::SceneObjModelInfo;
 
@@ -1077,7 +1078,7 @@ fn build_animations(
 
 /// Build a complete glTF JSON string for a single LMO building model.
 pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String> {
-    let model = lmo::load_lmo(lmo_path)?;
+    let model = lmo_loader::load_lmo(lmo_path)?;
 
     if model.geom_objects.is_empty() {
         return Err(anyhow!("LMO file has no geometry objects"));
@@ -1212,7 +1213,7 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
 /// Uses the same mesh/material/animation logic as `build_gltf_from_lmo`, but
 /// packs all buffer data into a single binary buffer for GLB writing.
 pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String, Vec<u8>)> {
-    let model = lmo::load_lmo(lmo_path)?;
+    let model = lmo_loader::load_lmo(lmo_path)?;
 
     if model.geom_objects.is_empty() {
         return Err(anyhow!("LMO file has no geometry objects"));
@@ -1524,7 +1525,7 @@ pub fn load_scene_models(
             None => continue,
         };
 
-        let model = match lmo::load_lmo_no_animation(&lmo_path) {
+        let model = match lmo_loader::load_lmo_no_animation(&lmo_path) {
             Ok(m) => m,
             Err(_) => continue,
         };

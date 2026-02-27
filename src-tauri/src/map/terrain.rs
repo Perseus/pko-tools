@@ -2835,7 +2835,7 @@ fn copy_teximg_textures(
             None => continue,
         };
 
-        let model = match super::lmo::load_lmo(&lmo_path) {
+        let model = match super::lmo_loader::load_lmo(&lmo_path) {
             Ok(m) => m,
             Err(_) => continue,
         };
