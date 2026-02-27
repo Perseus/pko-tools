@@ -2665,6 +2665,47 @@ fn load_effect_file(project_dir: &Path, eff_filename: &str) -> Option<EffFile> {
     None
 }
 
+/// Compute the relative path from `from_dir` to `to_dir`.
+/// Used to create manifest paths that reference the shared assets directory.
+/// e.g., from "/export/07xmas2-v3" to "/export/Shared" → "../Shared"
+fn compute_shared_rel_path(from_dir: &Path, to_dir: &Path) -> String {
+    // Canonicalize both paths if possible, otherwise use as-is
+    let from = std::fs::canonicalize(from_dir).unwrap_or_else(|_| from_dir.to_path_buf());
+    let to = std::fs::canonicalize(to_dir).unwrap_or_else(|_| to_dir.to_path_buf());
+
+    // Find common prefix
+    let from_parts: Vec<_> = from.components().collect();
+    let to_parts: Vec<_> = to.components().collect();
+
+    let common_len = from_parts
+        .iter()
+        .zip(to_parts.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    // Build relative path: go up from `from` to common ancestor, then down to `to`
+    let ups = from_parts.len() - common_len;
+    let mut rel = String::new();
+    for _ in 0..ups {
+        if !rel.is_empty() {
+            rel.push('/');
+        }
+        rel.push_str("..");
+    }
+    for part in &to_parts[common_len..] {
+        if !rel.is_empty() {
+            rel.push('/');
+        }
+        rel.push_str(&part.as_os_str().to_string_lossy());
+    }
+
+    if rel.is_empty() {
+        ".".to_string()
+    } else {
+        rel
+    }
+}
+
 /// Copy effect textures referenced by parsed EffFile definitions.
 /// Walks each sub-effect's tex_name and frame_tex_names, finds the source
 /// TGA/BMP in texture/effect/, converts to PNG in effects/textures/.
@@ -3017,53 +3058,76 @@ pub fn export_map_for_unity(
         .unwrap_or_default();
 
     // 7. Export buildings — glTF (v2) or GLB (v3)
+    // When shared_assets_dir is set, buildings are in the shared dir — don't re-export.
     std::fs::create_dir_all(output_dir)?;
-    let buildings_dir = output_dir.join("buildings");
-    std::fs::create_dir_all(&buildings_dir)?;
+    let use_shared = options.shared_assets_dir.is_some();
 
     let mut building_entries = Vec::new();
     let ext = if v3 { "glb" } else { "gltf" };
 
-    for &obj_id in &unique_obj_ids {
-        let info = match obj_info.get(&(obj_id as u32)) {
-            Some(info) => info,
-            None => continue,
-        };
-
-        let lmo_path = match super::scene_model::find_lmo_path(project_dir, &info.filename) {
-            Some(p) => p,
-            None => continue,
-        };
-
-        let stem = info
-            .filename
-            .strip_suffix(".lmo")
-            .or_else(|| info.filename.strip_suffix(".LMO"))
-            .unwrap_or(&info.filename);
-        let out_filename = format!("{}.{}", stem, ext);
-        let out_path = buildings_dir.join(&out_filename);
-
-        if v3 {
-            match super::scene_model::build_glb_from_lmo(&lmo_path, project_dir) {
-                Ok((json, bin)) => {
-                    super::glb::write_glb(&json, &bin, &out_path)?;
-                }
-                Err(_) => continue,
-            }
-        } else {
-            match super::scene_model::build_gltf_from_lmo(&lmo_path, project_dir) {
-                Ok(json) => {
-                    std::fs::write(&out_path, json.as_bytes())?;
-                }
-                Err(_) => continue,
-            }
+    if use_shared {
+        // Build entries from obj_info without exporting — buildings live in shared dir
+        for &obj_id in &unique_obj_ids {
+            let info = match obj_info.get(&(obj_id as u32)) {
+                Some(info) => info,
+                None => continue,
+            };
+            let stem = info
+                .filename
+                .strip_suffix(".lmo")
+                .or_else(|| info.filename.strip_suffix(".LMO"))
+                .unwrap_or(&info.filename);
+            building_entries.push(super::BuildingExportEntry {
+                obj_id: obj_id as u32,
+                filename: info.filename.clone(),
+                gltf_path: format!("buildings/{}.glb", stem),
+            });
         }
+    } else {
+        let buildings_dir = output_dir.join("buildings");
+        std::fs::create_dir_all(&buildings_dir)?;
 
-        building_entries.push(super::BuildingExportEntry {
-            obj_id: obj_id as u32,
-            filename: info.filename.clone(),
-            gltf_path: out_path.to_string_lossy().to_string(),
-        });
+        for &obj_id in &unique_obj_ids {
+            let info = match obj_info.get(&(obj_id as u32)) {
+                Some(info) => info,
+                None => continue,
+            };
+
+            let lmo_path = match super::scene_model::find_lmo_path(project_dir, &info.filename) {
+                Some(p) => p,
+                None => continue,
+            };
+
+            let stem = info
+                .filename
+                .strip_suffix(".lmo")
+                .or_else(|| info.filename.strip_suffix(".LMO"))
+                .unwrap_or(&info.filename);
+            let out_filename = format!("{}.{}", stem, ext);
+            let out_path = buildings_dir.join(&out_filename);
+
+            if v3 {
+                match super::scene_model::build_glb_from_lmo(&lmo_path, project_dir) {
+                    Ok((json, bin)) => {
+                        super::glb::write_glb(&json, &bin, &out_path)?;
+                    }
+                    Err(_) => continue,
+                }
+            } else {
+                match super::scene_model::build_gltf_from_lmo(&lmo_path, project_dir) {
+                    Ok(json) => {
+                        std::fs::write(&out_path, json.as_bytes())?;
+                    }
+                    Err(_) => continue,
+                }
+            }
+
+            building_entries.push(super::BuildingExportEntry {
+                obj_id: obj_id as u32,
+                filename: info.filename.clone(),
+                gltf_path: out_path.to_string_lossy().to_string(),
+            });
+        }
     }
 
     // 8. Build placements + effects
@@ -3083,8 +3147,15 @@ pub fn export_map_for_unity(
             .or_else(|| entry.filename.strip_suffix(".LMO"))
             .unwrap_or(&entry.filename);
 
+        let glb_path = if use_shared {
+            let shared_dir = options.shared_assets_dir.as_ref().unwrap();
+            let shared_rel = compute_shared_rel_path(output_dir, shared_dir);
+            format!("{}/buildings/{}.glb", shared_rel, stem)
+        } else {
+            format!("buildings/{}.{}", stem, ext)
+        };
         let mut bldg_json = serde_json::json!({
-            "glb": format!("buildings/{}.{}", stem, ext),
+            "glb": glb_path,
             "filename": entry.filename,
         });
 
@@ -3156,12 +3227,19 @@ pub fn export_map_for_unity(
                                 .unwrap_or(&i.filename)
                         })
                         .unwrap_or("unknown");
+                    let bldg_glb_ref = if use_shared {
+                        let shared_dir = options.shared_assets_dir.as_ref().unwrap();
+                        let shared_rel = compute_shared_rel_path(output_dir, shared_dir);
+                        format!("{}/buildings/{}.glb", shared_rel, stem)
+                    } else {
+                        format!("buildings/{}.glb", stem)
+                    };
                     building_glb_placements.push((
                         obj.obj_id as u32,
                         position,
                         obj.yaw_angle as f32,
                         obj.scale as f32,
-                        format!("buildings/{}.glb", stem),
+                        bldg_glb_ref,
                     ));
                 }
             } else if obj.obj_type == 1 {
@@ -3248,8 +3326,10 @@ pub fn export_map_for_unity(
         std::fs::write(&sidecar_path, sidecar_json.as_bytes())?;
     }
 
-    // 10b. Copy effect textures
-    let _effect_textures = copy_effect_textures(project_dir, output_dir, &effect_definitions);
+    // 10b. Copy effect textures (skip when using shared assets)
+    if !use_shared {
+        let _effect_textures = copy_effect_textures(project_dir, output_dir, &effect_definitions);
+    }
 
     // 11. Write terrain
     let terrain_file_path;
@@ -3339,23 +3419,84 @@ pub fn export_map_for_unity(
         std::fs::write(&terrain_file_path, terrain_gltf_json.as_bytes())?;
     }
 
-    // 11b. Copy teximg animation textures for buildings
-    let _teximg_textures = copy_teximg_textures(
-        project_dir,
-        output_dir,
-        &building_entries,
-        &obj_info,
-    );
+    // 11b. Copy teximg animation textures for buildings (skip when using shared assets)
+    if !use_shared {
+        let _teximg_textures = copy_teximg_textures(
+            project_dir,
+            output_dir,
+            &building_entries,
+            &obj_info,
+        );
+    }
 
     // 12. Copy water textures + terrain textures + alpha atlas
-    let water_textures = copy_water_textures(project_dir, output_dir);
-    let terrain_textures =
-        super::texture::export_terrain_textures(project_dir, &parsed_map, output_dir)
+    // When using shared assets, compute relative paths to the shared dir instead of exporting.
+    let (water_textures, terrain_textures, alpha_atlas_path, alpha_mask_array) = if use_shared {
+        let shared_dir = options.shared_assets_dir.as_ref().unwrap();
+        let shared_rel = compute_shared_rel_path(output_dir, shared_dir);
+
+        // Load shared_manifest.json to get the actual texture list
+        let shared_manifest_path = shared_dir.join("shared_manifest.json");
+        let shared_manifest: serde_json::Value = if shared_manifest_path.exists() {
+            let data = std::fs::read_to_string(&shared_manifest_path)?;
+            serde_json::from_str(&data)?
+        } else {
+            serde_json::json!({})
+        };
+
+        // Water textures: rewrite paths relative to output_dir
+        let water = shared_manifest.get("water_textures")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter()
+                .filter_map(|v| v.as_str().map(|s| format!("{}/{}", shared_rel, s)))
+                .collect::<Vec<_>>())
             .unwrap_or_default();
-    let alpha_atlas_path =
-        super::texture::export_alpha_atlas(project_dir, output_dir).unwrap_or(None);
-    let alpha_mask_array =
-        super::texture::export_alpha_mask_array(project_dir, output_dir).unwrap_or(None);
+
+        // Terrain textures: rewrite paths
+        let terrain = shared_manifest.get("terrain_textures")
+            .and_then(|v| v.as_object())
+            .map(|obj| {
+                let mut map = std::collections::HashMap::new();
+                for (id_str, path_val) in obj {
+                    if let (Ok(id), Some(path)) = (id_str.parse::<u8>(), path_val.as_str()) {
+                        // Only include textures referenced by this map
+                        map.insert(id, format!("{}/{}", shared_rel, path));
+                    }
+                }
+                map
+            })
+            .unwrap_or_default();
+
+        // Filter terrain textures to only those referenced by this map
+        let referenced_ids = super::texture::collect_referenced_tex_ids(&parsed_map);
+        let terrain_filtered: std::collections::HashMap<u8, String> = terrain.into_iter()
+            .filter(|(id, _)| referenced_ids.contains(id))
+            .collect();
+
+        // Alpha atlas
+        let alpha_atlas = shared_manifest.get("alpha_atlas")
+            .and_then(|v| v.as_str())
+            .map(|s| format!("{}/{}", shared_rel, s));
+
+        // Alpha masks
+        let alpha_masks = shared_manifest.get("alpha_masks")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter()
+                .filter_map(|v| v.as_str().map(|s| format!("{}/{}", shared_rel, s)))
+                .collect::<Vec<_>>());
+
+        (water, terrain_filtered, alpha_atlas, alpha_masks)
+    } else {
+        let water = copy_water_textures(project_dir, output_dir);
+        let terrain =
+            super::texture::export_terrain_textures(project_dir, &parsed_map, output_dir)
+                .unwrap_or_default();
+        let alpha_atlas =
+            super::texture::export_alpha_atlas(project_dir, output_dir).unwrap_or(None);
+        let alpha_masks =
+            super::texture::export_alpha_mask_array(project_dir, output_dir).unwrap_or(None);
+        (water, terrain, alpha_atlas, alpha_masks)
+    };
 
     // 13. Build manifest
     let mut manifest_map = serde_json::Map::new();
@@ -3371,6 +3512,11 @@ pub fn export_map_for_unity(
         manifest_map.insert("terrain_gltf".into(), serde_json::json!("terrain.glb")); // alias for ManifestShell compat
         if let Some(ref sections_info) = terrain_sections_info {
             manifest_map.insert("terrain_sections".into(), sections_info.clone());
+        }
+        if use_shared {
+            let shared_dir = options.shared_assets_dir.as_ref().unwrap();
+            let shared_rel = compute_shared_rel_path(output_dir, shared_dir);
+            manifest_map.insert("shared_assets".into(), serde_json::json!(shared_rel));
         }
         manifest_map.insert("map_name".into(), serde_json::json!(map_name));
         manifest_map.insert("coordinate_system".into(), serde_json::json!("y_up"));
