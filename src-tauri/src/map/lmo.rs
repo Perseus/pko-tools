@@ -49,20 +49,41 @@ const RENDER_STATE_ATOM_SIZE: usize = 12; // state(4) + value0(4) + value1(4)
 
 // D3D9 render state constants used by PKO scene materials/meshes.
 const D3DRS_ALPHATESTENABLE: u32 = 15;
+const D3DRS_SRCBLEND: u32 = 19;
+const D3DRS_DESTBLEND: u32 = 20;
 const D3DRS_ALPHAREF: u32 = 24;
+const D3DRS_CULLMODE: u32 = 22;
 const D3DRS_ALPHAFUNC: u32 = 25;
 const D3DCMP_GREATER: u32 = 5;
+const LW_INVALID_INDEX: u32 = 0xFFFFFFFF;
+
+// D3DCULL values
+pub const D3DCULL_NONE: u32 = 1;
+#[allow(dead_code)]
+pub const D3DCULL_CCW: u32 = 2;
+
+/// Transparency type enum matching lwMtlTexInfoTransparencyTypeEnum.
+pub const TRANSP_FILTER: u32 = 0;
+pub const TRANSP_ADDITIVE: u32 = 1;
+pub const TRANSP_ADDITIVE1: u32 = 2; // SrcColor/One — high-brightness additive
+pub const TRANSP_ADDITIVE2: u32 = 3; // SrcColor/InvSrcColor — soft/low additive
+pub const TRANSP_ADDITIVE3: u32 = 4; // SrcAlpha/DestAlpha — alpha-weighted additive
+pub const TRANSP_SUBTRACTIVE: u32 = 5; // Zero/InvSrcColor — darkening/shadow
+// Types 6-8 fall through to ONE/ONE in engine — identical to type 1
 
 #[derive(Debug, Clone, Copy, Default)]
-struct AlphaTestState {
-    enabled: bool,
+struct MaterialRenderState {
+    alpha_enabled: bool,
     alpha_ref: Option<u8>,
     alpha_func: Option<u32>,
+    src_blend: Option<u32>,
+    dest_blend: Option<u32>,
+    cull_mode: Option<u32>,
 }
 
-impl AlphaTestState {
-    fn normalized_enabled(self) -> bool {
-        self.enabled && self.alpha_func.map(|f| f == D3DCMP_GREATER).unwrap_or(true)
+impl MaterialRenderState {
+    fn normalized_alpha_enabled(self) -> bool {
+        self.alpha_enabled && self.alpha_func.map(|f| f == D3DCMP_GREATER).unwrap_or(true)
     }
 
     fn effective_alpha_ref(self) -> u8 {
@@ -76,6 +97,39 @@ pub struct LmoAnimData {
     pub frame_num: u32,
     pub translations: Vec<[f32; 3]>, // per-frame translation (Z-up game space)
     pub rotations: Vec<[f32; 4]>,    // per-frame quaternion [x,y,z,w] (Z-up game space)
+}
+
+/// UV animation data — per-frame 4×4 texture coordinate transform matrix.
+/// Stored per (subset_index, stage_index).
+#[derive(Debug, Clone)]
+pub struct LmoTexUvAnim {
+    pub subset: usize,
+    pub stage: usize,
+    pub frame_num: u32,
+    pub matrices: Vec<[[f32; 4]; 4]>, // per-frame 4×4 UV transform matrix
+}
+
+/// Texture image animation — frame-by-frame texture swap.
+/// Stored per (subset_index, stage_index).
+#[derive(Debug, Clone)]
+pub struct LmoTexImgAnim {
+    pub subset: usize,
+    pub stage: usize,
+    pub textures: Vec<String>, // texture filenames per frame
+}
+
+/// Material opacity keyframe — sparse keyed float.
+#[derive(Debug, Clone)]
+pub struct LmoOpacityKeyframe {
+    pub frame: u32,
+    pub opacity: f32,
+}
+
+/// Material opacity animation — sparse keyframes for a single subset.
+#[derive(Debug, Clone)]
+pub struct LmoMtlOpacAnim {
+    pub subset: usize,
+    pub keyframes: Vec<LmoOpacityKeyframe>,
 }
 
 /// A single geometry object within an LMO file.
@@ -93,6 +147,9 @@ pub struct LmoGeomObject {
     pub subsets: Vec<LmoSubset>,
     pub materials: Vec<LmoMaterial>,
     pub animation: Option<LmoAnimData>,
+    pub texuv_anims: Vec<LmoTexUvAnim>,
+    pub teximg_anims: Vec<LmoTexImgAnim>,
+    pub mtlopac_anims: Vec<LmoMtlOpacAnim>,
 }
 
 /// A mesh subset — defines a range of indices rendered with a specific material.
@@ -109,9 +166,14 @@ pub struct LmoSubset {
 pub struct LmoMaterial {
     pub diffuse: [f32; 4],
     pub ambient: [f32; 4],
+    pub emissive: [f32; 4],
     pub opacity: f32,
+    pub transp_type: u32,
     pub alpha_test_enabled: bool,
     pub alpha_ref: u8,
+    pub src_blend: Option<u32>,
+    pub dest_blend: Option<u32>,
+    pub cull_mode: Option<u32>,
     pub tex_filename: Option<String>,
 }
 
@@ -158,8 +220,8 @@ fn read_mat44(cursor: &mut Cursor<&[u8]>) -> Result<[[f32; 4]; 4]> {
 fn read_render_state_atoms(
     cursor: &mut Cursor<&[u8]>,
     atom_count: usize,
-) -> Result<AlphaTestState> {
-    let mut alpha = AlphaTestState::default();
+) -> Result<MaterialRenderState> {
+    let mut rs = MaterialRenderState::default();
     for _ in 0..atom_count {
         let state = read_u32(cursor)?;
         let value0 = read_u32(cursor)?;
@@ -167,18 +229,82 @@ fn read_render_state_atoms(
 
         match state {
             D3DRS_ALPHATESTENABLE => {
-                alpha.enabled = value0 != 0;
+                rs.alpha_enabled = value0 != 0;
+            }
+            D3DRS_CULLMODE => {
+                rs.cull_mode = Some(value0);
             }
             D3DRS_ALPHAREF => {
-                alpha.alpha_ref = Some((value0 & 0xFF) as u8);
+                rs.alpha_ref = Some((value0 & 0xFF) as u8);
             }
             D3DRS_ALPHAFUNC => {
-                alpha.alpha_func = Some(value0);
+                rs.alpha_func = Some(value0);
+            }
+            D3DRS_SRCBLEND => {
+                rs.src_blend = Some(value0);
+            }
+            D3DRS_DESTBLEND => {
+                rs.dest_blend = Some(value0);
             }
             _ => {}
         }
     }
-    Ok(alpha)
+    Ok(rs)
+}
+
+/// Read render states from the old lwRenderStateSetTemplate<2, N> format (V0000/V0001).
+///
+/// Layout: rsv_seq[2][seq_size], where each lwRenderStateValue = state(DWORD) + value(DWORD).
+/// Total bytes: 2 * seq_size * 8.
+///
+/// The original engine (lwExpObj.cpp) reads only set 0 and converts to lwRenderStateAtom,
+/// force-overriding ALPHAREF→129 and ALPHAFUNC→D3DCMP_GREATER for backwards compatibility.
+fn read_old_render_state_set(
+    cursor: &mut Cursor<&[u8]>,
+    seq_size: usize,
+) -> Result<MaterialRenderState> {
+    let mut rs = MaterialRenderState::default();
+
+    // Read set 0 (the active render states)
+    for _ in 0..seq_size {
+        let state = read_u32(cursor)?;
+        let value = read_u32(cursor)?;
+
+        if state == LW_INVALID_INDEX {
+            // End sentinel — continue reading remaining entries to maintain cursor position
+            continue;
+        }
+
+        // Match original engine: override ALPHAREF and ALPHAFUNC for old formats
+        match state {
+            D3DRS_ALPHATESTENABLE => {
+                rs.alpha_enabled = value != 0;
+            }
+            D3DRS_CULLMODE => {
+                rs.cull_mode = Some(value);
+            }
+            D3DRS_ALPHAREF => {
+                // Original engine forces 129 for old formats (lwExpObj.cpp lines 70-71, 137-138)
+                rs.alpha_ref = Some(129);
+            }
+            D3DRS_ALPHAFUNC => {
+                // Original engine forces D3DCMP_GREATER for old formats
+                rs.alpha_func = Some(D3DCMP_GREATER);
+            }
+            D3DRS_SRCBLEND => {
+                rs.src_blend = Some(value);
+            }
+            D3DRS_DESTBLEND => {
+                rs.dest_blend = Some(value);
+            }
+            _ => {}
+        }
+    }
+
+    // Skip set 1 (end/restore states — not used for material property extraction)
+    cursor.seek(SeekFrom::Current((seq_size * 8) as i64))?;
+
+    Ok(rs)
 }
 
 // ============================================================================
@@ -204,12 +330,19 @@ enum MtlFormatVersion {
 ///   - Current: opacity(4) + transp(4) + lwMaterial(68) + lwRenderStateAtom[8](96) + lwTexInfo[4]
 fn read_material(cursor: &mut Cursor<&[u8]>, mtl_ver: MtlFormatVersion) -> Result<LmoMaterial> {
     // Opacity / transp_type — absent in V0000
-    let opacity = if mtl_ver == MtlFormatVersion::V0000 {
-        1.0
+    let (opacity, transp_type) = if mtl_ver == MtlFormatVersion::V0000 {
+        (1.0, TRANSP_FILTER)
     } else {
         let o = read_f32(cursor)?;
-        let _transp_type = read_u32(cursor)?;
-        o
+        let mut t = read_u32(cursor)?;
+        // V0001 remap: old files only used 0/1/2. Value 2 meant "subtractive" (Zero/InvSrcColor),
+        // not ADDITIVE1 (SrcColor/One). The C++ engine (lwExpObj.cpp:225-228) remaps:
+        //   1 → MTLTEX_TRANSP_ADDITIVE (1, no change)
+        //   2 → MTLTEX_TRANSP_SUBTRACTIVE (5)
+        if mtl_ver == MtlFormatVersion::V0001 && t == 2 {
+            t = TRANSP_SUBTRACTIVE;
+        }
+        (o, t)
     };
 
     // CharMaterial: dif(16) + amb(16) + spe(16) + emi(16) + power(4) = 68 bytes
@@ -225,15 +358,21 @@ fn read_material(cursor: &mut Cursor<&[u8]>, mtl_ver: MtlFormatVersion) -> Resul
         read_f32(cursor)?,
         read_f32(cursor)?,
     ];
-    cursor.seek(SeekFrom::Current(16))?; // specular
-    cursor.seek(SeekFrom::Current(16))?; // emissive
+    cursor.seek(SeekFrom::Current(16))?; // specular (skip)
+    let emissive = [
+        read_f32(cursor)?,
+        read_f32(cursor)?,
+        read_f32(cursor)?,
+        read_f32(cursor)?,
+    ];
     cursor.seek(SeekFrom::Current(4))?; // power
 
     // rs_set — old formats use lwRenderStateSetMtl2 (128 bytes), new uses lwRenderStateAtom[8] (96 bytes)
-    let rs_alpha = match mtl_ver {
+    let rs = match mtl_ver {
         MtlFormatVersion::V0000 | MtlFormatVersion::V0001 => {
-            cursor.seek(SeekFrom::Current(128))?;
-            AlphaTestState::default()
+            // Old format: lwRenderStateSetTemplate<2, LW_MTL_RS_NUM> = lwRenderStateValue[2][8]
+            // Total: 2 * 8 * 8 = 128 bytes. Extract render states from set 0, skip set 1.
+            read_old_render_state_set(cursor, LW_MTL_RS_NUM)?
         }
         MtlFormatVersion::Current => read_render_state_atoms(cursor, LW_MTL_RS_NUM)?,
     };
@@ -283,13 +422,18 @@ fn read_material(cursor: &mut Cursor<&[u8]>, mtl_ver: MtlFormatVersion) -> Resul
     Ok(LmoMaterial {
         diffuse,
         ambient,
+        emissive,
         opacity,
-        alpha_test_enabled: rs_alpha.normalized_enabled(),
-        alpha_ref: if rs_alpha.normalized_enabled() {
-            rs_alpha.effective_alpha_ref()
+        transp_type,
+        alpha_test_enabled: rs.normalized_alpha_enabled(),
+        alpha_ref: if rs.normalized_alpha_enabled() {
+            rs.effective_alpha_ref()
         } else {
-            rs_alpha.alpha_ref.unwrap_or(0)
+            rs.alpha_ref.unwrap_or(0)
         },
+        src_blend: rs.src_blend,
+        dest_blend: rs.dest_blend,
+        cull_mode: rs.cull_mode,
         tex_filename,
     })
 }
@@ -312,7 +456,7 @@ fn read_mesh(
     Vec<u32>,
     Vec<u32>,
     Vec<LmoSubset>,
-    AlphaTestState,
+    MaterialRenderState,
 )> {
     // For version 0, the mesh section has an embedded old_version prefix
     let mesh_version = if file_version == EXP_OBJ_VERSION_0_0_0_0 {
@@ -321,7 +465,7 @@ fn read_mesh(
         file_version
     };
 
-    let mut mesh_alpha = AlphaTestState::default();
+    let mut mesh_alpha = MaterialRenderState::default();
 
     // Read mesh header — format depends on version
     let (fvf, vertex_num, index_num, subset_num, bone_index_num, vertex_element_num);
@@ -353,9 +497,8 @@ fn read_mesh(
 
         if mesh_version == 0 {
             // MESH_VERSION0000: rs_set is lwRenderStateSetMesh2 = lwRenderStateValue[2][8]
-            // lwRenderStateValue = state(4) + value(4) = 8 bytes
-            // Total: 2 × 8 × 8 = 128 bytes
-            cursor.seek(SeekFrom::Current(128))?;
+            // Total: 2 * 8 * 8 = 128 bytes. Extract render states from set 0.
+            mesh_alpha = read_old_render_state_set(cursor, LW_MESH_RS_NUM)?;
         } else {
             // MESH_VERSION0001 / EXP_OBJ_VERSION_1_0_0_0..3: rs_set is lwRenderStateAtom[8]
             // lwRenderStateAtom = state(4) + value0(4) + value1(4) = 12 bytes
@@ -571,18 +714,38 @@ fn decompose_matrix43(raw: &[f32; 12]) -> ([f32; 3], [f32; 4]) {
     (translation, rotation)
 }
 
+/// All animation data parsed from a geometry object's animation section.
+struct ParsedAnimations {
+    matrix: Option<LmoAnimData>,
+    texuv: Vec<LmoTexUvAnim>,
+    teximg: Vec<LmoTexImgAnim>,
+    mtlopac: Vec<LmoMtlOpacAnim>,
+}
+
+// sizeof(lwTexInfo) on 32-bit MSVC: 9 DWORDs (36) + colorkey_type(4) + colorkey(4)
+// + file_name[64] + void*(4) + tss_set[8×12=96] = 208 bytes
+const LW_MAX_NAME: usize = 64;
+// Bytes to skip per lwTexInfo entry: 36 (pre-filename) + 8 (colorkey) = 44 before filename,
+// then 100 after filename (void* + tss_set). Total = 44 + 64 + 100 = 208.
+
 /// Read animation data from the animation section of a geometry object.
 ///
-/// The animation section contains a size header table followed by actual data blocks.
-/// We only extract lwAnimDataMatrix (matrix keyframe animation), which is the format
-/// used by building animations (spinning lamps, rotating objects, etc.).
+/// The animation section contains a size header table followed by actual data blocks:
+/// bone, matrix, mtlopac[16], texuv[16][4], teximg[16][4].
 fn read_animation(
     cursor: &mut Cursor<&[u8]>,
     anim_size: usize,
     file_version: u32,
-) -> Result<Option<LmoAnimData>> {
+) -> Result<ParsedAnimations> {
+    let mut result = ParsedAnimations {
+        matrix: None,
+        texuv: Vec::new(),
+        teximg: Vec::new(),
+        mtlopac: Vec::new(),
+    };
+
     if anim_size == 0 {
-        return Ok(None);
+        return Ok(result);
     }
 
     let start_pos = cursor.position();
@@ -597,21 +760,30 @@ fn read_animation(
     let data_mat_size = read_u32(cursor)? as usize;
 
     // mtlopac_size[16] — only present in version >= 0x1005
+    let mut mtlopac_sizes = [0usize; LW_MAX_SUBSET_NUM];
     if file_version >= 0x1005 {
-        for _ in 0..LW_MAX_SUBSET_NUM {
-            let _ = read_u32(cursor)?;
+        for item in &mut mtlopac_sizes {
+            *item = read_u32(cursor)? as usize;
         }
     }
 
     // data_texuv_size[16][4]
-    for _ in 0..(LW_MAX_SUBSET_NUM * LW_MAX_TEXTURESTAGE_NUM) {
-        let _ = read_u32(cursor)?;
+    let mut texuv_sizes = [[0usize; LW_MAX_TEXTURESTAGE_NUM]; LW_MAX_SUBSET_NUM];
+    for i in 0..LW_MAX_SUBSET_NUM {
+        for j in 0..LW_MAX_TEXTURESTAGE_NUM {
+            texuv_sizes[i][j] = read_u32(cursor)? as usize;
+        }
     }
 
     // data_teximg_size[16][4]
-    for _ in 0..(LW_MAX_SUBSET_NUM * LW_MAX_TEXTURESTAGE_NUM) {
-        let _ = read_u32(cursor)?;
+    let mut teximg_sizes = [[0usize; LW_MAX_TEXTURESTAGE_NUM]; LW_MAX_SUBSET_NUM];
+    for i in 0..LW_MAX_SUBSET_NUM {
+        for j in 0..LW_MAX_TEXTURESTAGE_NUM {
+            teximg_sizes[i][j] = read_u32(cursor)? as usize;
+        }
     }
+
+    // --- Data blocks (in order: bone, matrix, mtlopac[16], texuv[16][4], teximg[16][4]) ---
 
     // Skip bone animation data (buildings don't use skeletal animation)
     if data_bone_size > 0 {
@@ -620,38 +792,178 @@ fn read_animation(
 
     // Read matrix animation data
     if data_mat_size > 0 {
+        let mat_start = cursor.position();
         let frame_num = read_u32(cursor)?;
 
-        if frame_num == 0 || frame_num > 100_000 {
-            // Sanity check — skip if 0 or unreasonably large
-            cursor.set_position(end_pos);
-            return Ok(None);
-        }
+        if frame_num > 0 && frame_num <= 100_000 {
+            let mut translations = Vec::with_capacity(frame_num as usize);
+            let mut rotations = Vec::with_capacity(frame_num as usize);
 
-        let mut translations = Vec::with_capacity(frame_num as usize);
-        let mut rotations = Vec::with_capacity(frame_num as usize);
-
-        for _ in 0..frame_num {
-            let mut raw = [0.0f32; 12];
-            for val in &mut raw {
-                *val = read_f32(cursor)?;
+            for _ in 0..frame_num {
+                let mut raw = [0.0f32; 12];
+                for val in &mut raw {
+                    *val = read_f32(cursor)?;
+                }
+                let (t, r) = decompose_matrix43(&raw);
+                translations.push(t);
+                rotations.push(r);
             }
-            let (t, r) = decompose_matrix43(&raw);
-            translations.push(t);
-            rotations.push(r);
+
+            result.matrix = Some(LmoAnimData {
+                frame_num,
+                translations,
+                rotations,
+            });
         }
 
-        cursor.set_position(end_pos);
-        return Ok(Some(LmoAnimData {
-            frame_num,
-            translations,
-            rotations,
-        }));
+        // Always advance past the full mat data block
+        cursor.set_position(mat_start + data_mat_size as u64);
     }
 
-    // No matrix animation
+    // Read mtlopac animation data (per-subset sparse keyframes)
+    if file_version >= 0x1005 {
+        for (subset_idx, &size) in mtlopac_sizes.iter().enumerate() {
+            if size == 0 {
+                continue;
+            }
+            let block_start = cursor.position();
+            match read_mtlopac_block(cursor, subset_idx) {
+                Ok(anim) => result.mtlopac.push(anim),
+                Err(e) => {
+                    eprintln!(
+                        "Warning: failed to read mtlopac anim subset {}: {}",
+                        subset_idx, e
+                    );
+                }
+            }
+            // Always advance past the full block
+            cursor.set_position(block_start + size as u64);
+        }
+    }
+
+    // Read texuv animation data (per-subset, per-stage 4×4 matrix keyframes)
+    for i in 0..LW_MAX_SUBSET_NUM {
+        for j in 0..LW_MAX_TEXTURESTAGE_NUM {
+            let size = texuv_sizes[i][j];
+            if size == 0 {
+                continue;
+            }
+            let block_start = cursor.position();
+            match read_texuv_block(cursor, i, j) {
+                Ok(anim) => result.texuv.push(anim),
+                Err(e) => {
+                    eprintln!(
+                        "Warning: failed to read texuv anim [{},{}]: {}",
+                        i, j, e
+                    );
+                }
+            }
+            cursor.set_position(block_start + size as u64);
+        }
+    }
+
+    // Read teximg animation data (per-subset, per-stage texture filename list)
+    for i in 0..LW_MAX_SUBSET_NUM {
+        for j in 0..LW_MAX_TEXTURESTAGE_NUM {
+            let size = teximg_sizes[i][j];
+            if size == 0 {
+                continue;
+            }
+            let block_start = cursor.position();
+            match read_teximg_block(cursor, i, j) {
+                Ok(anim) => result.teximg.push(anim),
+                Err(e) => {
+                    eprintln!(
+                        "Warning: failed to read teximg anim [{},{}]: {}",
+                        i, j, e
+                    );
+                }
+            }
+            cursor.set_position(block_start + size as u64);
+        }
+    }
+
+    // Ensure we end at the right position
     cursor.set_position(end_pos);
-    Ok(None)
+    Ok(result)
+}
+
+/// Read a texuv animation block: frame_num(4) + frame_num × lwMatrix44(64).
+fn read_texuv_block(
+    cursor: &mut Cursor<&[u8]>,
+    subset: usize,
+    stage: usize,
+) -> Result<LmoTexUvAnim> {
+    let frame_num = read_u32(cursor)?;
+    if frame_num > 100_000 {
+        return Err(anyhow!("texuv frame_num {} unreasonable", frame_num));
+    }
+
+    let mut matrices = Vec::with_capacity(frame_num as usize);
+    for _ in 0..frame_num {
+        matrices.push(read_mat44(cursor)?);
+    }
+
+    Ok(LmoTexUvAnim {
+        subset,
+        stage,
+        frame_num,
+        matrices,
+    })
+}
+
+/// Read a teximg animation block: data_num(4) + data_num × lwTexInfo(208).
+/// We only extract the file_name from each lwTexInfo entry.
+fn read_teximg_block(
+    cursor: &mut Cursor<&[u8]>,
+    subset: usize,
+    stage: usize,
+) -> Result<LmoTexImgAnim> {
+    let data_num = read_u32(cursor)?;
+    if data_num > 1000 {
+        return Err(anyhow!("teximg data_num {} unreasonable", data_num));
+    }
+
+    let mut textures = Vec::with_capacity(data_num as usize);
+    for _ in 0..data_num {
+        // lwTexInfo layout (208 bytes total on 32-bit):
+        // 9 DWORDs (36 bytes): stage, level, usage, format, pool, byte_alignment_flag, type, width, height
+        cursor.seek(SeekFrom::Current(36))?;
+        // colorkey_type(4) + colorkey(4) = 8 bytes
+        cursor.seek(SeekFrom::Current(8))?;
+        // file_name[64]
+        let filename = read_cstr_fixed(cursor, LW_MAX_NAME)?;
+        textures.push(filename);
+        // void*(4) + tss_set[8×12=96] = 100 bytes remaining
+        cursor.seek(SeekFrom::Current(100))?;
+    }
+
+    Ok(LmoTexImgAnim {
+        subset,
+        stage,
+        textures,
+    })
+}
+
+/// Read an mtlopac animation block: num(4) + num × lwKeyFloat(12).
+fn read_mtlopac_block(
+    cursor: &mut Cursor<&[u8]>,
+    subset: usize,
+) -> Result<LmoMtlOpacAnim> {
+    let num = read_u32(cursor)?;
+    if num > 100_000 {
+        return Err(anyhow!("mtlopac keyframe count {} unreasonable", num));
+    }
+
+    let mut keyframes = Vec::with_capacity(num as usize);
+    for _ in 0..num {
+        let frame = read_u32(cursor)?;
+        let _slerp_type = read_u32(cursor)?;
+        let opacity = read_f32(cursor)?;
+        keyframes.push(LmoOpacityKeyframe { frame, opacity });
+    }
+
+    Ok(LmoMtlOpacAnim { subset, keyframes })
 }
 
 // ============================================================================
@@ -745,7 +1057,7 @@ fn read_geom_object(
     let mut vertex_colors = Vec::new();
     let mut indices = Vec::new();
     let mut subsets = Vec::new();
-    let mut mesh_alpha = AlphaTestState::default();
+    let mut mesh_alpha = MaterialRenderState::default();
 
     if mesh_size > 0 {
         match read_mesh(&mut cursor, file_version) {
@@ -766,7 +1078,7 @@ fn read_geom_object(
 
     // Some LMO files store alpha test states at mesh-level rs_set rather than
     // material rs_set. Promote mesh-level state to all materials when needed.
-    if mesh_alpha.normalized_enabled() {
+    if mesh_alpha.normalized_alpha_enabled() {
         let mesh_alpha_ref = mesh_alpha.effective_alpha_ref();
         for mat in &mut materials {
             if !mat.alpha_test_enabled {
@@ -779,17 +1091,27 @@ fn read_geom_object(
     }
 
     // Skip helpers, then optionally parse animation
-    let animation = if parse_animations && anim_size > 0 {
+    let parsed_anim = if parse_animations && anim_size > 0 {
         cursor.set_position(anim_offset);
         match read_animation(&mut cursor, anim_size, file_version) {
             Ok(anim) => anim,
             Err(e) => {
                 eprintln!("Warning: failed to read animation: {}", e);
-                None
+                ParsedAnimations {
+                    matrix: None,
+                    texuv: Vec::new(),
+                    teximg: Vec::new(),
+                    mtlopac: Vec::new(),
+                }
             }
         }
     } else {
-        None
+        ParsedAnimations {
+            matrix: None,
+            texuv: Vec::new(),
+            teximg: Vec::new(),
+            mtlopac: Vec::new(),
+        }
     };
 
     Ok(LmoGeomObject {
@@ -804,7 +1126,10 @@ fn read_geom_object(
         indices,
         subsets,
         materials,
-        animation,
+        animation: parsed_anim.matrix,
+        texuv_anims: parsed_anim.texuv,
+        teximg_anims: parsed_anim.teximg,
+        mtlopac_anims: parsed_anim.mtlopac,
     })
 }
 
@@ -1582,6 +1907,40 @@ mod tests {
         }
     }
 
+    #[test]
+    fn parse_version0_lmo_alpha_test() {
+        // nml-bd022.lmo is a version-0 file with leaf textures that need alpha test.
+        // The old lwRenderStateSetMtl2 format stores ALPHATESTENABLE in the 128-byte
+        // render state block that we previously skipped.
+        let path = std::path::Path::new("../top-client/model/scene/nml-bd022.lmo");
+        if !path.exists() {
+            return;
+        }
+
+        let model = load_lmo(path).unwrap();
+        assert_eq!(model.version, 0, "nml-bd022 should be version 0");
+        assert!(!model.geom_objects.is_empty());
+
+        // Check that at least one material has alpha test enabled
+        let mut found_alpha = false;
+        for geom in &model.geom_objects {
+            for mat in &geom.materials {
+                if mat.alpha_test_enabled {
+                    found_alpha = true;
+                    // Old format should force alpha_ref to 129
+                    assert_eq!(
+                        mat.alpha_ref, 129,
+                        "V0000 format should force alpha_ref to 129"
+                    );
+                }
+            }
+        }
+        assert!(
+            found_alpha,
+            "nml-bd022 leaf textures should have alpha_test_enabled=true"
+        );
+    }
+
     // ====================================================================
     // Animation parsing tests
     // ====================================================================
@@ -1793,5 +2152,174 @@ mod tests {
                 assert!(anim.frame_num > 0);
             }
         }
+    }
+
+    #[test]
+    fn parse_texuv_animation_from_nml_bd201() {
+        // nml-bd201.lmo — small building with texuv animation on subset 0, stage 0
+        let path = std::path::Path::new(
+            "../top-client/corsairs-online-public/client/model/scene/nml-bd201.lmo",
+        );
+        if !path.exists() {
+            return;
+        }
+
+        let model = load_lmo(path).unwrap();
+        assert!(
+            !model.geom_objects.is_empty(),
+            "should have geometry objects"
+        );
+
+        let has_texuv = model
+            .geom_objects
+            .iter()
+            .any(|g| !g.texuv_anims.is_empty());
+        assert!(has_texuv, "nml-bd201 should have texuv animation");
+
+        for (i, geom) in model.geom_objects.iter().enumerate() {
+            for uv in &geom.texuv_anims {
+                eprintln!(
+                    "  geom[{}] id={}: texuv subset={} stage={} frames={}",
+                    i, geom.id, uv.subset, uv.stage, uv.frame_num
+                );
+                assert!(uv.frame_num > 0, "should have frames");
+                assert_eq!(
+                    uv.matrices.len(),
+                    uv.frame_num as usize,
+                    "matrix count must match frame_num"
+                );
+                // First frame's matrix should not be all zeros
+                let first = &uv.matrices[0];
+                let all_zero = first.iter().all(|row| row.iter().all(|&v| v == 0.0));
+                assert!(!all_zero, "first UV matrix should not be all zeros");
+            }
+        }
+    }
+
+    #[test]
+    fn parse_teximg_animation_from_cc_bd065() {
+        // cc-bd065.lmo — v0x1005 building with teximg animation (22KB)
+        let path = std::path::Path::new(
+            "../top-client/corsairs-online-public/client/model/scene/cc-bd065.lmo",
+        );
+        if !path.exists() {
+            return;
+        }
+
+        let model = load_lmo(path).unwrap();
+        assert!(
+            !model.geom_objects.is_empty(),
+            "should have geometry objects"
+        );
+
+        let has_teximg = model
+            .geom_objects
+            .iter()
+            .any(|g| !g.teximg_anims.is_empty());
+        assert!(has_teximg, "cc-bd065 should have teximg animation");
+
+        for (i, geom) in model.geom_objects.iter().enumerate() {
+            for ti in &geom.teximg_anims {
+                eprintln!(
+                    "  geom[{}] id={}: teximg subset={} stage={} textures={}",
+                    i,
+                    geom.id,
+                    ti.subset,
+                    ti.stage,
+                    ti.textures.len()
+                );
+                assert!(!ti.textures.is_empty(), "should have at least one texture");
+                for tex in &ti.textures {
+                    assert!(!tex.is_empty(), "texture filename should not be empty");
+                    eprintln!("    texture: {}", tex);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn parse_mtlopac_animation_from_hdjd_cbd01() {
+        // hdjd-cbd01.lmo — v0x1005 building with mtlopac animation
+        let path = std::path::Path::new(
+            "../top-client/corsairs-online-public/client/model/scene/hdjd-cbd01.lmo",
+        );
+        if !path.exists() {
+            return;
+        }
+
+        let model = load_lmo(path).unwrap();
+        assert!(
+            !model.geom_objects.is_empty(),
+            "should have geometry objects"
+        );
+
+        let has_mtlopac = model
+            .geom_objects
+            .iter()
+            .any(|g| !g.mtlopac_anims.is_empty());
+        assert!(has_mtlopac, "hdjd-cbd01 should have mtlopac animation");
+
+        for (i, geom) in model.geom_objects.iter().enumerate() {
+            for mo in &geom.mtlopac_anims {
+                eprintln!(
+                    "  geom[{}] id={}: mtlopac subset={} keyframes={}",
+                    i,
+                    geom.id,
+                    mo.subset,
+                    mo.keyframes.len()
+                );
+                assert!(
+                    !mo.keyframes.is_empty(),
+                    "should have at least one keyframe"
+                );
+                for kf in &mo.keyframes {
+                    // Opacity should be in [0, 1] range
+                    assert!(
+                        (0.0..=1.0).contains(&kf.opacity),
+                        "opacity {} out of [0,1] range",
+                        kf.opacity
+                    );
+                    eprintln!("    frame={} opacity={:.3}", kf.frame, kf.opacity);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn parse_all_animation_types_roundtrip() {
+        // cc-bd044.lmo — v0x1005, has BOTH texuv + teximg
+        let path = std::path::Path::new(
+            "../top-client/corsairs-online-public/client/model/scene/cc-bd044.lmo",
+        );
+        if !path.exists() {
+            return;
+        }
+
+        let model = load_lmo(path).unwrap();
+        let total_texuv: usize = model.geom_objects.iter().map(|g| g.texuv_anims.len()).sum();
+        let total_teximg: usize = model
+            .geom_objects
+            .iter()
+            .map(|g| g.teximg_anims.len())
+            .sum();
+        let total_mat: usize = model
+            .geom_objects
+            .iter()
+            .filter(|g| g.animation.is_some())
+            .count();
+
+        eprintln!(
+            "cc-bd044: {} geoms, {} mat anims, {} texuv, {} teximg",
+            model.geom_objects.len(),
+            total_mat,
+            total_texuv,
+            total_teximg
+        );
+
+        // cc-bd044 should have teximg (and possibly texuv)
+        assert!(
+            total_texuv > 0 || total_teximg > 0,
+            "should have texuv or teximg animations"
+        );
     }
 }

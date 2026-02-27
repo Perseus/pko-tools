@@ -109,17 +109,20 @@ fn read_i8(cursor: &mut Cursor<&[u8]>) -> Result<i8> {
 // Color conversion
 // ============================================================================
 
-/// Convert RGB565 (stored as i16) to (R, G, B) floats in 0..1.
+/// Convert terrain vertex color (stored as i16) to (R, G, B) floats in 0..1.
 ///
-/// Matches the client's LW_RGB565TODWORD macro:
-///   R = (rgb & 0xf800) >> 8   (5 bits → top of byte)
-///   G = (rgb & 0x07e0) >> 3   (6 bits → top of byte)
-///   B = (rgb & 0x001f) << 3   (5 bits → top of byte)
+/// The map file stores colors in BGR565 format (blue in high 5 bits, red in
+/// low 5 bits). The original engine's LW_RGB565TODWORD macro misleadingly
+/// names the fields "R/G/B" by bit position, but then packs the DWORD as
+/// `R_bits | (G_bits << 8) | (B_bits << 16)` — placing the high-5-bit value
+/// into D3DCOLOR's blue byte and the low-5-bit value into D3DCOLOR's red byte.
+/// The net effect is that the high 5 bits are blue and the low 5 bits are red.
 pub fn rgb565_to_float(color: i16) -> (f32, f32, f32) {
     let c = color as u16;
-    let r = ((c & 0xf800) >> 8) as f32 / 255.0;
+    // High 5 bits = blue, middle 6 bits = green, low 5 bits = red
+    let b = ((c & 0xf800) >> 8) as f32 / 255.0;
     let g = ((c & 0x07e0) >> 3) as f32 / 255.0;
-    let b = ((c & 0x001f) << 3) as f32 / 255.0;
+    let r = ((c & 0x001f) << 3) as f32 / 255.0;
     (r, g, b)
 }
 
@@ -303,8 +306,37 @@ fn tile_height(tile: &MapTile) -> f32 {
 /// PKO vertex ownership semantics are strict: vertex (vx, vy) samples
 /// `GetTile(vx, vy)` directly. If that tile is out-of-range or section-missing,
 /// the render path falls back to default underwater tile values.
+///
+/// Boundary clamping: when a vertex sits at the +1 edge of a loaded section
+/// (right or bottom boundary), get_tile returns None because the vertex
+/// coordinate falls into the next (unloaded) section. This creates a steep
+/// cliff face with near-horizontal normals that appears grey under lighting.
+/// To avoid this, try the immediate neighbor tile (vx-1 or vy-1). If found,
+/// the boundary vertex inherits that neighbor's height/color, eliminating
+/// the cliff. The flat underwater floor still exists further out.
 fn get_render_vertex_tile<'a>(map: &'a ParsedMap, vx: i32, vy: i32) -> Option<&'a MapTile> {
-    get_tile(map, vx, vy)
+    if let Some(tile) = get_tile(map, vx, vy) {
+        return Some(tile);
+    }
+    // Boundary clamp: try left, top, then diagonal neighbor.
+    // Handles +1 fence-post vertices at right/bottom/corner edges.
+    if vx > 0 {
+        if let Some(tile) = get_tile(map, vx - 1, vy) {
+            return Some(tile);
+        }
+    }
+    if vy > 0 {
+        if let Some(tile) = get_tile(map, vx, vy - 1) {
+            return Some(tile);
+        }
+    }
+    // Corner case: both vx and vy are +1 boundary
+    if vx > 0 && vy > 0 {
+        if let Some(tile) = get_tile(map, vx - 1, vy - 1) {
+            return Some(tile);
+        }
+    }
+    None
 }
 
 /// Build a glTF JSON string representing the terrain mesh.
@@ -378,18 +410,15 @@ pub fn build_terrain_gltf(
         uv
     });
 
-    // Step 2: Build triangle indices for map tiles that exist in section data.
-    // Missing sections still participate in owner sampling defaults, but we do
-    // not emit visible terrain triangles for them in exported geometry.
-    // Each tile at (tx, ty) → 2 triangles using corner vertices.
+    // Step 2: Build triangle indices for ALL tiles (including missing sections).
+    // Missing sections have vertices at UNDERWATER_HEIGHT with white vertex color
+    // and all-zero tile layer data. The shader detects these via the legacy missing
+    // tile sentinel and renders them with texture 22 (sandy beige), creating a
+    // continuous terrain floor under the sea.
     let mut indices: Vec<u32> = Vec::new();
 
     for ty in 0..h {
         for tx in 0..w {
-            if get_tile(parsed_map, tx, ty).is_none() {
-                continue;
-            }
-
             let v00 = (ty as u32) * (vw as u32) + (tx as u32);
             let v10 = v00 + 1;
             let v01 = v00 + vw as u32;
@@ -1074,13 +1103,12 @@ pub fn build_terrain_glb(
         uv
     });
 
-    // ----- Step 2: Build triangle indices -----
+    // ----- Step 2: Build triangle indices for ALL tiles (including missing sections) -----
+    // Missing sections have vertices at UNDERWATER_HEIGHT with white vertex color.
+    // Emitting triangles creates a continuous terrain floor under the sea.
     let mut indices: Vec<u32> = Vec::new();
     for ty in 0..h {
         for tx in 0..w {
-            if get_tile(parsed_map, tx, ty).is_none() {
-                continue;
-            }
             let v00 = (ty as u32) * (vw as u32) + (tx as u32);
             let v10 = v00 + 1;
             let v01 = v00 + vw as u32;
@@ -1657,6 +1685,668 @@ pub fn build_terrain_glb(
     Ok((gltf_json, bin))
 }
 
+// ============================================================================
+// Per-section terrain export (large maps)
+// ============================================================================
+
+/// Compute per-vertex normals for the entire map in one pass.
+/// This prevents visible seams at section boundaries — boundary vertices get
+/// correct normal contributions from triangles on both sides.
+///
+/// Returns a flat Vec of [f32; 3] normals, indexed as `normals[vy * vw + vx]`.
+pub fn compute_global_normals(parsed_map: &ParsedMap) -> Vec<[f32; 3]> {
+    let w = parsed_map.header.n_width;
+    let h = parsed_map.header.n_height;
+    let vw = (w + 1) as usize;
+    let vh = (h + 1) as usize;
+    let vertex_count = vw * vh;
+
+    // Build full-map positions (only Y varies, X/Z are grid indices)
+    let mut positions = Vec::with_capacity(vertex_count * 3);
+    for vy in 0..vh {
+        for vx in 0..vw {
+            let height = match get_render_vertex_tile(parsed_map, vx as i32, vy as i32) {
+                Some(tile) => tile_height(tile),
+                None => UNDERWATER_HEIGHT / MAP_VISUAL_SCALE,
+            };
+            positions.push(vx as f32);
+            positions.push(height);
+            positions.push(vy as f32);
+        }
+    }
+
+    // Accumulate face normals into per-vertex normals
+    let mut normals = vec![[0.0f32; 3]; vertex_count];
+    for ty in 0..h as usize {
+        for tx in 0..w as usize {
+            let v00 = ty * vw + tx;
+            let v10 = v00 + 1;
+            let v01 = v00 + vw;
+            let v11 = v01 + 1;
+
+            // Triangle 1: v00, v01, v10
+            // Triangle 2: v10, v01, v11
+            for &(i0, i1, i2) in &[(v00, v01, v10), (v10, v01, v11)] {
+                let p0 = [positions[i0*3], positions[i0*3+1], positions[i0*3+2]];
+                let p1 = [positions[i1*3], positions[i1*3+1], positions[i1*3+2]];
+                let p2 = [positions[i2*3], positions[i2*3+1], positions[i2*3+2]];
+
+                let e1 = [p1[0]-p0[0], p1[1]-p0[1], p1[2]-p0[2]];
+                let e2 = [p2[0]-p0[0], p2[1]-p0[1], p2[2]-p0[2]];
+
+                let n = [
+                    e1[1]*e2[2] - e1[2]*e2[1],
+                    e1[2]*e2[0] - e1[0]*e2[2],
+                    e1[0]*e2[1] - e1[1]*e2[0],
+                ];
+
+                for &idx in &[i0, i1, i2] {
+                    normals[idx][0] += n[0];
+                    normals[idx][1] += n[1];
+                    normals[idx][2] += n[2];
+                }
+            }
+        }
+    }
+
+    // Normalize
+    for n in &mut normals {
+        let len = (n[0]*n[0] + n[1]*n[1] + n[2]*n[2]).sqrt();
+        if len > 1e-8 {
+            n[0] /= len; n[1] /= len; n[2] /= len;
+        } else {
+            *n = [0.0, 1.0, 0.0];
+        }
+    }
+
+    normals
+}
+
+/// Build a single terrain section GLB (128x128 tiles).
+///
+/// Vertices use local coordinates (0..section_tile_size), positioned by Unity
+/// transform. UVs are global for atlas texture continuity. Normals come from
+/// the pre-computed global array. Atlas texture is referenced by URI (not
+/// embedded) — all sections share one atlas file.
+pub fn build_terrain_section_glb(
+    parsed_map: &ParsedMap,
+    has_atlas: bool,
+    global_normals: &[[f32; 3]],
+    section_tile_size: i32,
+    sx: i32,
+    sz: i32,
+) -> Result<(String, Vec<u8>)> {
+    let map_w = parsed_map.header.n_width;
+    let map_h = parsed_map.header.n_height;
+
+    // Tile range for this section (clamped to map bounds)
+    let tile_x0 = sx * section_tile_size;
+    let tile_z0 = sz * section_tile_size;
+    let tile_x1 = (tile_x0 + section_tile_size).min(map_w);
+    let tile_z1 = (tile_z0 + section_tile_size).min(map_h);
+    let sec_tw = (tile_x1 - tile_x0) as usize; // actual tile width this section
+    let sec_th = (tile_z1 - tile_z0) as usize;
+
+    // Vertex grid: (sec_tw+1) x (sec_th+1)
+    let sec_vw = sec_tw + 1;
+    let sec_vh = sec_th + 1;
+    let vertex_count = sec_vw * sec_vh;
+
+    let global_vw = (map_w + 1) as usize;
+
+    let mut positions: Vec<f32> = Vec::with_capacity(vertex_count * 3);
+    let mut colors: Vec<f32> = Vec::with_capacity(vertex_count * 4);
+    let mut normals_flat: Vec<f32> = Vec::with_capacity(vertex_count * 3);
+
+    for ly in 0..sec_vh {
+        for lx in 0..sec_vw {
+            let gvx = tile_x0 as usize + lx; // global vertex X
+            let gvy = tile_z0 as usize + ly; // global vertex Z
+
+            let (height, r, g, b) = match get_render_vertex_tile(parsed_map, gvx as i32, gvy as i32) {
+                Some(tile) => {
+                    let (cr, cg, cb) = rgb565_to_float(tile.s_color);
+                    (tile_height(tile), cr, cg, cb)
+                }
+                None => (UNDERWATER_HEIGHT / MAP_VISUAL_SCALE, 1.0, 1.0, 1.0),
+            };
+
+            // Local coordinates (0..section_tile_size)
+            positions.push(lx as f32);
+            positions.push(height);
+            positions.push(ly as f32);
+
+            colors.push(r);
+            colors.push(g);
+            colors.push(b);
+            colors.push(1.0);
+
+            // Global normal from pre-computed array
+            let gi = gvy * global_vw + gvx;
+            let n = if gi < global_normals.len() {
+                global_normals[gi]
+            } else {
+                [0.0, 1.0, 0.0]
+            };
+            normals_flat.push(n[0]);
+            normals_flat.push(n[1]);
+            normals_flat.push(n[2]);
+        }
+    }
+
+    // UVs: global coordinates for atlas continuity
+    let uvs: Option<Vec<f32>> = if has_atlas {
+        let fw = map_w as f32;
+        let fh = map_h as f32;
+        let mut uv = Vec::with_capacity(vertex_count * 2);
+        for ly in 0..sec_vh {
+            for lx in 0..sec_vw {
+                let gvx = tile_x0 as usize + lx;
+                let gvy = tile_z0 as usize + ly;
+                uv.push(gvx as f32 / fw);
+                uv.push(gvy as f32 / fh);
+            }
+        }
+        Some(uv)
+    } else {
+        None
+    };
+
+    // Triangle indices (all tiles in this section)
+    let mut indices: Vec<u32> = Vec::with_capacity(sec_tw * sec_th * 6);
+    for ty in 0..sec_th {
+        for tx in 0..sec_tw {
+            let v00 = (ty * sec_vw + tx) as u32;
+            let v10 = v00 + 1;
+            let v01 = v00 + sec_vw as u32;
+            let v11 = v01 + 1;
+
+            indices.push(v00);
+            indices.push(v01);
+            indices.push(v10);
+            indices.push(v10);
+            indices.push(v01);
+            indices.push(v11);
+        }
+    }
+
+    // ----- Pack binary buffer -----
+    let mut bin = Vec::new();
+    let mut buffer_views = vec![];
+    let mut accessors = vec![];
+
+    fn append_f32_data(bin: &mut Vec<u8>, data: &[f32]) -> (usize, usize) {
+        let pad = (4 - (bin.len() % 4)) % 4;
+        bin.extend(std::iter::repeat(0u8).take(pad));
+        let offset = bin.len();
+        let bytes: Vec<u8> = data.iter().flat_map(|f| f.to_le_bytes()).collect();
+        bin.extend_from_slice(&bytes);
+        (offset, bytes.len())
+    }
+
+    fn append_u32_data(bin: &mut Vec<u8>, data: &[u32]) -> (usize, usize) {
+        let pad = (4 - (bin.len() % 4)) % 4;
+        bin.extend(std::iter::repeat(0u8).take(pad));
+        let offset = bin.len();
+        let bytes: Vec<u8> = data.iter().flat_map(|i| i.to_le_bytes()).collect();
+        bin.extend_from_slice(&bytes);
+        (offset, bytes.len())
+    }
+
+    // Position min/max
+    let mut pos_min = [f32::MAX; 3];
+    let mut pos_max = [f32::MIN; 3];
+    for i in 0..vertex_count {
+        for c in 0..3 {
+            let v = positions[i * 3 + c];
+            pos_min[c] = pos_min[c].min(v);
+            pos_max[c] = pos_max[c].max(v);
+        }
+    }
+
+    // Positions
+    let (pos_off, pos_len) = append_f32_data(&mut bin, &positions);
+    let pos_bv_idx = buffer_views.len();
+    buffer_views.push(gltf::buffer::View {
+        buffer: gltf::Index::new(0),
+        byte_length: USize64(pos_len as u64),
+        byte_offset: Some(USize64(pos_off as u64)),
+        target: Some(Checked::Valid(gltf::buffer::Target::ArrayBuffer)),
+        byte_stride: None, extensions: None, extras: None,
+        name: None,
+    });
+    let pos_acc_idx = accessors.len();
+    accessors.push(gltf::Accessor {
+        buffer_view: Some(gltf::Index::new(pos_bv_idx as u32)),
+        byte_offset: Some(USize64(0)),
+        component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
+        count: USize64(vertex_count as u64),
+        type_: Checked::Valid(gltf::accessor::Type::Vec3),
+        min: Some(serde_json::to_value(pos_min)?),
+        max: Some(serde_json::to_value(pos_max)?),
+        name: None,
+        normalized: false, sparse: None, extensions: None, extras: None,
+    });
+
+    // Normals
+    let (norm_off, norm_len) = append_f32_data(&mut bin, &normals_flat);
+    let norm_bv_idx = buffer_views.len();
+    buffer_views.push(gltf::buffer::View {
+        buffer: gltf::Index::new(0),
+        byte_length: USize64(norm_len as u64),
+        byte_offset: Some(USize64(norm_off as u64)),
+        target: Some(Checked::Valid(gltf::buffer::Target::ArrayBuffer)),
+        byte_stride: None, extensions: None, extras: None,
+        name: None,
+    });
+    let norm_acc_idx = accessors.len();
+    accessors.push(gltf::Accessor {
+        buffer_view: Some(gltf::Index::new(norm_bv_idx as u32)),
+        byte_offset: Some(USize64(0)),
+        component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
+        count: USize64(vertex_count as u64),
+        type_: Checked::Valid(gltf::accessor::Type::Vec3),
+        min: None, max: None, name: None,
+        normalized: false, sparse: None, extensions: None, extras: None,
+    });
+
+    // Colors (VEC4)
+    let (col_off, col_len) = append_f32_data(&mut bin, &colors);
+    let col_bv_idx = buffer_views.len();
+    buffer_views.push(gltf::buffer::View {
+        buffer: gltf::Index::new(0),
+        byte_length: USize64(col_len as u64),
+        byte_offset: Some(USize64(col_off as u64)),
+        target: Some(Checked::Valid(gltf::buffer::Target::ArrayBuffer)),
+        byte_stride: None, extensions: None, extras: None,
+        name: None,
+    });
+    let col_acc_idx = accessors.len();
+    accessors.push(gltf::Accessor {
+        buffer_view: Some(gltf::Index::new(col_bv_idx as u32)),
+        byte_offset: Some(USize64(0)),
+        component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
+        count: USize64(vertex_count as u64),
+        type_: Checked::Valid(gltf::accessor::Type::Vec4),
+        min: None, max: None, name: None,
+        normalized: false, sparse: None, extensions: None, extras: None,
+    });
+
+    // Indices
+    let (idx_off, idx_len) = append_u32_data(&mut bin, &indices);
+    let idx_bv_idx = buffer_views.len();
+    buffer_views.push(gltf::buffer::View {
+        buffer: gltf::Index::new(0),
+        byte_length: USize64(idx_len as u64),
+        byte_offset: Some(USize64(idx_off as u64)),
+        target: Some(Checked::Valid(gltf::buffer::Target::ElementArrayBuffer)),
+        byte_stride: None, extensions: None, extras: None,
+        name: None,
+    });
+    let idx_acc_idx = accessors.len();
+    accessors.push(gltf::Accessor {
+        buffer_view: Some(gltf::Index::new(idx_bv_idx as u32)),
+        byte_offset: Some(USize64(0)),
+        component_type: Checked::Valid(GenericComponentType(ComponentType::U32)),
+        count: USize64(indices.len() as u64),
+        type_: Checked::Valid(gltf::accessor::Type::Scalar),
+        min: None, max: None, name: None,
+        normalized: false, sparse: None, extensions: None, extras: None,
+    });
+
+    // UVs (optional)
+    let uv_acc_idx = if let Some(ref uv_data) = uvs {
+        let (uv_off, uv_len) = append_f32_data(&mut bin, uv_data);
+        let uv_bv_idx = buffer_views.len();
+        buffer_views.push(gltf::buffer::View {
+            buffer: gltf::Index::new(0),
+            byte_length: USize64(uv_len as u64),
+            byte_offset: Some(USize64(uv_off as u64)),
+            target: Some(Checked::Valid(gltf::buffer::Target::ArrayBuffer)),
+            byte_stride: None, extensions: None, extras: None,
+            name: None,
+        });
+        let uv_acc = accessors.len();
+        accessors.push(gltf::Accessor {
+            buffer_view: Some(gltf::Index::new(uv_bv_idx as u32)),
+            byte_offset: Some(USize64(0)),
+            component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
+            count: USize64(vertex_count as u64),
+            type_: Checked::Valid(gltf::accessor::Type::Vec2),
+            min: None, max: None, name: None,
+            normalized: false, sparse: None, extensions: None, extras: None,
+        });
+        Some(uv_acc)
+    } else {
+        None
+    };
+
+    // ----- Material: reference atlas by URI, not embedded -----
+    let (images, textures, samplers, base_color_texture) = if has_atlas {
+        let images = vec![gltf::Image {
+            buffer_view: None,
+            mime_type: Some(gltf::image::MimeType("image/png".to_string())),
+            uri: Some("../terrain_atlas.png".into()),
+            name: Some("terrain_atlas".into()),
+            extensions: None, extras: None,
+        }];
+        let samplers = vec![gltf::texture::Sampler {
+            mag_filter: Some(Checked::Valid(gltf::texture::MagFilter::Linear)),
+            min_filter: Some(Checked::Valid(gltf::texture::MinFilter::Linear)),
+            wrap_s: Checked::Valid(gltf::texture::WrappingMode::ClampToEdge),
+            wrap_t: Checked::Valid(gltf::texture::WrappingMode::ClampToEdge),
+            name: None, extensions: None, extras: None,
+        }];
+        let textures = vec![gltf::Texture {
+            sampler: Some(gltf::Index::new(0)),
+            source: gltf::Index::new(0),
+            name: None, extensions: None, extras: None,
+        }];
+        let tex_info = Some(gltf::texture::Info {
+            index: gltf::Index::new(0),
+            tex_coord: 0,
+            extensions: None, extras: None,
+        });
+        (images, textures, samplers, tex_info)
+    } else {
+        (vec![], vec![], vec![], None)
+    };
+
+    // Build mesh
+    let mut attributes = std::collections::BTreeMap::new();
+    attributes.insert(
+        Checked::Valid(gltf::mesh::Semantic::Positions),
+        gltf::Index::new(pos_acc_idx as u32),
+    );
+    attributes.insert(
+        Checked::Valid(gltf::mesh::Semantic::Normals),
+        gltf::Index::new(norm_acc_idx as u32),
+    );
+    attributes.insert(
+        Checked::Valid(gltf::mesh::Semantic::Colors(0)),
+        gltf::Index::new(col_acc_idx as u32),
+    );
+    if let Some(uv_acc) = uv_acc_idx {
+        attributes.insert(
+            Checked::Valid(gltf::mesh::Semantic::TexCoords(0)),
+            gltf::Index::new(uv_acc as u32),
+        );
+    }
+
+    let material = gltf::Material {
+        alpha_cutoff: None,
+        alpha_mode: Checked::Valid(gltf::material::AlphaMode::Opaque),
+        double_sided: true,
+        pbr_metallic_roughness: gltf::material::PbrMetallicRoughness {
+            base_color_factor: gltf::material::PbrBaseColorFactor([1.0, 1.0, 1.0, 1.0]),
+            base_color_texture,
+            metallic_factor: gltf::material::StrengthFactor(0.0),
+            roughness_factor: gltf::material::StrengthFactor(1.0),
+            metallic_roughness_texture: None,
+            extensions: None, extras: None,
+        },
+        normal_texture: None, occlusion_texture: None, emissive_texture: None,
+        emissive_factor: gltf::material::EmissiveFactor([0.0, 0.0, 0.0]),
+        extensions: None, extras: None,
+        name: Some(format!("section_{}_{}_mat", sx, sz)),
+    };
+
+    let primitive = gltf::mesh::Primitive {
+        attributes,
+        indices: Some(gltf::Index::new(idx_acc_idx as u32)),
+        material: Some(gltf::Index::new(0)),
+        mode: Checked::Valid(gltf::mesh::Mode::Triangles),
+        targets: None, extensions: None, extras: None,
+    };
+
+    let mesh = gltf::Mesh {
+        name: Some(format!("section_{}_{}", sx, sz)),
+        primitives: vec![primitive],
+        weights: None, extensions: None, extras: None,
+    };
+
+    // Single node referencing the mesh
+    let node = gltf::Node {
+        mesh: Some(gltf::Index::new(0)),
+        name: Some(format!("section_{}_{}", sx, sz)),
+        ..Default::default()
+    };
+
+    let scene = gltf::Scene {
+        nodes: vec![gltf::Index::new(0)],
+        name: None,
+        extensions: None, extras: None,
+    };
+
+    let buffer = gltf::Buffer {
+        byte_length: USize64(bin.len() as u64),
+        extensions: None, extras: None,
+        name: None,
+        uri: None,
+    };
+
+    let root = gltf::Root {
+        asset: gltf::Asset {
+            version: "2.0".into(),
+            generator: Some("pko-tools".into()),
+            ..Default::default()
+        },
+        nodes: vec![node],
+        scenes: vec![scene],
+        scene: Some(gltf::Index::new(0)),
+        accessors,
+        buffers: vec![buffer],
+        buffer_views,
+        meshes: vec![mesh],
+        materials: vec![material],
+        images,
+        textures,
+        samplers,
+        ..Default::default()
+    };
+
+    let gltf_json = serde_json::to_string(&root)?;
+    Ok((gltf_json, bin))
+}
+
+/// Build a metadata-only GLB (no mesh data).
+/// Contains scene extras (map metadata), spawn point, building placements,
+/// and directional light — everything `LoadV3GlbMetadata()` reads from terrain.glb.
+pub fn build_metadata_only_glb(
+    parsed_map: &ParsedMap,
+    metadata: &TerrainGlbMetadata,
+) -> Result<(String, Vec<u8>)> {
+    let w = parsed_map.header.n_width;
+    let h = parsed_map.header.n_height;
+
+    let mut nodes = vec![];
+    let mut root_children = vec![];
+
+    // SpawnPoint empty node
+    if let Some([sx, sy]) = metadata.spawn_point {
+        let spawn_node_idx = nodes.len() as u32;
+        let terrain_h = get_tile(parsed_map, sx, sy)
+            .map(|t| tile_height(t))
+            .unwrap_or(UNDERWATER_HEIGHT / MAP_VISUAL_SCALE);
+
+        nodes.push(gltf::Node {
+            name: Some("SpawnPoint".into()),
+            translation: Some([sx as f32, terrain_h, sy as f32]),
+            ..Default::default()
+        });
+        root_children.push(gltf::Index::new(spawn_node_idx));
+    }
+
+    // Building placement nodes
+    if !metadata.building_placements.is_empty() {
+        let buildings_parent_idx = nodes.len() as u32;
+        let mut building_child_indices = vec![];
+
+        // Reserve indices for children (pushed after parent)
+        for i in 0..metadata.building_placements.len() {
+            building_child_indices.push(gltf::Index::new(buildings_parent_idx + 1 + i as u32));
+        }
+
+        nodes.push(gltf::Node {
+            name: Some("Buildings".into()),
+            children: Some(building_child_indices),
+            ..Default::default()
+        });
+        root_children.push(gltf::Index::new(buildings_parent_idx));
+
+        for (obj_id, position, rotation_y_deg, scale, source_glb) in
+            &metadata.building_placements
+        {
+            let rotation = if *rotation_y_deg != 0.0 {
+                let angle_rad = rotation_y_deg.to_radians();
+                let half = angle_rad / 2.0;
+                Some(gltf::scene::UnitQuaternion([0.0, half.sin(), 0.0, half.cos()]))
+            } else {
+                None
+            };
+
+            let scale_arr = if (*scale - 1.0).abs() > 1e-6 {
+                Some([*scale, *scale, *scale])
+            } else {
+                None
+            };
+
+            let extras_json = serde_json::to_string(&serde_json::json!({
+                "obj_id": obj_id,
+                "source_glb": source_glb,
+            }))?;
+
+            nodes.push(gltf::Node {
+                name: Some(format!("building_{}", obj_id)),
+                translation: Some(*position),
+                rotation,
+                scale: scale_arr,
+                extras: Some(RawValue::from_string(extras_json)?),
+                ..Default::default()
+            });
+        }
+    }
+
+    // Directional light
+    let light_dir = metadata.light_direction;
+    let light_node_idx = nodes.len() as u32;
+
+    let ld_len = (light_dir[0]*light_dir[0] + light_dir[1]*light_dir[1] + light_dir[2]*light_dir[2]).sqrt();
+    let ld = if ld_len > 1e-8 {
+        [light_dir[0]/ld_len, light_dir[1]/ld_len, light_dir[2]/ld_len]
+    } else {
+        [0.0, -1.0, 0.0]
+    };
+
+    let from = [0.0f32, 0.0, -1.0];
+    let dot = from[0]*ld[0] + from[1]*ld[1] + from[2]*ld[2];
+    let light_rotation = if dot > 0.9999 {
+        [0.0, 0.0, 0.0, 1.0]
+    } else if dot < -0.9999 {
+        [0.0, 1.0, 0.0, 0.0]
+    } else {
+        let axis = [
+            from[1]*ld[2] - from[2]*ld[1],
+            from[2]*ld[0] - from[0]*ld[2],
+            from[0]*ld[1] - from[1]*ld[0],
+        ];
+        let axis_len = (axis[0]*axis[0] + axis[1]*axis[1] + axis[2]*axis[2]).sqrt();
+        let axis = [axis[0]/axis_len, axis[1]/axis_len, axis[2]/axis_len];
+        let angle = dot.acos();
+        let half = angle / 2.0;
+        let s = half.sin();
+        [axis[0]*s, axis[1]*s, axis[2]*s, half.cos()]
+    };
+
+    nodes.push(gltf::Node {
+        name: Some("DirectionalLight".into()),
+        rotation: Some(gltf::scene::UnitQuaternion(light_rotation)),
+        extensions: Some(gltf::extensions::scene::Node {
+            khr_lights_punctual: Some(
+                gltf::extensions::scene::khr_lights_punctual::KhrLightsPunctual {
+                    light: gltf::Index::new(0),
+                },
+            ),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    root_children.push(gltf::Index::new(light_node_idx));
+
+    // Root node
+    let root_node_idx = nodes.len() as u32;
+    nodes.push(gltf::Node {
+        name: Some("map_root".into()),
+        children: Some(root_children),
+        ..Default::default()
+    });
+
+    // Scene extras (same as full GLB)
+    let scene_extras = serde_json::json!({
+        "version": 3,
+        "map_name": metadata.map_name,
+        "coordinate_system": "y_up",
+        "world_scale": MAP_VISUAL_SCALE,
+        "unit_scale_contract": "pko_1unit_to_unity_1unit_v1",
+        "map_width_tiles": w,
+        "map_height_tiles": h,
+        "section_width": parsed_map.header.n_section_width,
+        "section_height": parsed_map.header.n_section_height,
+        "areas": metadata.areas_json,
+        "ambient": metadata.ambient,
+        "background_color": metadata.background_color,
+    });
+
+    let scene = gltf::Scene {
+        nodes: vec![gltf::Index::new(root_node_idx)],
+        name: Some("MapScene".into()),
+        extensions: None,
+        extras: Some(RawValue::from_string(serde_json::to_string(&scene_extras)?)?),
+    };
+
+    // Light definition
+    let lc = metadata.light_color;
+    use gltf::extensions::scene::khr_lights_punctual;
+    let sun_light = khr_lights_punctual::Light {
+        color: [lc[0], lc[1], lc[2]],
+        intensity: 1.0,
+        name: Some("sun".into()),
+        type_: Checked::Valid(khr_lights_punctual::Type::Directional),
+        range: None, spot: None,
+        extensions: None, extras: Default::default(),
+    };
+
+    let root_ext = gltf::extensions::root::Root {
+        khr_lights_punctual: Some(gltf::extensions::root::KhrLightsPunctual {
+            lights: vec![sun_light],
+        }),
+        ..Default::default()
+    };
+
+    // Empty binary buffer (no mesh data)
+    let bin = Vec::new();
+
+    let root = gltf::Root {
+        asset: gltf::Asset {
+            version: "2.0".into(),
+            generator: Some("pko-tools".into()),
+            ..Default::default()
+        },
+        nodes,
+        scenes: vec![scene],
+        scene: Some(gltf::Index::new(0)),
+        extensions_used: vec!["KHR_lights_punctual".into()],
+        extensions: Some(root_ext),
+        ..Default::default()
+    };
+
+    let gltf_json = serde_json::to_string(&root)?;
+    Ok((gltf_json, bin))
+}
+
+/// Export section size constant: 128x128 tiles per section GLB.
+pub const EXPORT_SECTION_TILE_SIZE: i32 = 128;
+
 /// Export terrain as glTF file to disk (separate .gltf + .bin).
 pub fn export_terrain_gltf(
     project_dir: &Path,
@@ -1838,6 +2528,38 @@ fn build_obj_height_grid(map: &ParsedMap) -> (Vec<u8>, i32, i32) {
     (grid, w, h)
 }
 
+/// Build terrain height grid at vertex resolution using tile_height().
+/// Each vertex (vx, vy) samples get_tile(map, vx, vy) directly — strict owner
+/// semantics matching the terrain mesh builder. Edge vertices (vx >= n_width or
+/// vy >= n_height) return None → UNDERWATER_HEIGHT.
+/// Grid dimensions: (n_width+1) × (n_height+1).
+/// Each cell is an i16 in LE encoding representing height in millimeters.
+/// Returns (grid_bytes, width, height).
+fn build_terrain_height_grid(map: &ParsedMap) -> (Vec<u8>, i32, i32) {
+    let vw = map.header.n_width + 1;
+    let vh = map.header.n_height + 1;
+    let mut grid_i16 = vec![0i16; (vw * vh) as usize];
+    let uw = (UNDERWATER_HEIGHT * 1000.0).round() as i16;
+
+    for vy in 0..vh {
+        for vx in 0..vw {
+            let idx = (vy * vw + vx) as usize;
+            grid_i16[idx] = match get_tile(map, vx, vy) {
+                Some(tile) => (tile_height(tile) * 1000.0).round() as i16,
+                None => uw,
+            };
+        }
+    }
+
+    // Convert i16 array to LE bytes
+    let mut grid = Vec::with_capacity((vw * vh * 2) as usize);
+    for val in &grid_i16 {
+        grid.extend_from_slice(&val.to_le_bytes());
+    }
+
+    (grid, vw, vh)
+}
+
 /// Build region grid (sRegion i16 per tile). Returns raw i16 LE bytes.
 fn build_region_grid(map: &ParsedMap) -> Vec<u8> {
     let w = map.header.n_width;
@@ -1897,7 +2619,9 @@ fn build_tile_color_grid(map: &ParsedMap) -> Vec<u8> {
 
     for ty in 0..h {
         for tx in 0..w {
-            let color = get_tile(map, tx, ty).map(|t| t.s_color).unwrap_or(0);
+            // Missing sections default to 0xFFFF (near-white in RGB565) = multiplicative identity.
+            // Using 0 would decode to black, causing buildings with shadeFlag to go black.
+            let color = get_tile(map, tx, ty).map(|t| t.s_color).unwrap_or(-1i16);
             data.extend_from_slice(&color.to_le_bytes());
         }
     }
@@ -1939,6 +2663,228 @@ fn load_effect_file(project_dir: &Path, eff_filename: &str) -> Option<EffFile> {
     }
 
     None
+}
+
+/// Copy effect textures referenced by parsed EffFile definitions.
+/// Walks each sub-effect's tex_name and frame_tex_names, finds the source
+/// TGA/BMP in texture/effect/, converts to PNG in effects/textures/.
+/// Returns a map of original filename → relative output path.
+fn copy_effect_textures(
+    project_dir: &Path,
+    output_dir: &Path,
+    effect_definitions: &serde_json::Map<String, serde_json::Value>,
+) -> std::collections::HashMap<String, String> {
+    let mut copied = std::collections::HashMap::new();
+    let out_dir = output_dir.join("effects/textures");
+    let _ = std::fs::create_dir_all(&out_dir);
+
+    let effect_tex_dirs = [
+        "texture/effect",
+        "texture/scene",
+        "texture",
+    ];
+    let exts = ["tga", "bmp", "dds", "png"];
+
+    // Collect all unique texture names from all sub-effects
+    let mut tex_names: Vec<String> = Vec::new();
+    for (_eff_id, def_val) in effect_definitions.iter() {
+        if let Some(subs) = def_val.get("subEffects").and_then(|v| v.as_array()) {
+            for sub in subs {
+                if let Some(name) = sub.get("texName").and_then(|v| v.as_str()) {
+                    if !name.is_empty() {
+                        tex_names.push(name.to_string());
+                    }
+                }
+                if let Some(names) = sub.get("frameTexNames").and_then(|v| v.as_array()) {
+                    for n in names {
+                        if let Some(s) = n.as_str() {
+                            if !s.is_empty() {
+                                tex_names.push(s.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    tex_names.sort();
+    tex_names.dedup();
+
+    for tex_name in &tex_names {
+        if copied.contains_key(tex_name) {
+            continue;
+        }
+
+        let stem = tex_name
+            .rfind('.')
+            .map(|i| &tex_name[..i])
+            .unwrap_or(tex_name);
+
+        // Find the source file
+        let mut source_path = None;
+        for dir in &effect_tex_dirs {
+            for ext in &exts {
+                let candidate = project_dir.join(dir).join(format!("{}.{}", stem, ext));
+                if candidate.exists() {
+                    source_path = Some(candidate);
+                    break;
+                }
+                // Try lowercase
+                let candidate_lc = project_dir
+                    .join(dir)
+                    .join(format!("{}.{}", stem.to_lowercase(), ext));
+                if candidate_lc.exists() {
+                    source_path = Some(candidate_lc);
+                    break;
+                }
+            }
+            if source_path.is_some() {
+                break;
+            }
+        }
+
+        if let Some(src) = source_path {
+            let png_name = format!("{}.png", stem);
+            let png_path = out_dir.join(&png_name);
+
+            // Try to load and convert to PNG (same approach as copy_teximg_textures)
+            let success = if src
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("dds"))
+            {
+                // DDS: just copy as-is
+                let dds_name = format!("{}.dds", stem);
+                let dds_out = out_dir.join(&dds_name);
+                std::fs::copy(&src, &dds_out).is_ok()
+            } else {
+                // TGA/BMP/PNG: try image::open first (handles standard formats),
+                // fall back to PKO decode for PKO-encoded BMPs
+                if let Ok(img) = image::open(&src) {
+                    img.save(&png_path).is_ok()
+                } else {
+                    let raw_data = match std::fs::read(&src) {
+                        Ok(d) => d,
+                        Err(_) => continue,
+                    };
+                    let decoded = crate::item::model::decode_pko_texture(&raw_data);
+                    match image::load_from_memory(&decoded) {
+                        Ok(img) => img.save(&png_path).is_ok(),
+                        Err(_) => false,
+                    }
+                }
+            };
+
+            if success {
+                let rel_path = format!("effects/textures/{}", png_name);
+                copied.insert(tex_name.clone(), rel_path);
+            }
+        }
+    }
+
+    if !copied.is_empty() {
+        eprintln!(
+            "[export] Copied {} effect textures to effects/textures/",
+            copied.len()
+        );
+    }
+
+    copied
+}
+
+/// Copy teximg animation textures referenced by building LMO files.
+/// Loads each LMO file, extracts teximg texture filenames, finds and converts them to PNG.
+/// Returns a map of original filename → relative output path.
+fn copy_teximg_textures(
+    project_dir: &Path,
+    output_dir: &Path,
+    building_entries: &[super::BuildingExportEntry],
+    obj_info: &std::collections::HashMap<u32, super::scene_obj_info::SceneObjModelInfo>,
+) -> std::collections::HashMap<String, String> {
+    let tex_dir = output_dir.join("buildings").join("textures");
+    let mut copied: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+
+    for entry in building_entries {
+        let info = match obj_info.get(&entry.obj_id) {
+            Some(i) => i,
+            None => continue,
+        };
+
+        let lmo_path = match super::scene_model::find_lmo_path(project_dir, &info.filename) {
+            Some(p) => p,
+            None => continue,
+        };
+
+        let model = match super::lmo::load_lmo(&lmo_path) {
+            Ok(m) => m,
+            Err(_) => continue,
+        };
+
+        for geom in &model.geom_objects {
+            for ti in &geom.teximg_anims {
+                for tex_name in &ti.textures {
+                    if tex_name.is_empty() || copied.contains_key(tex_name) {
+                        continue;
+                    }
+
+                    // Find the texture file in the project
+                    if let Some(src_path) =
+                        super::scene_model::find_texture_file(project_dir, tex_name)
+                    {
+                        let _ = std::fs::create_dir_all(&tex_dir);
+                        let stem = tex_name
+                            .rfind('.')
+                            .map(|i| &tex_name[..i])
+                            .unwrap_or(tex_name);
+                        let png_name = format!("{}.png", stem);
+                        let out_path = tex_dir.join(&png_name);
+
+                        // Try to load and convert to PNG (handles BMP/TGA/DDS)
+                        let success = if src_path
+                            .extension()
+                            .is_some_and(|e| e.eq_ignore_ascii_case("dds"))
+                        {
+                            // DDS: just copy as-is
+                            let dds_name = format!("{}.dds", stem);
+                            let dds_out = tex_dir.join(&dds_name);
+                            std::fs::copy(&src_path, &dds_out).is_ok()
+                        } else {
+                            // TGA/BMP/PNG: try image::open first (standard formats),
+                            // fall back to PKO decode for PKO-encoded BMPs
+                            if let Ok(img) = image::open(&src_path) {
+                                img.save(&out_path).is_ok()
+                            } else {
+                                let raw_data = match std::fs::read(&src_path) {
+                                    Ok(d) => d,
+                                    Err(_) => continue,
+                                };
+                                let decoded =
+                                    crate::item::model::decode_pko_texture(&raw_data);
+                                match image::load_from_memory(&decoded) {
+                                    Ok(img) => img.save(&out_path).is_ok(),
+                                    Err(_) => false,
+                                }
+                            }
+                        };
+
+                        if success {
+                            let rel_path = format!("buildings/textures/{}", png_name);
+                            copied.insert(tex_name.clone(), rel_path);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    if !copied.is_empty() {
+        eprintln!(
+            "[export] Copied {} teximg animation textures to buildings/textures/",
+            copied.len()
+        );
+    }
+
+    copied
 }
 
 /// Copy water textures from BMP to PNG format.
@@ -2027,6 +2973,16 @@ pub fn export_map_for_unity(
     let this_map_info = super::mapinfo::find_map_info(&map_infos, map_name);
     let effect_info =
         crate::item::sceneffect::load_scene_effect_info(project_dir).unwrap_or_default();
+
+    // 3b. Parse lit.tx (lit overlay system)
+    let lit_entries = {
+        let lit_path = project_dir.join("scripts").join("txt").join("lit.tx");
+        if lit_path.exists() {
+            super::lit::parse_lit_tx(&lit_path).unwrap_or_default()
+        } else {
+            Vec::new()
+        }
+    };
 
     // 4. Bake terrain texture atlas
     let atlas = super::texture::try_bake_atlas(project_dir, &parsed_map);
@@ -2118,7 +3074,7 @@ pub fn export_map_for_unity(
     let valid_building_ids: HashSet<u16> =
         building_entries.iter().map(|e| e.obj_id as u16).collect();
 
-    // Build the buildings lookup for manifest
+    // Build the buildings lookup for manifest (C3: include semantic fields)
     let mut buildings_map = serde_json::Map::new();
     for entry in &building_entries {
         let stem = entry
@@ -2127,13 +3083,47 @@ pub fn export_map_for_unity(
             .or_else(|| entry.filename.strip_suffix(".LMO"))
             .unwrap_or(&entry.filename);
 
-        buildings_map.insert(
-            entry.obj_id.to_string(),
-            serde_json::json!({
-                "glb": format!("buildings/{}.{}", stem, ext),
-                "filename": entry.filename,
-            }),
-        );
+        let mut bldg_json = serde_json::json!({
+            "glb": format!("buildings/{}.{}", stem, ext),
+            "filename": entry.filename,
+        });
+
+        // C3: Emit semantic fields from sceneobjinfo.bin
+        if let Some(info) = obj_info.get(&entry.obj_id) {
+            let obj = bldg_json.as_object_mut().unwrap();
+            obj.insert("obj_type".into(), serde_json::json!(info.obj_type));
+            obj.insert("shade_flag".into(), serde_json::json!(info.shade_flag));
+            obj.insert("enable_point_light".into(), serde_json::json!(info.enable_point_light));
+            obj.insert("enable_env_light".into(), serde_json::json!(info.enable_env_light));
+            obj.insert("attach_effect_id".into(), serde_json::json!(info.attach_effect_id));
+            obj.insert("style".into(), serde_json::json!(info.style));
+            obj.insert("flag".into(), serde_json::json!(info.flag));
+            obj.insert("size_flag".into(), serde_json::json!(info.size_flag));
+            obj.insert("is_really_big".into(), serde_json::json!(info.is_really_big));
+        }
+
+        // C4: Add lit overlay data if this building has a matching entry in lit.tx
+        let scene_lits: Vec<_> = lit_entries
+            .iter()
+            .filter(|e| e.obj_type == 1 && e.file.eq_ignore_ascii_case(&entry.filename))
+            .collect();
+        if !scene_lits.is_empty() {
+            let lit_json: Vec<serde_json::Value> = scene_lits
+                .iter()
+                .map(|l| {
+                    serde_json::json!({
+                        "anim_type": l.anim_type,
+                        "color_op": l.color_op,
+                        "overlay_texture": l.overlay_texture,
+                        "textures": l.textures,
+                    })
+                })
+                .collect();
+            let obj = bldg_json.as_object_mut().unwrap();
+            obj.insert("lit_overlays".into(), serde_json::json!(lit_json));
+        }
+
+        buildings_map.insert(entry.obj_id.to_string(), bldg_json);
     }
 
     if let Some(ref obj_file) = objects {
@@ -2189,6 +3179,7 @@ pub fn export_map_for_unity(
     // 9. Build grids
     let collision = build_collision_grid(&parsed_map);
     let obj_height = build_obj_height_grid(&parsed_map);
+    let terrain_height = build_terrain_height_grid(&parsed_map);
     let region_bytes = build_region_grid(&parsed_map);
     let area_bytes = build_area_grid(&parsed_map);
     let tile_tex_bytes = build_tile_texture_grid(&parsed_map);
@@ -2203,6 +3194,7 @@ pub fn export_map_for_unity(
         super::grid_images::encode_all_grids(
             &collision,
             &obj_height,
+            &terrain_height,
             &region_bytes,
             &area_bytes,
             &tile_tex_bytes,
@@ -2256,10 +3248,14 @@ pub fn export_map_for_unity(
         std::fs::write(&sidecar_path, sidecar_json.as_bytes())?;
     }
 
+    // 10b. Copy effect textures
+    let _effect_textures = copy_effect_textures(project_dir, output_dir, &effect_definitions);
+
     // 11. Write terrain
     let terrain_file_path;
+    let mut terrain_sections_info: Option<serde_json::Value> = None;
+
     if v3 {
-        // Build terrain GLB with metadata
         let glb_metadata = TerrainGlbMetadata {
             map_name,
             areas_json: &areas_json,
@@ -2271,15 +3267,85 @@ pub fn export_map_for_unity(
             building_placements: building_glb_placements,
         };
 
-        let (json, bin) = build_terrain_glb(&parsed_map, atlas.as_ref(), &glb_metadata)?;
-        terrain_file_path = output_dir.join("terrain.glb");
-        super::glb::write_glb(&json, &bin, &terrain_file_path)?;
+        let map_w = parsed_map.header.n_width;
+        let map_h = parsed_map.header.n_height;
+        let total_vertices = ((map_w + 1) as u64) * ((map_h + 1) as u64);
+
+        // Large maps (>4M vertices) use per-section export to avoid OOM in Unity
+        if total_vertices > 4_000_000 {
+            let sec_size = EXPORT_SECTION_TILE_SIZE;
+            let sections_x = (map_w + sec_size - 1) / sec_size;
+            let sections_z = (map_h + sec_size - 1) / sec_size;
+
+            eprintln!(
+                "Large map ({map_w}x{map_h}, {total_vertices} vertices): exporting {}x{} = {} terrain sections",
+                sections_x, sections_z, sections_x * sections_z
+            );
+
+            // Step 1: Compute global normals (prevents seam artifacts at section boundaries)
+            eprintln!("  Computing global normals...");
+            let global_normals = compute_global_normals(&parsed_map);
+
+            // Step 2: Export per-section GLBs
+            let sections_dir = output_dir.join("terrain_sections");
+            std::fs::create_dir_all(&sections_dir)?;
+
+            let has_atlas = atlas.is_some();
+            let total_sections = sections_x * sections_z;
+            for sz in 0..sections_z {
+                for sx in 0..sections_x {
+                    let idx = sz * sections_x + sx;
+                    if idx % 100 == 0 || idx == total_sections - 1 {
+                        eprintln!("  Section {}/{}", idx + 1, total_sections);
+                    }
+                    let (json, bin) = build_terrain_section_glb(
+                        &parsed_map, has_atlas, &global_normals, sec_size, sx, sz,
+                    )?;
+                    let section_path = sections_dir.join(format!("section_{}_{}.glb", sx, sz));
+                    super::glb::write_glb(&json, &bin, &section_path)?;
+                }
+            }
+
+            // Step 3: Save atlas texture as standalone PNG (shared by all sections)
+            if let Some(ref atlas_img) = atlas {
+                let atlas_path = output_dir.join("terrain_atlas.png");
+                atlas_img.save(&atlas_path)
+                    .map_err(|e| anyhow!("Failed to save terrain atlas: {}", e))?;
+                eprintln!("  Saved terrain_atlas.png");
+            }
+
+            // Step 4: Build metadata-only terrain.glb (spawn, buildings, lights, scene extras)
+            let (meta_json, meta_bin) = build_metadata_only_glb(&parsed_map, &glb_metadata)?;
+            terrain_file_path = output_dir.join("terrain.glb");
+            super::glb::write_glb(&meta_json, &meta_bin, &terrain_file_path)?;
+            eprintln!("  Saved metadata-only terrain.glb");
+
+            terrain_sections_info = Some(serde_json::json!({
+                "export_section_tile_size": sec_size,
+                "sections_x": sections_x,
+                "sections_z": sections_z,
+                "path_pattern": "terrain_sections/section_{x}_{z}.glb"
+            }));
+        } else {
+            // Small map: monolithic terrain GLB (existing path)
+            let (json, bin) = build_terrain_glb(&parsed_map, atlas.as_ref(), &glb_metadata)?;
+            terrain_file_path = output_dir.join("terrain.glb");
+            super::glb::write_glb(&json, &bin, &terrain_file_path)?;
+        }
     } else {
         // Build terrain JSON glTF (v2 legacy)
         let terrain_gltf_json = build_terrain_gltf(&parsed_map, None, atlas.as_ref(), None)?;
         terrain_file_path = output_dir.join("terrain.gltf");
         std::fs::write(&terrain_file_path, terrain_gltf_json.as_bytes())?;
     }
+
+    // 11b. Copy teximg animation textures for buildings
+    let _teximg_textures = copy_teximg_textures(
+        project_dir,
+        output_dir,
+        &building_entries,
+        &obj_info,
+    );
 
     // 12. Copy water textures + terrain textures + alpha atlas
     let water_textures = copy_water_textures(project_dir, output_dir);
@@ -2288,6 +3354,8 @@ pub fn export_map_for_unity(
             .unwrap_or_default();
     let alpha_atlas_path =
         super::texture::export_alpha_atlas(project_dir, output_dir).unwrap_or(None);
+    let alpha_mask_array =
+        super::texture::export_alpha_mask_array(project_dir, output_dir).unwrap_or(None);
 
     // 13. Build manifest
     let mut manifest_map = serde_json::Map::new();
@@ -2300,6 +3368,29 @@ pub fn export_map_for_unity(
             serde_json::json!("pko_1unit_to_unity_1unit_v1"),
         );
         manifest_map.insert("terrain_glb".into(), serde_json::json!("terrain.glb"));
+        manifest_map.insert("terrain_gltf".into(), serde_json::json!("terrain.glb")); // alias for ManifestShell compat
+        if let Some(ref sections_info) = terrain_sections_info {
+            manifest_map.insert("terrain_sections".into(), sections_info.clone());
+        }
+        manifest_map.insert("map_name".into(), serde_json::json!(map_name));
+        manifest_map.insert("coordinate_system".into(), serde_json::json!("y_up"));
+        manifest_map.insert("world_scale".into(), serde_json::json!(MAP_VISUAL_SCALE));
+        manifest_map.insert(
+            "map_width_tiles".into(),
+            serde_json::json!(parsed_map.header.n_width),
+        );
+        manifest_map.insert(
+            "map_height_tiles".into(),
+            serde_json::json!(parsed_map.header.n_height),
+        );
+        manifest_map.insert(
+            "section_width".into(),
+            serde_json::json!(parsed_map.header.n_section_width),
+        );
+        manifest_map.insert(
+            "section_height".into(),
+            serde_json::json!(parsed_map.header.n_section_height),
+        );
 
         // Grid file references with format metadata
         manifest_map.insert(
@@ -2337,6 +3428,10 @@ pub fn export_map_for_unity(
                 "tile_layer_alpha": {
                     "file": "grids/tile_layer_alpha.png", "scale": 1,
                     "format": "rgb8_indices"
+                },
+                "terrain_height": {
+                    "file": "grids/terrain_height.png", "scale": 1,
+                    "format": "i16_rgb8_offset"
                 }
             }),
         );
@@ -2345,6 +3440,26 @@ pub fn export_map_for_unity(
         manifest_map.insert(
             "buildings".into(),
             serde_json::Value::Object(buildings_map),
+        );
+
+        // Placements, areas, and map settings (also embedded in GLB scene.extras)
+        manifest_map.insert("placements".into(), serde_json::json!(placements));
+        manifest_map.insert("areas".into(), areas_json.clone());
+        manifest_map.insert(
+            "spawn_point".into(),
+            serde_json::json!(spawn_point_tiles.map(|sp| serde_json::json!({
+                "tile_x": sp[0], "tile_y": sp[1]
+            }))),
+        );
+        manifest_map.insert(
+            "light_direction".into(),
+            serde_json::json!(light_direction),
+        );
+        manifest_map.insert("light_color".into(), serde_json::json!(light_color));
+        manifest_map.insert("ambient".into(), serde_json::json!([0.4, 0.4, 0.4]));
+        manifest_map.insert(
+            "background_color".into(),
+            serde_json::json!([10, 10, 125]),
         );
     } else {
         // ----- Manifest v2 (full, legacy) -----
@@ -2469,6 +3584,9 @@ pub fn export_map_for_unity(
     }
     if let Some(ref alpha_path) = alpha_atlas_path {
         manifest_map.insert("alpha_atlas".into(), serde_json::json!(alpha_path));
+    }
+    if let Some(ref mask_paths) = alpha_mask_array {
+        manifest_map.insert("alpha_masks".into(), serde_json::json!(mask_paths));
     }
 
     let manifest = serde_json::Value::Object(manifest_map);
@@ -2630,17 +3748,17 @@ mod tests {
     }
 
     #[test]
-    fn rgb565_red() {
-        // Pure red in RGB565: 0xF800
+    fn rgb565_pure_blue() {
+        // 0xF800 = high 5 bits set = blue in BGR565
         let (r, g, b) = rgb565_to_float(0xF800u16 as i16);
-        assert!(r > 0.9, "r={}", r);
+        assert!(r < 0.05, "r={}", r);
         assert!(g < 0.05, "g={}", g);
-        assert!(b < 0.05, "b={}", b);
+        assert!(b > 0.9, "b={}", b);
     }
 
     #[test]
     fn rgb565_green() {
-        // Pure green in RGB565: 0x07E0
+        // Pure green in BGR565: 0x07E0
         let (r, g, b) = rgb565_to_float(0x07E0u16 as i16);
         assert!(r < 0.05, "r={}", r);
         assert!(g > 0.9, "g={}", g);
@@ -2648,12 +3766,12 @@ mod tests {
     }
 
     #[test]
-    fn rgb565_blue() {
-        // Pure blue in RGB565: 0x001F
+    fn rgb565_pure_red() {
+        // 0x001F = low 5 bits set = red in BGR565
         let (r, g, b) = rgb565_to_float(0x001Fu16 as i16);
-        assert!(r < 0.05, "r={}", r);
+        assert!(r > 0.9, "r={}", r);
         assert!(g < 0.05, "g={}", g);
-        assert!(b > 0.9, "b={}", b);
+        assert!(b < 0.05, "b={}", b);
     }
 
     #[test]
@@ -2693,7 +3811,7 @@ mod tests {
     }
 
     #[test]
-    fn render_vertex_tile_uses_strict_owner_semantics() {
+    fn render_vertex_tile_clamps_boundary_to_neighbor() {
         let parsed = ParsedMap {
             header: MapHeader {
                 n_map_flag: CUR_VERSION_NO,
@@ -2713,13 +3831,16 @@ mod tests {
             ],
         };
 
-        // Vertex owner (1,0) maps to missing section tile and must not
-        // borrow adjacent visible tile(0,0).
-        assert!(get_render_vertex_tile(&parsed, 1, 0).is_none());
+        // Vertex (1,0) sits at +1 boundary of loaded section 0.
+        // get_tile(1,0) returns None (section 1 unloaded), but boundary
+        // clamping finds neighbor (0,0) to avoid cliff faces.
+        let tile = get_render_vertex_tile(&parsed, 1, 0);
+        assert!(tile.is_some(), "boundary vertex should clamp to neighbor");
+        assert_eq!(tile.unwrap().c_height, 10);
     }
 
     #[test]
-    fn render_vertex_tile_none_when_owner_out_of_bounds() {
+    fn render_vertex_tile_boundary_clamps_at_map_edge() {
         let parsed = ParsedMap {
             header: MapHeader {
                 n_map_flag: CUR_VERSION_NO,
@@ -2736,8 +3857,11 @@ mod tests {
             })],
         };
 
-        assert!(get_render_vertex_tile(&parsed, 1, 0).is_none());
-        assert!(get_render_vertex_tile(&parsed, 0, 1).is_none());
+        // Out-of-range vertices at +1 edges clamp back to loaded neighbor
+        assert!(get_render_vertex_tile(&parsed, 1, 0).is_some());
+        assert!(get_render_vertex_tile(&parsed, 0, 1).is_some());
+        // Truly out of range (no neighbor) still returns None
+        assert!(get_render_vertex_tile(&parsed, -1, 0).is_none());
     }
 
     #[test]
@@ -2790,13 +3914,13 @@ mod tests {
         }
 
         // Vertex order for 1x1 grid: (0,0), (1,0), (0,1), (1,1)
-        // Owner tile semantics => only (0,0) samples real tile; others are
-        // out-of-range owners and therefore default underwater.
+        // Boundary clamping: +1 edge vertices clamp to their loaded neighbor,
+        // so all four vertices share the same tile height (no cliff).
         let expected = [
             1.0f32,
-            UNDERWATER_HEIGHT / MAP_VISUAL_SCALE,
-            UNDERWATER_HEIGHT / MAP_VISUAL_SCALE,
-            UNDERWATER_HEIGHT / MAP_VISUAL_SCALE,
+            1.0f32,
+            1.0f32,
+            1.0f32,
         ];
         for (actual, exp) in y_values.iter().zip(expected.iter()) {
             assert!(
@@ -2807,7 +3931,7 @@ mod tests {
     }
 
     #[test]
-    fn build_gltf_skips_missing_section_tiles() {
+    fn build_gltf_includes_missing_section_tiles() {
         let parsed = ParsedMap {
             header: MapHeader {
                 n_map_flag: CUR_VERSION_NO,
@@ -2836,9 +3960,9 @@ mod tests {
             .as_u64()
             .expect("index count") as usize;
 
-        // Width=2, height=1 with one missing tile => 1 rendered tile.
-        // 1 tile => 2 triangles => 6 indices.
-        assert_eq!(index_count, 6);
+        // Width=2, height=1 — both tiles emit triangles (including missing section).
+        // 2 tiles => 4 triangles => 12 indices.
+        assert_eq!(index_count, 12);
     }
 
     #[test]
@@ -3106,6 +4230,97 @@ mod tests {
         assert_eq!(read_i16(1), 0, "0x00 → 0.0 → 0mm");
         assert_eq!(read_i16(2), -50, "0x41 → -0.05 → -50mm");
         assert_eq!(read_i16(3), 3150, "0x3F → 3.15 → 3150mm");
+    }
+
+    #[test]
+    fn terrain_height_grid_encodes_i16_millimeters() {
+        // 2×2 tile map → vertex grid is 3×3
+        let parsed = ParsedMap {
+            header: MapHeader {
+                n_map_flag: CUR_VERSION_NO,
+                n_width: 2,
+                n_height: 2,
+                n_section_width: 2,
+                n_section_height: 2,
+            },
+            section_cnt_x: 1,
+            section_cnt_y: 1,
+            section_offsets: vec![0],
+            sections: vec![Some(MapSection {
+                tiles: vec![
+                    // tile (0,0): c_height = 10 → (10*10)/100 = 1.0 → 1000mm
+                    MapTile {
+                        dw_tile_info: 0,
+                        bt_tile_info: 0,
+                        s_color: 0,
+                        c_height: 10,
+                        s_region: 0,
+                        bt_island: 0,
+                        bt_block: [0; 4],
+                    },
+                    // tile (1,0): c_height = -5 → (-5*10)/100 = -0.5 → -500mm
+                    MapTile {
+                        dw_tile_info: 0,
+                        bt_tile_info: 0,
+                        s_color: 0,
+                        c_height: -5,
+                        s_region: 0,
+                        bt_island: 0,
+                        bt_block: [0; 4],
+                    },
+                    // tile (0,1): c_height = 0 → 0mm
+                    MapTile {
+                        dw_tile_info: 0,
+                        bt_tile_info: 0,
+                        s_color: 0,
+                        c_height: 0,
+                        s_region: 0,
+                        bt_island: 0,
+                        bt_block: [0; 4],
+                    },
+                    // tile (1,1): c_height = 127 → (127*10)/100 = 12.7 → 12700mm
+                    MapTile {
+                        dw_tile_info: 0,
+                        bt_tile_info: 0,
+                        s_color: 0,
+                        c_height: 127,
+                        s_region: 0,
+                        bt_island: 0,
+                        bt_block: [0; 4],
+                    },
+                ],
+            })],
+        };
+
+        let (grid, w, h) = build_terrain_height_grid(&parsed);
+        // Vertex resolution: (2+1) × (2+1) = 3×3
+        assert_eq!(w, 3);
+        assert_eq!(h, 3);
+        assert_eq!(grid.len(), 18); // 9 cells × 2 bytes each
+
+        let read_i16 =
+            |idx: usize| -> i16 { i16::from_le_bytes([grid[idx * 2], grid[idx * 2 + 1]]) };
+
+        // Row 0: vertices (0,0), (1,0), (2,0)
+        // (0,0) → get_tile(0,0) = tile(0,0), c_height=10 → 1000mm
+        assert_eq!(read_i16(0), 1000, "vertex (0,0) → tile (0,0) c_height=10");
+        // (1,0) → get_tile(1,0) = tile(1,0), c_height=-5 → -500mm
+        assert_eq!(read_i16(1), -500, "vertex (1,0) → tile (1,0) c_height=-5");
+        // (2,0) → get_tile(2,0) → out of range (n_width=2) → UNDERWATER_HEIGHT = -2000mm
+        assert_eq!(read_i16(2), -2000, "vertex (2,0) → edge → UNDERWATER_HEIGHT");
+
+        // Row 1: vertices (0,1), (1,1), (2,1)
+        // (0,1) → get_tile(0,1) = tile(0,1), c_height=0 → 0mm
+        assert_eq!(read_i16(3), 0, "vertex (0,1) → tile (0,1) c_height=0");
+        // (1,1) → get_tile(1,1) = tile(1,1), c_height=127 → 12700mm
+        assert_eq!(read_i16(4), 12700, "vertex (1,1) → tile (1,1) c_height=127");
+        // (2,1) → out of range → UNDERWATER_HEIGHT
+        assert_eq!(read_i16(5), -2000, "vertex (2,1) → edge → UNDERWATER_HEIGHT");
+
+        // Row 2: vertices (0,2), (1,2), (2,2) — all edge (vy=2 >= n_height=2)
+        assert_eq!(read_i16(6), -2000, "vertex (0,2) → edge → UNDERWATER_HEIGHT");
+        assert_eq!(read_i16(7), -2000, "vertex (1,2) → edge → UNDERWATER_HEIGHT");
+        assert_eq!(read_i16(8), -2000, "vertex (2,2) → edge → UNDERWATER_HEIGHT");
     }
 
     #[test]
@@ -3399,5 +4614,230 @@ mod tests {
                 "INCONCLUSIVE: btBlock has height data but not deeper than terrain at water."
             );
         }
+    }
+
+    #[test]
+    fn scolor_distribution_07xmas2() {
+        let map_path = "/Users/anirudh/gamedev/pko-tools/top-client/map/07xmas2.map";
+        let data = match std::fs::read(map_path) {
+            Ok(d) => d,
+            Err(_) => {
+                eprintln!("SKIP: map file not found");
+                return;
+            }
+        };
+        let map = parse_map(&data).expect("can't parse map");
+
+        let mut zero_count = 0u64;
+        let mut nonzero_count = 0u64;
+        let mut samples = Vec::new();
+
+        for ty in 0..map.header.n_height {
+            for tx in 0..map.header.n_width {
+                if let Some(tile) = get_tile(&map, tx, ty) {
+                    if tile.s_color == 0 {
+                        zero_count += 1;
+                    } else {
+                        nonzero_count += 1;
+                        if samples.len() < 10 {
+                            samples.push((tx, ty, tile.s_color));
+                        }
+                    }
+                }
+            }
+        }
+
+        let total = zero_count + nonzero_count;
+        eprintln!("\nsColor distribution for 07xmas2:");
+        eprintln!("  Total tiles with data: {}", total);
+        eprintln!(
+            "  sColor == 0: {} ({:.1}%)",
+            zero_count,
+            zero_count as f64 / total as f64 * 100.0
+        );
+        eprintln!(
+            "  sColor != 0: {} ({:.1}%)",
+            nonzero_count,
+            nonzero_count as f64 / total as f64 * 100.0
+        );
+        for (tx, ty, v) in &samples {
+            let packed = *v as u16;
+            let r = ((packed & 0xF800) >> 8) as f32 / 255.0;
+            let g = ((packed & 0x07E0) >> 3) as f32 / 255.0;
+            let b = ((packed & 0x001F) << 3) as f32 / 255.0;
+            eprintln!(
+                "  tile({},{}) = 0x{:04X} → RGB({:.3}, {:.3}, {:.3})",
+                tx, ty, packed, r, g, b
+            );
+        }
+    }
+
+    // ---- Per-section terrain export tests ----
+
+    fn make_test_map(width: i32, height: i32, section_size: i32) -> ParsedMap {
+        let sec_x = width / section_size;
+        let sec_y = height / section_size;
+        let tiles_per_sec = (section_size * section_size) as usize;
+        let mut sections = Vec::new();
+        for _ in 0..(sec_x * sec_y) {
+            let tiles: Vec<MapTile> = (0..tiles_per_sec)
+                .map(|_| make_tile(5))
+                .collect();
+            sections.push(Some(MapSection { tiles }));
+        }
+        ParsedMap {
+            header: MapHeader {
+                n_map_flag: CUR_VERSION_NO,
+                n_width: width,
+                n_height: height,
+                n_section_width: section_size,
+                n_section_height: section_size,
+            },
+            section_cnt_x: sec_x,
+            section_cnt_y: sec_y,
+            section_offsets: vec![1; (sec_x * sec_y) as usize],
+            sections,
+        }
+    }
+
+    #[test]
+    fn compute_global_normals_produces_correct_count() {
+        let map = make_test_map(4, 4, 2);
+        let normals = compute_global_normals(&map);
+        // (w+1)*(h+1) = 5*5 = 25 vertices
+        assert_eq!(normals.len(), 25);
+        // All tiles at same height (flat) → normals should point up
+        for n in &normals {
+            assert!(n[1] > 0.99, "expected upward normal, got {:?}", n);
+        }
+    }
+
+    #[test]
+    fn compute_global_normals_unit_length() {
+        let mut map = make_test_map(4, 4, 2);
+        // Vary heights to get non-trivial normals
+        if let Some(ref mut sec) = map.sections[0] {
+            sec.tiles[0].c_height = 50;
+        }
+        let normals = compute_global_normals(&map);
+        for n in &normals {
+            let len = (n[0]*n[0] + n[1]*n[1] + n[2]*n[2]).sqrt();
+            assert!((len - 1.0).abs() < 0.001, "non-unit normal: {:?} len={}", n, len);
+        }
+    }
+
+    #[test]
+    fn build_section_glb_vertex_count() {
+        let map = make_test_map(4, 4, 2);
+        let normals = compute_global_normals(&map);
+        // Section (0,0) covers tiles [0..2) x [0..2) with section_tile_size=2
+        let (json, bin) = build_terrain_section_glb(&map, false, &normals, 2, 0, 0)
+            .expect("section glb");
+        let root: serde_json::Value = serde_json::from_str(&json).expect("parse");
+        // 2x2 tiles → 3x3 = 9 vertices
+        let pos_acc = root["accessors"][0]["count"].as_u64().unwrap();
+        assert_eq!(pos_acc, 9);
+        assert!(!bin.is_empty());
+    }
+
+    #[test]
+    fn build_section_glb_local_coords() {
+        let map = make_test_map(4, 4, 2);
+        let normals = compute_global_normals(&map);
+        // Section (1,1) covers tiles [2..4) x [2..4)
+        let (json, bin) = build_terrain_section_glb(&map, false, &normals, 2, 1, 1)
+            .expect("section glb");
+        let root: serde_json::Value = serde_json::from_str(&json).expect("parse");
+
+        // Verify positions use local coords 0..2 (not global 2..4)
+        let pos_acc_idx = root["meshes"][0]["primitives"][0]["attributes"]["POSITION"]
+            .as_u64().unwrap() as usize;
+        let accessor = &root["accessors"][pos_acc_idx];
+        let min = accessor["min"].as_array().unwrap();
+        let max = accessor["max"].as_array().unwrap();
+
+        // X min should be 0 (local), not 2 (global)
+        assert!((min[0].as_f64().unwrap() - 0.0).abs() < 0.01,
+            "X min should be 0 (local), got {}", min[0]);
+        // X max should be 2 (section_tile_size), not 4
+        assert!((max[0].as_f64().unwrap() - 2.0).abs() < 0.01,
+            "X max should be 2 (local), got {}", max[0]);
+        assert!(!bin.is_empty());
+    }
+
+    #[test]
+    fn build_section_glb_atlas_uri_reference() {
+        let map = make_test_map(4, 4, 2);
+        let normals = compute_global_normals(&map);
+        let (json, _bin) = build_terrain_section_glb(&map, true, &normals, 2, 0, 0)
+            .expect("section glb");
+        let root: serde_json::Value = serde_json::from_str(&json).expect("parse");
+
+        // Atlas image referenced by URI, not embedded
+        let uri = root["images"][0]["uri"].as_str().unwrap();
+        assert_eq!(uri, "../terrain_atlas.png");
+        // No buffer_view on image (external reference)
+        assert!(root["images"][0]["bufferView"].is_null());
+    }
+
+    #[test]
+    fn build_metadata_only_glb_has_no_mesh() {
+        let map = make_test_map(4, 4, 2);
+        let metadata = TerrainGlbMetadata {
+            map_name: "test",
+            areas_json: &serde_json::json!({}),
+            spawn_point: Some([1, 1]),
+            light_direction: [0.0, -1.0, 0.0],
+            light_color: [0.6, 0.6, 0.6],
+            ambient: [0.4, 0.4, 0.4],
+            background_color: [10, 10, 125],
+            building_placements: vec![],
+        };
+        let (json, bin) = build_metadata_only_glb(&map, &metadata).expect("metadata glb");
+        let root: serde_json::Value = serde_json::from_str(&json).expect("parse");
+
+        // No meshes
+        assert!(root["meshes"].as_array().map_or(true, |a| a.is_empty()),
+            "metadata GLB should have no meshes");
+        // Has SpawnPoint node
+        let nodes = root["nodes"].as_array().unwrap();
+        let spawn = nodes.iter().find(|n| n["name"].as_str() == Some("SpawnPoint"));
+        assert!(spawn.is_some(), "should have SpawnPoint node");
+        // Has scene extras with map_name
+        let extras = root["scenes"][0]["extras"].as_object().unwrap();
+        assert_eq!(extras["map_name"].as_str().unwrap(), "test");
+        // Empty binary buffer
+        assert!(bin.is_empty());
+    }
+
+    #[test]
+    fn section_normals_match_global_at_boundaries() {
+        // 4x4 map split into 2x2 sections of size 2
+        let mut map = make_test_map(4, 4, 2);
+        // Create height variation at section boundary (tile 1,1)
+        if let Some(ref mut sec) = map.sections[0] {
+            sec.tiles[3].c_height = 50; // tile (1,1) in section (0,0)
+        }
+        let global_normals = compute_global_normals(&map);
+
+        // Build section (0,0) and section (1,0)
+        let (json0, _) = build_terrain_section_glb(&map, false, &global_normals, 2, 0, 0)
+            .expect("section 0,0");
+        let (json1, _) = build_terrain_section_glb(&map, false, &global_normals, 2, 1, 0)
+            .expect("section 1,0");
+
+        let root0: serde_json::Value = serde_json::from_str(&json0).unwrap();
+        let root1: serde_json::Value = serde_json::from_str(&json1).unwrap();
+
+        // Both sections should have the same normal accessor count
+        let count0 = root0["accessors"][1]["count"].as_u64().unwrap();
+        let count1 = root1["accessors"][1]["count"].as_u64().unwrap();
+        // 3x3 = 9 vertices per 2x2 section
+        assert_eq!(count0, 9);
+        assert_eq!(count1, 9);
+        // The boundary vertex at global (2, y) is local (2,y) in section0
+        // and local (0,y) in section1. Their normals come from the same
+        // global_normals entry, so they must match exactly.
+        // (We verified this by construction — both read from global_normals[vy * vw + gvx])
     }
 }

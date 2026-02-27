@@ -1,0 +1,139 @@
+OpenAI Codex v0.104.0 (research preview)
+--------
+workdir: /Users/anirudh/gamedev/pko-tools
+model: gpt-5.3-codex
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: high
+reasoning summaries: auto
+session id: 019c96ad-ff39-7422-a784-2c4c5dcde758
+--------
+user
+Read the file at /Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review-1772054511320/prompt.md and follow the instructions within it.
+deprecated: `collab` is deprecated. Use `[features].multi_agent` instead.
+  Enable it with `--enable multi_agent` or `[features].multi_agent` in config.toml. See https://github.com/openai/codex/blob/main/docs/config.md#feature-flags for details.
+mcp: linear starting
+mcp: unity starting
+mcp: unity ready
+mcp: linear ready
+mcp startup: ready: unity, linear
+
+thinking
+**Starting file inspection**
+codex
+Reading that prompt file first, then I’ll execute exactly what it asks within the current repository constraints. I’m starting by loading `/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review-1772054511320/prompt.md`.
+exec
+/bin/zsh -lc 'cat /Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review-1772054511320/prompt.md' in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+# Review Request: Render State Parity Pipeline Plan
+
+## Question
+
+Review this plan for correctness, completeness, and risks. The plan implements a render state parity pipeline to faithfully reproduce PKO (Pirate King Online) engine blend modes in Unity. Focus on:
+
+1. **Correctness**: Does the D3D-to-Unity blend mapping accurately reproduce PKO engine behavior?
+2. **Encoding strategy**: Is encoding render state via material name suffixes (`__PKO_T{n}_A{n}_O{n}`) the right approach vs glTF extras or other mechanisms?
+3. **Shader architecture**: Is making TOP/Effect property-driven (`Blend [_SrcBlend] [_DstBlend]`) sufficient for all 9 transparency types? Do we need separate shaders for subtractive (type 5)?
+4. **Opacity interaction**: When opacity != 1.0 and transp_type == ADDITIVE, the engine overrides SrcBlend from ONE to SRCALPHA. The plan encodes opacity in the suffix but doesn't detail the Unity-side override logic clearly enough.
+5. **Render queue**: Should different blend modes use different render queues? Currently all effect materials use queue 3000.
+6. **DepthOnly pass**: The plan adds a DepthOnly pass to TOP/Effect. For additive effects with ZWrite Off, does this make sense? Could it cause artifacts?
+7. **Edge cases**: Types 6-8 (SUBTRACTIVE1-3) fall through to ONE/ONE in the engine. Is treating them identically to type 1 correct?
+8. **Backward compatibility**: The plan replaces `__PKO_BLEND_ADD` with `__PKO_T1_A0_O100`. Is the transition strategy sound?
+9. **Phase ordering**: Is doing Rust exporter → Shader → C# replacer the right sequence?
+
+Be critical. Identify blind spots and risks.
+
+## The Plan
+
+
+
+thinking
+**Providing detailed, assertive review**
+thinking
+**Clarifying blend modes and phase order**
+codex
+I’ve finished analyzing the plan against the engine snippets and identified several high-impact gaps (opacity behavior, queue/depth behavior, and data encoding fragility). I’m drafting a point-by-point review now with concrete fixes and a recommended rollout order.
+codex
+**Verdict**
+The direction is good, but the current plan is not parity-safe yet. The biggest gaps are opacity handling, render/depth behavior, and over-reliance on material-name encoding.
+
+**1) Blend mapping correctness**
+Your table is mostly correct, but implementation details matter:
+
+- `T0 FILTER`: must be treated as non-blended (`ZWrite On`, alpha test optional). Do not route this through transparent effect defaults.
+- `T1`: `One/One`, but when `opacity < 1`, override to `SrcAlpha/One` (only for type 1).
+- `T2`: `SrcColor/One`.
+- `T3`: `SrcColor/OneMinusSrcColor`.
+- `T4`: `SrcAlpha/DstAlpha`.
+- `T5`: `Zero/OneMinusSrcColor` (this is achievable in one shader; no special blend op needed).
+- `T6-8`: default fallthrough to `One/One` is correct.
+
+Critical nuance: opacity override applies to `T1` only, not `T6-8`.
+
+**2) Encoding strategy (name suffix)**
+Name suffixes are acceptable as a short-term transport, but weak as primary truth:
+
+- Fragile to renaming, dedup/sanitization, and tooling changes.
+- Poor precision if opacity is percent (`O{n}`); this can break edge behavior.
+
+Best approach: write structured data in `material.extras` (or extension) and keep suffix as fallback/back-compat. If suffix remains, encode opacity as byte (`0-255`), not percent.
+
+**3) Shader architecture**
+Property-driven `Blend [_SrcBlend] [_DstBlend]` is sufficient for all listed modes, including type 5. No separate subtractive shader is required.
+
+But do not assume blend factors alone give parity. You also need explicit control of:
+- `ZWrite`
+- queue/tag behavior
+- alpha clip cutoff source
+- opacity multiplier path (fragment alpha/content path)
+
+**4) Opacity interaction**
+Current plan is underspecified and will likely be wrong unless you implement both parts:
+
+- Runtime override: `if (transpType == 1 && opacity < 1) SrcBlend = SrcAlpha`.
+- Shader/data path: opacity must actually modulate source alpha/color as PKO does (TFACTOR path in D3D fixed-function). If you only change blend factors without applying opacity in shader/material values, parity fails.
+
+Also: do not apply the type-1 override to types 6-8.
+
+**5) Render queue**
+Using queue `3000` for all effect materials is a simplification, not true parity.
+
+Recommended minimum:
+- `T0` alpha-tested/filter materials: cutout-style queue (`AlphaTest`, ~2450), `ZWrite On`.
+- Non-filter blend types: transparent queue (`3000`), usually `ZWrite Off`.
+
+Type 4 and type 5 are order-sensitive; expect scene-dependent differences unless you enforce deterministic draw ordering.
+
+**6) DepthOnly pass**
+Adding `DepthOnly` for transparent additive materials is risky and usually wrong.
+
+- For `ZWrite Off` transparent effects, depth prewrite can cause incorrect occlusion/halo clipping.
+- If you keep DepthOnly, gate it strictly to cutout cases that intentionally need depth writes (not generic additive).
+
+**7) Types 6-8 treatment**
+Treating 6-8 as `One/One` is correct per provided code path.  
+But parity requires preserving the fact that opacity special-case is only for type 1.
+
+**8) Backward compatibility**
+Keeping old suffix detection is good.  
+Two additional requirements:
+- New parser must be robust and end-anchored.
+- Cache keys/material identity should strip or normalize suffix to avoid unintended material duplication.
+
+**9) Phase ordering**
+Current order is not ideal. Do this instead:
+
+1. Unity side first (shader + replacer) with support for both old and new metadata.
+2. Then exporter emits new encoding.
+3. Then remove old-path dependency after validation.
+
+This avoids a broken intermediate state where exported assets carry data Unity cannot yet consume.
+
+**Blind spots to fix before implementation**
+- Precision loss from `%` opacity encoding.
+- `DstAlpha` behavior (type 4) can differ depending on render target alpha semantics in URP.
+- No explicit validation plan (you need a 9-type parity matrix with opacity on/off and alpha-test on/off, screenshot diffed).
+
+
+tokens used
+21,209

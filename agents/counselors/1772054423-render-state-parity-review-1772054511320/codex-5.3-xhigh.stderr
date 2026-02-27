@@ -1,0 +1,261 @@
+OpenAI Codex v0.104.0 (research preview)
+--------
+workdir: /Users/anirudh/gamedev/pko-tools
+model: gpt-5.3-codex
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: xhigh
+reasoning summaries: auto
+session id: 019c96ae-a379-7f21-bb6d-aa719d9282a7
+--------
+user
+Read the file at /Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review-1772054511320/prompt.md and follow the instructions within it.
+deprecated: `collab` is deprecated. Use `[features].multi_agent` instead.
+  Enable it with `--enable multi_agent` or `[features].multi_agent` in config.toml. See https://github.com/openai/codex/blob/main/docs/config.md#feature-flags for details.
+mcp: unity starting
+mcp: linear starting
+mcp: unity ready
+mcp: linear ready
+mcp startup: ready: unity, linear
+
+thinking
+**Starting file inspection**
+codex
+I’m going to open that `prompt.md` file first, then execute exactly what it asks for within this repository context.
+exec
+/bin/zsh -lc 'cat /Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review-1772054511320/prompt.md' in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+# Review Request: Render State Parity Pipeline Plan
+
+## Question
+
+Review this plan for correctness, completeness, and risks. The plan implements a render state parity pipeline to faithfully reproduce PKO (Pirate King Online) engine blend modes in Unity. Focus on:
+
+1. **Correctness**: Does the D3D-to-Unity blend mapping accurately reproduce PKO engine behavior?
+2. **Encoding strategy**: Is encoding render state via material name suffixes (`__PKO_T{n}_A{n}_O{n}`) the right approach vs glTF extras or other mechanisms?
+3. **Shader architecture**: Is making TOP/Effect property-driven (`Blend [_SrcBlend] [_DstBlend]`) sufficient for all 9 transparency types? Do we need separate shaders for subtractive (type 5)?
+4. **Opacity interaction**: When opacity != 1.0 and transp_type == ADDITIVE, the engine overrides SrcBlend from ONE to SRCALPHA. The plan encodes opacity in the suffix but doesn't detail the Unity-side override logic clearly enough.
+5. **Render queue**: Should different blend modes use different render queues? Currently all effect materials use queue 3000.
+6. **DepthOnly pass**: The plan adds a DepthOnly pass to TOP/Effect. For additive effects with ZWrite Off, does this make sense? Could it cause artifacts?
+7. **Edge cases**: Types 6-8 (SUBTRACTIVE1-3) fall through to ONE/ONE in the engine. Is treating them identically to type 1 correct?
+8. **Backward compatibility**: The plan replaces `__PKO_BLEND_ADD` with `__PKO_T1_A0_O100`. Is the transition strategy sound?
+9. **Phase ordering**: Is doing Rust exporter → Shader → C# replacer the right sequence?
+
+Be critical. Identify blind spots and risks.
+
+## The Plan
+
+
+thinking
+**Assessing existing blend mapping plan**
+codex
+I’ve loaded the prompt and I’m now checking the actual repo files it references so the review can call out concrete implementation risks rather than only theoretical ones.
+exec
+/bin/zsh -lc pwd in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "rg --files | rg 'TOPMaterialReplacer|TOP_Effect|scene_model.rs|lmo.rs'" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+/Users/anirudh/gamedev/pko-tools
+ succeeded in 51ms:
+src-tauri/src/map/lmo.rs
+src-tauri/src/map/scene_model.rs
+
+thinking
+**Inspecting Rust files for validation**
+codex
+I found the Rust exporter sources in this repo; next I’ll read those sections to verify whether the plan aligns with current code paths and constants.
+exec
+/bin/zsh -lc "nl -ba src-tauri/src/map/scene_model.rs | sed -n '260,520p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "nl -ba src-tauri/src/map/lmo.rs | sed -n '1,240p'" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+     1	//! LMO file parser — multi-geometry-object container format for scene buildings/models.
+     2	//!
+     3	//! Binary layout:
+     4	//! ```text
+     5	//! [4 bytes]  version (DWORD, typically 0x1005)
+     6	//! [4 bytes]  obj_num (geometry objects + optional global helper)
+     7	//! [obj_num × 12 bytes]  Header table:
+     8	//!     type(4) — 1=GEOMETRY, 2=HELPER
+     9	//!     addr(4) — absolute file offset
+    10	//!     size(4) — data size
+    11	//!
+    12	//! TYPE 1 (Geometry Object) at each addr:
+    13	//!     [116 bytes]  Header: id(4) + parent_id(4) + type(4) + mat_local(64) +
+    14	//!                  rcci(16) + state_ctrl(8) + mtl_size(4) + mesh_size(4) +
+    15	//!                  helper_size(4) + anim_size(4)
+    16	//!     Materials:   mtl_num(4) + mtl_num × lwMtlTexInfo
+    17	//!     Mesh:        lwMeshInfoHeader + vertices + normals + texcoords + colors + indices + subsets
+    18	//!     Helpers:     (skip)
+    19	//!     Animation:   (skip)
+    20	//! ```
+ succeeded in 51ms:
+   260	fn find_texture_file(project_dir: &Path, tex_name: &str) -> Option<std::path::PathBuf> {
+   261	    // Strip extension from the material's texture filename
+   262	    let stem = tex_name
+   263	        .rfind('.')
+   264	        .map(|i| &tex_name[..i])
+   265	        .unwrap_or(tex_name);
+   266	
+   267	    let dirs = [
+   268	        "texture/scene",
+   269	        "texture/model",
+   270	        "texture/item",
+   271	        "texture/character",
+   272	        "texture",
+   273	    ];
+   274	    let exts = ["bmp", "tga", "dds", "png"];
+   275	
+   276	    for dir in &dirs {
+   277	        for ext in &exts {
+   278	            let candidate = project_dir.join(dir).join(format!("{}.{}", stem, ext));
+   279	            if candidate.exists() {
+
+thinking
+**Inspecting material parsing logic**
+exec
+/bin/zsh -lc "nl -ba src-tauri/src/map/lmo.rs | sed -n '240,420p'" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+   240	    let ambient = [
+   241	        read_f32(cursor)?,
+   242	        read_f32(cursor)?,
+   243	        read_f32(cursor)?,
+   244	        read_f32(cursor)?,
+   245	    ];
+   246	    cursor.seek(SeekFrom::Current(16))?; // specular (skip)
+   247	    let emissive = [
+   248	        read_f32(cursor)?,
+   249	        read_f32(cursor)?,
+   250	        read_f32(cursor)?,
+   251	        read_f32(cursor)?,
+   252	    ];
+   253	    cursor.seek(SeekFrom::Current(4))?; // power
+   254	
+   255	    // rs_set — old formats use lwRenderStateSetMtl2 (128 bytes), new uses lwRenderStateAtom[8] (96 bytes)
+   256	    let rs = match mtl_ver {
+   257	        MtlFormatVersion::V0000 | MtlFormatVersion::V0001 => {
+   258	            cursor.seek(SeekFrom::Current(128))?;
+   259	            MaterialRenderState::default()
+
+thinking
+**Checking blend mode usage**
+exec
+/bin/zsh -lc 'rg -n "src_blend|dest_blend|TRANSP_" src-tauri/src/map' in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+src-tauri/src/map/scene_model.rs:326:    let is_additive = mat.transp_type == lmo::TRANSP_ADDITIVE;
+src-tauri/src/map/scene_model.rs:870:                    src_blend: None,
+src-tauri/src/map/scene_model.rs:871:                    dest_blend: None,
+src-tauri/src/map/scene_model.rs:1001:                    src_blend: None,
+src-tauri/src/map/scene_model.rs:1002:                    dest_blend: None,
+src-tauri/src/map/scene_model.rs:1335:                    src_blend: None,
+src-tauri/src/map/scene_model.rs:1336:                    dest_blend: None,
+src-tauri/src/map/scene_model.rs:1412:                    src_blend: None,
+src-tauri/src/map/scene_model.rs:1413:                    dest_blend: None,
+src-tauri/src/map/scene_model.rs:1492:            src_blend: None,
+src-tauri/src/map/scene_model.rs:1493:            dest_blend: None,
+src-tauri/src/map/scene_model.rs:1519:            src_blend: None,
+src-tauri/src/map/scene_model.rs:1520:            dest_blend: None,
+src-tauri/src/map/scene_model.rs:1545:            src_blend: None,
+src-tauri/src/map/scene_model.rs:1546:            dest_blend: None,
+src-tauri/src/map/lmo.rs:59:pub const TRANSP_FILTER: u32 = 0;
+src-tauri/src/map/lmo.rs:60:pub const TRANSP_ADDITIVE: u32 = 1;
+src-tauri/src/map/lmo.rs:67:    src_blend: Option<u32>,
+src-tauri/src/map/lmo.rs:68:    dest_blend: Option<u32>,
+src-tauri/src/map/lmo.rs:125:    pub src_blend: Option<u32>,
+
+thinking
+**Assessing skill usage requirement**
+codex
+I confirmed the exporter snippets in the prompt match this repo. I’m briefly checking the `counselors` skill instructions too, because your AGENTS rules require using relevant skills when the task matches.
+exec
+/bin/zsh -lc 'cat /Users/anirudh/.codex/skills/counselors/SKILL.md' in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+---
+name: counselors
+description: Run parallel second-opinion reviews with the counselors CLI. Use when the user asks for independent AI reviews, architecture sanity checks, risk analysis from multiple models, or a synthesized consensus and disagreement report across agents.
+---
+
+# Counselors
+
+## Overview
+Use `counselors` to fan out one review prompt to multiple configured AI CLIs in parallel, then synthesize their responses.
+
+## Workflow
+1. Gather context.
+- Parse the user request and scope.
+- Read only relevant files.
+- Capture `git diff HEAD` and `git diff --staged` when code changes matter.
+
+2. Select agents.
+- Run `counselors ls`.
+- Print the full command output for the user.
+- Ask the user which agent IDs to use (or all).
+
+thinking
+**Planning detailed independent review**
+codex
+I’ve finished the source check and identified several concrete gaps in the plan (notably opacity precision, depth behavior, and rollout ordering). I’m now writing the full critical review with explicit fixes and decision points.
+
+thinking
+**Crafting detailed final response**
+codex
+**Verdict**
+The plan is directionally correct, but not complete enough for true PKO parity. The highest-risk gaps are opacity encoding precision, depth/queue behavior, and rollout order.
+
+Current exporter state confirms the baseline problem: only types `0/1` are explicitly handled in Rust ([lmo.rs:59](/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs:59), [scene_model.rs:326](/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs:326), [scene_model.rs:365](/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs:365)).
+
+**1. D3D-to-Unity blend mapping correctness**
+The proposed factor mapping is correct for the provided PKO code:
+1. `0 FILTER`: no blend override (treat as opaque/cutout path, not effect-transparent by default).
+2. `1 ADDITIVE`: `One, One`.
+3. `2 ADDITIVE1`: `SrcColor, One`.
+4. `3 ADDITIVE2`: `SrcColor, OneMinusSrcColor`.
+5. `4 ADDITIVE3`: `SrcAlpha, DstAlpha`.
+6. `5 SUBTRACTIVE`: `Zero, OneMinusSrcColor`.
+7. `6-8`: `One, One` (fallback default in engine switch).
+
+Missing in plan: parity also depends on `ZWrite`, alpha-test behavior, and potentially blend-enable/blend-op state, not just src/dst factors.
+
+**2. Encoding strategy (suffix vs extras)**
+Material-name suffix alone is brittle (rename collisions, parsing fragility, precision loss, hard schema evolution).  
+Recommended: dual encoding.
+1. Canonical: glTF `extras.pko_render_state` (structured JSON).
+2. Fallback: suffix for current Unity replacer compatibility.
+
+Also encode resolved blend factors (`src/dst`) and an explicit schema version, not only `transp_type`.
+
+**3. Shader architecture**
+`Blend [_SrcBlend] [_DstBlend]` is sufficient for all listed types, including type 5. You do not need a separate subtractive shader if blend op stays additive.
+
+But you likely need `_ZWrite` as a property (or material toggle) and queue/tag handling in C#, otherwise parity still drifts.
+
+**4. Opacity override (critical gap)**
+Plan is underspecified here. PKO behavior requires:
+1. If `opacity != 1.0`: force `ZWrite Off`.
+2. Multiply effective alpha by opacity.
+3. Only when `transp_type == 1`: override `SrcBlend` from `One` to `SrcAlpha`.
+
+Do not encode opacity as integer percent. That will misclassify near-1.0 values. Encode raw byte (`0..255`) or high-precision float.
+
+**5. Render queue**
+All effect materials at `3000` is too coarse.
+1. Opaque/filter no alpha test: `2000`.
+2. Alpha-test cutout path: `2450`.
+3. True blended effects: `3000+` (with small per-mode offsets only if sorting issues appear).
+
+**6. DepthOnly pass**
+Adding DepthOnly broadly to `TOP/Effect` is risky and likely wrong for additive with `ZWrite Off`. It can create occlusion artifacts and break transparent compositing.  
+Only use depth prepass behavior for cutout/opaque-like cases that are intended to write depth.
+
+**7. Types 6-8**
+Treating them as `One, One` is correct per provided PKO switch/fallback.  
+If parsed `src_blend/dest_blend` exists and differs, prefer parsed values.
+
+**8. Backward compatibility**
+Keeping old `__PKO_BLEND_ADD` detection is correct.  
+Do not remove old encoding immediately; support both for at least one transition window.
+
+**9. Phase ordering**
+Current order is risky for incremental rollout. Better order:
+1. Unity consumer first (shader + replacer supports old + new).
+2. Rust exporter emits new encoding.
+3. Switch defaults and keep legacy parser.
+4. Remove legacy path later.
+
+**Bottom line**
+Ship with: dual encoding, byte-accurate opacity handling, explicit zwrite/queue policy, and no blanket DepthOnly on transparent effect shader. Without these, you will fix some blend modes but still miss visual parity in common edge cases.
+tokens used
+36,576

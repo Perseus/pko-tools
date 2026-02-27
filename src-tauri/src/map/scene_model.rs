@@ -19,7 +19,7 @@ use gltf_json::{
 
 use crate::item::model::decode_pko_texture;
 
-use super::lmo::{self, LmoGeomObject, LmoModel};
+use super::lmo::{self, D3DCULL_NONE, LmoGeomObject, LmoModel};
 use super::scene_obj::SceneObject;
 use super::scene_obj_info::SceneObjModelInfo;
 
@@ -257,7 +257,7 @@ impl GltfBuilder {
 
 /// Try to find a texture file from the PKO project directory.
 /// Scene model textures can be in several directories.
-fn find_texture_file(project_dir: &Path, tex_name: &str) -> Option<std::path::PathBuf> {
+pub fn find_texture_file(project_dir: &Path, tex_name: &str) -> Option<std::path::PathBuf> {
     // Strip extension from the material's texture filename
     let stem = tex_name
         .rfind('.')
@@ -316,6 +316,40 @@ fn load_texture_as_data_uri(path: &Path) -> Option<String> {
     ))
 }
 
+/// D3D blend constants matching D3DBLEND enum values used in LMO render states.
+const D3DBLEND_ZERO: u32 = 1;
+const D3DBLEND_ONE: u32 = 2;
+const D3DBLEND_SRCCOLOR: u32 = 3;
+const D3DBLEND_INVSRCCOLOR: u32 = 4;
+const D3DBLEND_SRCALPHA: u32 = 5;
+const D3DBLEND_DESTALPHA: u32 = 7;
+
+/// Returns the expected D3D SrcBlend value for a given transp_type, or None for type 0.
+fn default_src_blend_for_transp_type(transp_type: u32) -> Option<u32> {
+    match transp_type {
+        0 => None,                      // FILTER: no blend set
+        1 => Some(D3DBLEND_ONE),        // ADDITIVE: One/One
+        2 => Some(D3DBLEND_SRCCOLOR),   // ADDITIVE1: SrcColor/One
+        3 => Some(D3DBLEND_SRCCOLOR),   // ADDITIVE2: SrcColor/InvSrcColor
+        4 => Some(D3DBLEND_SRCALPHA),   // ADDITIVE3: SrcAlpha/DestAlpha
+        5 => Some(D3DBLEND_ZERO),       // SUBTRACTIVE: Zero/InvSrcColor
+        _ => Some(D3DBLEND_ONE),        // 6-8 fall through to ONE/ONE
+    }
+}
+
+/// Returns the expected D3D DstBlend value for a given transp_type, or None for type 0.
+fn default_dst_blend_for_transp_type(transp_type: u32) -> Option<u32> {
+    match transp_type {
+        0 => None,
+        1 => Some(D3DBLEND_ONE),
+        2 => Some(D3DBLEND_ONE),
+        3 => Some(D3DBLEND_INVSRCCOLOR),
+        4 => Some(D3DBLEND_DESTALPHA),
+        5 => Some(D3DBLEND_INVSRCCOLOR),
+        _ => Some(D3DBLEND_ONE),
+    }
+}
+
 fn build_lmo_material(
     builder: &mut GltfBuilder,
     mat: &lmo::LmoMaterial,
@@ -323,6 +357,21 @@ fn build_lmo_material(
     project_dir: &Path,
     load_textures: bool,
 ) {
+    // Canonicalize types 6-8 to type 1 (they fall through to ONE/ONE in engine)
+    // Types > 8 are unknown/corrupt — warn and remap to type 1
+    let effective_transp = match mat.transp_type {
+        0..=5 => mat.transp_type,
+        6..=8 => 1,
+        other => {
+            eprintln!(
+                "WARN: material '{}' has unknown transp_type={}, remapping to type 1",
+                name, other
+            );
+            1
+        }
+    };
+    let is_effect = effective_transp != lmo::TRANSP_FILTER;
+
     let base_color = [
         mat.diffuse[0].clamp(0.0, 1.0),
         mat.diffuse[1].clamp(0.0, 1.0),
@@ -330,7 +379,16 @@ fn build_lmo_material(
         mat.opacity.clamp(0.0, 1.0),
     ];
 
-    let alpha_mode = if mat.alpha_test_enabled {
+    // Effect materials (types 1-5): Unity shader handles blending, use Opaque alpha mode
+    // UNLESS alpha test is also enabled — then use Mask so glTF importers respect the cutoff.
+    // Non-effect (type 0): use existing alpha test / opacity logic.
+    let alpha_mode = if is_effect {
+        if mat.alpha_test_enabled {
+            Checked::Valid(gltf_json::material::AlphaMode::Mask)
+        } else {
+            Checked::Valid(gltf_json::material::AlphaMode::Opaque)
+        }
+    } else if mat.alpha_test_enabled {
         Checked::Valid(gltf_json::material::AlphaMode::Mask)
     } else if mat.opacity < 0.99 {
         Checked::Valid(gltf_json::material::AlphaMode::Blend)
@@ -339,11 +397,62 @@ fn build_lmo_material(
     };
 
     let alpha_cutoff = if mat.alpha_test_enabled {
+        let ref_value = if mat.alpha_ref == 0 { 129u8 } else { mat.alpha_ref };
         Some(gltf_json::material::AlphaCutoff(
-            (mat.alpha_ref as f32 / 255.0).clamp(0.0, 1.0),
+            (ref_value as f32 / 255.0).clamp(0.0, 1.0),
         ))
     } else {
         None
+    };
+
+    // Warn if per-material blend overrides differ from engine defaults for this type
+    if let Some(sb) = mat.src_blend {
+        let default_src = default_src_blend_for_transp_type(effective_transp);
+        if let Some(ds) = default_src {
+            if sb != ds {
+                eprintln!(
+                    "WARN: material '{}' has src_blend={} but type {} defaults to {}",
+                    name, sb, effective_transp, ds
+                );
+            }
+        }
+    }
+    if let Some(db) = mat.dest_blend {
+        let default_dst = default_dst_blend_for_transp_type(effective_transp);
+        if let Some(dd) = default_dst {
+            if db != dd {
+                eprintln!(
+                    "WARN: material '{}' has dest_blend={} but type {} defaults to {}",
+                    name, db, effective_transp, dd
+                );
+            }
+        }
+    }
+
+    // Structured material name suffix for blend mode signaling to Unity
+    // Encode: T=transp_type, A=alpha_ref (0 if no alpha test), O=opacity as byte 0-255
+    // Engine overrides ALPHAREF to 129 at runtime (RenderStateMgr.cpp _rsa_sceneobj),
+    // so materials with alpha_test_enabled=true but alpha_ref=0 effectively use 129.
+    //
+    // C2 fix: Also emit suffix for type-0 (FILTER) with partial opacity (opacity < 1.0).
+    // Without the suffix, Unity falls through to opaque TOP/StaticMesh — glass, fences,
+    // and translucent surfaces render as solid.
+    let has_partial_opacity = mat.opacity < 0.99;
+    let needs_suffix = is_effect || mat.alpha_test_enabled || has_partial_opacity;
+    let material_name = if needs_suffix {
+        let alpha_ref = if mat.alpha_test_enabled {
+            let raw = mat.alpha_ref as u32;
+            if raw == 0 { 129 } else { raw } // Engine default ALPHAREF=129
+        } else {
+            0
+        };
+        let opacity_byte = (mat.opacity.clamp(0.0, 1.0) * 255.0).round() as u32;
+        format!(
+            "{}__PKO_T{}_A{}_O{}",
+            name, effective_transp, alpha_ref, opacity_byte
+        )
+    } else {
+        name.to_string()
     };
 
     // Try to load and embed the texture (skipped for map batch loading)
@@ -400,10 +509,18 @@ fn build_lmo_material(
             })
     };
 
+    // Emissive factor — clamp to [0,1] for glTF spec compliance
+    let emissive = [
+        mat.emissive[0].clamp(0.0, 1.0),
+        mat.emissive[1].clamp(0.0, 1.0),
+        mat.emissive[2].clamp(0.0, 1.0),
+    ];
+
     builder.materials.push(gltf_json::Material {
         alpha_cutoff,
         alpha_mode,
-        double_sided: true,
+        // D3D default is D3DCULL_CCW (back-face culling). Only D3DCULL_NONE means double-sided.
+        double_sided: mat.cull_mode == Some(D3DCULL_NONE),
         pbr_metallic_roughness: gltf_json::material::PbrMetallicRoughness {
             base_color_factor: gltf_json::material::PbrBaseColorFactor(base_color),
             base_color_texture,
@@ -416,10 +533,10 @@ fn build_lmo_material(
         normal_texture: None,
         occlusion_texture: None,
         emissive_texture: None,
-        emissive_factor: gltf_json::material::EmissiveFactor([0.0, 0.0, 0.0]),
+        emissive_factor: gltf_json::material::EmissiveFactor(emissive),
         extensions: None,
         extras: None,
-        name: Some(name.to_string()),
+        name: Some(material_name),
     });
 }
 
@@ -525,6 +642,32 @@ fn build_geom_primitives(
         None
     };
 
+    // Export vertex colors (COLOR_0) if present.
+    // D3DCOLOR is packed as 0xAARRGGBB — extract in correct byte order.
+    let color_acc = if !geom.vertex_colors.is_empty() {
+        let color_data: Vec<f32> = geom
+            .vertex_colors
+            .iter()
+            .flat_map(|&c| {
+                let r = ((c >> 16) & 0xFF) as f32 / 255.0;
+                let g = ((c >> 8) & 0xFF) as f32 / 255.0;
+                let b = (c & 0xFF) as f32 / 255.0;
+                let a = ((c >> 24) & 0xFF) as f32 / 255.0;
+                [r, g, b, a]
+            })
+            .collect();
+        Some(builder.add_accessor_f32(
+            &color_data,
+            &format!("{}_color", prefix),
+            gltf_json::accessor::Type::Vec4,
+            4,
+            None,
+            None,
+        ))
+    } else {
+        None
+    };
+
     // Build primitives per subset (each subset maps to a material)
     if geom.subsets.is_empty() {
         // No subsets — single primitive with all indices
@@ -546,6 +689,12 @@ fn build_geom_primitives(
             attributes.insert(
                 Checked::Valid(gltf_json::mesh::Semantic::TexCoords(0)),
                 gltf_json::Index::new(ua),
+            );
+        }
+        if let Some(ca) = color_acc {
+            attributes.insert(
+                Checked::Valid(gltf_json::mesh::Semantic::Colors(0)),
+                gltf_json::Index::new(ca),
             );
         }
 
@@ -591,6 +740,12 @@ fn build_geom_primitives(
                     gltf_json::Index::new(ua),
                 );
             }
+            if let Some(ca) = color_acc {
+                attributes.insert(
+                    Checked::Valid(gltf_json::mesh::Semantic::Colors(0)),
+                    gltf_json::Index::new(ca),
+                );
+            }
 
             // Material index: use subset index if we have enough materials
             let mat_idx = if si < geom.materials.len() {
@@ -611,6 +766,93 @@ fn build_geom_primitives(
         }
         primitives
     }
+}
+
+// ============================================================================
+// Texture/opacity animation → glTF node extras
+// ============================================================================
+
+/// Build glTF node extras JSON for texuv/teximg/mtlopac animation data.
+/// Returns None if the geom object has no texture/opacity animations.
+fn build_anim_extras(geom: &LmoGeomObject) -> gltf_json::extras::Extras {
+    if geom.texuv_anims.is_empty()
+        && geom.teximg_anims.is_empty()
+        && geom.mtlopac_anims.is_empty()
+    {
+        return None;
+    }
+
+    let mut extras = serde_json::Map::new();
+
+    // texuv: array of { subset, stage, frame_num, matrices: [[16 floats]...] }
+    if !geom.texuv_anims.is_empty() {
+        let texuv_arr: Vec<serde_json::Value> = geom
+            .texuv_anims
+            .iter()
+            .map(|uv| {
+                // Flatten each 4×4 matrix to 16 floats (row-major)
+                let matrices: Vec<serde_json::Value> = uv
+                    .matrices
+                    .iter()
+                    .map(|m| {
+                        let flat: Vec<f32> = m.iter().flat_map(|row| row.iter().copied()).collect();
+                        serde_json::json!(flat)
+                    })
+                    .collect();
+                serde_json::json!({
+                    "subset": uv.subset,
+                    "stage": uv.stage,
+                    "frame_num": uv.frame_num,
+                    "matrices": matrices,
+                })
+            })
+            .collect();
+        extras.insert("texuv_anims".to_string(), serde_json::json!(texuv_arr));
+    }
+
+    // teximg: array of { subset, stage, textures: ["file1.tga", ...] }
+    if !geom.teximg_anims.is_empty() {
+        let teximg_arr: Vec<serde_json::Value> = geom
+            .teximg_anims
+            .iter()
+            .map(|ti| {
+                serde_json::json!({
+                    "subset": ti.subset,
+                    "stage": ti.stage,
+                    "textures": ti.textures,
+                })
+            })
+            .collect();
+        extras.insert("teximg_anims".to_string(), serde_json::json!(teximg_arr));
+    }
+
+    // mtlopac: array of { subset, keyframes: [{ frame, opacity }...] }
+    if !geom.mtlopac_anims.is_empty() {
+        let mtlopac_arr: Vec<serde_json::Value> = geom
+            .mtlopac_anims
+            .iter()
+            .map(|mo| {
+                let kfs: Vec<serde_json::Value> = mo
+                    .keyframes
+                    .iter()
+                    .map(|kf| {
+                        serde_json::json!({
+                            "frame": kf.frame,
+                            "opacity": kf.opacity,
+                        })
+                    })
+                    .collect();
+                serde_json::json!({
+                    "subset": mo.subset,
+                    "keyframes": kfs,
+                })
+            })
+            .collect();
+        extras.insert("mtlopac_anims".to_string(), serde_json::json!(mtlopac_arr));
+    }
+
+    let json_str = serde_json::to_string(&extras).ok()?;
+    serde_json::value::RawValue::from_string(json_str).ok()
 }
 
 // ============================================================================
@@ -794,9 +1036,14 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
                 &lmo::LmoMaterial {
                     diffuse: [0.7, 0.7, 0.7, 1.0],
                     ambient: [0.3, 0.3, 0.3, 1.0],
+                    emissive: [0.0, 0.0, 0.0, 0.0],
                     opacity: 1.0,
+                    transp_type: 0,
                     alpha_test_enabled: false,
                     alpha_ref: 0,
+                    src_blend: None,
+                    dest_blend: None,
+                    cull_mode: None,
                     tex_filename: None,
                 },
                 &format!("{}_default_mat", prefix),
@@ -838,9 +1085,11 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         });
 
         let node_idx = builder.nodes.len() as u32;
+        let anim_extras = build_anim_extras(geom);
         builder.nodes.push(gltf_json::Node {
             mesh: Some(gltf_json::Index::new(mesh_idx)),
             name: Some(format!("geom_node_{}", gi)),
+            extras: anim_extras,
             ..Default::default()
         });
         child_indices.push(gltf_json::Index::new(node_idx));
@@ -921,9 +1170,14 @@ pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String
                 &lmo::LmoMaterial {
                     diffuse: [0.7, 0.7, 0.7, 1.0],
                     ambient: [0.3, 0.3, 0.3, 1.0],
+                    emissive: [0.0, 0.0, 0.0, 0.0],
                     opacity: 1.0,
+                    transp_type: 0,
                     alpha_test_enabled: false,
                     alpha_ref: 0,
+                    src_blend: None,
+                    dest_blend: None,
+                    cull_mode: None,
                     tex_filename: None,
                 },
                 &format!("{}_default_mat", prefix),
@@ -965,9 +1219,11 @@ pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String
         });
 
         let node_idx = builder.nodes.len() as u32;
+        let anim_extras = build_anim_extras(geom);
         builder.nodes.push(gltf_json::Node {
             mesh: Some(gltf_json::Index::new(mesh_idx)),
             name: Some(format!("geom_node_{}", gi)),
+            extras: anim_extras,
             ..Default::default()
         });
         child_indices.push(gltf_json::Index::new(node_idx));
@@ -1251,9 +1507,14 @@ fn add_model_to_builder(
                 &lmo::LmoMaterial {
                     diffuse: [0.7, 0.7, 0.7, 1.0],
                     ambient: [0.3, 0.3, 0.3, 1.0],
+                    emissive: [0.0, 0.0, 0.0, 0.0],
                     opacity: 1.0,
+                    transp_type: 0,
                     alpha_test_enabled: false,
                     alpha_ref: 0,
+                    src_blend: None,
+                    dest_blend: None,
+                    cull_mode: None,
                     tex_filename: None,
                 },
                 &format!("{}_mat", prefix),
@@ -1324,12 +1585,20 @@ mod tests {
                 materials: vec![lmo::LmoMaterial {
                     diffuse: [0.8, 0.2, 0.1, 1.0],
                     ambient: [0.3, 0.3, 0.3, 1.0],
+                    emissive: [0.0, 0.0, 0.0, 0.0],
                     opacity: 1.0,
+                    transp_type: 0,
                     alpha_test_enabled: false,
                     alpha_ref: 0,
+                    src_blend: None,
+                    dest_blend: None,
+                    cull_mode: None,
                     tex_filename: Some("wall.bmp".to_string()),
                 }],
                 animation: None,
+                texuv_anims: Vec::new(),
+                teximg_anims: Vec::new(),
+                mtlopac_anims: Vec::new(),
             }],
         }
     }
@@ -1400,9 +1669,14 @@ mod tests {
         let mat = lmo::LmoMaterial {
             diffuse: [0.5, 0.6, 0.7, 1.0],
             ambient: [0.1, 0.1, 0.1, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
             opacity: 1.0,
+            transp_type: 0,
             alpha_test_enabled: false,
             alpha_ref: 0,
+            src_blend: None,
+            dest_blend: None,
+            cull_mode: None,
             tex_filename: None,
         };
         let mut builder = GltfBuilder::new();
@@ -1423,9 +1697,14 @@ mod tests {
         let mat = lmo::LmoMaterial {
             diffuse: [0.5, 0.6, 0.7, 1.0],
             ambient: [0.1, 0.1, 0.1, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
             opacity: 0.5,
+            transp_type: 0,
             alpha_test_enabled: false,
             alpha_ref: 0,
+            src_blend: None,
+            dest_blend: None,
+            cull_mode: None,
             tex_filename: None,
         };
         let mut builder = GltfBuilder::new();
@@ -1445,9 +1724,14 @@ mod tests {
         let mat = lmo::LmoMaterial {
             diffuse: [0.5, 0.6, 0.7, 1.0],
             ambient: [0.1, 0.1, 0.1, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
             opacity: 1.0,
+            transp_type: 0,
             alpha_test_enabled: true,
             alpha_ref: 129,
+            src_blend: None,
+            dest_blend: None,
+            cull_mode: None,
             tex_filename: None,
         };
         let mut builder = GltfBuilder::new();
@@ -1465,6 +1749,83 @@ mod tests {
             .expect("alpha cutoff should be set for alpha-test materials")
             .0;
         assert!((cutoff - (129.0 / 255.0)).abs() < 1e-6);
+    }
+
+    #[test]
+    fn build_material_type9_remapped_to_type1() {
+        // Unknown transp_type > 8 should be remapped to type 1 (additive)
+        let mat = lmo::LmoMaterial {
+            diffuse: [1.0, 1.0, 1.0, 1.0],
+            ambient: [0.1, 0.1, 0.1, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
+            opacity: 1.0,
+            transp_type: 9,
+            alpha_test_enabled: false,
+            alpha_ref: 0,
+            src_blend: None,
+            dest_blend: None,
+            cull_mode: None,
+            tex_filename: None,
+        };
+        let mut builder = GltfBuilder::new();
+        let tmp = std::env::temp_dir();
+        build_lmo_material(&mut builder, &mat, "test_type9", &tmp, false);
+        let gltf_mat = &builder.materials[0];
+        // Type 9 → remapped to 1 → is_effect=true → Opaque alpha mode (no alpha test)
+        assert_eq!(
+            gltf_mat.alpha_mode,
+            Checked::Valid(gltf_json::material::AlphaMode::Opaque)
+        );
+        // Name should have T1 (remapped), not T9
+        assert!(
+            gltf_mat.name.as_ref().unwrap().contains("__PKO_T1_"),
+            "type 9 should be remapped to T1 in suffix"
+        );
+    }
+
+    #[test]
+    fn build_material_alpha_ref_zero_gets_engine_default_129() {
+        // Materials with alpha_test_enabled=true but alpha_ref=0 should use
+        // the engine's default ALPHAREF=129, not encode A0 (which Unity reads as "no alpha test")
+        let mat = lmo::LmoMaterial {
+            diffuse: [0.5, 0.6, 0.7, 1.0],
+            ambient: [0.1, 0.1, 0.1, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
+            opacity: 1.0,
+            transp_type: 0,
+            alpha_test_enabled: true,
+            alpha_ref: 0, // Engine overrides to 129 at runtime
+            src_blend: None,
+            dest_blend: None,
+            cull_mode: None,
+            tex_filename: None,
+        };
+        let mut builder = GltfBuilder::new();
+        let tmp = std::env::temp_dir();
+        build_lmo_material(&mut builder, &mat, "tree_leaf", &tmp, false);
+        let gltf_mat = &builder.materials[0];
+
+        // Should be Mask (alpha test enabled)
+        assert_eq!(
+            gltf_mat.alpha_mode,
+            Checked::Valid(gltf_json::material::AlphaMode::Mask)
+        );
+
+        // Suffix should have A129 (engine default), not A0
+        let name = gltf_mat.name.as_ref().unwrap();
+        assert!(
+            name.contains("_A129_"),
+            "alpha_ref=0 with alpha_test should encode as A129 (engine default), got: {}",
+            name
+        );
+
+        // Cutoff should be 129/255 ≈ 0.506
+        let cutoff = gltf_mat.alpha_cutoff.as_ref().unwrap().0;
+        assert!(
+            (cutoff - 129.0 / 255.0).abs() < 1e-6,
+            "cutoff should be 129/255, got: {}",
+            cutoff
+        );
     }
 
     #[test]
@@ -1599,6 +1960,7 @@ mod tests {
             SceneObjModelInfo {
                 id: 1,
                 filename: "test.lmo".to_string(),
+                ..Default::default()
             },
         );
         // Object is type 1 (effect) — should be skipped
@@ -1892,5 +2254,348 @@ mod tests {
             eprintln!("Version-0 LMO generated {} texture images", imgs.len());
             assert!(!imgs.is_empty(), "version-0 LMO should have texture images");
         }
+    }
+
+    // ================================================================
+    // Phase 3: Structured suffix + blend mode tests
+    // ================================================================
+
+    #[test]
+    fn default_blend_for_all_transp_types() {
+        // Type 0 (FILTER): no blend set
+        assert_eq!(default_src_blend_for_transp_type(0), None);
+        assert_eq!(default_dst_blend_for_transp_type(0), None);
+
+        // Type 1 (ADDITIVE): One/One
+        assert_eq!(default_src_blend_for_transp_type(1), Some(D3DBLEND_ONE));
+        assert_eq!(default_dst_blend_for_transp_type(1), Some(D3DBLEND_ONE));
+
+        // Type 2 (ADDITIVE1): SrcColor/One
+        assert_eq!(default_src_blend_for_transp_type(2), Some(D3DBLEND_SRCCOLOR));
+        assert_eq!(default_dst_blend_for_transp_type(2), Some(D3DBLEND_ONE));
+
+        // Type 3 (ADDITIVE2): SrcColor/InvSrcColor
+        assert_eq!(default_src_blend_for_transp_type(3), Some(D3DBLEND_SRCCOLOR));
+        assert_eq!(
+            default_dst_blend_for_transp_type(3),
+            Some(D3DBLEND_INVSRCCOLOR)
+        );
+
+        // Type 4 (ADDITIVE3): SrcAlpha/DestAlpha
+        assert_eq!(default_src_blend_for_transp_type(4), Some(D3DBLEND_SRCALPHA));
+        assert_eq!(
+            default_dst_blend_for_transp_type(4),
+            Some(D3DBLEND_DESTALPHA)
+        );
+
+        // Type 5 (SUBTRACTIVE): Zero/InvSrcColor
+        assert_eq!(default_src_blend_for_transp_type(5), Some(D3DBLEND_ZERO));
+        assert_eq!(
+            default_dst_blend_for_transp_type(5),
+            Some(D3DBLEND_INVSRCCOLOR)
+        );
+
+        // Types 6-8: fall through to One/One (same as type 1)
+        for t in 6..=8 {
+            assert_eq!(
+                default_src_blend_for_transp_type(t),
+                Some(D3DBLEND_ONE),
+                "type {} src",
+                t
+            );
+            assert_eq!(
+                default_dst_blend_for_transp_type(t),
+                Some(D3DBLEND_ONE),
+                "type {} dst",
+                t
+            );
+        }
+    }
+
+    #[test]
+    fn types_6_through_8_canonicalize_to_type_1() {
+        let tmp = std::env::temp_dir();
+        for transp_type in [6, 7, 8] {
+            let mat = lmo::LmoMaterial {
+                diffuse: [0.5, 0.6, 0.7, 1.0],
+                ambient: [0.1, 0.1, 0.1, 1.0],
+                emissive: [0.0, 0.0, 0.0, 0.0],
+                opacity: 1.0,
+                transp_type,
+                alpha_test_enabled: false,
+                alpha_ref: 0,
+                src_blend: None,
+                dest_blend: None,
+                cull_mode: None,
+                tex_filename: None,
+            };
+            let mut builder = GltfBuilder::new();
+            build_lmo_material(&mut builder, &mat, "test", &tmp, false);
+            let gltf_mat = &builder.materials[0];
+            // Name should contain T1, not T6/T7/T8
+            assert!(
+                gltf_mat
+                    .name
+                    .as_ref()
+                    .unwrap()
+                    .contains("__PKO_T1_A0_O255"),
+                "type {} should canonicalize to T1 in name, got: {}",
+                transp_type,
+                gltf_mat.name.as_ref().unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn build_material_type3_produces_correct_suffix() {
+        let mat = lmo::LmoMaterial {
+            diffuse: [0.5, 0.6, 0.7, 1.0],
+            ambient: [0.1, 0.1, 0.1, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
+            opacity: 0.75,
+            transp_type: 3,
+            alpha_test_enabled: false,
+            alpha_ref: 0,
+            src_blend: None,
+            dest_blend: None,
+            cull_mode: None,
+            tex_filename: None,
+        };
+        let mut builder = GltfBuilder::new();
+        let tmp = std::env::temp_dir();
+        build_lmo_material(&mut builder, &mat, "glow", &tmp, false);
+        let gltf_mat = &builder.materials[0];
+        let name = gltf_mat.name.as_ref().unwrap();
+        // opacity 0.75 * 255 = 191.25 → 191
+        assert!(
+            name.contains("__PKO_T3_A0_O191"),
+            "expected T3_A0_O191 suffix, got: {}",
+            name
+        );
+    }
+
+    #[test]
+    fn build_material_additive_with_alpha_test_uses_mask() {
+        // Previously forced to Opaque when additive — now should be Mask
+        let mat = lmo::LmoMaterial {
+            diffuse: [0.5, 0.6, 0.7, 1.0],
+            ambient: [0.1, 0.1, 0.1, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
+            opacity: 1.0,
+            transp_type: 1,
+            alpha_test_enabled: true,
+            alpha_ref: 129,
+            src_blend: None,
+            dest_blend: None,
+            cull_mode: None,
+            tex_filename: None,
+        };
+        let mut builder = GltfBuilder::new();
+        let tmp = std::env::temp_dir();
+        build_lmo_material(&mut builder, &mat, "sparkle", &tmp, false);
+        let gltf_mat = &builder.materials[0];
+
+        assert_eq!(
+            gltf_mat.alpha_mode,
+            Checked::Valid(gltf_json::material::AlphaMode::Mask),
+            "additive + alpha test should produce Mask alpha mode"
+        );
+
+        let cutoff = gltf_mat
+            .alpha_cutoff
+            .expect("alpha cutoff should be set")
+            .0;
+        assert!((cutoff - (129.0 / 255.0)).abs() < 1e-6);
+
+        let name = gltf_mat.name.as_ref().unwrap();
+        assert!(
+            name.contains("__PKO_T1_A129_O255"),
+            "expected T1_A129_O255, got: {}",
+            name
+        );
+    }
+
+    #[test]
+    fn build_material_type0_no_suffix_when_no_alpha_test() {
+        // Type 0 with no alpha test and full opacity → no suffix
+        let mat = lmo::LmoMaterial {
+            diffuse: [0.5, 0.6, 0.7, 1.0],
+            ambient: [0.1, 0.1, 0.1, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
+            opacity: 1.0,
+            transp_type: 0,
+            alpha_test_enabled: false,
+            alpha_ref: 0,
+            src_blend: None,
+            dest_blend: None,
+            cull_mode: None,
+            tex_filename: None,
+        };
+        let mut builder = GltfBuilder::new();
+        let tmp = std::env::temp_dir();
+        build_lmo_material(&mut builder, &mat, "wall", &tmp, false);
+        let gltf_mat = &builder.materials[0];
+        let name = gltf_mat.name.as_ref().unwrap();
+        assert!(
+            !name.contains("__PKO_"),
+            "type 0 opaque should have no PKO suffix, got: {}",
+            name
+        );
+    }
+
+    #[test]
+    fn build_material_type0_with_alpha_test_gets_suffix() {
+        // Type 0 with alpha test → should get suffix for cutout routing
+        let mat = lmo::LmoMaterial {
+            diffuse: [0.5, 0.6, 0.7, 1.0],
+            ambient: [0.1, 0.1, 0.1, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
+            opacity: 1.0,
+            transp_type: 0,
+            alpha_test_enabled: true,
+            alpha_ref: 129,
+            src_blend: None,
+            dest_blend: None,
+            cull_mode: None,
+            tex_filename: None,
+        };
+        let mut builder = GltfBuilder::new();
+        let tmp = std::env::temp_dir();
+        build_lmo_material(&mut builder, &mat, "tree", &tmp, false);
+        let gltf_mat = &builder.materials[0];
+        let name = gltf_mat.name.as_ref().unwrap();
+        assert!(
+            name.contains("__PKO_T0_A129_O255"),
+            "type 0 with alpha test should have suffix, got: {}",
+            name
+        );
+    }
+
+    #[test]
+    fn build_material_subtractive_type5() {
+        let mat = lmo::LmoMaterial {
+            diffuse: [0.3, 0.3, 0.3, 1.0],
+            ambient: [0.1, 0.1, 0.1, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
+            opacity: 1.0,
+            transp_type: 5,
+            alpha_test_enabled: false,
+            alpha_ref: 0,
+            src_blend: None,
+            dest_blend: None,
+            cull_mode: None,
+            tex_filename: None,
+        };
+        let mut builder = GltfBuilder::new();
+        let tmp = std::env::temp_dir();
+        build_lmo_material(&mut builder, &mat, "shadow", &tmp, false);
+        let gltf_mat = &builder.materials[0];
+        let name = gltf_mat.name.as_ref().unwrap();
+        assert!(
+            name.contains("__PKO_T5_A0_O255"),
+            "type 5 should have T5 suffix, got: {}",
+            name
+        );
+        // Subtractive is effect → Opaque alpha mode (shader handles blend)
+        assert_eq!(
+            gltf_mat.alpha_mode,
+            Checked::Valid(gltf_json::material::AlphaMode::Opaque)
+        );
+    }
+
+    // ---- C2: Type 0 partial opacity tests ----
+
+    #[test]
+    fn build_material_type0_partial_opacity_gets_suffix() {
+        // C2 fix: Type 0 (FILTER) with opacity < 1.0 should get __PKO_T0_A0_O{n}
+        // so Unity routes it to TOP/Effect with SrcAlpha/InvSrcAlpha blend.
+        let mat = lmo::LmoMaterial {
+            diffuse: [0.5, 0.6, 0.7, 1.0],
+            ambient: [0.1, 0.1, 0.1, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
+            opacity: 0.5,
+            transp_type: 0,
+            alpha_test_enabled: false,
+            alpha_ref: 0,
+            src_blend: None,
+            dest_blend: None,
+            cull_mode: None,
+            tex_filename: None,
+        };
+        let mut builder = GltfBuilder::new();
+        let tmp = std::env::temp_dir();
+        build_lmo_material(&mut builder, &mat, "glass", &tmp, false);
+        let gltf_mat = &builder.materials[0];
+        let name = gltf_mat.name.as_ref().unwrap();
+        // opacity 0.5 * 255 = 127.5 → 128
+        assert!(
+            name.contains("__PKO_T0_A0_O128"),
+            "type 0 partial opacity should have suffix T0_A0_O128, got: {}",
+            name
+        );
+        // Should use Blend alpha mode (not Opaque)
+        assert_eq!(
+            gltf_mat.alpha_mode,
+            Checked::Valid(gltf_json::material::AlphaMode::Blend),
+            "type 0 partial opacity should use Blend alpha mode"
+        );
+    }
+
+    #[test]
+    fn build_material_type0_partial_opacity_with_alpha_test() {
+        // C2 + M4: Type 0 with both partial opacity AND alpha test
+        // The ALPHAREF should be scaled: min(opacity * alphaRef, 129)
+        let mat = lmo::LmoMaterial {
+            diffuse: [0.5, 0.6, 0.7, 1.0],
+            ambient: [0.1, 0.1, 0.1, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
+            opacity: 0.7,
+            transp_type: 0,
+            alpha_test_enabled: true,
+            alpha_ref: 129,
+            src_blend: None,
+            dest_blend: None,
+            cull_mode: None,
+            tex_filename: None,
+        };
+        let mut builder = GltfBuilder::new();
+        let tmp = std::env::temp_dir();
+        build_lmo_material(&mut builder, &mat, "fence", &tmp, false);
+        let gltf_mat = &builder.materials[0];
+        let name = gltf_mat.name.as_ref().unwrap();
+        // opacity 0.7 * 255 = 178.5 → 179
+        assert!(
+            name.contains("__PKO_T0_A129_O179"),
+            "type 0 with alpha test + partial opacity should encode both, got: {}",
+            name
+        );
+    }
+
+    #[test]
+    fn build_material_type0_full_opacity_still_no_suffix() {
+        // Regression: full opacity (1.0) type 0 without alpha test → no suffix
+        let mat = lmo::LmoMaterial {
+            diffuse: [0.5, 0.6, 0.7, 1.0],
+            ambient: [0.1, 0.1, 0.1, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
+            opacity: 1.0,
+            transp_type: 0,
+            alpha_test_enabled: false,
+            alpha_ref: 0,
+            src_blend: None,
+            dest_blend: None,
+            cull_mode: None,
+            tex_filename: None,
+        };
+        let mut builder = GltfBuilder::new();
+        let tmp = std::env::temp_dir();
+        build_lmo_material(&mut builder, &mat, "stone", &tmp, false);
+        let gltf_mat = &builder.materials[0];
+        let name = gltf_mat.name.as_ref().unwrap();
+        assert!(
+            !name.contains("__PKO_"),
+            "type 0 full opacity should have no suffix, got: {}",
+            name
+        );
     }
 }

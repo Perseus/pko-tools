@@ -1,0 +1,269 @@
+OpenAI Codex v0.104.0 (research preview)
+--------
+workdir: /Users/anirudh/gamedev/pko-tools
+model: gpt-5.3-codex
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: auto
+session id: 019c96ce-5232-7662-9177-30d74e7b2a6a
+--------
+user
+Read the file at /Users/anirudh/gamedev/pko-tools/agents/counselors/1772056435-render-state-parity-review-1772056505549/prompt.md and follow the instructions within it.
+deprecated: `collab` is deprecated. Use `[features].multi_agent` instead.
+  Enable it with `--enable multi_agent` or `[features].multi_agent` in config.toml. See https://github.com/openai/codex/blob/main/docs/config.md#feature-flags for details.
+mcp: linear starting
+mcp: unity starting
+mcp: unity ready
+mcp: linear ready
+mcp startup: ready: unity, linear
+
+thinking
+**Preparing file inspection**
+codex
+I’m going to open the referenced `prompt.md` first, extract its exact instructions, and then execute them step by step.
+exec
+/bin/zsh -lc 'cat /Users/anirudh/gamedev/pko-tools/agents/counselors/1772056435-render-state-parity-review-1772056505549/prompt.md' in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+# Review Request: Render State Parity Pipeline
+
+## Question
+Review the Render State Parity Pipeline implementation across 3 phases. Focus on:
+1. **Shader correctness** — Are the property-driven blend modes in TOP_Effect.shader correct for URP? Is the CBUFFER layout SRP-Batcher compatible? Are there any issues with the DepthOnly pass?
+2. **Suffix parsing robustness** in TOPMaterialReplacer.cs — Any edge cases missed in TryParsePkoSuffix? Could texture names containing "__PKO_T" cause false positives? Is the parsing order (structured suffix → legacy suffix → terrain → default) correct?
+3. **Rust exporter logic** — Is the type canonicalization (6-8→1) correct? Is the suffix generation correct for all opacity/alpha_ref values? Are the D3D blend constants correct?
+4. **Visual regressions** — Changing alpha mode for additive+alpha-test from Opaque to Mask: could glTFast or Unity handle Mask differently for transparent-queue materials? Any sorting issues?
+
+## Context
+
+### PKO Engine Blend Mode Reference (lwResourceMgr.cpp:2087-2109)
+
+| transp_type | Name | SrcBlend | DestBlend |
+|-------------|------|----------|-----------|
+| 0 | FILTER | (no blend) | (no blend) |
+| 1 | ADDITIVE | ONE | ONE |
+| 2 | ADDITIVE1 | SRCCOLOR | ONE |
+| 3 | ADDITIVE2 | SRCCOLOR | INVSRCCOLOR |
+| 4 | ADDITIVE3 | SRCALPHA | DESTALPHA |
+
+thinking
+**Planning independent code review**
+codex
+I’ve extracted the review brief. Next I’ll inspect the real repository files for any differences from the snippets, then provide a direct risk-focused review with concrete recommendations.
+exec
+/bin/zsh -lc 'git status --short' in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "rg --files | rg 'TOP_Effect\\.shader|TOPMaterialReplacer\\.cs|scene_model\\.rs|lmo\\.rs'" in /Users/anirudh/gamedev/pko-tools succeeded in 50ms:
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-8KvUig3t' (errno=Operation not permitted)
+git: warning: confstr() failed with code 5: couldn't get path of DARWIN_USER_TEMP_DIR; using /tmp instead
+git: error: couldn't create cache file '/tmp/xcrun_db-DGnY48kj' (errno=Operation not permitted)
+?? agents/
+ succeeded in 51ms:
+src-tauri/src/map/lmo.rs
+src-tauri/src/map/scene_model.rs
+
+thinking
+**Searching for shader by content**
+codex
+I found the Rust files directly; the Unity shader/C# files may be in another path or not checked in. I’ll locate them by content search and then review all four implementation areas.
+exec
+/bin/zsh -lc "rg -n \"Shader \\\"TOP/Effect\\\"|TryParsePkoSuffix|GetOrCreateEffectMaterial|__PKO_T\" -S" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+Total output lines: 129
+
+src-tauri/src/map/scene_model.rs:430:            "{}__PKO_T{}_A{}_O{}",
+src-tauri/src/map/scene_model.rs:2139:                    .contains("__PKO_T1_A0_O255"),
+src-tauri/src/map/scene_model.rs:2168:            name.contains("__PKO_T3_A0_O191"),
+src-tauri/src/map/scene_model.rs:2208:            name.contains("__PKO_T1_A129_O255"),
+src-tauri/src/map/scene_model.rs:2262:            name.contains("__PKO_T0_A129_O255"),
+src-tauri/src/map/scene_model.rs:2288:            name.contains("__PKO_T5_A0_O255"),
+agents/counselors/1772054423-render-state-parity-review/prompt.md:8:2. **Encoding strategy**: Is encoding render state via material name suffixes (`__PKO_T{n}_A{n}_O{n}`) the right approach vs glTF extras or other mechanisms?
+agents/counselors/1772054423-render-state-parity-review/prompt.md:14:8. **Backward compatibility**: The plan replaces `__PKO_BLEND_ADD` with `__PKO_T1_A0_O100`. Is the transition strategy sound?
+agents/counselors/1772054423-render-state-parity-review/prompt.md:52:- Write structured material name suffix: `materialName__PKO_T{transp_type}_A{alpha_ref}_O{opacity_pct}`
+agents/counselors/1772054423-render-state-parity-review/prompt.md:65:- Parse `__PKO_T{n}_A{n}_O{n}` suffix
+agents/counselors/1772054423-render-state-parity-review/prompt.md:73:- Replace `__PKO_BLEND_ADD` with structured `__PKO_T{n}_A{n}_O{n}` suffix
+agents/counselors/1772054423-render-state-parity-review/prompt.md:74:- FILTER with alpha test encoded as `__PKO_T0_A129_O100`
+agents/counselors/1772054423-render-state-parity-review/prompt.md:232:    mats[i] = GetOrCreateEffectMaterial(tex, sharpSparkle, sharpSparkleAlphaClip);
+agents/counselors/1772054423-render-state-parity-review/prompt.md:241:static Material GetOrCreateEffectMaterial(Texture tex, bool sharpSparkle, float sharpAlphaClip)
+agents/counselors/1772054423-render-state-parity-review/prompt.md:255:Shader "TOP/Effect"
+agents/counselors/plans/claude-sonnet.md:15:- Add `TryParsePkoSuffix()` to parse `__PKO_T{n}_A{n}_O{n}` suffix
+agents/counselors/plans/claude-sonnet.md:17:- Expand `GetOrCreateEffectMaterial()` to accept `transpType`, `alphaRef`, `opacityByte`; sets `_SrcBlend`, `_DstBlend`, `_Opacity`, optionally enables `_ALPHATEST_ON`
+agents/counselors/plans/claude-sonnet.md:19:- In `Awake()` loop: `__PKO_BLEND_ADD` (legacy, type=1) → backwards compat; `__PKO_T0_*` → `GetOrCreateMaterial()` (StaticMesh); `__PKO_T{1-8}_*` → `GetOrCreateEffectMaterial()` with parsed params
+exec
+/bin/zsh -lc "find . -name 'TOP_Effect.shader' -o -name 'TOPMaterialReplacer.cs'" in /Users/anirudh/gamedev/pko-tools succeeded in 6.21s:
+
+
+thinking
+**Preparing independent review of Rust code**
+codex
+I’m now validating the Rust implementation details directly (`scene_model.rs` and `lmo.rs`) to ground the review in actual code, then I’ll deliver a concise verdict by risk area.
+exec
+/bin/zsh -lc "nl -ba src-tauri/src/map/scene_model.rs | sed -n '2060,2325p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "nl -ba src-tauri/src/map/scene_model.rs | sed -n '360,520p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "nl -ba src-tauri/src/map/lmo.rs | sed -n '1,140p'" in /Users/anirudh/gamedev/pko-tools succeeded in 50ms:
+  2060	    // ================================================================
+  2061	
+  2062	    #[test]
+  2063	    fn default_blend_for_all_transp_types() {
+  2064	        // Type 0 (FILTER): no blend set
+  2065	        assert_eq!(default_src_blend_for_transp_type(0), None);
+  2066	        assert_eq!(default_dst_blend_for_transp_type(0), None);
+  2067	
+  2068	        // Type 1 (ADDITIVE): One/One
+  2069	        assert_eq!(default_src_blend_for_transp_type(1), Some(D3DBLEND_ONE));
+  2070	        assert_eq!(default_dst_blend_for_transp_type(1), Some(D3DBLEND_ONE));
+  2071	
+  2072	        // Type 2 (ADDITIVE1): SrcColor/One
+  2073	        assert_eq!(default_src_blend_for_transp_type(2), Some(D3DBLEND_SRCCOLOR));
+  2074	        assert_eq!(default_dst_blend_for_transp_type(2), Some(D3DBLEND_ONE));
+  2075	
+  2076	        // Type 3 (ADDITIVE2): SrcColor/InvSrcColor
+  2077	        assert_eq!(default_src_blend_for_transp_type(3), Some(D3DBLEND_SRCCOLOR));
+  2078	        assert_eq!(
+  2079	            default_dst_blend_for_transp_type(3),
+ succeeded in 50ms:
+   360	    // Canonicalize types 6-8 to type 1 (they are indistinguishable in engine behavior)
+   361	    let effective_transp = if mat.transp_type >= 6 { 1 } else { mat.transp_type };
+   362	    let is_effect = effective_transp != lmo::TRANSP_FILTER;
+   363	
+   364	    let base_color = [
+   365	        mat.diffuse[0].clamp(0.0, 1.0),
+   366	        mat.diffuse[1].clamp(0.0, 1.0),
+   367	        mat.diffuse[2].clamp(0.0, 1.0),
+   368	        mat.opacity.clamp(0.0, 1.0),
+   369	    ];
+   370	
+   371	    // Effect materials (types 1-5): Unity shader handles blending, use Opaque alpha mode
+   372	    // UNLESS alpha test is also enabled — then use Mask so glTF importers respect the cutoff.
+   373	    // Non-effect (type 0): use existing alpha test / opacity logic.
+   374	    let alpha_mode = if is_effect {
+   375	        if mat.alpha_test_enabled {
+   376	            Checked::Valid(gltf_json::material::AlphaMode::Mask)
+   377	        } else {
+   378	            Checked::Valid(gltf_json::material::AlphaMode::Opaque)
+   379	        }
+ succeeded in 51ms:
+     1	//! LMO file parser — multi-geometry-object container format for scene buildings/models.
+     2	//!
+     3	//! Binary layout:
+     4	//! ```text
+     5	//! [4 bytes]  version (DWORD, typically 0x1005)
+     6	//! [4 bytes]  obj_num (geometry objects + optional global helper)
+     7	//! [obj_num × 12 bytes]  Header table:
+     8	//!     type(4) — 1=GEOMETRY, 2=HELPER
+     9	//!     addr(4) — absolute file offset
+    10	//!     size(4) — data size
+    11	//!
+    12	//! TYPE 1 (Geometry Object) at each addr:
+    13	//!     [116 bytes]  Header: id(4) + parent_id(4) + type(4) + mat_local(64) +
+    14	//!                  rcci(16) + state_ctrl(8) + mtl_size(4) + mesh_size(4) +
+    15	//!                  helper_size(4) + anim_size(4)
+    16	//!     Materials:   mtl_num(4) + mtl_num × lwMtlTexInfo
+    17	//!     Mesh:        lwMeshInfoHeader + vertices + normals + texcoords + colors + indices + subsets
+    18	//!     Helpers:     (skip)
+    19	//!     Animation:   (skip)
+    20	//! ```
+
+thinking
+**Inspecting blend function definitions**
+codex
+I confirmed the Rust side implements the described changes and has targeted tests. I’ll check the blend helper functions too, then provide the independent critique including specific failure modes and alternatives.
+exec
+/bin/zsh -lc 'rg -n "default_src_blend_for_transp_type|default_dst_blend_for_transp_type|D3DBLEND_" src-tauri/src/map/scene_model.rs' in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+320:const D3DBLEND_ZERO: u32 = 1;
+321:const D3DBLEND_ONE: u32 = 2;
+322:const D3DBLEND_SRCCOLOR: u32 = 3;
+323:const D3DBLEND_INVSRCCOLOR: u32 = 4;
+324:const D3DBLEND_SRCALPHA: u32 = 5;
+325:const D3DBLEND_DESTALPHA: u32 = 7;
+328:fn default_src_blend_for_transp_type(transp_type: u32) -> Option<u32> {
+331:        1 => Some(D3DBLEND_ONE),        // ADDITIVE: One/One
+332:        2 => Some(D3DBLEND_SRCCOLOR),   // ADDITIVE1: SrcColor/One
+333:        3 => Some(D3DBLEND_SRCCOLOR),   // ADDITIVE2: SrcColor/InvSrcColor
+334:        4 => Some(D3DBLEND_SRCALPHA),   // ADDITIVE3: SrcAlpha/DestAlpha
+335:        5 => Some(D3DBLEND_ZERO),       // SUBTRACTIVE: Zero/InvSrcColor
+336:        _ => Some(D3DBLEND_ONE),        // 6-8 fall through to ONE/ONE
+341:fn default_dst_blend_for_transp_type(transp_type: u32) -> Option<u32> {
+344:        1 => Some(D3DBLEND_ONE),
+345:        2 => Some(D3DBLEND_ONE),
+346:        3 => Some(D3DBLEND_INVSRCCOLOR),
+347:        4 => Some(D3DBLEND_DESTALPHA),
+348:        5 => Some(D3DBLEND_INVSRCCOLOR),
+349:        _ => Some(D3DBLEND_ONE),
+
+thinking
+**Reviewing function block near line 328**
+exec
+/bin/zsh -lc "nl -ba src-tauri/src/map/scene_model.rs | sed -n '312,356p'" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+   312	    img.write_to(&mut cursor, image::ImageFormat::Png).ok()?;
+   313	    Some(format!(
+   314	        "data:image/png;base64,{}",
+   315	        BASE64_STANDARD.encode(&png_data)
+   316	    ))
+   317	}
+   318	
+   319	/// D3D blend constants matching D3DBLEND enum values used in LMO render states.
+   320	const D3DBLEND_ZERO: u32 = 1;
+   321	const D3DBLEND_ONE: u32 = 2;
+   322	const D3DBLEND_SRCCOLOR: u32 = 3;
+   323	const D3DBLEND_INVSRCCOLOR: u32 = 4;
+   324	const D3DBLEND_SRCALPHA: u32 = 5;
+   325	const D3DBLEND_DESTALPHA: u32 = 7;
+   326	
+   327	/// Returns the expected D3D SrcBlend value for a given transp_type, or None for type 0.
+   328	fn default_src_blend_for_transp_type(transp_type: u32) -> Option<u32> {
+   329	    match transp_type {
+   330	        0 => None,                      // FILTER: no blend set
+   331	        1 => Some(D3DBLEND_ONE),        // ADDITIVE: One/One
+
+thinking
+**Summarizing detailed review findings**
+codex
+**Findings (ordered by severity)**
+
+1. **High: suffix parser is too permissive and can mis-route materials.**  
+In `TOPMaterialReplacer.cs` (`TryParsePkoSuffix` snippet), using `IndexOf("__PKO_T")` plus partial token parsing accepts non-terminal/embedded patterns and ignores trailing junk (for example `"...__PKO_T1_A0_O255_extra"`). That can create false positives and wrong shader routing.  
+Fix: require an end-anchored full match (`__PKO_T(\d+)_A(\d+)_O(\d+)$`) or at least `LastIndexOf` + exact end-of-string validation.
+
+2. **High: Rust canonicalization currently maps `>=6` to type 1, not just 6-8.**  
+[`scene_model.rs:360`](file:///Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs:360) uses `if mat.transp_type >= 6 { 1 }`, which silently remaps unknown future/corrupt types (9+) to additive. Same pattern exists in default blend helpers (`_ => One/One`) at [`scene_model.rs:336`](file:///Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs:336) and [`scene_model.rs:349`](file:///Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs:349).  
+Fix: canonicalize only `6..=8`; keep others explicit (warn + preserve or fail fast).
+
+3. **Medium: effect shader alpha-test materials stay in transparent queue by design, which can cause sorting edge cases.**  
+`TOP/Effect` is tagged/render-queued transparent, and replacer sets queue 3000 even when `_ALPHATEST_ON`. That avoids glTFast queue dependence, but alpha-clipped additive objects can still exhibit transparent sorting artifacts in dense overlap cases.  
+Verdict: acceptable tradeoff for parity with PKO-style effect rendering, but it is not “free” of regression risk.
+
+4. **Medium: static material caches can accumulate stale entries across scene churn.**  
+`s_effectCache` / `s_materialCache` never clear. In long sessions (or domain-reload-disabled play mode), this risks unbounded growth and stale references.  
+Fix: clear on scene unload / `OnDestroy`, or cap with LRU.
+
+---
+
+**Answers to your 4 review axes**
+
+1. **Shader correctness (URP/SRP Batcher/DepthOnly):**  
+- Property-driven blend mapping is correct for URP fixed-function blend states.  
+- `UnityPerMaterial` layout shown is SRP-Batcher compatible (consistent per-pass CBUFFER, 16-byte packing is fine).  
+- DepthOnly pass is functionally okay, but mostly inert when `_ZWrite=0`; that’s expected. The real risk is if `_ZWrite=1` is ever used broadly on effect materials.
+
+2. **Suffix parsing robustness / order:**  
+- Parsing logic has the false-positive issue above; tighten it.  
+- Concern about texture names containing `__PKO_T` is real in principle (low probability, high confusion cost when it happens).  
+- Routing order (structured → legacy → terrain → default) is correct.
+
+3. **Rust exporter logic:**  
+- D3D blend constants look correct.  
+- Suffix generation format is good and consistent with Unity-side decode.  
+- Type canonicalization intent is correct, implementation predicate is too broad (`>=6`).
+
+4. **Visual regression from additive+alpha-test `Opaque`→`Mask`:**  
+- If replacer succeeds, behavior should improve (cutoff preserved) and queue still ends at transparent effect material.  
+- If replacer fails/misses, `Mask` fallback can render more visibly wrong than previous opaque fallback. Parser hardening is therefore critical.
+
+---
+
+**Strong recommendation**
+- Lock parser to strict end-anchored format and add negative tests for malformed names.  
+- Restrict canonicalization to `6..=8` only and add explicit test for `9` behavior.  
+These two changes remove the highest-risk failure modes without changing the overall design.
+tokens used
+53,936
