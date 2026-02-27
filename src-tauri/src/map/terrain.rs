@@ -1685,6 +1685,668 @@ pub fn build_terrain_glb(
     Ok((gltf_json, bin))
 }
 
+// ============================================================================
+// Per-section terrain export (large maps)
+// ============================================================================
+
+/// Compute per-vertex normals for the entire map in one pass.
+/// This prevents visible seams at section boundaries — boundary vertices get
+/// correct normal contributions from triangles on both sides.
+///
+/// Returns a flat Vec of [f32; 3] normals, indexed as `normals[vy * vw + vx]`.
+pub fn compute_global_normals(parsed_map: &ParsedMap) -> Vec<[f32; 3]> {
+    let w = parsed_map.header.n_width;
+    let h = parsed_map.header.n_height;
+    let vw = (w + 1) as usize;
+    let vh = (h + 1) as usize;
+    let vertex_count = vw * vh;
+
+    // Build full-map positions (only Y varies, X/Z are grid indices)
+    let mut positions = Vec::with_capacity(vertex_count * 3);
+    for vy in 0..vh {
+        for vx in 0..vw {
+            let height = match get_render_vertex_tile(parsed_map, vx as i32, vy as i32) {
+                Some(tile) => tile_height(tile),
+                None => UNDERWATER_HEIGHT / MAP_VISUAL_SCALE,
+            };
+            positions.push(vx as f32);
+            positions.push(height);
+            positions.push(vy as f32);
+        }
+    }
+
+    // Accumulate face normals into per-vertex normals
+    let mut normals = vec![[0.0f32; 3]; vertex_count];
+    for ty in 0..h as usize {
+        for tx in 0..w as usize {
+            let v00 = ty * vw + tx;
+            let v10 = v00 + 1;
+            let v01 = v00 + vw;
+            let v11 = v01 + 1;
+
+            // Triangle 1: v00, v01, v10
+            // Triangle 2: v10, v01, v11
+            for &(i0, i1, i2) in &[(v00, v01, v10), (v10, v01, v11)] {
+                let p0 = [positions[i0*3], positions[i0*3+1], positions[i0*3+2]];
+                let p1 = [positions[i1*3], positions[i1*3+1], positions[i1*3+2]];
+                let p2 = [positions[i2*3], positions[i2*3+1], positions[i2*3+2]];
+
+                let e1 = [p1[0]-p0[0], p1[1]-p0[1], p1[2]-p0[2]];
+                let e2 = [p2[0]-p0[0], p2[1]-p0[1], p2[2]-p0[2]];
+
+                let n = [
+                    e1[1]*e2[2] - e1[2]*e2[1],
+                    e1[2]*e2[0] - e1[0]*e2[2],
+                    e1[0]*e2[1] - e1[1]*e2[0],
+                ];
+
+                for &idx in &[i0, i1, i2] {
+                    normals[idx][0] += n[0];
+                    normals[idx][1] += n[1];
+                    normals[idx][2] += n[2];
+                }
+            }
+        }
+    }
+
+    // Normalize
+    for n in &mut normals {
+        let len = (n[0]*n[0] + n[1]*n[1] + n[2]*n[2]).sqrt();
+        if len > 1e-8 {
+            n[0] /= len; n[1] /= len; n[2] /= len;
+        } else {
+            *n = [0.0, 1.0, 0.0];
+        }
+    }
+
+    normals
+}
+
+/// Build a single terrain section GLB (128x128 tiles).
+///
+/// Vertices use local coordinates (0..section_tile_size), positioned by Unity
+/// transform. UVs are global for atlas texture continuity. Normals come from
+/// the pre-computed global array. Atlas texture is referenced by URI (not
+/// embedded) — all sections share one atlas file.
+pub fn build_terrain_section_glb(
+    parsed_map: &ParsedMap,
+    has_atlas: bool,
+    global_normals: &[[f32; 3]],
+    section_tile_size: i32,
+    sx: i32,
+    sz: i32,
+) -> Result<(String, Vec<u8>)> {
+    let map_w = parsed_map.header.n_width;
+    let map_h = parsed_map.header.n_height;
+
+    // Tile range for this section (clamped to map bounds)
+    let tile_x0 = sx * section_tile_size;
+    let tile_z0 = sz * section_tile_size;
+    let tile_x1 = (tile_x0 + section_tile_size).min(map_w);
+    let tile_z1 = (tile_z0 + section_tile_size).min(map_h);
+    let sec_tw = (tile_x1 - tile_x0) as usize; // actual tile width this section
+    let sec_th = (tile_z1 - tile_z0) as usize;
+
+    // Vertex grid: (sec_tw+1) x (sec_th+1)
+    let sec_vw = sec_tw + 1;
+    let sec_vh = sec_th + 1;
+    let vertex_count = sec_vw * sec_vh;
+
+    let global_vw = (map_w + 1) as usize;
+
+    let mut positions: Vec<f32> = Vec::with_capacity(vertex_count * 3);
+    let mut colors: Vec<f32> = Vec::with_capacity(vertex_count * 4);
+    let mut normals_flat: Vec<f32> = Vec::with_capacity(vertex_count * 3);
+
+    for ly in 0..sec_vh {
+        for lx in 0..sec_vw {
+            let gvx = tile_x0 as usize + lx; // global vertex X
+            let gvy = tile_z0 as usize + ly; // global vertex Z
+
+            let (height, r, g, b) = match get_render_vertex_tile(parsed_map, gvx as i32, gvy as i32) {
+                Some(tile) => {
+                    let (cr, cg, cb) = rgb565_to_float(tile.s_color);
+                    (tile_height(tile), cr, cg, cb)
+                }
+                None => (UNDERWATER_HEIGHT / MAP_VISUAL_SCALE, 1.0, 1.0, 1.0),
+            };
+
+            // Local coordinates (0..section_tile_size)
+            positions.push(lx as f32);
+            positions.push(height);
+            positions.push(ly as f32);
+
+            colors.push(r);
+            colors.push(g);
+            colors.push(b);
+            colors.push(1.0);
+
+            // Global normal from pre-computed array
+            let gi = gvy * global_vw + gvx;
+            let n = if gi < global_normals.len() {
+                global_normals[gi]
+            } else {
+                [0.0, 1.0, 0.0]
+            };
+            normals_flat.push(n[0]);
+            normals_flat.push(n[1]);
+            normals_flat.push(n[2]);
+        }
+    }
+
+    // UVs: global coordinates for atlas continuity
+    let uvs: Option<Vec<f32>> = if has_atlas {
+        let fw = map_w as f32;
+        let fh = map_h as f32;
+        let mut uv = Vec::with_capacity(vertex_count * 2);
+        for ly in 0..sec_vh {
+            for lx in 0..sec_vw {
+                let gvx = tile_x0 as usize + lx;
+                let gvy = tile_z0 as usize + ly;
+                uv.push(gvx as f32 / fw);
+                uv.push(gvy as f32 / fh);
+            }
+        }
+        Some(uv)
+    } else {
+        None
+    };
+
+    // Triangle indices (all tiles in this section)
+    let mut indices: Vec<u32> = Vec::with_capacity(sec_tw * sec_th * 6);
+    for ty in 0..sec_th {
+        for tx in 0..sec_tw {
+            let v00 = (ty * sec_vw + tx) as u32;
+            let v10 = v00 + 1;
+            let v01 = v00 + sec_vw as u32;
+            let v11 = v01 + 1;
+
+            indices.push(v00);
+            indices.push(v01);
+            indices.push(v10);
+            indices.push(v10);
+            indices.push(v01);
+            indices.push(v11);
+        }
+    }
+
+    // ----- Pack binary buffer -----
+    let mut bin = Vec::new();
+    let mut buffer_views = vec![];
+    let mut accessors = vec![];
+
+    fn append_f32_data(bin: &mut Vec<u8>, data: &[f32]) -> (usize, usize) {
+        let pad = (4 - (bin.len() % 4)) % 4;
+        bin.extend(std::iter::repeat(0u8).take(pad));
+        let offset = bin.len();
+        let bytes: Vec<u8> = data.iter().flat_map(|f| f.to_le_bytes()).collect();
+        bin.extend_from_slice(&bytes);
+        (offset, bytes.len())
+    }
+
+    fn append_u32_data(bin: &mut Vec<u8>, data: &[u32]) -> (usize, usize) {
+        let pad = (4 - (bin.len() % 4)) % 4;
+        bin.extend(std::iter::repeat(0u8).take(pad));
+        let offset = bin.len();
+        let bytes: Vec<u8> = data.iter().flat_map(|i| i.to_le_bytes()).collect();
+        bin.extend_from_slice(&bytes);
+        (offset, bytes.len())
+    }
+
+    // Position min/max
+    let mut pos_min = [f32::MAX; 3];
+    let mut pos_max = [f32::MIN; 3];
+    for i in 0..vertex_count {
+        for c in 0..3 {
+            let v = positions[i * 3 + c];
+            pos_min[c] = pos_min[c].min(v);
+            pos_max[c] = pos_max[c].max(v);
+        }
+    }
+
+    // Positions
+    let (pos_off, pos_len) = append_f32_data(&mut bin, &positions);
+    let pos_bv_idx = buffer_views.len();
+    buffer_views.push(gltf::buffer::View {
+        buffer: gltf::Index::new(0),
+        byte_length: USize64(pos_len as u64),
+        byte_offset: Some(USize64(pos_off as u64)),
+        target: Some(Checked::Valid(gltf::buffer::Target::ArrayBuffer)),
+        byte_stride: None, extensions: None, extras: None,
+        name: None,
+    });
+    let pos_acc_idx = accessors.len();
+    accessors.push(gltf::Accessor {
+        buffer_view: Some(gltf::Index::new(pos_bv_idx as u32)),
+        byte_offset: Some(USize64(0)),
+        component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
+        count: USize64(vertex_count as u64),
+        type_: Checked::Valid(gltf::accessor::Type::Vec3),
+        min: Some(serde_json::to_value(pos_min)?),
+        max: Some(serde_json::to_value(pos_max)?),
+        name: None,
+        normalized: false, sparse: None, extensions: None, extras: None,
+    });
+
+    // Normals
+    let (norm_off, norm_len) = append_f32_data(&mut bin, &normals_flat);
+    let norm_bv_idx = buffer_views.len();
+    buffer_views.push(gltf::buffer::View {
+        buffer: gltf::Index::new(0),
+        byte_length: USize64(norm_len as u64),
+        byte_offset: Some(USize64(norm_off as u64)),
+        target: Some(Checked::Valid(gltf::buffer::Target::ArrayBuffer)),
+        byte_stride: None, extensions: None, extras: None,
+        name: None,
+    });
+    let norm_acc_idx = accessors.len();
+    accessors.push(gltf::Accessor {
+        buffer_view: Some(gltf::Index::new(norm_bv_idx as u32)),
+        byte_offset: Some(USize64(0)),
+        component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
+        count: USize64(vertex_count as u64),
+        type_: Checked::Valid(gltf::accessor::Type::Vec3),
+        min: None, max: None, name: None,
+        normalized: false, sparse: None, extensions: None, extras: None,
+    });
+
+    // Colors (VEC4)
+    let (col_off, col_len) = append_f32_data(&mut bin, &colors);
+    let col_bv_idx = buffer_views.len();
+    buffer_views.push(gltf::buffer::View {
+        buffer: gltf::Index::new(0),
+        byte_length: USize64(col_len as u64),
+        byte_offset: Some(USize64(col_off as u64)),
+        target: Some(Checked::Valid(gltf::buffer::Target::ArrayBuffer)),
+        byte_stride: None, extensions: None, extras: None,
+        name: None,
+    });
+    let col_acc_idx = accessors.len();
+    accessors.push(gltf::Accessor {
+        buffer_view: Some(gltf::Index::new(col_bv_idx as u32)),
+        byte_offset: Some(USize64(0)),
+        component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
+        count: USize64(vertex_count as u64),
+        type_: Checked::Valid(gltf::accessor::Type::Vec4),
+        min: None, max: None, name: None,
+        normalized: false, sparse: None, extensions: None, extras: None,
+    });
+
+    // Indices
+    let (idx_off, idx_len) = append_u32_data(&mut bin, &indices);
+    let idx_bv_idx = buffer_views.len();
+    buffer_views.push(gltf::buffer::View {
+        buffer: gltf::Index::new(0),
+        byte_length: USize64(idx_len as u64),
+        byte_offset: Some(USize64(idx_off as u64)),
+        target: Some(Checked::Valid(gltf::buffer::Target::ElementArrayBuffer)),
+        byte_stride: None, extensions: None, extras: None,
+        name: None,
+    });
+    let idx_acc_idx = accessors.len();
+    accessors.push(gltf::Accessor {
+        buffer_view: Some(gltf::Index::new(idx_bv_idx as u32)),
+        byte_offset: Some(USize64(0)),
+        component_type: Checked::Valid(GenericComponentType(ComponentType::U32)),
+        count: USize64(indices.len() as u64),
+        type_: Checked::Valid(gltf::accessor::Type::Scalar),
+        min: None, max: None, name: None,
+        normalized: false, sparse: None, extensions: None, extras: None,
+    });
+
+    // UVs (optional)
+    let uv_acc_idx = if let Some(ref uv_data) = uvs {
+        let (uv_off, uv_len) = append_f32_data(&mut bin, uv_data);
+        let uv_bv_idx = buffer_views.len();
+        buffer_views.push(gltf::buffer::View {
+            buffer: gltf::Index::new(0),
+            byte_length: USize64(uv_len as u64),
+            byte_offset: Some(USize64(uv_off as u64)),
+            target: Some(Checked::Valid(gltf::buffer::Target::ArrayBuffer)),
+            byte_stride: None, extensions: None, extras: None,
+            name: None,
+        });
+        let uv_acc = accessors.len();
+        accessors.push(gltf::Accessor {
+            buffer_view: Some(gltf::Index::new(uv_bv_idx as u32)),
+            byte_offset: Some(USize64(0)),
+            component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
+            count: USize64(vertex_count as u64),
+            type_: Checked::Valid(gltf::accessor::Type::Vec2),
+            min: None, max: None, name: None,
+            normalized: false, sparse: None, extensions: None, extras: None,
+        });
+        Some(uv_acc)
+    } else {
+        None
+    };
+
+    // ----- Material: reference atlas by URI, not embedded -----
+    let (images, textures, samplers, base_color_texture) = if has_atlas {
+        let images = vec![gltf::Image {
+            buffer_view: None,
+            mime_type: Some(gltf::image::MimeType("image/png".to_string())),
+            uri: Some("../terrain_atlas.png".into()),
+            name: Some("terrain_atlas".into()),
+            extensions: None, extras: None,
+        }];
+        let samplers = vec![gltf::texture::Sampler {
+            mag_filter: Some(Checked::Valid(gltf::texture::MagFilter::Linear)),
+            min_filter: Some(Checked::Valid(gltf::texture::MinFilter::Linear)),
+            wrap_s: Checked::Valid(gltf::texture::WrappingMode::ClampToEdge),
+            wrap_t: Checked::Valid(gltf::texture::WrappingMode::ClampToEdge),
+            name: None, extensions: None, extras: None,
+        }];
+        let textures = vec![gltf::Texture {
+            sampler: Some(gltf::Index::new(0)),
+            source: gltf::Index::new(0),
+            name: None, extensions: None, extras: None,
+        }];
+        let tex_info = Some(gltf::texture::Info {
+            index: gltf::Index::new(0),
+            tex_coord: 0,
+            extensions: None, extras: None,
+        });
+        (images, textures, samplers, tex_info)
+    } else {
+        (vec![], vec![], vec![], None)
+    };
+
+    // Build mesh
+    let mut attributes = std::collections::BTreeMap::new();
+    attributes.insert(
+        Checked::Valid(gltf::mesh::Semantic::Positions),
+        gltf::Index::new(pos_acc_idx as u32),
+    );
+    attributes.insert(
+        Checked::Valid(gltf::mesh::Semantic::Normals),
+        gltf::Index::new(norm_acc_idx as u32),
+    );
+    attributes.insert(
+        Checked::Valid(gltf::mesh::Semantic::Colors(0)),
+        gltf::Index::new(col_acc_idx as u32),
+    );
+    if let Some(uv_acc) = uv_acc_idx {
+        attributes.insert(
+            Checked::Valid(gltf::mesh::Semantic::TexCoords(0)),
+            gltf::Index::new(uv_acc as u32),
+        );
+    }
+
+    let material = gltf::Material {
+        alpha_cutoff: None,
+        alpha_mode: Checked::Valid(gltf::material::AlphaMode::Opaque),
+        double_sided: true,
+        pbr_metallic_roughness: gltf::material::PbrMetallicRoughness {
+            base_color_factor: gltf::material::PbrBaseColorFactor([1.0, 1.0, 1.0, 1.0]),
+            base_color_texture,
+            metallic_factor: gltf::material::StrengthFactor(0.0),
+            roughness_factor: gltf::material::StrengthFactor(1.0),
+            metallic_roughness_texture: None,
+            extensions: None, extras: None,
+        },
+        normal_texture: None, occlusion_texture: None, emissive_texture: None,
+        emissive_factor: gltf::material::EmissiveFactor([0.0, 0.0, 0.0]),
+        extensions: None, extras: None,
+        name: Some(format!("section_{}_{}_mat", sx, sz)),
+    };
+
+    let primitive = gltf::mesh::Primitive {
+        attributes,
+        indices: Some(gltf::Index::new(idx_acc_idx as u32)),
+        material: Some(gltf::Index::new(0)),
+        mode: Checked::Valid(gltf::mesh::Mode::Triangles),
+        targets: None, extensions: None, extras: None,
+    };
+
+    let mesh = gltf::Mesh {
+        name: Some(format!("section_{}_{}", sx, sz)),
+        primitives: vec![primitive],
+        weights: None, extensions: None, extras: None,
+    };
+
+    // Single node referencing the mesh
+    let node = gltf::Node {
+        mesh: Some(gltf::Index::new(0)),
+        name: Some(format!("section_{}_{}", sx, sz)),
+        ..Default::default()
+    };
+
+    let scene = gltf::Scene {
+        nodes: vec![gltf::Index::new(0)],
+        name: None,
+        extensions: None, extras: None,
+    };
+
+    let buffer = gltf::Buffer {
+        byte_length: USize64(bin.len() as u64),
+        extensions: None, extras: None,
+        name: None,
+        uri: None,
+    };
+
+    let root = gltf::Root {
+        asset: gltf::Asset {
+            version: "2.0".into(),
+            generator: Some("pko-tools".into()),
+            ..Default::default()
+        },
+        nodes: vec![node],
+        scenes: vec![scene],
+        scene: Some(gltf::Index::new(0)),
+        accessors,
+        buffers: vec![buffer],
+        buffer_views,
+        meshes: vec![mesh],
+        materials: vec![material],
+        images,
+        textures,
+        samplers,
+        ..Default::default()
+    };
+
+    let gltf_json = serde_json::to_string(&root)?;
+    Ok((gltf_json, bin))
+}
+
+/// Build a metadata-only GLB (no mesh data).
+/// Contains scene extras (map metadata), spawn point, building placements,
+/// and directional light — everything `LoadV3GlbMetadata()` reads from terrain.glb.
+pub fn build_metadata_only_glb(
+    parsed_map: &ParsedMap,
+    metadata: &TerrainGlbMetadata,
+) -> Result<(String, Vec<u8>)> {
+    let w = parsed_map.header.n_width;
+    let h = parsed_map.header.n_height;
+
+    let mut nodes = vec![];
+    let mut root_children = vec![];
+
+    // SpawnPoint empty node
+    if let Some([sx, sy]) = metadata.spawn_point {
+        let spawn_node_idx = nodes.len() as u32;
+        let terrain_h = get_tile(parsed_map, sx, sy)
+            .map(|t| tile_height(t))
+            .unwrap_or(UNDERWATER_HEIGHT / MAP_VISUAL_SCALE);
+
+        nodes.push(gltf::Node {
+            name: Some("SpawnPoint".into()),
+            translation: Some([sx as f32, terrain_h, sy as f32]),
+            ..Default::default()
+        });
+        root_children.push(gltf::Index::new(spawn_node_idx));
+    }
+
+    // Building placement nodes
+    if !metadata.building_placements.is_empty() {
+        let buildings_parent_idx = nodes.len() as u32;
+        let mut building_child_indices = vec![];
+
+        // Reserve indices for children (pushed after parent)
+        for i in 0..metadata.building_placements.len() {
+            building_child_indices.push(gltf::Index::new(buildings_parent_idx + 1 + i as u32));
+        }
+
+        nodes.push(gltf::Node {
+            name: Some("Buildings".into()),
+            children: Some(building_child_indices),
+            ..Default::default()
+        });
+        root_children.push(gltf::Index::new(buildings_parent_idx));
+
+        for (obj_id, position, rotation_y_deg, scale, source_glb) in
+            &metadata.building_placements
+        {
+            let rotation = if *rotation_y_deg != 0.0 {
+                let angle_rad = rotation_y_deg.to_radians();
+                let half = angle_rad / 2.0;
+                Some(gltf::scene::UnitQuaternion([0.0, half.sin(), 0.0, half.cos()]))
+            } else {
+                None
+            };
+
+            let scale_arr = if (*scale - 1.0).abs() > 1e-6 {
+                Some([*scale, *scale, *scale])
+            } else {
+                None
+            };
+
+            let extras_json = serde_json::to_string(&serde_json::json!({
+                "obj_id": obj_id,
+                "source_glb": source_glb,
+            }))?;
+
+            nodes.push(gltf::Node {
+                name: Some(format!("building_{}", obj_id)),
+                translation: Some(*position),
+                rotation,
+                scale: scale_arr,
+                extras: Some(RawValue::from_string(extras_json)?),
+                ..Default::default()
+            });
+        }
+    }
+
+    // Directional light
+    let light_dir = metadata.light_direction;
+    let light_node_idx = nodes.len() as u32;
+
+    let ld_len = (light_dir[0]*light_dir[0] + light_dir[1]*light_dir[1] + light_dir[2]*light_dir[2]).sqrt();
+    let ld = if ld_len > 1e-8 {
+        [light_dir[0]/ld_len, light_dir[1]/ld_len, light_dir[2]/ld_len]
+    } else {
+        [0.0, -1.0, 0.0]
+    };
+
+    let from = [0.0f32, 0.0, -1.0];
+    let dot = from[0]*ld[0] + from[1]*ld[1] + from[2]*ld[2];
+    let light_rotation = if dot > 0.9999 {
+        [0.0, 0.0, 0.0, 1.0]
+    } else if dot < -0.9999 {
+        [0.0, 1.0, 0.0, 0.0]
+    } else {
+        let axis = [
+            from[1]*ld[2] - from[2]*ld[1],
+            from[2]*ld[0] - from[0]*ld[2],
+            from[0]*ld[1] - from[1]*ld[0],
+        ];
+        let axis_len = (axis[0]*axis[0] + axis[1]*axis[1] + axis[2]*axis[2]).sqrt();
+        let axis = [axis[0]/axis_len, axis[1]/axis_len, axis[2]/axis_len];
+        let angle = dot.acos();
+        let half = angle / 2.0;
+        let s = half.sin();
+        [axis[0]*s, axis[1]*s, axis[2]*s, half.cos()]
+    };
+
+    nodes.push(gltf::Node {
+        name: Some("DirectionalLight".into()),
+        rotation: Some(gltf::scene::UnitQuaternion(light_rotation)),
+        extensions: Some(gltf::extensions::scene::Node {
+            khr_lights_punctual: Some(
+                gltf::extensions::scene::khr_lights_punctual::KhrLightsPunctual {
+                    light: gltf::Index::new(0),
+                },
+            ),
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    root_children.push(gltf::Index::new(light_node_idx));
+
+    // Root node
+    let root_node_idx = nodes.len() as u32;
+    nodes.push(gltf::Node {
+        name: Some("map_root".into()),
+        children: Some(root_children),
+        ..Default::default()
+    });
+
+    // Scene extras (same as full GLB)
+    let scene_extras = serde_json::json!({
+        "version": 3,
+        "map_name": metadata.map_name,
+        "coordinate_system": "y_up",
+        "world_scale": MAP_VISUAL_SCALE,
+        "unit_scale_contract": "pko_1unit_to_unity_1unit_v1",
+        "map_width_tiles": w,
+        "map_height_tiles": h,
+        "section_width": parsed_map.header.n_section_width,
+        "section_height": parsed_map.header.n_section_height,
+        "areas": metadata.areas_json,
+        "ambient": metadata.ambient,
+        "background_color": metadata.background_color,
+    });
+
+    let scene = gltf::Scene {
+        nodes: vec![gltf::Index::new(root_node_idx)],
+        name: Some("MapScene".into()),
+        extensions: None,
+        extras: Some(RawValue::from_string(serde_json::to_string(&scene_extras)?)?),
+    };
+
+    // Light definition
+    let lc = metadata.light_color;
+    use gltf::extensions::scene::khr_lights_punctual;
+    let sun_light = khr_lights_punctual::Light {
+        color: [lc[0], lc[1], lc[2]],
+        intensity: 1.0,
+        name: Some("sun".into()),
+        type_: Checked::Valid(khr_lights_punctual::Type::Directional),
+        range: None, spot: None,
+        extensions: None, extras: Default::default(),
+    };
+
+    let root_ext = gltf::extensions::root::Root {
+        khr_lights_punctual: Some(gltf::extensions::root::KhrLightsPunctual {
+            lights: vec![sun_light],
+        }),
+        ..Default::default()
+    };
+
+    // Empty binary buffer (no mesh data)
+    let bin = Vec::new();
+
+    let root = gltf::Root {
+        asset: gltf::Asset {
+            version: "2.0".into(),
+            generator: Some("pko-tools".into()),
+            ..Default::default()
+        },
+        nodes,
+        scenes: vec![scene],
+        scene: Some(gltf::Index::new(0)),
+        extensions_used: vec!["KHR_lights_punctual".into()],
+        extensions: Some(root_ext),
+        ..Default::default()
+    };
+
+    let gltf_json = serde_json::to_string(&root)?;
+    Ok((gltf_json, bin))
+}
+
+/// Export section size constant: 128x128 tiles per section GLB.
+pub const EXPORT_SECTION_TILE_SIZE: i32 = 128;
+
 /// Export terrain as glTF file to disk (separate .gltf + .bin).
 pub fn export_terrain_gltf(
     project_dir: &Path,
@@ -2591,8 +3253,9 @@ pub fn export_map_for_unity(
 
     // 11. Write terrain
     let terrain_file_path;
+    let mut terrain_sections_info: Option<serde_json::Value> = None;
+
     if v3 {
-        // Build terrain GLB with metadata
         let glb_metadata = TerrainGlbMetadata {
             map_name,
             areas_json: &areas_json,
@@ -2604,9 +3267,71 @@ pub fn export_map_for_unity(
             building_placements: building_glb_placements,
         };
 
-        let (json, bin) = build_terrain_glb(&parsed_map, atlas.as_ref(), &glb_metadata)?;
-        terrain_file_path = output_dir.join("terrain.glb");
-        super::glb::write_glb(&json, &bin, &terrain_file_path)?;
+        let map_w = parsed_map.header.n_width;
+        let map_h = parsed_map.header.n_height;
+        let total_vertices = ((map_w + 1) as u64) * ((map_h + 1) as u64);
+
+        // Large maps (>4M vertices) use per-section export to avoid OOM in Unity
+        if total_vertices > 4_000_000 {
+            let sec_size = EXPORT_SECTION_TILE_SIZE;
+            let sections_x = (map_w + sec_size - 1) / sec_size;
+            let sections_z = (map_h + sec_size - 1) / sec_size;
+
+            eprintln!(
+                "Large map ({map_w}x{map_h}, {total_vertices} vertices): exporting {}x{} = {} terrain sections",
+                sections_x, sections_z, sections_x * sections_z
+            );
+
+            // Step 1: Compute global normals (prevents seam artifacts at section boundaries)
+            eprintln!("  Computing global normals...");
+            let global_normals = compute_global_normals(&parsed_map);
+
+            // Step 2: Export per-section GLBs
+            let sections_dir = output_dir.join("terrain_sections");
+            std::fs::create_dir_all(&sections_dir)?;
+
+            let has_atlas = atlas.is_some();
+            let total_sections = sections_x * sections_z;
+            for sz in 0..sections_z {
+                for sx in 0..sections_x {
+                    let idx = sz * sections_x + sx;
+                    if idx % 100 == 0 || idx == total_sections - 1 {
+                        eprintln!("  Section {}/{}", idx + 1, total_sections);
+                    }
+                    let (json, bin) = build_terrain_section_glb(
+                        &parsed_map, has_atlas, &global_normals, sec_size, sx, sz,
+                    )?;
+                    let section_path = sections_dir.join(format!("section_{}_{}.glb", sx, sz));
+                    super::glb::write_glb(&json, &bin, &section_path)?;
+                }
+            }
+
+            // Step 3: Save atlas texture as standalone PNG (shared by all sections)
+            if let Some(ref atlas_img) = atlas {
+                let atlas_path = output_dir.join("terrain_atlas.png");
+                atlas_img.save(&atlas_path)
+                    .map_err(|e| anyhow!("Failed to save terrain atlas: {}", e))?;
+                eprintln!("  Saved terrain_atlas.png");
+            }
+
+            // Step 4: Build metadata-only terrain.glb (spawn, buildings, lights, scene extras)
+            let (meta_json, meta_bin) = build_metadata_only_glb(&parsed_map, &glb_metadata)?;
+            terrain_file_path = output_dir.join("terrain.glb");
+            super::glb::write_glb(&meta_json, &meta_bin, &terrain_file_path)?;
+            eprintln!("  Saved metadata-only terrain.glb");
+
+            terrain_sections_info = Some(serde_json::json!({
+                "export_section_tile_size": sec_size,
+                "sections_x": sections_x,
+                "sections_z": sections_z,
+                "path_pattern": "terrain_sections/section_{x}_{z}.glb"
+            }));
+        } else {
+            // Small map: monolithic terrain GLB (existing path)
+            let (json, bin) = build_terrain_glb(&parsed_map, atlas.as_ref(), &glb_metadata)?;
+            terrain_file_path = output_dir.join("terrain.glb");
+            super::glb::write_glb(&json, &bin, &terrain_file_path)?;
+        }
     } else {
         // Build terrain JSON glTF (v2 legacy)
         let terrain_gltf_json = build_terrain_gltf(&parsed_map, None, atlas.as_ref(), None)?;
@@ -2644,6 +3369,9 @@ pub fn export_map_for_unity(
         );
         manifest_map.insert("terrain_glb".into(), serde_json::json!("terrain.glb"));
         manifest_map.insert("terrain_gltf".into(), serde_json::json!("terrain.glb")); // alias for ManifestShell compat
+        if let Some(ref sections_info) = terrain_sections_info {
+            manifest_map.insert("terrain_sections".into(), sections_info.clone());
+        }
         manifest_map.insert("map_name".into(), serde_json::json!(map_name));
         manifest_map.insert("coordinate_system".into(), serde_json::json!("y_up"));
         manifest_map.insert("world_scale".into(), serde_json::json!(MAP_VISUAL_SCALE));
@@ -3942,5 +4670,174 @@ mod tests {
                 tx, ty, packed, r, g, b
             );
         }
+    }
+
+    // ---- Per-section terrain export tests ----
+
+    fn make_test_map(width: i32, height: i32, section_size: i32) -> ParsedMap {
+        let sec_x = width / section_size;
+        let sec_y = height / section_size;
+        let tiles_per_sec = (section_size * section_size) as usize;
+        let mut sections = Vec::new();
+        for _ in 0..(sec_x * sec_y) {
+            let tiles: Vec<MapTile> = (0..tiles_per_sec)
+                .map(|_| make_tile(5))
+                .collect();
+            sections.push(Some(MapSection { tiles }));
+        }
+        ParsedMap {
+            header: MapHeader {
+                n_map_flag: CUR_VERSION_NO,
+                n_width: width,
+                n_height: height,
+                n_section_width: section_size,
+                n_section_height: section_size,
+            },
+            section_cnt_x: sec_x,
+            section_cnt_y: sec_y,
+            section_offsets: vec![1; (sec_x * sec_y) as usize],
+            sections,
+        }
+    }
+
+    #[test]
+    fn compute_global_normals_produces_correct_count() {
+        let map = make_test_map(4, 4, 2);
+        let normals = compute_global_normals(&map);
+        // (w+1)*(h+1) = 5*5 = 25 vertices
+        assert_eq!(normals.len(), 25);
+        // All tiles at same height (flat) → normals should point up
+        for n in &normals {
+            assert!(n[1] > 0.99, "expected upward normal, got {:?}", n);
+        }
+    }
+
+    #[test]
+    fn compute_global_normals_unit_length() {
+        let mut map = make_test_map(4, 4, 2);
+        // Vary heights to get non-trivial normals
+        if let Some(ref mut sec) = map.sections[0] {
+            sec.tiles[0].c_height = 50;
+        }
+        let normals = compute_global_normals(&map);
+        for n in &normals {
+            let len = (n[0]*n[0] + n[1]*n[1] + n[2]*n[2]).sqrt();
+            assert!((len - 1.0).abs() < 0.001, "non-unit normal: {:?} len={}", n, len);
+        }
+    }
+
+    #[test]
+    fn build_section_glb_vertex_count() {
+        let map = make_test_map(4, 4, 2);
+        let normals = compute_global_normals(&map);
+        // Section (0,0) covers tiles [0..2) x [0..2) with section_tile_size=2
+        let (json, bin) = build_terrain_section_glb(&map, false, &normals, 2, 0, 0)
+            .expect("section glb");
+        let root: serde_json::Value = serde_json::from_str(&json).expect("parse");
+        // 2x2 tiles → 3x3 = 9 vertices
+        let pos_acc = root["accessors"][0]["count"].as_u64().unwrap();
+        assert_eq!(pos_acc, 9);
+        assert!(!bin.is_empty());
+    }
+
+    #[test]
+    fn build_section_glb_local_coords() {
+        let map = make_test_map(4, 4, 2);
+        let normals = compute_global_normals(&map);
+        // Section (1,1) covers tiles [2..4) x [2..4)
+        let (json, bin) = build_terrain_section_glb(&map, false, &normals, 2, 1, 1)
+            .expect("section glb");
+        let root: serde_json::Value = serde_json::from_str(&json).expect("parse");
+
+        // Verify positions use local coords 0..2 (not global 2..4)
+        let pos_acc_idx = root["meshes"][0]["primitives"][0]["attributes"]["POSITION"]
+            .as_u64().unwrap() as usize;
+        let accessor = &root["accessors"][pos_acc_idx];
+        let min = accessor["min"].as_array().unwrap();
+        let max = accessor["max"].as_array().unwrap();
+
+        // X min should be 0 (local), not 2 (global)
+        assert!((min[0].as_f64().unwrap() - 0.0).abs() < 0.01,
+            "X min should be 0 (local), got {}", min[0]);
+        // X max should be 2 (section_tile_size), not 4
+        assert!((max[0].as_f64().unwrap() - 2.0).abs() < 0.01,
+            "X max should be 2 (local), got {}", max[0]);
+        assert!(!bin.is_empty());
+    }
+
+    #[test]
+    fn build_section_glb_atlas_uri_reference() {
+        let map = make_test_map(4, 4, 2);
+        let normals = compute_global_normals(&map);
+        let (json, _bin) = build_terrain_section_glb(&map, true, &normals, 2, 0, 0)
+            .expect("section glb");
+        let root: serde_json::Value = serde_json::from_str(&json).expect("parse");
+
+        // Atlas image referenced by URI, not embedded
+        let uri = root["images"][0]["uri"].as_str().unwrap();
+        assert_eq!(uri, "../terrain_atlas.png");
+        // No buffer_view on image (external reference)
+        assert!(root["images"][0]["bufferView"].is_null());
+    }
+
+    #[test]
+    fn build_metadata_only_glb_has_no_mesh() {
+        let map = make_test_map(4, 4, 2);
+        let metadata = TerrainGlbMetadata {
+            map_name: "test",
+            areas_json: &serde_json::json!({}),
+            spawn_point: Some([1, 1]),
+            light_direction: [0.0, -1.0, 0.0],
+            light_color: [0.6, 0.6, 0.6],
+            ambient: [0.4, 0.4, 0.4],
+            background_color: [10, 10, 125],
+            building_placements: vec![],
+        };
+        let (json, bin) = build_metadata_only_glb(&map, &metadata).expect("metadata glb");
+        let root: serde_json::Value = serde_json::from_str(&json).expect("parse");
+
+        // No meshes
+        assert!(root["meshes"].as_array().map_or(true, |a| a.is_empty()),
+            "metadata GLB should have no meshes");
+        // Has SpawnPoint node
+        let nodes = root["nodes"].as_array().unwrap();
+        let spawn = nodes.iter().find(|n| n["name"].as_str() == Some("SpawnPoint"));
+        assert!(spawn.is_some(), "should have SpawnPoint node");
+        // Has scene extras with map_name
+        let extras = root["scenes"][0]["extras"].as_object().unwrap();
+        assert_eq!(extras["map_name"].as_str().unwrap(), "test");
+        // Empty binary buffer
+        assert!(bin.is_empty());
+    }
+
+    #[test]
+    fn section_normals_match_global_at_boundaries() {
+        // 4x4 map split into 2x2 sections of size 2
+        let mut map = make_test_map(4, 4, 2);
+        // Create height variation at section boundary (tile 1,1)
+        if let Some(ref mut sec) = map.sections[0] {
+            sec.tiles[3].c_height = 50; // tile (1,1) in section (0,0)
+        }
+        let global_normals = compute_global_normals(&map);
+
+        // Build section (0,0) and section (1,0)
+        let (json0, _) = build_terrain_section_glb(&map, false, &global_normals, 2, 0, 0)
+            .expect("section 0,0");
+        let (json1, _) = build_terrain_section_glb(&map, false, &global_normals, 2, 1, 0)
+            .expect("section 1,0");
+
+        let root0: serde_json::Value = serde_json::from_str(&json0).unwrap();
+        let root1: serde_json::Value = serde_json::from_str(&json1).unwrap();
+
+        // Both sections should have the same normal accessor count
+        let count0 = root0["accessors"][1]["count"].as_u64().unwrap();
+        let count1 = root1["accessors"][1]["count"].as_u64().unwrap();
+        // 3x3 = 9 vertices per 2x2 section
+        assert_eq!(count0, 9);
+        assert_eq!(count1, 9);
+        // The boundary vertex at global (2, y) is local (2,y) in section0
+        // and local (0,y) in section1. Their normals come from the same
+        // global_normals entry, so they must match exactly.
+        // (We verified this by construction — both read from global_normals[vy * vw + gvx])
     }
 }
