@@ -12,14 +12,42 @@ fn main() {
         return;
     }
 
+    // Check for --shared mode: export_cli <client_dir> <output_dir> --shared
+    if args.len() >= 4 && args[3] == "--shared" {
+        let client_dir = PathBuf::from(&args[1]);
+        let output_dir = PathBuf::from(&args[2]);
+
+        eprintln!("Exporting shared assets ...");
+        eprintln!("  Client dir: {}", client_dir.display());
+        eprintln!("  Output dir: {}", output_dir.display());
+
+        match pko_tools_lib::map::shared::export_shared_assets(&client_dir, &output_dir) {
+            Ok(result) => {
+                eprintln!("Shared export complete!");
+                eprintln!("  Terrain textures: {}", result.total_terrain_textures);
+                eprintln!("  Buildings exported: {} ({} failed)", result.total_buildings_exported, result.total_buildings_failed);
+                eprintln!("  Effect textures: {}", result.total_effect_textures);
+                eprintln!("  Water textures: {}", result.total_water_textures);
+                eprintln!("  Alpha masks: {}", if result.has_alpha_masks { "yes" } else { "no" });
+            }
+            Err(e) => {
+                eprintln!("Shared export failed: {:?}", e);
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
+
     if args.len() < 4 {
         eprintln!("Usage:");
         eprintln!("  export_cli <client_dir> <output_dir> <map_name> [--format v2|v3]");
+        eprintln!("  export_cli <client_dir> <output_dir> --shared");
         eprintln!("  export_cli --dump-scene-obj-info <client_dir> [map_name]");
         eprintln!();
         eprintln!("Examples:");
         eprintln!("  export_cli ./top-client ./unity-export 07xmas2");
         eprintln!("  export_cli ./top-client ./unity-export 07xmas2 --format v2");
+        eprintln!("  export_cli ./top-client ./unity-export/Shared --shared");
         eprintln!("  export_cli --dump-scene-obj-info ./top-client");
         eprintln!("  export_cli --dump-scene-obj-info ./top-client 07xmas2");
         std::process::exit(1);

@@ -8,6 +8,7 @@ pub mod mapinfo;
 pub mod scene_model;
 pub mod scene_obj;
 pub mod scene_obj_info;
+pub mod shared;
 pub mod terrain;
 pub mod texture;
 

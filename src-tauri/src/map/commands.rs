@@ -103,6 +103,32 @@ pub async fn batch_export_maps_for_unity(
 }
 
 // ============================================================================
+// Shared asset export
+// ============================================================================
+
+#[tauri::command]
+pub async fn export_shared_assets(
+    project_id: String,
+    output_dir: Option<String>,
+) -> Result<super::shared::SharedExportResult, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+
+    let out_dir = match output_dir {
+        Some(dir) => std::path::PathBuf::from(dir),
+        None => project
+            .project_directory
+            .join("pko-tools")
+            .join("exports")
+            .join("Shared"),
+    };
+
+    super::shared::export_shared_assets(project.project_directory.as_ref(), &out_dir)
+        .map_err(|e| e.to_string())
+}
+
+// ============================================================================
 // Building commands
 // ============================================================================
 
