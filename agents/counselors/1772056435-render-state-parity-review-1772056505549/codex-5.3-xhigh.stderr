@@ -1,0 +1,477 @@
+OpenAI Codex v0.104.0 (research preview)
+--------
+workdir: /Users/anirudh/gamedev/pko-tools
+model: gpt-5.3-codex
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: xhigh
+reasoning summaries: auto
+session id: 019c96cd-025c-7391-9dc2-5c12e72b2ed5
+--------
+user
+Read the file at /Users/anirudh/gamedev/pko-tools/agents/counselors/1772056435-render-state-parity-review-1772056505549/prompt.md and follow the instructions within it.
+deprecated: `collab` is deprecated. Use `[features].multi_agent` instead.
+  Enable it with `--enable multi_agent` or `[features].multi_agent` in config.toml. See https://github.com/openai/codex/blob/main/docs/config.md#feature-flags for details.
+mcp: linear starting
+mcp: unity starting
+mcp: unity ready
+mcp: linear ready
+mcp startup: ready: unity, linear
+
+thinking
+**Acknowledging user request**
+codex
+I’m going to open that `prompt.md` and execute its instructions exactly. First I’ll read the file contents, then I’ll carry out whatever workflow it specifies and report the results.
+
+thinking
+**Reading file contents**
+exec
+/bin/zsh -lc 'cat /Users/anirudh/gamedev/pko-tools/agents/counselors/1772056435-render-state-parity-review-1772056505549/prompt.md' in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+# Review Request: Render State Parity Pipeline
+
+## Question
+Review the Render State Parity Pipeline implementation across 3 phases. Focus on:
+1. **Shader correctness** — Are the property-driven blend modes in TOP_Effect.shader correct for URP? Is the CBUFFER layout SRP-Batcher compatible? Are there any issues with the DepthOnly pass?
+2. **Suffix parsing robustness** in TOPMaterialReplacer.cs — Any edge cases missed in TryParsePkoSuffix? Could texture names containing "__PKO_T" cause false positives? Is the parsing order (structured suffix → legacy suffix → terrain → default) correct?
+3. **Rust exporter logic** — Is the type canonicalization (6-8→1) correct? Is the suffix generation correct for all opacity/alpha_ref values? Are the D3D blend constants correct?
+4. **Visual regressions** — Changing alpha mode for additive+alpha-test from Opaque to Mask: could glTFast or Unity handle Mask differently for transparent-queue materials? Any sorting issues?
+
+## Context
+
+### PKO Engine Blend Mode Reference (lwResourceMgr.cpp:2087-2109)
+
+| transp_type | Name | SrcBlend | DestBlend |
+|-------------|------|----------|-----------|
+| 0 | FILTER | (no blend) | (no blend) |
+| 1 | ADDITIVE | ONE | ONE |
+| 2 | ADDITIVE1 | SRCCOLOR | ONE |
+| 3 | ADDITIVE2 | SRCCOLOR | INVSRCCOLOR |
+| 4 | ADDITIVE3 | SRCALPHA | DESTALPHA |
+
+thinking
+**Planning detailed code review**
+codex
+I’ve loaded the review brief. Next I’m inspecting the actual shader/C#/Rust files in this repo so the feedback is grounded in the implemented code and line-level references.
+exec
+/bin/zsh -lc pwd in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "rg --files /Users/anirudh/gamedev/pko-tools | rg 'TOP_Effect\\.shader|TOPMaterialReplacer\\.cs|scene_model\\.rs|lmo\\.rs'" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+/Users/anirudh/gamedev/pko-tools
+ succeeded in 51ms:
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs
+
+thinking
+**Searching for shader references**
+exec
+/bin/zsh -lc "rg -n \"class TOPMaterialReplacer|Shader \\\"TOP/Effect\\\"|TryParsePkoSuffix|__PKO_T\" /Users/anirudh/gamedev/pko-tools" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+Total output lines: 100
+
+/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review/prompt.md:8:2. **Encoding strategy**: Is encoding render state via material name suffixes (`__PKO_T{n}_A{n}_O{n}`) the right approach vs glTF extras or other mechanisms?
+/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review/prompt.md:14:8. **Backward compatibility**: The plan replaces `__PKO_BLEND_ADD` with `__PKO_T1_A0_O100`. Is the transition strategy sound?
+/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review/prompt.md:52:- Write structured material name suffix: `materialName__PKO_T{transp_type}_A{alpha_ref}_O{opacity_pct}`
+/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review/prompt.md:65:- Parse `__PKO_T{n}_A{n}_O{n}` suffix
+/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review/prompt.md:73:- Replace `__PKO_BLEND_ADD` with structured `__PKO_T{n}_A{n}_O{n}` suffix
+/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review/prompt.md:74:- FILTER with alpha test encoded as `__PKO_T0_A129_O100`
+/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review/prompt.md:255:Shader "TOP/Effect"
+/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review-1772054511320/claude-sonnet.md:89:The `__PKO_BLEND_ADD` → `__PKO_T1_A0_O100` transition is sound as long as the C# replacer detects both. One gap: `A0` in the new suffix for a type 1 material with alpha_test_enabled=false is technically correct (alpha test disabled), but what does the C# side do with `A0`? Does it mean "no alpha test" or "cutoff = 0"? Define `A0` explicitly as the sentinel for "alpha test disabled" in the parser, not as a cutoff value.
+/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review-1772054511320/codex-5.3-medium.stderr:35:2. **Encoding strategy**: Is encoding render state via material name suffixes (`__PKO_T{n}_A{n}_O{n}`) the right approach vs glTF extras or other mechanisms?
+/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review-1772054511320/codex-5.3-medium.stderr:41:8. **Backward compatibility**: The plan replaces `__PKO_BLEND_ADD` with `__PKO_T1_A0_O100`. Is the transition strategy sound?
+/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review-1772054511320/codex-5.3-medium.stderr:69:**2. Encoding Strategy (`__PKO_T{n}_A{n}_O{n}`)**
+/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review-1772054511320/claude-opus.md:35:**The format `__PKO_T{n}_A{n}_O{n}` is good but consider one addition:** include the raw src/dest blend when the LMO stores explicit overrides (i.e., when `src_blend`/`dest_blend` are `Some`). The engine's render state atom system allows per-material blend overrides that *differ* from the type-level defaults. The plan says "Use parsed src_blend/dest_blend from LmoMaterial when available, fall back to engine defaults" in Phase A but the suffix format doesn't encode them. If you discover materials where `src_blend` deviates from the type-level default, you'll lose that data.
+/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review-1772054511320/claude-opus.md:99:Replacing `__PKO_BLEND_ADD` with `__PKO_T1_A0_O100` means **existing exported glTF files and Unity scenes break** until the C# replacer is updated. The plan says Phase C adds backward compat detection for the old suffix, which is correct.
+/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review-1772054511320/claude-opus.md:121:The plan's suffix `__PKO_T1_A129_O100` encodes this, and the shader already needs `_Cutoff`. Just make sure the C# replacer sets **both** the blend properties AND the alpha cutoff when `A > 0`. The plan seems to handle this but it's worth calling out as a test case.
+/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review-1772054511320/codex-5.3-medium.md:16:**2. Encoding Strategy (`__PKO_T{n}_A{n}_O{n}`)**
+/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review-1772054511320/prompt.md:8:2. **Encoding strategy**: Is encoding render state via material name suffixes (`__PKO_T{n}_A{n}_O{n}`) the right approach vs glTF extras or other mechanisms?
+/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review-1772054511320/prompt.md:14:8. **Backward compatibility**: The plan replaces `__PKO_BLEND_ADD` with `__PKO_T1_A0_O100`. Is the transition strategy sound?
+/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review-1772054511320/prompt.md:52:- Write structured material name suffix: `materialName__PKO_T{transp_type}_A{alpha_ref}_O{opacity_pct}`
+exec
+/bin/zsh -lc "find /Users/anirudh/gamedev/pko-tools -name 'TOPMaterialReplacer.cs' -o -name 'TOP_Effect.shader' 2>/dev/null" in /Users/anirudh/gamedev/pko-tools succeeded in 5.89s:
+
+
+thinking
+**Investigating external code sources**
+codex
+I located the Rust implementation in-repo; the Unity shader/C# changes seem to be captured as snippets in the prompt bundle rather than tracked source here. I’m now checking the exact Rust code and tests for parity issues before I deliver findings.
+exec
+/bin/zsh -lc "sed -n '360,520p' /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,220p' /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc 'ls -la /Users/anirudh/gamedev/pko-tools/agents/counselors/1772056435-render-state-parity-review-1772056505549' in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+    // Canonicalize types 6-8 to type 1 (they are indistinguishable in engine behavior)
+    let effective_transp = if mat.transp_type >= 6 { 1 } else { mat.transp_type };
+    let is_effect = effective_transp != lmo::TRANSP_FILTER;
+
+    let base_color = [
+        mat.diffuse[0].clamp(0.0, 1.0),
+        mat.diffuse[1].clamp(0.0, 1.0),
+        mat.diffuse[2].clamp(0.0, 1.0),
+        mat.opacity.clamp(0.0, 1.0),
+    ];
+
+    // Effect materials (types 1-5): Unity shader handles blending, use Opaque alpha mode
+    // UNLESS alpha test is also enabled — then use Mask so glTF importers respect the cutoff.
+    // Non-effect (type 0): use existing alpha test / opacity logic.
+    let alpha_mode = if is_effect {
+        if mat.alpha_test_enabled {
+            Checked::Valid(gltf_json::material::AlphaMode::Mask)
+        } else {
+            Checked::Valid(gltf_json::material::AlphaMode::Opaque)
+        }
+ succeeded in 51ms:
+//! LMO file parser — multi-geometry-object container format for scene buildings/models.
+//!
+//! Binary layout:
+//! ```text
+//! [4 bytes]  version (DWORD, typically 0x1005)
+//! [4 bytes]  obj_num (geometry objects + optional global helper)
+//! [obj_num × 12 bytes]  Header table:
+//!     type(4) — 1=GEOMETRY, 2=HELPER
+//!     addr(4) — absolute file offset
+//!     size(4) — data size
+//!
+//! TYPE 1 (Geometry Object) at each addr:
+//!     [116 bytes]  Header: id(4) + parent_id(4) + type(4) + mat_local(64) +
+//!                  rcci(16) + state_ctrl(8) + mtl_size(4) + mesh_size(4) +
+//!                  helper_size(4) + anim_size(4)
+//!     Materials:   mtl_num(4) + mtl_num × lwMtlTexInfo
+//!     Mesh:        lwMeshInfoHeader + vertices + normals + texcoords + colors + indices + subsets
+//!     Helpers:     (skip)
+//!     Animation:   (skip)
+//! ```
+ succeeded in 50ms:
+total 48
+drwxr-xr-x@ 5 anirudh  staff    160 Feb 25 22:55 .
+drwxr-xr-x@ 7 anirudh  staff    224 Feb 25 22:55 ..
+-rw-r--r--@ 1 anirudh  staff   9607 Feb 25 22:55 claude-haiku.md
+-rw-r--r--@ 1 anirudh  staff      0 Feb 25 22:55 claude-haiku.stderr
+-rw-r--r--@ 1 anirudh  staff  11373 Feb 25 22:55 prompt.md
+
+thinking
+**Reviewing tests and helpers**
+exec
+/bin/zsh -lc "sed -n '240,380p' /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '2000,2325p' /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc 'rg -n "default_src_blend_for_transp_type|default_dst_blend_for_transp_type|__PKO_T|alpha_mode|alpha_cutoff|TRANSP_" /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs' in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+            extensions: None,
+            extras: None,
+            max: None,
+            min: None,
+            name: Some(format!("{}_accessor", name)),
+            normalized: false,
+            sparse: None,
+            type_: Checked::Valid(gltf_json::accessor::Type::Scalar),
+        });
+
+        acc_idx as u32
+    }
+}
+
+// ============================================================================
+// Build glTF material from LMO material data (with texture loading)
+// ============================================================================
+
+/// Try to find a texture file from the PKO project directory.
+/// Scene model textures can be in several directories.
+ succeeded in 51ms:
+                        .map(|e| {
+                            e.path()
+                                .extension()
+                                .map(|ext| ext.to_ascii_lowercase() == "dds")
+                                .unwrap_or(false)
+                        })
+                        .unwrap_or(false)
+                })
+            })
+            .and_then(|e| e.ok())
+            .map(|e| e.path());
+
+        let dds_path = match dds_file {
+            Some(p) => p,
+            None => return,
+        };
+
+        let result = load_texture_as_data_uri(&dds_path);
+        assert!(
+            result.is_some(),
+ succeeded in 50ms:
+328:fn default_src_blend_for_transp_type(transp_type: u32) -> Option<u32> {
+341:fn default_dst_blend_for_transp_type(transp_type: u32) -> Option<u32> {
+362:    let is_effect = effective_transp != lmo::TRANSP_FILTER;
+374:    let alpha_mode = if is_effect {
+388:    let alpha_cutoff = if mat.alpha_test_enabled {
+398:        let default_src = default_src_blend_for_transp_type(effective_transp);
+409:        let default_dst = default_dst_blend_for_transp_type(effective_transp);
+430:            "{}__PKO_T{}_A{}_O{}",
+499:        alpha_cutoff,
+500:        alpha_mode,
+1566:            gltf_mat.alpha_mode,
+1593:            gltf_mat.alpha_mode,
+1620:            gltf_mat.alpha_mode,
+1625:            .alpha_cutoff
+2065:        assert_eq!(default_src_blend_for_transp_type(0), None);
+2066:        assert_eq!(default_dst_blend_for_transp_type(0), None);
+2069:        assert_eq!(default_src_blend_for_transp_type(1), Some(D3DBLEND_ONE));
+2070:        assert_eq!(default_dst_blend_for_transp_type(1), Some(D3DBLEND_ONE));
+2073:        assert_eq!(default_src_blend_for_transp_type(2), Some(D3DBLEND_SRCCOLOR));
+2074:        assert_eq!(default_dst_blend_for_transp_type(2), Some(D3DBLEND_ONE));
+
+thinking
+**Planning targeted file search**
+exec
+/bin/zsh -lc "find /Users/anirudh/gamedev -name 'TOPMaterialReplacer.cs' -o -name 'TOP_Effect.shader' 2>/dev/null" in /Users/anirudh/gamedev/pko-tools succeeded in 9.51s:
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Effect.shader
+
+thinking
+**Inspecting referenced code files**
+codex
+I found the real Unity files under `/Users/anirudh/gamedev/client-unity/pko-client`, so I’m reviewing those directly (not just the snippet) along with the Rust code to catch any implementation drift.
+exec
+/bin/zsh -lc "nl -ba /Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Effect.shader | sed -n '1,320p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "nl -ba /Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs | sed -n '1,320p'" in /Users/anirudh/gamedev/pko-tools succeeded in 50ms:
+     1	Shader "TOP/Effect"
+     2	{
+     3	    Properties
+     4	    {
+     5	        _MainTex ("Texture", 2D) = "white" {}
+     6	        [Enum(UnityEngine.Rendering.BlendMode)] _SrcBlend ("Src Blend", Float) = 1  // One
+     7	        [Enum(UnityEngine.Rendering.BlendMode)] _DstBlend ("Dst Blend", Float) = 1  // One
+     8	        [Toggle] _ZWrite ("Z Write", Float) = 0
+     9	        _Opacity ("Opacity", Range(0, 1)) = 1.0
+    10	        [Toggle] _SharpSparkleAB ("Sharp Sparkle A/B", Float) = 0
+    11	        _SharpAlphaClip ("Sharp Alpha Clip", Range(0, 1)) = 0.22
+    12	        [Toggle(_ALPHATEST_ON)] _AlphaTest ("Alpha Test", Float) = 0
+    13	        _Cutoff ("Alpha Cutoff", Range(0,1)) = 0.5
+    14	        [Enum(Off,0,Front,1,Back,2)] _Cull ("Cull", Float) = 0
+    15	    }
+    16	    SubShader
+    17	    {
+    18	        // Original eff.fx technique t0 (Model): additive glow effects
+    19	        // Now property-driven: blend mode, depth write, cull, alpha test all configurable.
+    20	        // Defaults match original behavior: One/One additive, ZWrite Off, Cull Off.
+ succeeded in 50ms:
+     1	using System.Collections.Generic;
+     2	using UnityEngine;
+     3	using UnityEngine.Rendering;
+     4	
+     5	namespace PKO.Rendering
+     6	{
+     7	/// <summary>
+     8	/// Replaces glTFast-imported URP materials with TOP/ family shaders.
+     9	/// Finds the base texture from the original material and creates a cached
+    10	/// TOP material with that texture. Renderers sharing the same texture get
+    11	/// the same Material instance, enabling SRP Batcher batching.
+    12	///
+    13	/// Default shader is TOP/StaticMesh (terrain, buildings).
+    14	/// Set targetShaderName to "TOP/Character" for skinned character models.
+    15	///
+    16	/// When terrainTextureArray is assigned, terrain meshes (detected by texture
+    17	/// name containing "terrain" or "atlas") use the TOP/Terrain shader with
+    18	/// 4-layer alpha mask compositing instead of the baked atlas fallback.
+    19	///
+    20	/// Material name suffixes encode PKO render state:
+exec
+/bin/zsh -lc "nl -ba /Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs | sed -n '320,620p'" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+   320	        var mat = new Material(effectShader);
+   321	        string texName = tex != null ? tex.name : "NoTexture";
+   322	        mat.name = $"TOP_Effect_{texName}_T{transpType}";
+   323	
+   324	        if (tex != null)
+   325	            mat.SetTexture("_MainTex", tex);
+   326	
+   327	        // Blend mode from transp_type
+   328	        var (srcBlend, dstBlend) = GetBlendForTranspType(transpType);
+   329	
+   330	        // Opacity override: type 1 + opacity < 255 → SrcBlend becomes SrcAlpha
+   331	        // (matches lwResourceMgr.cpp:2114-2148 opacity interaction)
+   332	        float opacity = opacityByte / 255f;
+   333	        if (transpType == 1 && opacityByte < 255)
+   334	            srcBlend = BlendMode.SrcAlpha;
+   335	
+   336	        mat.SetFloat("_SrcBlend", (float)srcBlend);
+   337	        mat.SetFloat("_DstBlend", (float)dstBlend);
+   338	        mat.SetFloat("_ZWrite", 0f); // All effect types: ZWrite Off
+   339	        mat.SetFloat("_Opacity", opacity);
+
+thinking
+**Preparing line-number inspection**
+exec
+/bin/zsh -lc "nl -ba /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs | sed -n '300,520p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "nl -ba /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs | sed -n '2040,2315p'" in /Users/anirudh/gamedev/pko-tools succeeded in 50ms:
+   300	        Ok(img) => img,
+   301	        Err(e) => {
+   302	            eprintln!(
+   303	                "Warning: failed to decode texture {}: {}",
+   304	                path.display(),
+   305	                e
+   306	            );
+   307	            return None;
+   308	        }
+   309	    };
+   310	    let mut png_data = Vec::new();
+   311	    let mut cursor = std::io::Cursor::new(&mut png_data);
+   312	    img.write_to(&mut cursor, image::ImageFormat::Png).ok()?;
+   313	    Some(format!(
+   314	        "data:image/png;base64,{}",
+   315	        BASE64_STANDARD.encode(&png_data)
+   316	    ))
+   317	}
+   318	
+   319	/// D3D blend constants matching D3DBLEND enum values used in LMO render states.
+ succeeded in 52ms:
+  2040	        if !lmo_path.exists() {
+  2041	            return;
+  2042	        }
+  2043	
+  2044	        let json = build_gltf_from_lmo(&lmo_path, project_dir).unwrap();
+  2045	        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+  2046	
+  2047	        // Should have at least one mesh
+  2048	        assert!(parsed["meshes"].as_array().unwrap().len() >= 1);
+  2049	
+  2050	        // Check if textures are present (they should be if DDS loading works)
+  2051	        let images = parsed["images"].as_array();
+  2052	        if let Some(imgs) = images {
+  2053	            eprintln!("Version-0 LMO generated {} texture images", imgs.len());
+  2054	            assert!(!imgs.is_empty(), "version-0 LMO should have texture images");
+  2055	        }
+  2056	    }
+  2057	
+  2058	    // ================================================================
+  2059	    // Phase 3: Structured suffix + blend mode tests
+
+thinking
+**Inspecting rendering constants and state parsing**
+exec
+/bin/zsh -lc "nl -ba /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs | sed -n '560,760p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc 'rg -n "transp_type|src_blend|dest_blend|opacity|alpha_ref|normalized_alpha_enabled|effective_alpha_ref" /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs' in /Users/anirudh/gamedev/pko-tools succeeded in 50ms:
+70:    alpha_ref: Option<u8>,
+72:    src_blend: Option<u32>,
+73:    dest_blend: Option<u32>,
+77:    fn normalized_alpha_enabled(self) -> bool {
+81:    fn effective_alpha_ref(self) -> u8 {
+82:        self.alpha_ref.unwrap_or(129)
+126:    pub opacity: f32,
+127:    pub transp_type: u32,
+129:    pub alpha_ref: u8,
+130:    pub src_blend: Option<u32>,
+131:    pub dest_blend: Option<u32>,
+190:                rs.alpha_ref = Some((value0 & 0xFF) as u8);
+196:                rs.src_blend = Some(value0);
+199:                rs.dest_blend = Some(value0);
+214:    /// MTLTEX_VERSION0000: no opacity/transp, lwTexInfo_0000, old rs/tss (128 bytes each)
+216:    /// MTLTEX_VERSION0001: has opacity/transp, lwTexInfo_0001, old rs/tss (128 bytes each)
+218:    /// MTLTEX_VERSION0002+ / EXP_OBJ >= 1.0.0.0: has opacity/transp, lwTexInfo, new rs/tss (96 bytes each)
+226:///   - V0001: opacity(4) + transp(4) + lwMaterial(68) + lwRenderStateSetMtl2(128) + lwTexInfo_0001[4]
+227:///   - Current: opacity(4) + transp(4) + lwMaterial(68) + lwRenderStateAtom[8](96) + lwTexInfo[4]
+229:    // Opacity / transp_type — absent in V0000
+ succeeded in 51ms:
+   560	/// Decompose a 4x3 matrix (stored as 12 floats) into translation + quaternion rotation.
+   561	///
+   562	/// File layout: 12 floats in row-major order → 3 basis vectors (rows 0-2) + translation (row 3).
+   563	/// We construct a column-major Matrix4 matching the `LwMatrix43` convention from `math/mod.rs`.
+   564	fn decompose_matrix43(raw: &[f32; 12]) -> ([f32; 3], [f32; 4]) {
+   565	    // Construct column-major Matrix4 (same layout as LwMatrix43's br(map)):
+   566	    // Column 0: [raw[0], raw[1], raw[2], 0]
+   567	    // Column 1: [raw[3], raw[4], raw[5], 0]
+   568	    // Column 2: [raw[6], raw[7], raw[8], 0]
+   569	    // Column 3: [raw[9], raw[10], raw[11], 1]
+   570	    let mat = Matrix4::new(
+   571	        raw[0], raw[1], raw[2], 0.0, raw[3], raw[4], raw[5], 0.0, raw[6], raw[7], raw[8], 0.0,
+   572	        raw[9], raw[10], raw[11], 1.0,
+   573	    );
+   574	
+   575	    // Translation = 4th column
+   576	    let translation = [mat.w.x, mat.w.y, mat.w.z];
+   577	
+   578	    // Extract column vectors for rotation
+   579	    let mut col0 = Vector3::new(mat.x.x, mat.x.y, mat.x.z);
+
+thinking
+**Inspecting material reading code**
+exec
+/bin/zsh -lc "nl -ba /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs | sed -n '220,360p'" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+   220	}
+   221	
+   222	/// Read a single material entry from cursor, format determined by `mtl_ver`.
+   223	///
+   224	/// Three formats exist with different render state sizes and texture info layouts:
+   225	///   - V0000: lwMaterial(68) + lwRenderStateSetMtl2(128) + lwTexInfo_0000[4]
+   226	///   - V0001: opacity(4) + transp(4) + lwMaterial(68) + lwRenderStateSetMtl2(128) + lwTexInfo_0001[4]
+   227	///   - Current: opacity(4) + transp(4) + lwMaterial(68) + lwRenderStateAtom[8](96) + lwTexInfo[4]
+   228	fn read_material(cursor: &mut Cursor<&[u8]>, mtl_ver: MtlFormatVersion) -> Result<LmoMaterial> {
+   229	    // Opacity / transp_type — absent in V0000
+   230	    let (opacity, transp_type) = if mtl_ver == MtlFormatVersion::V0000 {
+   231	        (1.0, TRANSP_FILTER)
+   232	    } else {
+   233	        let o = read_f32(cursor)?;
+   234	        let t = read_u32(cursor)?;
+   235	        (o, t)
+   236	    };
+   237	
+   238	    // CharMaterial: dif(16) + amb(16) + spe(16) + emi(16) + power(4) = 68 bytes
+   239	    let diffuse = [
+
+
+thinking
+**Analyzing material parsing and shader issues**
+thinking
+**Detailing blend modes, suffix parsing, and shader caveats**
+codex
+I’ve finished collecting the concrete code paths in Unity and Rust. I’m now synthesizing the review into severity-ranked findings with exact file/line references, then I’ll give targeted fixes and tradeoffs for each of the four questions.
+
+thinking
+**Planning detailed review response**
+codex
+**Findings (Ordered by Severity)**
+
+1. **High: `TryParsePkoSuffix` is not suffix-anchored and uses first marker, so it can misparse or miss valid metadata.**  
+   Evidence: [TOPMaterialReplacer.cs:169](/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs:169), [TOPMaterialReplacer.cs:173](/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs:173), [TOPMaterialReplacer.cs:193](/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs:193).  
+   Impact: material names containing `__PKO_T` earlier in the string can cause false negatives; names containing a valid-looking token in the middle can cause false routing. This is exactly where parity breaks, because effect behavior depends on this parser.
+
+2. **High: type-0 partial opacity path is effectively a no-op (opacity is calculated then ignored).**  
+   Evidence: [TOPMaterialReplacer.cs:113](/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs:113), [TOPMaterialReplacer.cs:117](/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs:117), [TOPMaterialReplacer.cs:118](/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs:118).  
+   Impact: if `T0_A0_O<255` ever appears, it gets routed to opaque static mesh behavior with no actual opacity application.
+
+3. **Medium: alpha-tested effect materials are still forced to Transparent queue + `ZWrite=0`, so sorting artifacts remain.**  
+   Evidence: [TOPMaterialReplacer.cs:338](/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs:338), [TOPMaterialReplacer.cs:349](/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs:349), [TOP_Effect.shader:21](/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Effect.shader:21), [TOP_Effect.shader:99](/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Effect.shader:99).  
+   Impact: changing glTF alpha mode to `Mask` helps metadata transport, but final Unity render order is still transparent-object sorting. Expect overdraw/self-sorting issues on intersecting quads.
+
+4. **Medium: static caches are unbounded and never cleared, holding strong refs to textures/materials across scene loads.**  
+   Evidence: [TOPMaterialReplacer.cs:61](/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs:61), [TOPMaterialReplacer.cs:64](/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs:64).  
+   Impact: memory growth and stale state risk in long sessions or multi-map workflows.
+
+5. **Low: transp canonicalization is broader than intended (`>=6`), so unknown invalid values are silently mapped to type 1.**  
+   Evidence: [scene_model.rs:361](/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs:361).  
+   Impact: hides corrupted/out-of-spec data instead of surfacing it.
+
+6. **Low: DepthOnly clip logic diverges from Forward when `_ALPHATEST_ON` is off.**  
+   Evidence: [TOP_Effect.shader:79](/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Effect.shader:79), [TOP_Effect.shader:141](/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Effect.shader:141).  
+   Impact: if `_ZWrite` is later enabled without `_ALPHATEST_ON`, depth can be written for pixels that Forward would clip with sparkle threshold.
+
+**Direct Answers to Your 4 Questions**
+
+1. **Shader correctness:** blend mapping is correct for URP property-driven blend states, and the CBUFFER layout is SRP-batcher safe (same `UnityPerMaterial` layout in both passes). DepthOnly pass is mostly inert in your current setup because effects are queued transparent and forced `ZWrite=0`.
+
+2. **Suffix parser robustness:** not robust enough. `IndexOf` + non-anchored parsing is the main weak point. Parsing order is conceptually right (structured > legacy > terrain > default), but only if parser matching is strict/end-anchored.
+
+3. **Rust exporter logic:** D3D constants/mappings are correct, and `6-8 -> 1` is correct for known PKO semantics. Suffix generation is generally correct, including type 0 + alpha test. Main issue is silent canonicalization of unknown `>8` values and dependency on fragile Unity parsing.
+
+4. **Visual regressions from `Mask` change:** switching additive+alpha-test to `Mask` is defensible and better for transporting cutoff intent, but it does not solve transparent sorting once material is replaced to queue 3000 with `ZWrite=0`.
+
+**Open Questions / Assumptions**
+
+1. Do you have any real materials with `transp_type=0` and `opacity<1`? If yes, current Unity routing is wrong.
+2. Should alpha-tested effect materials ever be depth-writing cutout-style (`queue 2450`) in Unity, or must they remain fully transparent-queue for strict PKO look?
+3. Are material names guaranteed not to already contain `__PKO_T` before exporter suffixing?
+
+**Best Next Fixes**
+
+1. Make parser end-anchored and last-marker based (or regex `__PKO_T(\d+)_A(\d+)_O(\d+)$`).
+2. Either support true type-0 opacity path or explicitly reject/log `T0_A0_O<255`.
+3. Clear static caches on scene unload or bound them by map/session.
+4. Canonicalize only `6..=8`; warn on other unknown transp values.
+
+I did not run runtime tests/builds in this environment (read-only sandbox).
+tokens used
+81,658

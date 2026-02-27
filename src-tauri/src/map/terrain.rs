@@ -306,8 +306,37 @@ fn tile_height(tile: &MapTile) -> f32 {
 /// PKO vertex ownership semantics are strict: vertex (vx, vy) samples
 /// `GetTile(vx, vy)` directly. If that tile is out-of-range or section-missing,
 /// the render path falls back to default underwater tile values.
+///
+/// Boundary clamping: when a vertex sits at the +1 edge of a loaded section
+/// (right or bottom boundary), get_tile returns None because the vertex
+/// coordinate falls into the next (unloaded) section. This creates a steep
+/// cliff face with near-horizontal normals that appears grey under lighting.
+/// To avoid this, try the immediate neighbor tile (vx-1 or vy-1). If found,
+/// the boundary vertex inherits that neighbor's height/color, eliminating
+/// the cliff. The flat underwater floor still exists further out.
 fn get_render_vertex_tile<'a>(map: &'a ParsedMap, vx: i32, vy: i32) -> Option<&'a MapTile> {
-    get_tile(map, vx, vy)
+    if let Some(tile) = get_tile(map, vx, vy) {
+        return Some(tile);
+    }
+    // Boundary clamp: try left, top, then diagonal neighbor.
+    // Handles +1 fence-post vertices at right/bottom/corner edges.
+    if vx > 0 {
+        if let Some(tile) = get_tile(map, vx - 1, vy) {
+            return Some(tile);
+        }
+    }
+    if vy > 0 {
+        if let Some(tile) = get_tile(map, vx, vy - 1) {
+            return Some(tile);
+        }
+    }
+    // Corner case: both vx and vy are +1 boundary
+    if vx > 0 && vy > 0 {
+        if let Some(tile) = get_tile(map, vx - 1, vy - 1) {
+            return Some(tile);
+        }
+    }
+    None
 }
 
 /// Build a glTF JSON string representing the terrain mesh.
@@ -3054,7 +3083,7 @@ mod tests {
     }
 
     #[test]
-    fn render_vertex_tile_uses_strict_owner_semantics() {
+    fn render_vertex_tile_clamps_boundary_to_neighbor() {
         let parsed = ParsedMap {
             header: MapHeader {
                 n_map_flag: CUR_VERSION_NO,
@@ -3074,13 +3103,16 @@ mod tests {
             ],
         };
 
-        // Vertex owner (1,0) maps to missing section tile and must not
-        // borrow adjacent visible tile(0,0).
-        assert!(get_render_vertex_tile(&parsed, 1, 0).is_none());
+        // Vertex (1,0) sits at +1 boundary of loaded section 0.
+        // get_tile(1,0) returns None (section 1 unloaded), but boundary
+        // clamping finds neighbor (0,0) to avoid cliff faces.
+        let tile = get_render_vertex_tile(&parsed, 1, 0);
+        assert!(tile.is_some(), "boundary vertex should clamp to neighbor");
+        assert_eq!(tile.unwrap().c_height, 10);
     }
 
     #[test]
-    fn render_vertex_tile_none_when_owner_out_of_bounds() {
+    fn render_vertex_tile_boundary_clamps_at_map_edge() {
         let parsed = ParsedMap {
             header: MapHeader {
                 n_map_flag: CUR_VERSION_NO,
@@ -3097,8 +3129,11 @@ mod tests {
             })],
         };
 
-        assert!(get_render_vertex_tile(&parsed, 1, 0).is_none());
-        assert!(get_render_vertex_tile(&parsed, 0, 1).is_none());
+        // Out-of-range vertices at +1 edges clamp back to loaded neighbor
+        assert!(get_render_vertex_tile(&parsed, 1, 0).is_some());
+        assert!(get_render_vertex_tile(&parsed, 0, 1).is_some());
+        // Truly out of range (no neighbor) still returns None
+        assert!(get_render_vertex_tile(&parsed, -1, 0).is_none());
     }
 
     #[test]
@@ -3151,13 +3186,13 @@ mod tests {
         }
 
         // Vertex order for 1x1 grid: (0,0), (1,0), (0,1), (1,1)
-        // Owner tile semantics => only (0,0) samples real tile; others are
-        // out-of-range owners and therefore default underwater.
+        // Boundary clamping: +1 edge vertices clamp to their loaded neighbor,
+        // so all four vertices share the same tile height (no cliff).
         let expected = [
             1.0f32,
-            UNDERWATER_HEIGHT / MAP_VISUAL_SCALE,
-            UNDERWATER_HEIGHT / MAP_VISUAL_SCALE,
-            UNDERWATER_HEIGHT / MAP_VISUAL_SCALE,
+            1.0f32,
+            1.0f32,
+            1.0f32,
         ];
         for (actual, exp) in y_values.iter().zip(expected.iter()) {
             assert!(

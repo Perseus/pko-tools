@@ -1,0 +1,924 @@
+OpenAI Codex v0.104.0 (research preview)
+--------
+workdir: /Users/anirudh/gamedev/pko-tools
+model: gpt-5.3-codex
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: high
+reasoning summaries: auto
+session id: 019c96b3-4861-7012-8296-28ad52767db9
+--------
+user
+Read the file at /Users/anirudh/gamedev/pko-tools/agents/counselors/plans/prompt.md and follow the instructions within it.
+deprecated: `collab` is deprecated. Use `[features].multi_agent` instead.
+  Enable it with `--enable multi_agent` or `[features].multi_agent` in config.toml. See https://github.com/openai/codex/blob/main/docs/config.md#feature-flags for details.
+mcp: unity starting
+mcp: linear starting
+mcp: unity ready
+mcp: linear ready
+mcp startup: ready: unity, linear
+
+thinking
+**Preparing to read instruction file**
+codex
+I’m going to open that `prompt.md` file first, then I’ll execute its instructions exactly as written and report back results.
+exec
+/bin/zsh -lc 'cat /Users/anirudh/gamedev/pko-tools/agents/counselors/plans/prompt.md' in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+# Render State Parity Pipeline
+
+## Context
+
+PKO buildings/scene objects use 9 transparency types (0-8) with distinct D3D blend modes, per-material alpha test with engine-overridden ALPHAREF=129, and opacity-modulated blending. Our current pipeline only distinguishes two cases: **FILTER (type 0)** and **ADDITIVE (type 1)**. Types 2-8 are silently treated as type 0, losing their blend semantics. Additionally, the additive path forces `AlphaMode::Opaque` in glTF, discarding any alpha test that coexists with additive blending.
+
+**The fix:** Encode per-material PKO render state via material name suffixes → read in Unity's `TOPMaterialReplacer` → configure property-driven blend modes on TOP/Effect shader.
+
+### What NOT to change (confirmed against engine source)
+
+- **Sampler state**: Current hardcoded Linear + LinearMipmapLinear + Repeat is **correct** — `RenderStateMgr.cpp` `_rsa_sceneobj` (lines 59-73) overrides device defaults to LINEAR or ANISOTROPIC for all scene objects.
+- **TSS atoms**: Dead code in engine — `lwTex::BeginSet()` line 264-266 has TSS application commented out. No need to parse or export.
+
+### PKO Engine Blend Mode Reference (`lwResourceMgr.cpp:2087-2109`)
+
+| transp_type | Name | SrcBlend | DestBlend | Visual |
+|-------------|------|----------|-----------|--------|
+| 0 | FILTER | (no blend set) | (no blend set) | Opaque / alpha-test |
+| 1 | ADDITIVE | ONE | ONE | Pure additive glow |
+| 2 | ADDITIVE1 | SRCCOLOR | ONE | High-brightness additive |
+
+thinking
+**Planning patch creation despite read-only**
+codex
+I’ve parsed the implementation plan from `prompt.md`; next I’m inspecting the target Unity and Rust files to apply those phase changes directly.
+exec
+/bin/zsh -lc "rg --files /Users/anirudh/gamedev/pko-tools | rg 'TOP_Effect.shader|TOPMaterialReplacer.cs|src-tauri/src/map/lmo.rs|src-tauri/src/map/scene_model.rs'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,260p' /Users/anirudh/gamedev/pko-tools/pko-client/Assets/_Project/Rendering/Shaders/TOP_Effect.shader" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs
+exec
+/bin/zsh -lc "sed -n '1,320p' /Users/anirudh/gamedev/pko-tools/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs" in /Users/anirudh/gamedev/pko-tools exited 1 in 52ms:
+sed: /Users/anirudh/gamedev/pko-tools/pko-client/Assets/_Project/Rendering/Shaders/TOP_Effect.shader: No such file or directory
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs" in /Users/anirudh/gamedev/pko-tools exited 1 in 51ms:
+sed: /Users/anirudh/gamedev/pko-tools/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs: No such file or directory
+ succeeded in 51ms:
+//! LMO file parser — multi-geometry-object container format for scene buildings/models.
+//!
+//! Binary layout:
+//! ```text
+//! [4 bytes]  version (DWORD, typically 0x1005)
+//! [4 bytes]  obj_num (geometry objects + optional global helper)
+//! [obj_num × 12 bytes]  Header table:
+//!     type(4) — 1=GEOMETRY, 2=HELPER
+//!     addr(4) — absolute file offset
+//!     size(4) — data size
+//!
+//! TYPE 1 (Geometry Object) at each addr:
+//!     [116 bytes]  Header: id(4) + parent_id(4) + type(4) + mat_local(64) +
+//!                  rcci(16) + state_ctrl(8) + mtl_size(4) + mesh_size(4) +
+//!                  helper_size(4) + anim_size(4)
+//!     Materials:   mtl_num(4) + mtl_num × lwMtlTexInfo
+//!     Mesh:        lwMeshInfoHeader + vertices + normals + texcoords + colors + indices + subsets
+//!     Helpers:     (skip)
+//!     Animation:   (skip)
+//! ```
+exec
+/bin/zsh -lc "sed -n '1,360p' /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+//! LMO → glTF conversion for scene building models.
+//!
+//! Two entry points:
+//! - `build_gltf_from_lmo` — standalone building viewer (single LMO → complete glTF)
+//! - `load_scene_models` — map integration (batch load unique models, return glTF components)
+
+use std::collections::HashMap;
+use std::path::Path;
+
+use anyhow::{anyhow, Result};
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
+use gltf::json as gltf_json;
+use gltf_json::{
+    accessor::{ComponentType, GenericComponentType},
+    animation::{Channel, Sampler, Target},
+    validation::{Checked, USize64},
+};
+
+use crate::item::model::decode_pko_texture;
+
+thinking
+**Examining related functions and tests**
+exec
+/bin/zsh -lc "sed -n '360,760p' /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '260,620p' /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+        Some(gltf_json::material::AlphaCutoff(cutoff))
+    } else {
+        None
+    };
+
+    // Material name suffix for blend mode signaling to Unity
+    let material_name = if is_additive {
+        format!("{}__PKO_BLEND_ADD", name)
+    } else {
+        name.to_string()
+    };
+
+    // Try to load and embed the texture (skipped for map batch loading)
+    let base_color_texture = if !load_textures {
+        None
+    } else {
+        mat.tex_filename
+            .as_deref()
+            .filter(|f| !f.is_empty())
+            .and_then(|tex_name| find_texture_file(project_dir, tex_name))
+ succeeded in 52ms:
+        }
+        MtlFormatVersion::Current => read_render_state_atoms(cursor, LW_MTL_RS_NUM)?,
+    };
+
+    // tex_seq: 4 × TextureInfo — extract filename from first texture slot
+    let mut tex_filename = None;
+    for i in 0..LW_MAX_TEXTURESTAGE_NUM {
+        match mtl_ver {
+            MtlFormatVersion::V0000 => {
+                // lwTexInfo_0000: stage(4) + colorkey_type(4) + colorkey(4) + format(4) +
+                //                 file_name(64) + lwTextureStageStateSetTex2(128) = 208
+                cursor.seek(SeekFrom::Current(16))?; // stage + colorkey_type + colorkey + format
+                let fname = read_cstr_fixed(cursor, 64)?;
+                cursor.seek(SeekFrom::Current(128))?; // tss_set
+
+                if i == 0 && !fname.is_empty() {
+                    tex_filename = Some(fname);
+                }
+            }
+            MtlFormatVersion::V0001 => {
+
+thinking
+**Inspecting top material replacer location**
+codex
+I found the Rust targets, but the Unity paths in the plan don’t exist in this workspace; I’m locating the actual shader/replacer files now so I can map the same changes onto the right paths.
+exec
+/bin/zsh -lc "rg --files /Users/anirudh/gamedev/pko-tools | rg 'TOP.*Effect\\.shader|TOPMaterialReplacer\\.cs|MaterialReplacer\\.cs|Effect\\.shader"'$'"'" in /Users/anirudh/gamedev/pko-tools exited 1 in 52ms:
+
+exec
+/bin/zsh -lc 'ls -la /Users/anirudh/gamedev/pko-tools' in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+total 576
+drwxr-xr-x@ 37 anirudh  staff    1184 Feb 25 22:20 .
+drwxr-xr-x@ 23 anirudh  staff     736 Feb 24 23:15 ..
+-rw-r--r--@  1 anirudh  staff   10244 Feb 22 19:52 .DS_Store
+drwx------   4 anirudh  staff     128 Feb 17 18:22 .claude
+drwxr-xr-x@ 17 anirudh  staff     544 Feb 25 21:29 .git
+drwxr-xr-x@  3 anirudh  staff      96 Jan  5 06:14 .github
+-rw-r--r--@  1 anirudh  staff     631 Feb 24 12:16 .gitignore
+drwxr-xr-x@  3 anirudh  staff      96 Jan  5 06:14 .vscode
+-rw-r--r--   1 anirudh  staff    2478 Jan  8 13:42 AGENTS.md
+-rw-r--r--   1 anirudh  staff    8735 Feb  3 09:36 CHANGELOG.md
+-rw-r--r--   1 anirudh  staff   11647 Feb 12 14:33 CLAUDE.md
+-rw-r--r--@  1 anirudh  staff    4659 Jan  5 06:14 README.md
+-rw-r--r--@  1 anirudh  staff     774 Feb 24 17:52 SESSION_CONTEXT.md
+drwxr-xr-x@  3 anirudh  staff      96 Feb 25 22:20 agents
+drwxr-xr-x   8 anirudh  staff     256 Feb  3 09:36 changelog-assets
+lrwxr-xr-x   1 anirudh  staff     111 Jan 24 07:50 client-src -> /Users/anirudh/Downloads/Client 1.3x Clean Fixed + League Of Pirates Online SRC/Client 1.3x Clean Fixed/source/
+-rw-r--r--@  1 anirudh  staff     448 Jan  5 06:14 components.json
+drwxr-xr-x@  7 anirudh  staff     224 Feb  4 22:18 dist
+drwxr-xr-x   9 anirudh  staff     288 Feb 12 15:42 docs
+exec
+/bin/zsh -lc 'rg -n "PKO_BLEND_ADD|TOP/Effect|_SharpSparkleAB|TOPMaterialReplacer|_AlphaTest|_Cutoff" /Users/anirudh/gamedev/pko-tools' in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "find /Users/anirudh/gamedev/pko-tools -maxdepth 4 -type d | rg 'Assets|Rendering|pko-client'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc 'rg -n "TRANSP_FILTER|TRANSP_ADDITIVE|build_lmo_material|default_blend_for_transp_type|alpha_test_enabled" /Users/anirudh/gamedev/pko-tools/src-tauri/src/map' in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+/Users/anirudh/gamedev/pko-tools/agents/counselors/plans/prompt.md:7:**The fix:** Encode per-material PKO render state via material name suffixes → read in Unity's `TOPMaterialReplacer` → configure property-driven blend modes on TOP/Effect shader.
+/Users/anirudh/gamedev/pko-tools/agents/counselors/plans/prompt.md:35:## Phase 1: Property-driven blend in TOP/Effect shader (Unity — backward compatible)
+/Users/anirudh/gamedev/pko-tools/agents/counselors/plans/prompt.md:51:       [Toggle] _SharpSparkleAB ("Sharp Sparkle A/B", Float) = 0
+/Users/anirudh/gamedev/pko-tools/agents/counselors/plans/prompt.md:53:       [Toggle(_ALPHATEST_ON)] _AlphaTest ("Alpha Test", Float) = 0
+/Users/anirudh/gamedev/pko-tools/agents/counselors/plans/prompt.md:54:       _Cutoff ("Alpha Cutoff", Range(0,1)) = 0.5
+/Users/anirudh/gamedev/pko-tools/agents/counselors/plans/prompt.md:72:   float _Cutoff;
+/Users/anirudh/gamedev/pko-tools/agents/counselors/plans/prompt.md:78:       clip(result.a - _Cutoff);
+/Users/anirudh/gamedev/pko-tools/agents/counselors/plans/prompt.md:90:## Phase 2: TOPMaterialReplacer reads suffix and configures materials (Unity)
+/Users/anirudh/gamedev/pko-tools/agents/counselors/plans/prompt.md:93:- `pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs`
+/Users/anirudh/gamedev/pko-tools/agents/counselors/plans/prompt.md:114:   - `__PKO_BLEND_ADD` (legacy) → `GetOrCreateEffectMaterial()` with type=1, no alpha test, full opacity (backward compat)
+/Users/anirudh/gamedev/pko-tools/agents/counselors/plans/prompt.md:115:   - `__PKO_T0_A{n}_O{n}` (FILTER with alpha test) → `GetOrCreateMaterial()` with TOP/StaticMesh, NOT TOP/Effect. Type 0 is opaque/cutout.
+/Users/anirudh/gamedev/pko-tools/agents/counselors/plans/prompt.md:139:           mat.SetFloat("_AlphaTest", 1f);
+/Users/anirudh/gamedev/pko-tools/agents/counselors/plans/prompt.md:140:           mat.SetFloat("_Cutoff", alphaRef / 255f);
+/Users/anirudh/gamedev/pko-tools/agents/counselors/plans/prompt.md:165:5. **Type 0 (FILTER) with alpha test**: Route to `GetOrCreateMaterial()` (TOP/StaticMesh) at queue 2450, NOT to TOP/Effect. Type 0 is opaque/cutout, not transparent.
+/Users/anirudh/gamedev/pko-tools/agents/counselors/plans/prompt.md:173:- `src-tauri/src/map/scene_model.rs` — replace `__PKO_BLEND_ADD` with structured suffix, fix additive+alpha-test
+/Users/anirudh/gamedev/pko-tools/agents/counselors/plans/prompt.md:195:2. **Structured suffix** replaces `__PKO_BLEND_ADD`:
+/Users/anirudh/gamedev/pko-tools/agents/counselors/plans/prompt.md:242:Unity consumer changes (shader + replacer) ship first with backward compatibility for `__PKO_BLEND_ADD`. Then the Rust exporter switches to the new suffix format. At no point does an intermediate state break the pipeline.
+/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review/prompt.md:9:3. **Shader architecture**: Is making TOP/Effect property-driven (`Blend [_SrcBlend] [_DstBlend]`) sufficient for all 9 transparency types? Do we need separate shaders for subtractive (type 5)?
+/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review/prompt.md:12:6. **DepthOnly pass**: The plan adds a DepthOnly pass to TOP/Effect. For additive effects with ZWrite Off, does this make sense? Could it cause artifacts?
+/Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review/prompt.md:14:8. **Backward compatibility**: The plan replaces `__PKO_BLEND_ADD` with `__PKO_T1_A0_O100`. Is the transition strategy sound?
+ succeeded in 51ms:
+/Users/anirudh/gamedev/pko-tools/.claude/skills/pko-client-reference
+/Users/anirudh/gamedev/pko-tools/.claude/skills/pko-client-reference/references
+ succeeded in 50ms:
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs:59:pub const TRANSP_FILTER: u32 = 0;
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs:60:pub const TRANSP_ADDITIVE: u32 = 1;
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs:123:    pub alpha_test_enabled: bool,
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs:226:        (1.0, TRANSP_FILTER)
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs:312:        alpha_test_enabled: rs.normalized_alpha_enabled(),
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs:799:            if !mat.alpha_test_enabled {
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs:800:                mat.alpha_test_enabled = true;
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs:1321:        assert!(!mat.alpha_test_enabled);
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs:1333:            mat.alpha_test_enabled,
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs:1346:            mat.alpha_test_enabled,
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs:319:fn build_lmo_material(
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs:326:    let is_additive = mat.transp_type == lmo::TRANSP_ADDITIVE;
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs:339:    } else if mat.alpha_test_enabled {
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs:352:    let alpha_cutoff = if !is_additive && mat.alpha_test_enabled {
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs:860:            build_lmo_material(
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs:868:                    alpha_test_enabled: false,
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs:880:                build_lmo_material(
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs:991:            build_lmo_material(
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs:999:                    alpha_test_enabled: false,
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs:1011:                build_lmo_material(
+
+thinking
+**Searching Unity files in top-client**
+codex
+I confirmed the Rust files are present and currently still use `__PKO_BLEND_ADD`; I’m now checking whether the Unity consumer files are inside `top-client` or if this repo only contains the Rust side.
+exec
+/bin/zsh -lc "rg --files /Users/anirudh/gamedev/pko-tools/top-client | rg 'TOPMaterialReplacer\\.cs|TOP_Effect\\.shader|Effect\\.shader"'$|'"\\.shader"'$'"'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,260p' /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '760,980p' /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '980,1700p' /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs" in /Users/anirudh/gamedev/pko-tools exited 1 in 51ms:
+
+exec
+/bin/zsh -lc "find /Users/anirudh/gamedev/pko-tools/top-client -maxdepth 6 -type f | rg 'MaterialReplacer|TOP|shader|\\.cs"'$'"' | head -n 200" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+//! LMO → glTF conversion for scene building models.
+//!
+//! Two entry points:
+//! - `build_gltf_from_lmo` — standalone building viewer (single LMO → complete glTF)
+//! - `load_scene_models` — map integration (batch load unique models, return glTF components)
+
+use std::collections::HashMap;
+use std::path::Path;
+
+use anyhow::{anyhow, Result};
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
+use gltf::json as gltf_json;
+use gltf_json::{
+    accessor::{ComponentType, GenericComponentType},
+    animation::{Channel, Sampler, Target},
+    validation::{Checked, USize64},
+};
+
+use crate::item::model::decode_pko_texture;
+ succeeded in 50ms:
+            materials = mats;
+        }
+    }
+
+    // Always jump to mesh section using size-based offset — material parsing may
+    // have consumed wrong number of bytes for old format materials
+    cursor.set_position(mesh_offset);
+
+    // Mesh
+    let mut vertices = Vec::new();
+    let mut normals = Vec::new();
+    let mut texcoords = Vec::new();
+    let mut vertex_colors = Vec::new();
+    let mut indices = Vec::new();
+    let mut subsets = Vec::new();
+    let mut mesh_alpha = MaterialRenderState::default();
+
+    if mesh_size > 0 {
+        match read_mesh(&mut cursor, file_version) {
+            Ok((v, n, t, c, i, s, alpha)) => {
+ succeeded in 50ms:
+
+    // Build using the same GltfBuilder approach as build_gltf_from_lmo
+    let mut builder = GltfBuilder::new();
+    let mut child_indices = Vec::new();
+    let mut animated_nodes: Vec<(u32, &LmoGeomObject)> = Vec::new();
+
+    for (gi, geom) in model.geom_objects.iter().enumerate() {
+        let prefix = format!("geom{}", gi);
+        let material_base_idx = builder.materials.len() as u32;
+
+        if geom.materials.is_empty() {
+            build_lmo_material(
+                &mut builder,
+                &lmo::LmoMaterial {
+                    diffuse: [0.7, 0.7, 0.7, 1.0],
+                    ambient: [0.3, 0.3, 0.3, 1.0],
+                    emissive: [0.0, 0.0, 0.0, 0.0],
+                    opacity: 1.0,
+                    transp_type: 0,
+                    alpha_test_enabled: false,
+ succeeded in 51ms:
+/Users/anirudh/gamedev/pko-tools/top-client/corsairs-online-public/source/Common/MaxSDK/include/idx9vertexshader.h
+/Users/anirudh/gamedev/pko-tools/top-client/corsairs-online-public/source/Common/MaxSDK/include/shaders.h
+/Users/anirudh/gamedev/pko-tools/top-client/corsairs-online-public/source/Common/MaxSDK/include/ihardwareshader.h
+/Users/anirudh/gamedev/pko-tools/top-client/corsairs-online-public/source/Common/MaxSDK/include/idx8vertexshader.h
+/Users/anirudh/gamedev/pko-tools/top-client/corsairs-online-public/source/Common/MaxSDK/include/idx8pixelshader.h
+/Users/anirudh/gamedev/pko-tools/top-client/corsairs-online-public/source/Common/MaxSDK/include/idx9pixelshader.h
+/Users/anirudh/gamedev/pko-tools/top-client/corsairs-online-public/client/shader/minimap.vsh
+/Users/anirudh/gamedev/pko-tools/top-client/corsairs-online-public/client/shader/eff4.vsh
+/Users/anirudh/gamedev/pko-tools/top-client/corsairs-online-public/client/shader/vs_pndt0.vsh
+/Users/anirudh/gamedev/pko-tools/top-client/corsairs-online-public/client/shader/eff3.vsh
+/Users/anirudh/gamedev/pko-tools/top-client/corsairs-online-public/client/shader/eff.fx
+/Users/anirudh/gamedev/pko-tools/top-client/corsairs-online-public/client/shader/eff2.vsh
+/Users/anirudh/gamedev/pko-tools/top-client/corsairs-online-public/client/shader/vs_pndt0_ld.vsh
+/Users/anirudh/gamedev/pko-tools/top-client/corsairs-online-public/client/shader/eff1.vsh
+/Users/anirudh/gamedev/pko-tools/top-client/corsairs-online-public/client/shader/skin_2_.vsh
+/Users/anirudh/gamedev/pko-tools/top-client/corsairs-online-public/client/shader/vs_pnt0_t0uvmat.vsh
+/Users/anirudh/gamedev/pko-tools/top-client/corsairs-online-public/client/shader/shadeeff.vsh
+/Users/anirudh/gamedev/pko-tools/top-client/corsairs-online-public/client/shader/shadowmap.vsh
+/Users/anirudh/gamedev/pko-tools/top-client/corsairs-online-public/client/shader/skinmesh8_2.vsh
+/Users/anirudh/gamedev/pko-tools/top-client/corsairs-online-public/client/shader/skinmesh8_3.vsh
+
+thinking
+**Auditing tests around blending and transparency**
+exec
+/bin/zsh -lc 'rg -n "__PKO_BLEND_ADD|__PKO_T|build_material_additive|additive|TRANSP_ADDITIVE|alpha_mode|alpha_cutoff|default_blend_for_transp_type|canonical" /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs' in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc 'rg -n "TRANSP_ADDITIVE|TRANSP_FILTER|TRANSP_ADDITIVE1|TRANSP_SUBTRACTIVE|src_blend|dest_blend|alpha_ref" /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs' in /Users/anirudh/gamedev/pko-tools succeeded in 50ms:
+326:    let is_additive = mat.transp_type == lmo::TRANSP_ADDITIVE;
+336:    // Non-additive: use existing alpha test / opacity logic.
+337:    let alpha_mode = if is_additive {
+352:    let alpha_cutoff = if !is_additive && mat.alpha_test_enabled {
+366:    let material_name = if is_additive {
+367:        format!("{}__PKO_BLEND_ADD", name)
+434:        alpha_cutoff,
+435:        alpha_mode,
+1501:            gltf_mat.alpha_mode,
+1528:            gltf_mat.alpha_mode,
+1555:            gltf_mat.alpha_mode,
+1560:            .alpha_cutoff
+exec
+/bin/zsh -lc "sed -n '1460,1660p' /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+59:pub const TRANSP_FILTER: u32 = 0;
+60:pub const TRANSP_ADDITIVE: u32 = 1;
+65:    alpha_ref: Option<u8>,
+67:    src_blend: Option<u32>,
+68:    dest_blend: Option<u32>,
+76:    fn effective_alpha_ref(self) -> u8 {
+77:        self.alpha_ref.unwrap_or(129)
+124:    pub alpha_ref: u8,
+125:    pub src_blend: Option<u32>,
+126:    pub dest_blend: Option<u32>,
+185:                rs.alpha_ref = Some((value0 & 0xFF) as u8);
+191:                rs.src_blend = Some(value0);
+194:                rs.dest_blend = Some(value0);
+226:        (1.0, TRANSP_FILTER)
+313:        alpha_ref: if rs.normalized_alpha_enabled() {
+314:            rs.effective_alpha_ref()
+316:            rs.alpha_ref.unwrap_or(0)
+318:        src_blend: rs.src_blend,
+319:        dest_blend: rs.dest_blend,
+797:        let mesh_alpha_ref = mesh_alpha.effective_alpha_ref();
+exec
+/bin/zsh -lc "sed -n '1280,1420p' /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+        let p = [3.0, 4.0, 5.0];
+        let result = transform_by_matrix(p, &id);
+        for i in 0..3 {
+            assert!((result[i] - p[i]).abs() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn matrix_transform_translation() {
+        let mat = [
+            [1.0, 0.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
+            [10.0, 20.0, 30.0, 1.0],
+        ];
+        let p = [1.0, 2.0, 3.0];
+        let result = transform_by_matrix(p, &mat);
+        assert!((result[0] - 11.0).abs() < 1e-6);
+        assert!((result[1] - 22.0).abs() < 1e-6);
+        assert!((result[2] - 33.0).abs() < 1e-6);
+ succeeded in 52ms:
+
+        let model = parse_lmo(&data).unwrap();
+        assert!(model.geom_objects.is_empty(), "helpers should be skipped");
+    }
+
+    #[test]
+    fn parse_single_geom_positions_only() {
+        // FVF with just positions (0x002 = D3DFVF_XYZ, no normals, no tex, no colors)
+        let fvf = 0x002;
+        let data = build_single_geom_lmo(fvf);
+        let model = parse_lmo(&data).unwrap();
+
+        assert_eq!(model.version, 0x1005);
+        assert_eq!(model.geom_objects.len(), 1);
+
+        let geom = &model.geom_objects[0];
+        assert_eq!(geom.id, 42);
+        assert_eq!(geom.vertices.len(), 3);
+        assert!(geom.normals.is_empty());
+        assert!(geom.texcoords.is_empty());
+
+thinking
+**Checking for Unity files**
+exec
+/bin/zsh -lc "find /Users/anirudh/gamedev/pko-tools/unity-export -maxdepth 8 -type f | rg 'TOP_Effect\\.shader|TOPMaterialReplacer\\.cs|MaterialReplacer\\.cs|\\.shader"'$'"' | head -n 200" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+
+exec
+/bin/zsh -lc 'ls -la /Users/anirudh/gamedev/pko-tools/unity-export' in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+total 62776
+drwxr-xr-x    9 anirudh  staff       288 Feb 24 16:58 .
+drwxr-xr-x@  37 anirudh  staff      1184 Feb 25 22:20 ..
+drwxr-xr-x@   7 anirudh  staff       224 Feb 14 13:56 07xmas
+drwxr-xr-x@   7 anirudh  staff       224 Feb 14 13:54 07xmas2
+drwxr-xr-x@   3 anirudh  staff        96 Feb 24 16:58 07xmas2-seafloor
+drwxr-xr-x  191 anirudh  staff      6112 Feb 11 22:37 buildings
+drwxr-xr-x    7 anirudh  staff       224 Feb 15 19:31 garner
+-rw-r--r--    1 anirudh  staff   1266420 Feb 11 23:11 manifest.json
+-rw-r--r--    1 anirudh  staff  30870085 Feb 11 23:11 terrain.gltf
+exec
+/bin/zsh -lc 'rg -n "TOP/Effect|TOP/StaticMesh|_SharpSparkleAB|__PKO_BLEND_ADD|__PKO_T" /Users/anirudh/gamedev/pko-tools/unity-export' in /Users/anirudh/gamedev/pko-tools exited 1 in 1.18s:
+
+
+thinking
+**Testing write capability despite read-only**
+codex
+I located only the Rust exporter files in this repo; the Unity shader/replacer paths from the plan are not present here. I’ll implement the Rust phase now and include exactly what remains pending for Unity once I confirm write access.
+
+thinking
+**Inspecting material build function**
+exec
+/bin/zsh -lc "nl -ba /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs | sed -n '280,470p'" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+   280	                return Some(candidate);
+   281	            }
+   282	            // Try lowercase
+   283	            let candidate_lc =
+   284	                project_dir
+   285	                    .join(dir)
+   286	                    .join(format!("{}.{}", stem.to_lowercase(), ext));
+   287	            if candidate_lc.exists() {
+   288	                return Some(candidate_lc);
+   289	            }
+   290	        }
+   291	    }
+   292	    None
+   293	}
+   294	
+   295	/// Load a texture from disk, decode PKO encoding, convert to PNG, return base64 data URI.
+   296	fn load_texture_as_data_uri(path: &Path) -> Option<String> {
+   297	    let raw_bytes = std::fs::read(path).ok()?;
+   298	    let decoded = decode_pko_texture(&raw_bytes);
+   299	    let img = match image::load_from_memory(&decoded) {
+
+thinking
+**Reviewing constants and tests placement**
+exec
+/bin/zsh -lc "nl -ba /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs | sed -n '1,120p'" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+     1	//! LMO file parser — multi-geometry-object container format for scene buildings/models.
+     2	//!
+     3	//! Binary layout:
+     4	//! ```text
+     5	//! [4 bytes]  version (DWORD, typically 0x1005)
+     6	//! [4 bytes]  obj_num (geometry objects + optional global helper)
+     7	//! [obj_num × 12 bytes]  Header table:
+     8	//!     type(4) — 1=GEOMETRY, 2=HELPER
+     9	//!     addr(4) — absolute file offset
+    10	//!     size(4) — data size
+    11	//!
+    12	//! TYPE 1 (Geometry Object) at each addr:
+    13	//!     [116 bytes]  Header: id(4) + parent_id(4) + type(4) + mat_local(64) +
+    14	//!                  rcci(16) + state_ctrl(8) + mtl_size(4) + mesh_size(4) +
+    15	//!                  helper_size(4) + anim_size(4)
+    16	//!     Materials:   mtl_num(4) + mtl_num × lwMtlTexInfo
+    17	//!     Mesh:        lwMeshInfoHeader + vertices + normals + texcoords + colors + indices + subsets
+    18	//!     Helpers:     (skip)
+    19	//!     Animation:   (skip)
+    20	//! ```
+
+thinking
+**Scoping blend defaults and alpha mask fixes**
+codex
+I’m applying the Rust changes now: adding the missing transparency constants in `lmo.rs`, then updating `scene_model.rs` for canonicalization, structured suffixes, blend-default warnings, and the new tests.
+
+thinking
+**Adjusting paths to relative**
+codex
+I hit a path restriction on the first edit attempt; retrying with repo-relative paths.
+
+thinking
+**Verifying working directory context**
+exec
+/bin/zsh -lc pwd in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+/Users/anirudh/gamedev/pko-tools
+
+thinking
+**Testing write permissions inside repo**
+
+thinking
+**Drafting comprehensive patch text**
+codex
+I can’t write in this session (`Operation not permitted` on file edits), so I’m preparing a complete patch you can apply; I’m also checking whether the Unity files exist elsewhere on disk to include that part if possible.
+exec
+/bin/zsh -lc "ls -la /Users/anirudh/gamedev | sed -n '1,200p'" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+total 640
+drwxr-xr-x@ 23 anirudh  staff    736 Feb 24 23:15 .
+drwxr-x---+ 60 anirudh  staff   1920 Feb 25 22:28 ..
+-rw-r--r--@  1 anirudh  staff  10244 Feb 22 19:58 .DS_Store
+drwxr-xr-x@  3 anirudh  staff     96 Feb 24 22:59 .claude
+-rw-r--r--@  1 anirudh  staff    110 Feb 21 18:15 .mcp.json
+drwxr-xr-x@  7 anirudh  staff    224 Feb 22 14:56 .venv
+drwxr-xr-x   5 anirudh  staff    160 Feb 23 21:04 Pirate King Online
+drwxr-xr-x  13 anirudh  staff    416 Feb 12 13:48 agent-valley
+drwxr-xr-x@  3 anirudh  staff     96 Feb 19 10:44 agents
+drwxr-xr-x  22 anirudh  staff    704 Feb 25 10:03 client-unity
+-rw-r--r--@  1 anirudh  staff   2557 Feb 19 10:50 counselors.skill
+drwxr-xr-x  19 anirudh  staff    608 Feb 22 19:48 ide-kaitai-io.github.io
+drwxr-xr-x@  4 anirudh  staff    128 Feb  4 20:30 models
+-rw-r--r--@  1 anirudh  staff  64931 Feb 24 22:52 nml-bd030_flower_pot_texture.png
+-rw-r--r--@  1 anirudh  staff  49679 Feb 24 22:53 nml-bd031_texture_0.png
+-rw-r--r--@  1 anirudh  staff  70786 Feb 24 22:53 nml-bd031_texture_1.png
+-rw-r--r--@  1 anirudh  staff  60604 Feb 24 22:53 nml-bd032_texture_0.png
+-rw-r--r--@  1 anirudh  staff  49679 Feb 24 22:53 nml-bd094_texture_0.png
+drwxr-xr-x  18 anirudh  staff    576 Feb 22 19:52 pko-map-lab
+exec
+/bin/zsh -lc "find /Users/anirudh/gamedev -maxdepth 4 -type f | rg 'TOP_Effect\\.shader|TOPMaterialReplacer\\.cs' | head -n 50" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+
+
+thinking
+**Expanding search depth**
+exec
+/bin/zsh -lc "rg --files /Users/anirudh/gamedev/client-unity | rg 'TOP_Effect\\.shader|TOPMaterialReplacer\\.cs|_Project/Rendering/.+\\.shader|MaterialReplacer\\.cs'" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Sea.shader.meta
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Particle.shader.meta
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Sea.shader
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_DebugAlphaMask.shader
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_DebugAlphaPreview.shader.meta
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Particle.shader
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_DebugWorldGrid.shader.meta
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Character.shader.meta
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Effect.shader
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Terrain.shader
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_StaticMesh.shader.meta
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_StaticMesh.shader
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Effect.shader.meta
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_DebugAlphaPreview.shader
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Character.shader
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Terrain.shader.meta
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_DebugAlphaMask.shader.meta
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_DebugWorldGrid.shader
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs.meta
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs
+exec
+/bin/zsh -lc "find /Users/anirudh/gamedev/client-unity -type f | rg 'TOP_Effect\\.shader|TOPMaterialReplacer\\.cs|MaterialReplacer\\.cs|_Project/Rendering' | head -n 200" in /Users/anirudh/gamedev/pko-tools succeeded in 558ms:
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering.meta
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders.meta
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/ShaderLabHelpers.cs.meta
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/ShaderLabHelpers.cs
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs.meta
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_DebugWorldGrid.shader
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_DebugAlphaMask.shader.meta
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Terrain.shader.meta
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Character.shader
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_DebugAlphaPreview.shader
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Effect.shader.meta
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_StaticMesh.shader
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_StaticMesh.shader.meta
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Terrain.shader
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Effect.shader
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Character.shader.meta
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_DebugWorldGrid.shader.meta
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Particle.shader
+/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_DebugAlphaPreview.shader.meta
+
+thinking
+**Assessing external Unity file access**
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Effect.shader" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+Shader "TOP/Effect"
+{
+    Properties
+    {
+        _MainTex ("Texture", 2D) = "white" {}
+        [Toggle] _SharpSparkleAB ("Sharp Sparkle A/B", Float) = 0
+        _SharpAlphaClip ("Sharp Alpha Clip", Range(0, 1)) = 0.22
+    }
+    SubShader
+    {
+        // Original eff.fx technique t0 (Model): additive glow effects
+        // Z-Write OFF, Alpha Blend ON (Additive: One/One), Cull None, Lighting OFF
+        // ColorOp[0] = Modulate (Texture * Diffuse), AlphaOp[0] = Modulate
+        Tags { "RenderPipeline" = "UniversalPipeline" "RenderType" = "Transparent" "Queue" = "Transparent" }
+
+        Pass
+        {
+            Name "ForwardLit"
+            Tags { "LightMode" = "UniversalForward" }
+
+exec
+/bin/zsh -lc "sed -n '1,360p' /Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+using System.Collections.Generic;
+using UnityEngine;
+
+namespace PKO.Rendering
+{
+/// <summary>
+/// Replaces glTFast-imported URP materials with TOP/ family shaders.
+/// Finds the base texture from the original material and creates a cached
+/// TOP material with that texture. Renderers sharing the same texture get
+/// the same Material instance, enabling SRP Batcher batching.
+///
+/// Default shader is TOP/StaticMesh (terrain, buildings).
+/// Set targetShaderName to "TOP/Character" for skinned character models.
+///
+/// When terrainTextureArray is assigned, terrain meshes (detected by texture
+/// name containing "terrain" or "atlas") use the TOP/Terrain shader with
+/// 4-layer alpha mask compositing instead of the baked atlas fallback.
+/// </summary>
+[DefaultExecutionOrder(-90)]
+public class TOPMaterialReplacer : MonoBehaviour
+
+thinking
+**Checking file end completeness**
+exec
+/bin/zsh -lc "sed -n '360,520p' /Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+        return null;
+    }
+}
+} // namespace PKO.Rendering
+
+thinking
+**Testing patch file creation in temp**
+
+thinking
+**Crafting detailed Rust patch and Unity plan**
+exec
+/bin/zsh -lc "sed -n '210,340p' /Users/anirudh/gamedev/pko-tools/agents/counselors/1772054423-render-state-parity-review/prompt.md" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+}
+```
+
+### Constants — lmo.rs:59-60
+
+```rust
+pub const TRANSP_FILTER: u32 = 0;
+pub const TRANSP_ADDITIVE: u32 = 1;
+// Types 2-8: NO CONSTANTS DEFINED
+```
+
+## Context: Current Unity Pipeline
+
+### TOPMaterialReplacer.cs — Material replacement logic
+
+```csharp
+// Detection: material name suffix
+const string BlendAddSuffix = "__PKO_BLEND_ADD";
+
+// In Awake loop:
+
+thinking
+**Summarizing patch restriction and next steps**
+codex
+The environment is hard read-only (all write attempts fail), so I can’t apply changes directly; I’m finishing with a ready-to-apply patch for the Rust files and a concrete change list for the Unity files located at `/Users/anirudh/gamedev/client-unity/pko-client/...`.
+
+thinking
+**Including detailed patch and blockers**
+codex
+Write access is blocked in this session, so I couldn’t apply edits directly (`Operation not permitted` on file writes).  
+I still followed the prompt and prepared the exact Rust patch for:
+
+- [lmo.rs](/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs)
+- [scene_model.rs](/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/scene_model.rs)
+
+```diff
+diff --git a/src-tauri/src/map/lmo.rs b/src-tauri/src/map/lmo.rs
+index 0000000..0000000 100644
+--- a/src-tauri/src/map/lmo.rs
++++ b/src-tauri/src/map/lmo.rs
+@@ -57,6 +57,10 @@ const D3DCMP_GREATER: u32 = 5;
+ /// Transparency type enum matching lwMtlTexInfoTransparencyTypeEnum.
+ pub const TRANSP_FILTER: u32 = 0;
+ pub const TRANSP_ADDITIVE: u32 = 1;
++pub const TRANSP_ADDITIVE1: u32 = 2;
++pub const TRANSP_ADDITIVE2: u32 = 3;
++pub const TRANSP_ADDITIVE3: u32 = 4;
++pub const TRANSP_SUBTRACTIVE: u32 = 5;
+
+ #[derive(Debug, Clone, Copy, Default)]
+ struct MaterialRenderState {
+diff --git a/src-tauri/src/map/scene_model.rs b/src-tauri/src/map/scene_model.rs
+index 0000000..0000000 100644
+--- a/src-tauri/src/map/scene_model.rs
++++ b/src-tauri/src/map/scene_model.rs
+@@ -316,6 +316,35 @@ fn load_texture_as_data_uri(path: &Path) -> Option<String> {
+     ))
+ }
+ 
++// D3DBLEND values used for parity warnings against PKO's transp_type defaults.
++const D3DBLEND_ZERO: u32 = 1;
++const D3DBLEND_ONE: u32 = 2;
++const D3DBLEND_SRCCOLOR: u32 = 3;
++const D3DBLEND_INVSRCCOLOR: u32 = 4;
++const D3DBLEND_SRCALPHA: u32 = 5;
++const D3DBLEND_DESTALPHA: u32 = 7;
++
++fn canonicalize_transp_type(transp_type: u32) -> u32 {
++    if transp_type >= 6 {
++        lmo::TRANSP_ADDITIVE
++    } else {
++        transp_type
++    }
++}
++
++fn default_blend_for_transp_type(transp_type: u32) -> Option<(u32, u32)> {
++    match canonicalize_transp_type(transp_type) {
++        lmo::TRANSP_FILTER => None,
++        lmo::TRANSP_ADDITIVE => Some((D3DBLEND_ONE, D3DBLEND_ONE)),
++        lmo::TRANSP_ADDITIVE1 => Some((D3DBLEND_SRCCOLOR, D3DBLEND_ONE)),
++        lmo::TRANSP_ADDITIVE2 => Some((D3DBLEND_SRCCOLOR, D3DBLEND_INVSRCCOLOR)),
++        lmo::TRANSP_ADDITIVE3 => Some((D3DBLEND_SRCALPHA, D3DBLEND_DESTALPHA)),
++        lmo::TRANSP_SUBTRACTIVE => Some((D3DBLEND_ZERO, D3DBLEND_INVSRCCOLOR)),
++        _ => Some((D3DBLEND_ONE, D3DBLEND_ONE)),
++    }
++}
++
+ fn build_lmo_material(
+     builder: &mut GltfBuilder,
+     mat: &lmo::LmoMaterial,
+@@ -323,7 +352,33 @@ fn build_lmo_material(
+     project_dir: &Path,
+     load_textures: bool,
+ ) {
+-    let is_additive = mat.transp_type == lmo::TRANSP_ADDITIVE;
++    let effective_transp = canonicalize_transp_type(mat.transp_type);
++    let default_blend = default_blend_for_transp_type(effective_transp);
++
++    if let Some((default_src, default_dst)) = default_blend {
++        if let Some(src_blend) = mat.src_blend {
++            if src_blend != default_src {
++                eprintln!(
++                    "WARN: material '{}' has src_blend={} but transp_type {} (effective {}) defaults to {}",
++                    name, src_blend, mat.transp_type, effective_transp, default_src
++                );
++            }
++        }
++
++        if let Some(dest_blend) = mat.dest_blend {
++            if dest_blend != default_dst {
++                eprintln!(
++                    "WARN: material '{}' has dest_blend={} but transp_type {} (effective {}) defaults to {}",
++                    name, dest_blend, mat.transp_type, effective_transp, default_dst
++                );
++            }
++        }
++    }
+ 
+     let base_color = [
+         mat.diffuse[0].clamp(0.0, 1.0),
+@@ -332,12 +387,11 @@ fn build_lmo_material(
+         mat.opacity.clamp(0.0, 1.0),
+     ];
+ 
+-    // Additive materials: keep Opaque alpha mode — the Unity shader handles blending.
+-    // Non-additive: use existing alpha test / opacity logic.
+-    let alpha_mode = if is_additive {
+-        Checked::Valid(gltf_json::material::AlphaMode::Opaque)
+-    } else if mat.alpha_test_enabled {
++    // Preserve cutout semantics whenever alpha-test is enabled, including additive types.
++    let alpha_mode = if mat.alpha_test_enabled {
+         Checked::Valid(gltf_json::material::AlphaMode::Mask)
++    } else if effective_transp == lmo::TRANSP_FILTER && mat.opacity < 0.99 {
++        Checked::Valid(gltf_json::material::AlphaMode::Blend)
+     } else if mat.opacity < 0.99 {
+         Checked::Valid(gltf_json::material::AlphaMode::Blend)
+     } else {
+@@ -349,7 +403,7 @@ fn build_lmo_material(
+     // The stored alpha_ref in the LMO file is effectively ignored — 129 is the
+     // universal threshold for opaque materials (opacity=1.0).
+     // Use 129/255 ≈ 0.506 to match the engine's actual behavior.
+-    let alpha_cutoff = if !is_additive && mat.alpha_test_enabled {
++    let alpha_cutoff = if mat.alpha_test_enabled {
+         let cutoff = if mat.opacity < 0.99 {
+             // Opacity-scaled: v = (opacity * 255) - 1, capped at 129
+             let v = ((mat.opacity * 255.0) - 1.0).clamp(0.0, 129.0);
+@@ -363,11 +417,15 @@ fn build_lmo_material(
+         None
+     };
+ 
+-    // Material name suffix for blend mode signaling to Unity
+-    let material_name = if is_additive {
+-        format!("{}__PKO_BLEND_ADD", name)
++    // Encode PKO render-state metadata for Unity material replacement.
++    let material_name = if effective_transp != lmo::TRANSP_FILTER || mat.alpha_test_enabled {
++        let alpha_ref = if mat.alpha_test_enabled {
++            mat.alpha_ref as u32
++        } else {
++            0
++        };
++        let opacity_byte = (mat.opacity.clamp(0.0, 1.0) * 255.0).round() as u32;
++        format!("{}__PKO_T{}_A{}_O{}", name, effective_transp, alpha_ref, opacity_byte)
+     } else {
+         name.to_string()
+     };
+@@ -1557,6 +1615,90 @@ mod tests {
+         let cutoff = gltf_mat
+             .alpha_cutoff
+             .expect("alpha cutoff should be set for alpha-test materials")
+             .0;
+         assert!((cutoff - (129.0 / 255.0)).abs() < 1e-6);
+     }
++
++    #[test]
++    fn default_blend_for_transp_type_matches_engine_switch() {
++        assert_eq!(default_blend_for_transp_type(0), None);
++        assert_eq!(
++            default_blend_for_transp_type(1),
++            Some((D3DBLEND_ONE, D3DBLEND_ONE))
++        );
++        assert_eq!(
++            default_blend_for_transp_type(2),
++            Some((D3DBLEND_SRCCOLOR, D3DBLEND_ONE))
++        );
++        assert_eq!(
++            default_blend_for_transp_type(3),
++            Some((D3DBLEND_SRCCOLOR, D3DBLEND_INVSRCCOLOR))
++        );
++        assert_eq!(
++            default_blend_for_transp_type(4),
++            Some((D3DBLEND_SRCALPHA, D3DBLEND_DESTALPHA))
++        );
++        assert_eq!(
++            default_blend_for_transp_type(5),
++            Some((D3DBLEND_ZERO, D3DBLEND_INVSRCCOLOR))
++        );
++        assert_eq!(
++            default_blend_for_transp_type(6),
++            Some((D3DBLEND_ONE, D3DBLEND_ONE))
++        );
++        assert_eq!(
++            default_blend_for_transp_type(7),
++            Some((D3DBLEND_ONE, D3DBLEND_ONE))
++        );
++        assert_eq!(
++            default_blend_for_transp_type(8),
++            Some((D3DBLEND_ONE, D3DBLEND_ONE))
++        );
++    }
++
++    #[test]
++    fn transp_types_6_to_8_canonicalize_to_type_1() {
++        for transp in 6..=8 {
++            assert_eq!(canonicalize_transp_type(transp), lmo::TRANSP_ADDITIVE);
++        }
++    }
++
++    #[test]
++    fn build_material_additive_alpha_test_uses_mask_and_suffix() {
++        let mat = lmo::LmoMaterial {
++            diffuse: [0.5, 0.6, 0.7, 1.0],
++            ambient: [0.1, 0.1, 0.1, 1.0],
++            emissive: [0.0, 0.0, 0.0, 0.0],
++            opacity: 1.0,
++            transp_type: lmo::TRANSP_ADDITIVE,
++            alpha_test_enabled: true,
++            alpha_ref: 129,
++            src_blend: None,
++            dest_blend: None,
++            tex_filename: None,
++        };
++        let mut builder = GltfBuilder::new();
++        let tmp = std::env::temp_dir();
++        build_lmo_material(&mut builder, &mat, "test", &tmp, false);
++        let gltf_mat = &builder.materials[0];
++
++        assert_eq!(
++            gltf_mat.alpha_mode,
++            Checked::Valid(gltf_json::material::AlphaMode::Mask)
++        );
++        assert_eq!(gltf_mat.name.as_deref(), Some("test__PKO_T1_A129_O255"));
++    }
++
++    #[test]
++    fn build_material_transp_type_3_has_structured_suffix() {
++        let mat = lmo::LmoMaterial {
++            diffuse: [0.5, 0.6, 0.7, 1.0],
++            ambient: [0.1, 0.1, 0.1, 1.0],
++            emissive: [0.0, 0.0, 0.0, 0.0],
++            opacity: 1.0,
++            transp_type: lmo::TRANSP_ADDITIVE2,
++            alpha_test_enabled: false,
++            alpha_ref: 0,
++            src_blend: None,
++            dest_blend: None,
++            tex_filename: None,
++        };
++        let mut builder = GltfBuilder::new();
++        let tmp = std::env::temp_dir();
++        build_lmo_material(&mut builder, &mat, "test", &tmp, false);
++        let gltf_mat = &builder.materials[0];
++        assert_eq!(gltf_mat.name.as_deref(), Some("test__PKO_T3_A0_O255"));
++    }
+```
+
+Unity phase files from your prompt do exist, but outside this repo at:
+
+- [/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Effect.shader](/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Shaders/TOP_Effect.shader)
+- [/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs](/Users/anirudh/gamedev/client-unity/pko-client/Assets/_Project/Rendering/Runtime/TOPMaterialReplacer.cs)
+
+I couldn’t patch those either due the same write restriction.
+
+I also couldn’t run `cargo test`/`cargo clippy` in this session because build/test needs write access for artifacts.  
+
+1. If you rerun with write-enabled sandbox, I’ll apply this patch directly and run the verification commands end-to-end.
+
+tokens used
+85,855

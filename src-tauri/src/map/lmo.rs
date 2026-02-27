@@ -334,7 +334,14 @@ fn read_material(cursor: &mut Cursor<&[u8]>, mtl_ver: MtlFormatVersion) -> Resul
         (1.0, TRANSP_FILTER)
     } else {
         let o = read_f32(cursor)?;
-        let t = read_u32(cursor)?;
+        let mut t = read_u32(cursor)?;
+        // V0001 remap: old files only used 0/1/2. Value 2 meant "subtractive" (Zero/InvSrcColor),
+        // not ADDITIVE1 (SrcColor/One). The C++ engine (lwExpObj.cpp:225-228) remaps:
+        //   1 → MTLTEX_TRANSP_ADDITIVE (1, no change)
+        //   2 → MTLTEX_TRANSP_SUBTRACTIVE (5)
+        if mtl_ver == MtlFormatVersion::V0001 && t == 2 {
+            t = TRANSP_SUBTRACTIVE;
+        }
         (o, t)
     };
 
