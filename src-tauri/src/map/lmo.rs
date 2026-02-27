@@ -58,6 +58,11 @@ const D3DCMP_GREATER: u32 = 5;
 /// Transparency type enum matching lwMtlTexInfoTransparencyTypeEnum.
 pub const TRANSP_FILTER: u32 = 0;
 pub const TRANSP_ADDITIVE: u32 = 1;
+pub const TRANSP_ADDITIVE1: u32 = 2; // SrcColor/One — high-brightness additive
+pub const TRANSP_ADDITIVE2: u32 = 3; // SrcColor/InvSrcColor — soft/low additive
+pub const TRANSP_ADDITIVE3: u32 = 4; // SrcAlpha/DestAlpha — alpha-weighted additive
+pub const TRANSP_SUBTRACTIVE: u32 = 5; // Zero/InvSrcColor — darkening/shadow
+// Types 6-8 fall through to ONE/ONE in engine — identical to type 1
 
 #[derive(Debug, Clone, Copy, Default)]
 struct MaterialRenderState {
