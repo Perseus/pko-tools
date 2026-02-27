@@ -1,0 +1,63 @@
+{
+  "timestamp": "2026-02-25T21:25:10.111Z",
+  "slug": "1772054423-render-state-parity-review",
+  "prompt": "file:prompt.md",
+  "promptSource": "file",
+  "readOnlyPolicy": "bestEffort",
+  "tools": [
+    {
+      "toolId": "claude-opus",
+      "status": "success",
+      "exitCode": 0,
+      "durationMs": 122299,
+      "wordCount": 1901,
+      "outputFile": "agents/counselors/1772054423-render-state-parity-review-1772054511320/claude-opus.md",
+      "stderrFile": "agents/counselors/1772054423-render-state-parity-review-1772054511320/claude-opus.stderr"
+    },
+    {
+      "toolId": "claude-sonnet",
+      "status": "success",
+      "exitCode": 0,
+      "durationMs": 183313,
+      "wordCount": 1371,
+      "outputFile": "agents/counselors/1772054423-render-state-parity-review-1772054511320/claude-sonnet.md",
+      "stderrFile": "agents/counselors/1772054423-render-state-parity-review-1772054511320/claude-sonnet.stderr"
+    },
+    {
+      "toolId": "claude-haiku",
+      "status": "success",
+      "exitCode": 0,
+      "durationMs": 42062,
+      "wordCount": 1410,
+      "outputFile": "agents/counselors/1772054423-render-state-parity-review-1772054511320/claude-haiku.md",
+      "stderrFile": "agents/counselors/1772054423-render-state-parity-review-1772054511320/claude-haiku.stderr"
+    },
+    {
+      "toolId": "codex-5.3-high",
+      "status": "success",
+      "exitCode": 0,
+      "durationMs": 93551,
+      "wordCount": 568,
+      "outputFile": "agents/counselors/1772054423-render-state-parity-review-1772054511320/codex-5.3-high.md",
+      "stderrFile": "agents/counselors/1772054423-render-state-parity-review-1772054511320/codex-5.3-high.stderr"
+    },
+    {
+      "toolId": "codex-5.3-xhigh",
+      "status": "success",
+      "exitCode": 0,
+      "durationMs": 156692,
+      "wordCount": 483,
+      "outputFile": "agents/counselors/1772054423-render-state-parity-review-1772054511320/codex-5.3-xhigh.md",
+      "stderrFile": "agents/counselors/1772054423-render-state-parity-review-1772054511320/codex-5.3-xhigh.stderr"
+    },
+    {
+      "toolId": "codex-5.3-medium",
+      "status": "success",
+      "exitCode": 0,
+      "durationMs": 45510,
+      "wordCount": 656,
+      "outputFile": "agents/counselors/1772054423-render-state-parity-review-1772054511320/codex-5.3-medium.md",
+      "stderrFile": "agents/counselors/1772054423-render-state-parity-review-1772054511320/codex-5.3-medium.stderr"
+    }
+  ]
+}
