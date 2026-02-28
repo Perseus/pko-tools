@@ -473,6 +473,54 @@ pub fn export_terrain_textures(
     Ok(exported)
 }
 
+/// Export ALL terrain textures from TerrainInfo.bin as 256×256 PNGs to `output_dir/terrain_textures/`.
+/// Unlike `export_terrain_textures()`, this exports every entry in the tileset catalog,
+/// not just textures referenced by a specific map. Used by the shared export.
+/// Returns a map of texture_id → relative path (e.g. "terrain_textures/terrain_5.png").
+pub fn export_all_terrain_textures(
+    project_dir: &Path,
+    output_dir: &Path,
+) -> Result<HashMap<u8, String>> {
+    let terrain_info_path = project_dir
+        .join("scripts")
+        .join("table")
+        .join("TerrainInfo.bin");
+
+    let terrain_info_data = std::fs::read(&terrain_info_path)
+        .map_err(|e| anyhow::anyhow!("Failed to read TerrainInfo.bin: {}", e))?;
+    let terrain_info = parse_terrain_info(&terrain_info_data)?;
+
+    let tex_dir = output_dir.join("terrain_textures");
+    std::fs::create_dir_all(&tex_dir)?;
+
+    let mut exported = HashMap::new();
+
+    for (id, info) in &terrain_info {
+        if let Some(img) = load_pko_image(project_dir, &info.path) {
+            let resized = img.resize_exact(256, 256, image::imageops::FilterType::Lanczos3);
+            let png_name = format!("terrain_{}.png", id);
+            let png_path = tex_dir.join(&png_name);
+            resized
+                .save(&png_path)
+                .map_err(|e| anyhow::anyhow!("Failed to save terrain texture {}: {}", id, e))?;
+            exported.insert(*id, format!("terrain_textures/{}", png_name));
+        } else {
+            eprintln!(
+                "Warning: could not load terrain texture {} (path: {})",
+                id, info.path
+            );
+        }
+    }
+
+    eprintln!(
+        "Exported {}/{} terrain textures (all entries from TerrainInfo.bin)",
+        exported.len(),
+        terrain_info.len()
+    );
+
+    Ok(exported)
+}
+
 /// Export the alpha mask atlas (total.tga) as a PNG to `output_dir/terrain_textures/alpha_atlas.png`.
 /// Returns the relative path if successful.
 pub fn export_alpha_atlas(project_dir: &Path, output_dir: &Path) -> Result<Option<String>> {

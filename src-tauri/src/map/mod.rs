@@ -8,6 +8,7 @@ pub mod mapinfo;
 pub mod scene_model;
 pub mod scene_obj;
 pub mod scene_obj_info;
+pub mod shared;
 pub mod terrain;
 pub mod texture;
 
@@ -76,12 +77,17 @@ pub struct ExportOptions {
     /// Manifest version: 2 = legacy binary grids + JSON glTF,
     /// 3 = PNG grids + GLB terrain/buildings + slim manifest.
     pub manifest_version: u32,
+    /// Path to the shared assets directory (from `--shared` export).
+    /// When set, per-map export skips buildings, textures, effects, and water,
+    /// and the manifest references assets relative to this directory.
+    pub shared_assets_dir: Option<std::path::PathBuf>,
 }
 
 impl Default for ExportOptions {
     fn default() -> Self {
         Self {
             manifest_version: 3,
+            shared_assets_dir: None,
         }
     }
 }

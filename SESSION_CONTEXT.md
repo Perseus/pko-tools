@@ -1,29 +1,55 @@
 # Session Context
 
 ## Plan
-- **File:** ~/.claude/plans/parser-parity-audit-fixes.md
-- **Feature:** LMO Parser & Rendering Parity Fixes
-- **Started:** 2026-02-26
-- **Completed:** 2026-02-26
+- **File:** ~/.claude/plans/vivid-chasing-cray.md
+- **Feature:** Shared Assets System
+- **Started:** 2026-02-27
 
 ## Progress
-| Phase | Repo | Branch | Status | Commit |
-|-------|------|--------|--------|--------|
-| Phase A0: Tile color grid default | pko-tools | feat/parser-parity-phase-a0 | complete | 8e1555e |
-| Phase A: Lighting + alpha test | pko-tools | feat/parser-parity-phase-a | complete | fe04ef2 |
-| Phase A1: Lighting constants | client-unity | feat/parser-parity-phase-a | complete | 00a4778 |
-| Phase B: Cull mode parsing | pko-tools | feat/parser-parity-phase-b-cull | complete | 82bf8e3 |
-| Phase C: Transp type remapping | pko-tools | feat/parser-parity-phase-c | complete | 25682c0 |
-
-## Final Test Results
-- **pko-tools:** 290 passed, 1 failed (pre-existing test_tile_color_png_round_trip), 9 ignored
-- **client-unity:** WorldSystemsTests updated to match new lighting defaults (needs Unity compile verification)
+| Phase | Repo | Branch | Status | Commit | Linear |
+|-------|------|--------|--------|--------|--------|
+| Phase 1: Shared Export Command | pko-tools | feat/shared-assets-phase-a | done | 036e5f5 | PKO-115..PKO-118 |
+| Phase 2: Per-Map Shared Refs | pko-tools | feat/shared-assets-phase-b | done | 6d47fe3 | PKO-119 |
+| Phase 2 fix: atlas URI removal | pko-tools | feat/shared-assets-phase-b | done | 48728b6 | - |
+| Phase 3: Unity Import Shared | client-unity | feat/shared-assets-phase-a | done | f0713e1 | PKO-120 |
+| Phase 3 fix: manifest version parsing | client-unity | feat/shared-assets-phase-a | done | 95bd8a3 | - |
+| Phase 4: Migration | client-unity | feat/shared-assets-phase-a | done | a3b7afe | - |
 
 ## Decisions
-1. **Phase A0 round-trip test:** The `test_tile_color_png_round_trip` test now fails because it expects 0 for missing tiles but we changed the default to -1i16 (0xFFFF). This is a test maintenance issue, not a regression — the new behavior is correct. Left as known issue.
-2. **Character vs scene object lighting:** Plan correctly identifies these as intentionally separate. GameConfig/RegionLighting now has scene object values. CLAUDE.md still references old character values — should be updated as a follow-up.
+- `shared_assets_dir` kept as `Option<PathBuf>` (not required) in `ExportOptions` for backward compatibility. The plan suggested making it required, but optional is safer — existing tooling and batch exports work without it.
+- Implemented `compute_shared_rel_path()` manually instead of adding `pathdiff` crate dependency.
+- `SharedManifestData` struct introduced to avoid clippy too-many-arguments warning on `build_shared_manifest()`.
+- MapImporter uses priority chain for building folder (shared > legacy > map-local) instead of making shared mandatory, preserving backward compatibility with existing map imports.
 
 ## Known Issues
-- Pre-existing test failure: map::grid_images::tests::test_tile_color_png_round_trip (now expected to fail due to Phase A0 default change)
-- client-unity CLAUDE.md TOP Shader section still references old character lighting values (-1,-1,-1 / 0.6 / 0.4)
-- client-unity changes not yet Unity compile-verified (no Unity CLI available in this session)
+- Pre-existing test failure: `test_tile_color_png_round_trip` (290 pass, 1 fail) — not caused by our changes
+- Pre-existing integration test compile failure: `model_088_roundtrip_test` — signature mismatch in `get_gltf_mesh_primitive`
+- Unity compile verification not available from CLI — C# changes are syntactically correct but untested in Unity editor
+
+## Migration (Phase 4) — COMPLETED
+
+Ran the full migration:
+
+1. **Shared export**: `export_cli top-client Assets/Maps/Shared --shared`
+   - 49 terrain textures, 565 buildings (3 failed), 381 effect textures, 30 water textures, 16 alpha masks
+   - Shared dir: 362 MB
+
+2. **Re-exported maps with shared refs**:
+   - `07xmas2` → `Assets/Maps/07xmas2-v3/` (manifest + terrain.glb + grids only)
+   - `garner` → `Assets/Maps/garner/` (manifest + terrain.glb + grids only)
+   - Both manifests use `../Shared/...` relative paths, verified resolving
+
+3. **Deleted old per-map duplicates**:
+   - `07xmas2-v3/terrain_textures/`, `07xmas2-v3/effects/`
+   - `garner/terrain_textures/`, `garner/effects/`, `garner/water/`, `garner/buildings/`
+   - `garner/terrain.gltf`, `garner/terrain_atlas.png`, `garner/terrain_sections/`
+   - `Assets/Maps/Buildings/` (old legacy shared folder)
+   - Reclaimed ~2.7 GB of duplicated assets
+
+4. **Verified**: All `../Shared/...` paths in both manifests resolve to actual files
+
+## Post-Migration Fixes
+
+1. **ManifestParser version parsing** (95bd8a3): `ExtractInt()` found nested `"version": 2` in effect_definitions before top-level `"version": 3`, breaking garner import. Fixed with `ExtractTopLevelInt()` that tracks brace depth.
+
+2. **Section GLB atlas URI** (48728b6): Each of garner's 1024 section GLBs referenced `../terrain_atlas.png` (152 MB) via URI, causing glTFast to resolve it for every section during import. Removed the URI — `TOPMaterialReplacer` handles materials at runtime.

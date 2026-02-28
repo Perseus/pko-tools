@@ -57,6 +57,7 @@ pub async fn export_map_for_unity(
     project_id: String,
     map_name: String,
     format: Option<String>,
+    shared_dir: Option<String>,
 ) -> Result<MapForUnityExportResult, String> {
     let project_id =
         uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
@@ -69,10 +70,13 @@ pub async fn export_map_for_unity(
         .join("map")
         .join(&map_name);
 
-    let options = match format.as_deref() {
-        Some("v2") => super::ExportOptions { manifest_version: 2 },
+    let mut options = match format.as_deref() {
+        Some("v2") => super::ExportOptions { manifest_version: 2, ..Default::default() },
         _ => super::ExportOptions::default(),
     };
+    if let Some(dir) = shared_dir {
+        options.shared_assets_dir = Some(std::path::PathBuf::from(dir));
+    }
 
     terrain::export_map_for_unity(project.project_directory.as_ref(), &map_name, &exports_dir, &options)
         .map_err(|e| e.to_string())
@@ -94,11 +98,37 @@ pub async fn batch_export_maps_for_unity(
         .join("map");
 
     let options = match format.as_deref() {
-        Some("v2") => super::ExportOptions { manifest_version: 2 },
+        Some("v2") => super::ExportOptions { manifest_version: 2, ..Default::default() },
         _ => super::ExportOptions::default(),
     };
 
     terrain::batch_export_for_unity(project.project_directory.as_ref(), &output_base_dir, &options)
+        .map_err(|e| e.to_string())
+}
+
+// ============================================================================
+// Shared asset export
+// ============================================================================
+
+#[tauri::command]
+pub async fn export_shared_assets(
+    project_id: String,
+    output_dir: Option<String>,
+) -> Result<super::shared::SharedExportResult, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+
+    let out_dir = match output_dir {
+        Some(dir) => std::path::PathBuf::from(dir),
+        None => project
+            .project_directory
+            .join("pko-tools")
+            .join("exports")
+            .join("Shared"),
+    };
+
+    super::shared::export_shared_assets(project.project_directory.as_ref(), &out_dir)
         .map_err(|e| e.to_string())
 }
 
