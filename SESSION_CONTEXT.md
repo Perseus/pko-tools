@@ -10,8 +10,10 @@
 |-------|------|--------|--------|--------|--------|
 | Phase 1: Shared Export Command | pko-tools | feat/shared-assets-phase-a | done | 036e5f5 | PKO-115..PKO-118 |
 | Phase 2: Per-Map Shared Refs | pko-tools | feat/shared-assets-phase-b | done | 6d47fe3 | PKO-119 |
+| Phase 2 fix: atlas URI removal | pko-tools | feat/shared-assets-phase-b | done | 48728b6 | - |
 | Phase 3: Unity Import Shared | client-unity | feat/shared-assets-phase-a | done | f0713e1 | PKO-120 |
-| Phase 4: Migration | - | - | done | - | - |
+| Phase 3 fix: manifest version parsing | client-unity | feat/shared-assets-phase-a | done | 95bd8a3 | - |
+| Phase 4: Migration | client-unity | feat/shared-assets-phase-a | done | a3b7afe | - |
 
 ## Decisions
 - `shared_assets_dir` kept as `Option<PathBuf>` (not required) in `ExportOptions` for backward compatibility. The plan suggested making it required, but optional is safer — existing tooling and batch exports work without it.
@@ -45,3 +47,9 @@ Ran the full migration:
    - Reclaimed ~2.7 GB of duplicated assets
 
 4. **Verified**: All `../Shared/...` paths in both manifests resolve to actual files
+
+## Post-Migration Fixes
+
+1. **ManifestParser version parsing** (95bd8a3): `ExtractInt()` found nested `"version": 2` in effect_definitions before top-level `"version": 3`, breaking garner import. Fixed with `ExtractTopLevelInt()` that tracks brace depth.
+
+2. **Section GLB atlas URI** (48728b6): Each of garner's 1024 section GLBs referenced `../terrain_atlas.png` (152 MB) via URI, causing glTFast to resolve it for every section during import. Removed the URI — `TOPMaterialReplacer` handles materials at runtime.
