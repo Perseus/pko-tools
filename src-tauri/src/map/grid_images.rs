@@ -294,8 +294,8 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let path = tmp.path().join("tile_color.png");
 
-        // Test known RGB565 values
-        // Pure red: 0xF800, pure green: 0x07E0, pure blue: 0x001F, white: 0xFFFF
+        // Test known BGR565 values (PKO stores blue in high 5 bits, red in low 5)
+        // Pure blue: 0xF800, pure green: 0x07E0, pure red: 0x001F, white: 0xFFFF
         let test_colors: Vec<u16> = vec![0xF800, 0x07E0, 0x001F, 0xFFFF];
         let mut grid_bytes = Vec::new();
         for &c in &test_colors {
@@ -307,23 +307,23 @@ mod tests {
         let img = image::open(&path).unwrap().into_rgb8();
         assert_eq!(img.dimensions(), (2, 2));
 
-        // Pure red (0xF800): R=0xF8, G=0, B=0
+        // Pure blue (0xF800): high 5 bits = blue → R=0, G=0, B=0xF8
         let p = img.get_pixel(0, 0).0;
-        assert_eq!(p[0], 0xF8);
+        assert_eq!(p[0], 0);
         assert_eq!(p[1], 0);
-        assert_eq!(p[2], 0);
+        assert_eq!(p[2], 0xF8);
 
-        // Pure green (0x07E0): R=0, G=0xFC, B=0
+        // Pure green (0x07E0): middle 6 bits = green → R=0, G=0xFC, B=0
         let p = img.get_pixel(1, 0).0;
         assert_eq!(p[0], 0);
         assert_eq!(p[1], 0xFC);
         assert_eq!(p[2], 0);
 
-        // Pure blue (0x001F): R=0, G=0, B=0xF8
+        // Pure red (0x001F): low 5 bits = red → R=0xF8, G=0, B=0
         let p = img.get_pixel(0, 1).0;
-        assert_eq!(p[0], 0);
+        assert_eq!(p[0], 0xF8);
         assert_eq!(p[1], 0);
-        assert_eq!(p[2], 0xF8);
+        assert_eq!(p[2], 0);
 
         // White (0xFFFF): R=0xF8, G=0xFC, B=0xF8
         let p = img.get_pixel(1, 1).0;

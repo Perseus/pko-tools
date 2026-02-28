@@ -2598,4 +2598,387 @@ mod tests {
             name
         );
     }
+
+    // ====================================================================
+    // GLB index buffer integrity tests
+    // ====================================================================
+
+    /// Helper: write an LmoModel to a temp LMO file and return its path.
+    fn write_temp_lmo(model: &LmoModel, dir: &Path, name: &str) -> std::path::PathBuf {
+        let lmo_path = dir.join(name);
+        let mut data = Vec::new();
+        data.extend_from_slice(&model.version.to_le_bytes());
+        let obj_count = model.geom_objects.len() as u32;
+        data.extend_from_slice(&obj_count.to_le_bytes());
+
+        // Build all geom blobs first to compute header entries
+        let blobs: Vec<Vec<u8>> = model
+            .geom_objects
+            .iter()
+            .map(|g| build_test_geom_blob(g))
+            .collect();
+
+        // Header table: 4 (version) + 4 (count) + obj_count * 12 (entries)
+        let header_end = 4 + 4 + model.geom_objects.len() * 12;
+        let mut offset = header_end;
+        for blob in &blobs {
+            data.extend_from_slice(&1u32.to_le_bytes()); // type = GEOMETRY
+            data.extend_from_slice(&(offset as u32).to_le_bytes());
+            data.extend_from_slice(&(blob.len() as u32).to_le_bytes());
+            offset += blob.len();
+        }
+        for blob in &blobs {
+            data.extend_from_slice(blob);
+        }
+
+        std::fs::write(&lmo_path, &data).unwrap();
+        lmo_path
+    }
+
+    /// Helper: parse GLB binary, extract JSON and BIN chunks.
+    fn parse_glb(glb: &[u8]) -> (serde_json::Value, Vec<u8>) {
+        assert!(glb.len() >= 12, "GLB too short");
+        assert_eq!(&glb[0..4], b"glTF", "not a GLB");
+        let json_len = u32::from_le_bytes(glb[12..16].try_into().unwrap()) as usize;
+        let json_data = &glb[20..20 + json_len];
+        let bin_offset = 20 + json_len;
+        let bin_len = u32::from_le_bytes(glb[bin_offset..bin_offset + 4].try_into().unwrap()) as usize;
+        let bin_data = glb[bin_offset + 8..bin_offset + 8 + bin_len].to_vec();
+        let parsed: serde_json::Value = serde_json::from_slice(json_data).unwrap();
+        (parsed, bin_data)
+    }
+
+    /// Helper: extract index values from GLB binary using the accessor/bufferView metadata.
+    fn extract_indices(json: &serde_json::Value, bin: &[u8], accessor_idx: usize) -> Vec<u32> {
+        let acc = &json["accessors"][accessor_idx];
+        let bv_idx = acc["bufferView"].as_u64().unwrap() as usize;
+        let bv = &json["bufferViews"][bv_idx];
+        let byte_offset = bv["byteOffset"].as_u64().unwrap_or(0) as usize
+            + acc["byteOffset"].as_u64().unwrap_or(0) as usize;
+        let count = acc["count"].as_u64().unwrap() as usize;
+        let comp_type = acc["componentType"].as_u64().unwrap();
+
+        match comp_type {
+            5123 => {
+                // UNSIGNED_SHORT
+                (0..count)
+                    .map(|i| {
+                        let off = byte_offset + i * 2;
+                        u16::from_le_bytes(bin[off..off + 2].try_into().unwrap()) as u32
+                    })
+                    .collect()
+            }
+            5125 => {
+                // UNSIGNED_INT
+                (0..count)
+                    .map(|i| {
+                        let off = byte_offset + i * 4;
+                        u32::from_le_bytes(bin[off..off + 4].try_into().unwrap())
+                    })
+                    .collect()
+            }
+            _ => panic!("unexpected componentType {}", comp_type),
+        }
+    }
+
+    /// Helper: serialize GLB from JSON string + binary data.
+    fn build_glb_bytes(json_str: &str, bin: &[u8]) -> Vec<u8> {
+        let json_bytes = json_str.as_bytes();
+        // Pad JSON to 4-byte alignment
+        let json_pad = (4 - (json_bytes.len() % 4)) % 4;
+        let json_chunk_len = json_bytes.len() + json_pad;
+        // Pad BIN to 4-byte alignment
+        let bin_pad = (4 - (bin.len() % 4)) % 4;
+        let bin_chunk_len = bin.len() + bin_pad;
+
+        let total = 12 + 8 + json_chunk_len + 8 + bin_chunk_len;
+        let mut out = Vec::with_capacity(total);
+        out.extend_from_slice(b"glTF");
+        out.extend_from_slice(&2u32.to_le_bytes());
+        out.extend_from_slice(&(total as u32).to_le_bytes());
+        // JSON chunk
+        out.extend_from_slice(&(json_chunk_len as u32).to_le_bytes());
+        out.extend_from_slice(&0x4E4F534Au32.to_le_bytes()); // "JSON"
+        out.extend_from_slice(json_bytes);
+        out.extend(std::iter::repeat(0x20u8).take(json_pad));
+        // BIN chunk
+        out.extend_from_slice(&(bin_chunk_len as u32).to_le_bytes());
+        out.extend_from_slice(&0x004E4942u32.to_le_bytes()); // "BIN\0"
+        out.extend_from_slice(bin);
+        out.extend(std::iter::repeat(0u8).take(bin_pad));
+        out
+    }
+
+    /// Make a test model with multiple geometry objects, optionally with vertex colors.
+    fn make_multi_geom_model(geom_count: usize, with_vertex_colors: bool) -> LmoModel {
+        let mut geom_objects = Vec::new();
+        for gi in 0..geom_count {
+            let vert_count = 4;
+            let vertices = vec![
+                [gi as f32, 0.0, 0.0],
+                [gi as f32 + 1.0, 0.0, 0.0],
+                [gi as f32, 1.0, 0.0],
+                [gi as f32 + 1.0, 1.0, 0.0],
+            ];
+            let normals = vec![[0.0, 0.0, 1.0]; vert_count];
+            let texcoords = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
+            let vertex_colors = if with_vertex_colors {
+                // D3DCOLOR: 0xAARRGGBB
+                vec![0xFFFF0000; vert_count] // opaque red
+            } else {
+                vec![]
+            };
+            // Two triangles: (0,1,2), (1,3,2)
+            let indices = vec![0, 1, 2, 1, 3, 2];
+
+            geom_objects.push(LmoGeomObject {
+                id: (gi + 1) as u32,
+                parent_id: 0xFFFFFFFF,
+                obj_type: 0,
+                mat_local: [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+                vertices,
+                normals,
+                texcoords,
+                vertex_colors,
+                indices,
+                subsets: vec![lmo::LmoSubset {
+                    primitive_num: 2,
+                    start_index: 0,
+                    vertex_num: vert_count as u32,
+                    min_index: 0,
+                }],
+                materials: vec![lmo::LmoMaterial {
+                    diffuse: [0.8, 0.2, 0.1, 1.0],
+                    ambient: [0.3, 0.3, 0.3, 1.0],
+                    emissive: [0.0, 0.0, 0.0, 0.0],
+                    opacity: 1.0,
+                    transp_type: 0,
+                    alpha_test_enabled: false,
+                    alpha_ref: 0,
+                    src_blend: None,
+                    dest_blend: None,
+                    cull_mode: None,
+                    tex_filename: None,
+                }],
+                animation: None,
+                texuv_anims: Vec::new(),
+                teximg_anims: Vec::new(),
+                mtlopac_anims: Vec::new(),
+            });
+        }
+        LmoModel {
+            version: 0x1005,
+            geom_objects,
+        }
+    }
+
+    /// Validate that all index values in a GLB are within vertex count bounds.
+    /// Returns a list of (mesh_name, bad_index_value, vertex_count) for any failures.
+    fn validate_glb_indices(json: &serde_json::Value, bin: &[u8]) -> Vec<(String, u32, u64)> {
+        let mut errors = Vec::new();
+        let meshes = json["meshes"].as_array().unwrap();
+        for mesh in meshes {
+            let mesh_name = mesh["name"].as_str().unwrap_or("?").to_string();
+            for prim in mesh["primitives"].as_array().unwrap() {
+                let idx_acc = prim["indices"].as_u64().unwrap() as usize;
+                let pos_acc = prim["attributes"]["POSITION"].as_u64().unwrap() as usize;
+                let vert_count = json["accessors"][pos_acc]["count"].as_u64().unwrap();
+
+                let indices = extract_indices(json, bin, idx_acc);
+                for &idx in &indices {
+                    if idx as u64 >= vert_count {
+                        errors.push((mesh_name.clone(), idx, vert_count));
+                        break; // one error per mesh is enough
+                    }
+                }
+            }
+        }
+        errors
+    }
+
+    #[test]
+    fn glb_index_integrity_without_vertex_colors() {
+        let tmp_dir = std::env::temp_dir().join("pko_test_glb_idx_no_color");
+        let _ = std::fs::create_dir_all(&tmp_dir);
+
+        let model = make_multi_geom_model(4, false);
+        let lmo_path = write_temp_lmo(&model, &tmp_dir, "no_colors.lmo");
+
+        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir).unwrap();
+        let glb = build_glb_bytes(&json_str, &bin);
+        let (json, bin_data) = parse_glb(&glb);
+
+        let errors = validate_glb_indices(&json, &bin_data);
+        assert!(
+            errors.is_empty(),
+            "GLB without vertex colors should have valid indices, got errors: {:?}",
+            errors
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn glb_index_integrity_with_vertex_colors() {
+        let tmp_dir = std::env::temp_dir().join("pko_test_glb_idx_with_color");
+        let _ = std::fs::create_dir_all(&tmp_dir);
+
+        let model = make_multi_geom_model(4, true);
+        let lmo_path = write_temp_lmo(&model, &tmp_dir, "with_colors.lmo");
+
+        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir).unwrap();
+        let glb = build_glb_bytes(&json_str, &bin);
+        let (json, bin_data) = parse_glb(&glb);
+
+        let errors = validate_glb_indices(&json, &bin_data);
+        assert!(
+            errors.is_empty(),
+            "GLB with vertex colors should have valid indices, got errors: {:?}",
+            errors
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn glb_index_integrity_mixed_color_geoms() {
+        // Model where some geom objects have vertex colors and others don't —
+        // this is the pattern most likely to trigger buffer offset misalignment.
+        let tmp_dir = std::env::temp_dir().join("pko_test_glb_idx_mixed");
+        let _ = std::fs::create_dir_all(&tmp_dir);
+
+        let mut model = make_multi_geom_model(4, false);
+        // Add vertex colors to geom 1 and 3 only
+        model.geom_objects[1].vertex_colors = vec![0xFFFF0000; 4];
+        model.geom_objects[3].vertex_colors = vec![0xFF00FF00; 4];
+
+        let lmo_path = write_temp_lmo(&model, &tmp_dir, "mixed_colors.lmo");
+
+        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir).unwrap();
+        let glb = build_glb_bytes(&json_str, &bin);
+        let (json, bin_data) = parse_glb(&glb);
+
+        let errors = validate_glb_indices(&json, &bin_data);
+        assert!(
+            errors.is_empty(),
+            "GLB with mixed vertex colors should have valid indices, got errors: {:?}",
+            errors
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    /// Test against actual building GLB files on disk (skipped if not present).
+    /// This test validates that the exporter produces correct index buffers.
+    /// Any failure here means the GLB has corrupt indices — the index data region
+    /// contains vertex float data instead of triangle indices.
+    #[test]
+    fn real_glb_buildings_have_valid_indices() {
+        let buildings_dir = std::path::Path::new(
+            "../../client-unity/pko-client/Assets/Maps/Shared/buildings",
+        );
+        if !buildings_dir.exists() {
+            return; // skip if building files not available
+        }
+
+        let mut total = 0;
+        let mut corrupt = Vec::new();
+
+        for entry in std::fs::read_dir(buildings_dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.extension().map(|e| e == "glb").unwrap_or(false) {
+                total += 1;
+                let glb = std::fs::read(&path).unwrap();
+                if glb.len() < 20 || &glb[0..4] != b"glTF" {
+                    continue;
+                }
+                let (json, bin_data) = parse_glb(&glb);
+                let errors = validate_glb_indices(&json, &bin_data);
+                if !errors.is_empty() {
+                    let name = path.file_name().unwrap().to_string_lossy().to_string();
+                    corrupt.push((name, errors));
+                }
+            }
+        }
+
+        assert!(
+            corrupt.is_empty(),
+            "Found {} corrupt GLBs out of {} total:\n{}",
+            corrupt.len(),
+            total,
+            corrupt
+                .iter()
+                .map(|(name, errs)| format!(
+                    "  {}: mesh '{}' has index {} but only {} vertices",
+                    name, errs[0].0, errs[0].1, errs[0].2
+                ))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+
+    /// Reproduce the index corruption bug by round-tripping a known-corrupt LMO
+    /// through build_glb_from_lmo and checking the output (skipped if not present).
+    #[test]
+    fn real_lmo_roundtrip_produces_valid_glb_indices() {
+        let lmo_candidates = [
+            "../../top-client/model/scene/nml-bd167.lmo",
+            "../top-client/model/scene/nml-bd167.lmo",
+        ];
+        let lmo_path = lmo_candidates
+            .iter()
+            .map(std::path::Path::new)
+            .find(|p| p.exists());
+
+        let Some(lmo_path) = lmo_path else {
+            return; // skip if LMO source not available
+        };
+
+        let project_dir = lmo_path.parent().unwrap().parent().unwrap();
+        let (json_str, bin) = build_glb_from_lmo(lmo_path, project_dir).unwrap();
+        let glb = build_glb_bytes(&json_str, &bin);
+        let (json, bin_data) = parse_glb(&glb);
+
+        let errors = validate_glb_indices(&json, &bin_data);
+        assert!(
+            errors.is_empty(),
+            "Round-tripped nml-bd167.lmo should produce valid GLB indices, got errors: {:?}",
+            errors
+        );
+    }
+
+    /// Verify that parsing nml-bd167.lmo (which has FVF=0x1118 with blend data)
+    /// produces valid index values after the lwBlendInfo size fix.
+    #[test]
+    fn real_lmo_parse_produces_valid_indices() {
+        let lmo_candidates = [
+            "../../top-client/model/scene/nml-bd167.lmo",
+            "../top-client/model/scene/nml-bd167.lmo",
+        ];
+        let lmo_path = lmo_candidates
+            .iter()
+            .map(std::path::Path::new)
+            .find(|p| p.exists());
+
+        let Some(lmo_path) = lmo_path else {
+            return;
+        };
+
+        let model = lmo::load_lmo(lmo_path).unwrap();
+        for (gi, geom) in model.geom_objects.iter().enumerate() {
+            let vert_count = geom.vertices.len();
+            let max_idx = geom.indices.iter().copied().max().unwrap_or(0);
+            assert!(
+                (max_idx as usize) < vert_count,
+                "geom[{}]: max index {} >= vertex count {} — LMO parser read indices from wrong offset",
+                gi, max_idx, vert_count
+            );
+        }
+    }
 }

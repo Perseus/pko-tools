@@ -30,6 +30,7 @@ const D3DFVF_NORMAL: u32 = 0x010;
 const D3DFVF_DIFFUSE: u32 = 0x040;
 const D3DFVF_TEXCOUNT_MASK: u32 = 0xf00;
 const D3DFVF_TEXCOUNT_SHIFT: u32 = 8;
+const D3DFVF_LASTBETA_UBYTE4: u32 = 0x1000;
 
 // Object types in the header table
 const OBJ_TYPE_GEOMETRY: u32 = 1;
@@ -446,9 +447,11 @@ fn read_material(cursor: &mut Cursor<&[u8]>, mtl_ver: MtlFormatVersion) -> Resul
 ///
 /// `file_version` is the top-level LMO file version. For version 0, an extra `old_version`
 /// DWORD is read first and used to determine the actual mesh format.
+/// `mesh_size` is the total byte size of the mesh section (used for legacy pre-index detection).
 fn read_mesh(
     cursor: &mut Cursor<&[u8]>,
     file_version: u32,
+    mesh_size: usize,
 ) -> Result<(
     Vec<[f32; 3]>,
     Vec<[f32; 3]>,
@@ -458,6 +461,9 @@ fn read_mesh(
     Vec<LmoSubset>,
     MaterialRenderState,
 )> {
+    // Track the start of the mesh section for pre-index pair detection
+    let mesh_start = cursor.position();
+
     // For version 0, the mesh section has an embedded old_version prefix
     let mesh_version = if file_version == EXP_OBJ_VERSION_0_0_0_0 {
         read_u32(cursor)?
@@ -554,10 +560,10 @@ fn read_mesh(
 
         // Skip blend/bone data if present
         if bone_index_num > 0 {
-            // lwBlendInfo per vertex (each is 8 bytes: 2 floats for weights)
+            // lwBlendInfo = { DWORD indexd (4 bytes) + float weight[4] (16 bytes) } = 20 bytes per vertex
             // + DWORD per bone_index
             cursor.seek(SeekFrom::Current(
-                vertex_num as i64 * 8 + bone_index_num as i64 * 4,
+                vertex_num as i64 * 20 + bone_index_num as i64 * 4,
             ))?;
         }
 
@@ -638,12 +644,26 @@ fn read_mesh(
             }
         }
 
-        // Skip blend/bone data if present (old format uses BYTE bone indices)
-        if bone_index_num > 0 {
-            // lwBlendInfo per vertex (8 bytes) + BYTE per bone_index
+        // Skip blend/bone data if present (old format uses BYTE bone indices).
+        // Gate on D3DFVF_LASTBETA_UBYTE4 flag (matching engine behavior) rather than bone_index_num.
+        if (fvf & D3DFVF_LASTBETA_UBYTE4) != 0 {
+            // lwBlendInfo = { DWORD indexd (4 bytes) + float weight[4] (16 bytes) } = 20 bytes per vertex
+            // + BYTE per bone_index
             cursor.seek(SeekFrom::Current(
-                vertex_num as i64 * 8 + bone_index_num as i64,
+                vertex_num as i64 * 20 + bone_index_num as i64,
             ))?;
+        }
+
+        // For mesh_version 0, some files have 8 extra bytes (2 DWORDs) before the index
+        // buffer — a stale artifact from an older save format. Detect by comparing
+        // remaining bytes against expected index data size.
+        if mesh_version == 0 && mesh_size > 0 {
+            let mesh_end = mesh_start + mesh_size as u64;
+            let remaining = mesh_end.saturating_sub(cursor.position()) as usize;
+            let expected_index_bytes = index_num * 4;
+            if remaining == expected_index_bytes + 8 {
+                cursor.seek(SeekFrom::Current(8))?;
+            }
         }
 
         // Indices (u32)
@@ -987,7 +1007,7 @@ fn read_geom_object(
     let chunk = &data[addr..addr + size];
     let mut cursor = Cursor::new(chunk);
 
-    // For version 0, skip the extra old_version DWORD prefix
+    // For version 0, skip the extra old_version DWORD prefix and detect header variant
     let header_prefix = if file_version == EXP_OBJ_VERSION_0_0_0_0 {
         let _old_version = read_u32(&mut cursor)?;
         4usize
@@ -995,17 +1015,56 @@ fn read_geom_object(
         0usize
     };
 
-    // Header: 116 bytes (lwGeomObjInfoHeader)
+    // For v0 files, detect whether the header is legacy (92 bytes, no rcci/state_ctrl)
+    // or modern (116 bytes). Probe the 4 size fields at both possible offsets and
+    // check which one produces a plausible sum <= chunk payload size.
+    let is_legacy_header = if file_version == EXP_OBJ_VERSION_0_0_0_0 {
+        let chunk_payload_size = size - header_prefix;
+
+        // Probe candidate size fields at both legacy (offset 76) and modern (offset 100)
+        // header positions, and check which set produces a plausible total.
+        // Use exact-match check: header_bytes + sum(sizes) must equal chunk_payload_size.
+        // This is stricter than the .ksy's <= check and avoids false positives when
+        // data bytes happen to look like small size values.
+
+        let legacy_ok = if header_prefix + 92 <= size {
+            let s = u32::from_le_bytes(chunk[header_prefix + 76..header_prefix + 80].try_into().unwrap()) as usize
+                + u32::from_le_bytes(chunk[header_prefix + 80..header_prefix + 84].try_into().unwrap()) as usize
+                + u32::from_le_bytes(chunk[header_prefix + 84..header_prefix + 88].try_into().unwrap()) as usize
+                + u32::from_le_bytes(chunk[header_prefix + 88..header_prefix + 92].try_into().unwrap()) as usize;
+            92 + s == chunk_payload_size
+        } else {
+            false
+        };
+
+        let modern_ok = if header_prefix + 116 <= size {
+            let s = u32::from_le_bytes(chunk[header_prefix + 100..header_prefix + 104].try_into().unwrap()) as usize
+                + u32::from_le_bytes(chunk[header_prefix + 104..header_prefix + 108].try_into().unwrap()) as usize
+                + u32::from_le_bytes(chunk[header_prefix + 108..header_prefix + 112].try_into().unwrap()) as usize
+                + u32::from_le_bytes(chunk[header_prefix + 112..header_prefix + 116].try_into().unwrap()) as usize;
+            116 + s == chunk_payload_size
+        } else {
+            false
+        };
+
+        // Prefer modern (matches engine's sizeof(lwGeomObjInfoHeader)); fall back to legacy
+        !modern_ok && legacy_ok
+    } else {
+        false
+    };
+
+    // Header: read common fields first
     let id = read_u32(&mut cursor)?;
     let parent_id = read_u32(&mut cursor)?;
     let obj_type = read_u32(&mut cursor)?;
     let mat_local = read_mat44(&mut cursor)?;
 
-    // rcci: lwRenderCtrlCreateInfo — 4 DWORDs = 16 bytes
-    cursor.seek(SeekFrom::Current(16))?;
-
-    // state_ctrl: lwStateCtrl — BYTE[8] = 8 bytes
-    cursor.seek(SeekFrom::Current(8))?;
+    if !is_legacy_header {
+        // rcci: lwRenderCtrlCreateInfo — 4 DWORDs = 16 bytes
+        cursor.seek(SeekFrom::Current(16))?;
+        // state_ctrl: lwStateCtrl — BYTE[8] = 8 bytes
+        cursor.seek(SeekFrom::Current(8))?;
+    }
 
     let mtl_size = read_u32(&mut cursor)? as usize;
     let mesh_size = read_u32(&mut cursor)? as usize;
@@ -1013,7 +1072,8 @@ fn read_geom_object(
     let anim_size = read_u32(&mut cursor)? as usize;
 
     // Compute section offsets within the chunk using sizes (for fallback positioning)
-    let header_size = header_prefix + 116; // old_version prefix (if v0) + lwGeomObjInfoHeader
+    let actual_header_bytes = if is_legacy_header { 92 } else { 116 };
+    let header_size = header_prefix + actual_header_bytes; // old_version prefix (if v0) + header
     let mesh_offset = (header_size + mtl_size) as u64;
     let anim_offset = (header_size + mtl_size + mesh_size + helper_size) as u64;
 
@@ -1021,13 +1081,31 @@ fn read_geom_object(
     let mut materials = Vec::new();
     if mtl_size > 0 {
         let parse_result = (|| -> Result<Vec<LmoMaterial>> {
-            // Determine material format version
+            // Determine material format version.
+            // For v0, the section MAY start with a version prefix DWORD — but some
+            // legacy files omit it entirely, with the first DWORD being mtl_num.
+            // Detect by probing: only consume a prefix if the first DWORD is a known
+            // version marker AND the second DWORD is a plausible mtl_num (≤ 65535).
             let mtl_ver = if file_version == EXP_OBJ_VERSION_0_0_0_0 {
-                let mtl_old_version = read_u32(&mut cursor)?;
-                match mtl_old_version {
-                    0 => MtlFormatVersion::V0000,
-                    1 => MtlFormatVersion::V0001,
-                    _ => MtlFormatVersion::Current,
+                let probe_pos = cursor.position();
+                let first = read_u32(&mut cursor)?;
+                let second = read_u32(&mut cursor)?;
+                cursor.set_position(probe_pos); // rewind
+
+                let is_known_version = matches!(first, 0 | 1 | 2 | 0x1000..=0x1005);
+                let has_prefix = is_known_version && second <= 65535;
+
+                if has_prefix {
+                    let mtl_old_version = read_u32(&mut cursor)?; // consume prefix
+                    match mtl_old_version {
+                        0 => MtlFormatVersion::V0000,
+                        1 => MtlFormatVersion::V0001,
+                        _ => MtlFormatVersion::Current,
+                    }
+                } else {
+                    // No version prefix — first DWORD is mtl_num directly.
+                    // These legacy files use Current-format material entries.
+                    MtlFormatVersion::Current
                 }
             } else {
                 MtlFormatVersion::Current
@@ -1060,7 +1138,7 @@ fn read_geom_object(
     let mut mesh_alpha = MaterialRenderState::default();
 
     if mesh_size > 0 {
-        match read_mesh(&mut cursor, file_version) {
+        match read_mesh(&mut cursor, file_version, mesh_size) {
             Ok((v, n, t, c, i, s, alpha)) => {
                 vertices = v;
                 normals = n;
@@ -2285,6 +2363,181 @@ mod tests {
         }
     }
 
+    // ====================================================================
+    // Version-0 legacy header regression tests
+    // ====================================================================
+
+    #[test]
+    fn parse_v0_legacy_header_kao_bd001() {
+        // kao-bd001.lmo has a 92-byte legacy header (no rcci/state_ctrl).
+        // Previously broke because we always read 116 bytes.
+        let path = std::path::Path::new("../top-client/model/scene/kao-bd001.lmo");
+        if !path.exists() {
+            return;
+        }
+
+        let model = load_lmo(path).unwrap();
+        assert_eq!(model.version, 0, "kao-bd001 should be version 0");
+        assert!(
+            !model.geom_objects.is_empty(),
+            "kao-bd001 should have geometry objects"
+        );
+
+        for (i, geom) in model.geom_objects.iter().enumerate() {
+            assert!(
+                !geom.vertices.is_empty(),
+                "geom[{}] should have vertices",
+                i
+            );
+            assert!(!geom.indices.is_empty(), "geom[{}] should have indices", i);
+            // Verify index validity: all indices should be < vertex count
+            let max_idx = geom.indices.iter().copied().max().unwrap_or(0);
+            assert!(
+                max_idx < geom.vertices.len() as u32,
+                "geom[{}] max index {} >= vertex count {}",
+                i,
+                max_idx,
+                geom.vertices.len()
+            );
+            eprintln!(
+                "  geom[{}]: id={}, verts={}, indices={}, mats={}, subsets={}",
+                i,
+                geom.id,
+                geom.vertices.len(),
+                geom.indices.len(),
+                geom.materials.len(),
+                geom.subsets.len()
+            );
+        }
+    }
+
+    #[test]
+    fn parse_v0_legacy_header_nml_bd016() {
+        // nml-bd016.lmo has a 92-byte legacy header (no rcci/state_ctrl).
+        // Previously broke because we always read 116 bytes.
+        let path = std::path::Path::new("../top-client/model/scene/nml-bd016.lmo");
+        if !path.exists() {
+            return;
+        }
+
+        let model = load_lmo(path).unwrap();
+        assert_eq!(model.version, 0, "nml-bd016 should be version 0");
+        assert!(
+            !model.geom_objects.is_empty(),
+            "nml-bd016 should have geometry objects"
+        );
+
+        for (i, geom) in model.geom_objects.iter().enumerate() {
+            assert!(
+                !geom.vertices.is_empty(),
+                "geom[{}] should have vertices",
+                i
+            );
+            assert!(!geom.indices.is_empty(), "geom[{}] should have indices", i);
+            let max_idx = geom.indices.iter().copied().max().unwrap_or(0);
+            assert!(
+                max_idx < geom.vertices.len() as u32,
+                "geom[{}] max index {} >= vertex count {}",
+                i,
+                max_idx,
+                geom.vertices.len()
+            );
+            eprintln!(
+                "  geom[{}]: id={}, verts={}, indices={}, mats={}, subsets={}",
+                i,
+                geom.id,
+                geom.vertices.len(),
+                geom.indices.len(),
+                geom.materials.len(),
+                geom.subsets.len()
+            );
+        }
+    }
+
+    /// Build a synthetic version-0 LMO with a 92-byte legacy header (no rcci/state_ctrl).
+    fn build_v0_legacy_header_lmo() -> Vec<u8> {
+        let fvf = 0x002u32; // positions only
+        let vertex_num: u32 = 3;
+        let index_num: u32 = 3;
+        let subset_num: u32 = 1;
+
+        // Old format mesh: old_version(4) + header + subsets + vertices + indices
+        // Old mesh header: fvf(4) + pt_type(4) + vertex_num(4) + index_num(4) + subset_num(4)
+        //   + bone_index_num(4) + rs_set(128 bytes for mesh_version=0)
+        let mesh_header_size = 4 + 24 + 128; // old_version + 6 DWORDs + lwRenderStateSetMesh2
+        let mesh_data_size = subset_num as usize * 16 // subsets FIRST in old format
+            + vertex_num as usize * 12      // positions
+            + index_num as usize * 4;       // indices
+        let mesh_size = mesh_header_size + mesh_data_size;
+
+        // Build the geometry chunk
+        let mut geom = Vec::new();
+
+        // old_version prefix (v0 geometry chunk starts with this)
+        push_u32(&mut geom, 0); // old_version
+
+        // Legacy geometry header (92 bytes): id + parent_id + type + mat44 + sizes
+        // NO rcci, NO state_ctrl
+        push_u32(&mut geom, 99); // id
+        push_u32(&mut geom, 0xFFFFFFFF); // parent_id
+        push_u32(&mut geom, 0); // type
+        push_identity_mat44(&mut geom); // mat_local (64 bytes)
+        // Sizes immediately after mat_local (no rcci/state_ctrl gap)
+        push_u32(&mut geom, 0); // mtl_size
+        push_u32(&mut geom, mesh_size as u32);
+        push_u32(&mut geom, 0); // helper_size
+        push_u32(&mut geom, 0); // anim_size
+
+        // Mesh section (old format, mesh_version=0)
+        push_u32(&mut geom, 0); // mesh old_version
+        push_u32(&mut geom, fvf);
+        push_u32(&mut geom, 4); // pt_type
+        push_u32(&mut geom, vertex_num);
+        push_u32(&mut geom, index_num);
+        push_u32(&mut geom, subset_num);
+        push_u32(&mut geom, 0); // bone_index_num
+        // rs_set: lwRenderStateSetMesh2 = 2 * 8 * 8 = 128 bytes
+        push_zeros(&mut geom, 128);
+        // Subsets (old format: subsets FIRST)
+        push_u32(&mut geom, 1); // primitive_num
+        push_u32(&mut geom, 0); // start_index
+        push_u32(&mut geom, 3); // vertex_num
+        push_u32(&mut geom, 0); // min_index
+        // Vertices
+        push_f32(&mut geom, 0.0); push_f32(&mut geom, 0.0); push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 1.0); push_f32(&mut geom, 0.0); push_f32(&mut geom, 0.0);
+        push_f32(&mut geom, 0.0); push_f32(&mut geom, 1.0); push_f32(&mut geom, 0.0);
+        // Indices
+        push_u32(&mut geom, 0);
+        push_u32(&mut geom, 1);
+        push_u32(&mut geom, 2);
+
+        // Build file
+        let header_size = 4 + 4 + 12; // version + obj_num + 1 entry
+        let mut data = Vec::new();
+        push_u32(&mut data, 0); // file version = 0
+        push_u32(&mut data, 1); // obj_num
+        push_u32(&mut data, OBJ_TYPE_GEOMETRY);
+        push_u32(&mut data, header_size as u32);
+        push_u32(&mut data, geom.len() as u32);
+        data.extend_from_slice(&geom);
+        data
+    }
+
+    #[test]
+    fn parse_synthetic_v0_legacy_header() {
+        let data = build_v0_legacy_header_lmo();
+        let model = parse_lmo(&data).unwrap();
+        assert_eq!(model.version, 0);
+        assert_eq!(model.geom_objects.len(), 1);
+
+        let geom = &model.geom_objects[0];
+        assert_eq!(geom.id, 99);
+        assert_eq!(geom.vertices.len(), 3);
+        assert_eq!(geom.indices.len(), 3);
+        assert_eq!(geom.indices, vec![0, 1, 2]);
+    }
+
     #[test]
     fn parse_all_animation_types_roundtrip() {
         // cc-bd044.lmo — v0x1005, has BOTH texuv + teximg
@@ -2322,4 +2575,5 @@ mod tests {
             "should have texuv or teximg animations"
         );
     }
+
 }
