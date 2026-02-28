@@ -292,6 +292,66 @@ pub fn find_texture_file(project_dir: &Path, tex_name: &str) -> Option<std::path
     None
 }
 
+/// DDS FourCC constants.
+const DDS_MAGIC: &[u8; 4] = b"DDS ";
+const FOURCC_DXT1: u32 = u32::from_le_bytes(*b"DXT1");
+const FOURCC_DXT3: u32 = u32::from_le_bytes(*b"DXT3");
+const FOURCC_DXT5: u32 = u32::from_le_bytes(*b"DXT5");
+
+/// Decode raw texture bytes into an RGBA8 `DynamicImage`, preserving DXT1 punch-through alpha.
+///
+/// The `image` crate (v0.25) decodes DXT1 as Rgb8, permanently discarding the 1-bit alpha.
+/// This function detects DXT1 DDS files and uses `texture2ddecoder::decode_bc1a()` which
+/// correctly preserves punch-through alpha (transparent pixels where color0 <= color1).
+///
+/// For DXT3/DXT5 and non-DDS formats, falls through to the `image` crate.
+pub(crate) fn decode_dds_with_alpha(data: &[u8]) -> Option<image::DynamicImage> {
+    // Check DDS magic (4 bytes) + minimum header size (124 bytes) + pixelformat
+    if data.len() >= 128 && &data[0..4] == DDS_MAGIC {
+        // DDS_PIXELFORMAT.dwFlags at offset 76+4=80 from file start
+        // (header starts at offset 4, pixelformat at offset 76 within header)
+        let pf_flags = u32::from_le_bytes([data[80], data[81], data[82], data[83]]);
+        let has_fourcc = pf_flags & 0x4 != 0; // DDPF_FOURCC
+
+        if has_fourcc {
+            let fourcc = u32::from_le_bytes([data[84], data[85], data[86], data[87]]);
+
+            if fourcc == FOURCC_DXT1 {
+                // Parse dimensions from header
+                let height = u32::from_le_bytes([data[12], data[13], data[14], data[15]]) as usize;
+                let width = u32::from_le_bytes([data[16], data[17], data[18], data[19]]) as usize;
+
+                if width == 0 || height == 0 {
+                    return None;
+                }
+
+                // Compressed data starts at offset 128 (4 magic + 124 header)
+                let compressed = &data[128..];
+                let mut pixels = vec![0u32; width * height];
+
+                if texture2ddecoder::decode_bc1a(compressed, width, height, &mut pixels).is_err() {
+                    return None;
+                }
+
+                // Convert u32 pixels to ImageRgba8
+                // texture2ddecoder outputs pixels as u32 where LE bytes = [B, G, R, A]
+                let mut rgba_bytes = Vec::with_capacity(width * height * 4);
+                for pixel in &pixels {
+                    let [b, g, r, a] = pixel.to_le_bytes();
+                    rgba_bytes.extend_from_slice(&[r, g, b, a]);
+                }
+
+                let img_buf = image::RgbaImage::from_raw(width as u32, height as u32, rgba_bytes)?;
+                return Some(image::DynamicImage::ImageRgba8(img_buf));
+            }
+            // DXT3/DXT5: fall through to image crate (handles alpha correctly)
+        }
+    }
+
+    // Non-DDS or non-DXT1: use image crate as before
+    image::load_from_memory(data).ok()
+}
+
 /// Load a texture from disk, decode PKO encoding, convert to PNG, return base64 data URI.
 fn load_texture_as_data_uri(path: &Path) -> Option<String> {
     let raw_bytes = std::fs::read(path).ok()?;
@@ -2979,6 +3039,196 @@ mod tests {
                 "geom[{}]: max index {} >= vertex count {} — LMO parser read indices from wrong offset",
                 gi, max_idx, vert_count
             );
+        }
+    }
+
+    // ========================================================================
+    // DDS decode tests (DXT1 alpha preservation)
+    // ========================================================================
+
+    /// Build a minimal synthetic DDS file with DXT1 compression.
+    /// `width` and `height` must be multiples of 4. `block_data` is the raw compressed blocks.
+    fn build_dxt1_dds(width: u32, height: u32, block_data: &[u8]) -> Vec<u8> {
+        build_dds(width, height, FOURCC_DXT1, block_data)
+    }
+
+    fn build_dds(width: u32, height: u32, fourcc: u32, block_data: &[u8]) -> Vec<u8> {
+        let mut file = Vec::with_capacity(128 + block_data.len());
+
+        // Magic
+        file.extend_from_slice(b"DDS ");
+
+        // DDS_HEADER (124 bytes)
+        file.extend_from_slice(&124u32.to_le_bytes()); // dwSize
+        file.extend_from_slice(&0x81007u32.to_le_bytes()); // dwFlags
+        file.extend_from_slice(&height.to_le_bytes()); // dwHeight
+        file.extend_from_slice(&width.to_le_bytes()); // dwWidth
+        file.extend_from_slice(&(block_data.len() as u32).to_le_bytes()); // dwPitchOrLinearSize
+        file.extend_from_slice(&0u32.to_le_bytes()); // dwDepth
+        file.extend_from_slice(&1u32.to_le_bytes()); // dwMipMapCount
+        // dwReserved1[11]
+        for _ in 0..11 {
+            file.extend_from_slice(&0u32.to_le_bytes());
+        }
+        // DDS_PIXELFORMAT (32 bytes)
+        file.extend_from_slice(&32u32.to_le_bytes()); // dwSize
+        file.extend_from_slice(&0x4u32.to_le_bytes()); // dwFlags = DDPF_FOURCC
+        file.extend_from_slice(&fourcc.to_le_bytes()); // dwFourCC
+        file.extend_from_slice(&0u32.to_le_bytes()); // dwRGBBitCount
+        for _ in 0..4 {
+            file.extend_from_slice(&0u32.to_le_bytes()); // RGBA masks
+        }
+        // Caps
+        file.extend_from_slice(&0x1000u32.to_le_bytes()); // dwCaps = TEXTURE
+        for _ in 0..4 {
+            file.extend_from_slice(&0u32.to_le_bytes()); // dwCaps2-4 + dwReserved2
+        }
+
+        assert_eq!(file.len(), 128, "DDS header must be exactly 128 bytes");
+
+        // Compressed data
+        file.extend_from_slice(block_data);
+        file
+    }
+
+    #[test]
+    fn dxt1_alpha_preservation_punch_through() {
+        // Build a single 4x4 DXT1 block with punch-through alpha.
+        // When color0 <= color1, index 3 = transparent black.
+        //
+        // color0 = 0x0000 (black, RGB565)
+        // color1 = 0xFFFF (white, RGB565)
+        // Since color0 (0) < color1 (0xFFFF), this is punch-through mode.
+        // Index bits: all 0b11 = index 3 = transparent for all 16 pixels.
+        let mut block = [0u8; 8];
+        block[0] = 0x00; block[1] = 0x00; // color0 = 0 (black)
+        block[2] = 0xFF; block[3] = 0xFF; // color1 = 0xFFFF (white)
+        // All pixels = index 3 (0b11 repeated 16 times = 0xFFFFFFFF)
+        block[4] = 0xFF;
+        block[5] = 0xFF;
+        block[6] = 0xFF;
+        block[7] = 0xFF;
+
+        let dds = build_dxt1_dds(4, 4, &block);
+        let img = decode_dds_with_alpha(&dds).expect("should decode DXT1 DDS");
+        let rgba = img.to_rgba8();
+
+        assert_eq!(rgba.width(), 4);
+        assert_eq!(rgba.height(), 4);
+
+        // All 16 pixels should have alpha=0 (transparent)
+        let transparent_count = rgba.pixels().filter(|p| p.0[3] == 0).count();
+        assert_eq!(
+            transparent_count, 16,
+            "all pixels with index 3 in punch-through mode should be transparent, got {} transparent",
+            transparent_count
+        );
+    }
+
+    #[test]
+    fn dxt1_opaque_no_unexpected_holes() {
+        // Build a 4x4 DXT1 block in opaque mode (color0 > color1).
+        // All indices = 0 → all pixels = color0.
+        //
+        // color0 = 0xF800 (bright red, RGB565)
+        // color1 = 0x001F (bright blue, RGB565)
+        // Since color0 (0xF800) > color1 (0x001F), this is 4-color opaque mode.
+        let mut block = [0u8; 8];
+        block[0] = 0x00; block[1] = 0xF8; // color0 = 0xF800 (red)
+        block[2] = 0x1F; block[3] = 0x00; // color1 = 0x001F (blue)
+        // All pixels = index 0 → color0 (red)
+        block[4] = 0x00;
+        block[5] = 0x00;
+        block[6] = 0x00;
+        block[7] = 0x00;
+
+        let dds = build_dxt1_dds(4, 4, &block);
+        let img = decode_dds_with_alpha(&dds).expect("should decode opaque DXT1 DDS");
+        let rgba = img.to_rgba8();
+
+        // All 16 pixels should have alpha=255 (fully opaque)
+        let opaque_count = rgba.pixels().filter(|p| p.0[3] == 255).count();
+        assert_eq!(
+            opaque_count, 16,
+            "opaque DXT1 block should have all pixels alpha=255, got {} opaque",
+            opaque_count
+        );
+
+        // First pixel should be red-ish (R high, G low, B low)
+        let p = rgba.get_pixel(0, 0).0;
+        assert!(p[0] > 200, "red channel should be high, got R={} G={} B={} A={}", p[0], p[1], p[2], p[3]);
+        assert!(p[1] < 10, "green channel should be low, got {}", p[1]);
+        assert!(p[2] < 10, "blue channel should be low, got {}", p[2]);
+    }
+
+    #[test]
+    fn non_dds_falls_through_to_image_crate() {
+        // Create a tiny 1x1 PNG in memory
+        let mut png_data = Vec::new();
+        let img = image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 0, 128, 200]));
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(
+                &mut std::io::Cursor::new(&mut png_data),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+
+        let result = decode_dds_with_alpha(&png_data).expect("should decode PNG via fallback");
+        let rgba = result.to_rgba8();
+        let p = rgba.get_pixel(0, 0).0;
+        assert_eq!(p, [255, 0, 128, 200], "PNG pixel should round-trip exactly");
+    }
+
+    #[test]
+    fn truncated_dds_returns_none() {
+        // DDS magic but truncated header
+        let data = b"DDS short";
+        assert!(
+            decode_dds_with_alpha(data).is_none(),
+            "truncated DDS should return None"
+        );
+    }
+
+    #[test]
+    fn dxt1_mixed_opaque_and_transparent_pixels() {
+        // 4x4 block: top-left 4 pixels = opaque (index 0), bottom-right 4 = transparent (index 3)
+        // Punch-through mode: color0 <= color1
+        //
+        // color0 = 0x07E0 (green, RGB565) = 0xE0, 0x07
+        // color1 = 0xFFFF (white) = 0xFF, 0xFF
+        // color0 (0x07E0) < color1 (0xFFFF) → punch-through mode
+        //
+        // Row layout (4 pixels per row, 2 bits each = 1 byte per row):
+        // Row 0: 0,0,0,0 → 0b00_00_00_00 = 0x00
+        // Row 1: 0,0,0,0 → 0x00
+        // Row 2: 3,3,3,3 → 0b11_11_11_11 = 0xFF
+        // Row 3: 3,3,3,3 → 0xFF
+        let block: [u8; 8] = [
+            0xE0, 0x07, // color0 = green
+            0xFF, 0xFF, // color1 = white
+            0x00, // row 0: all index 0 (color0 = green, opaque)
+            0x00, // row 1: all index 0
+            0xFF, // row 2: all index 3 (transparent)
+            0xFF, // row 3: all index 3
+        ];
+
+        let dds = build_dxt1_dds(4, 4, &block);
+        let img = decode_dds_with_alpha(&dds).expect("decode mixed block");
+        let rgba = img.to_rgba8();
+
+        // Top half: opaque
+        for y in 0..2 {
+            for x in 0..4 {
+                let a = rgba.get_pixel(x, y).0[3];
+                assert_eq!(a, 255, "pixel ({},{}) should be opaque, got alpha={}", x, y, a);
+            }
+        }
+        // Bottom half: transparent
+        for y in 2..4 {
+            for x in 0..4 {
+                let a = rgba.get_pixel(x, y).0[3];
+                assert_eq!(a, 0, "pixel ({},{}) should be transparent, got alpha={}", x, y, a);
+            }
         }
     }
 }
