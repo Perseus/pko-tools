@@ -353,23 +353,26 @@ pub(crate) fn decode_dds_with_alpha(data: &[u8]) -> Option<image::DynamicImage> 
 }
 
 /// Load a texture from disk, decode PKO encoding, convert to PNG, return base64 data URI.
+/// Uses `decode_dds_with_alpha` to preserve DXT1 punch-through alpha.
 fn load_texture_as_data_uri(path: &Path) -> Option<String> {
     let raw_bytes = std::fs::read(path).ok()?;
     let decoded = decode_pko_texture(&raw_bytes);
-    let img = match image::load_from_memory(&decoded) {
-        Ok(img) => img,
-        Err(e) => {
+    let img = match decode_dds_with_alpha(&decoded) {
+        Some(img) => img,
+        None => {
             eprintln!(
-                "Warning: failed to decode texture {}: {}",
+                "Warning: failed to decode texture {}",
                 path.display(),
-                e
             );
             return None;
         }
     };
+    let rgba = img.to_rgba8();
     let mut png_data = Vec::new();
     let mut cursor = std::io::Cursor::new(&mut png_data);
-    img.write_to(&mut cursor, image::ImageFormat::Png).ok()?;
+    image::DynamicImage::ImageRgba8(rgba)
+        .write_to(&mut cursor, image::ImageFormat::Png)
+        .ok()?;
     Some(format!(
         "data:image/png;base64,{}",
         BASE64_STANDARD.encode(&png_data)
