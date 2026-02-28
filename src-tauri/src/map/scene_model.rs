@@ -3234,4 +3234,171 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn dxt3_falls_through_to_image_crate() {
+        // DXT3 (BC2): 16 bytes per block = 8 bytes explicit alpha + 8 bytes DXT1 color
+        // Build a 4x4 DXT3 DDS with half-alpha (0x88 per pixel = ~53% alpha)
+        let mut block = [0u8; 16];
+        // Alpha section: 4 bits per pixel, 16 pixels = 8 bytes
+        // All pixels get alpha nibble 0x8 = 128/255 ≈ 50%
+        for i in 0..8 {
+            block[i] = 0x88; // two nibbles per byte, each 0x8
+        }
+        // Color section: color0 > color1 (opaque mode), all index 0 = white
+        block[8] = 0xFF; block[9] = 0xFF; // color0 = white
+        block[10] = 0x00; block[11] = 0x00; // color1 = black
+        // All indices 0
+        block[12] = 0x00; block[13] = 0x00; block[14] = 0x00; block[15] = 0x00;
+
+        let dds = build_dds(4, 4, FOURCC_DXT3, &block);
+        // DXT3 falls through to image crate — should decode with alpha preserved
+        let img = decode_dds_with_alpha(&dds).expect("DXT3 should decode via image crate");
+        let rgba = img.to_rgba8();
+        assert_eq!(rgba.width(), 4);
+        assert_eq!(rgba.height(), 4);
+
+        // All pixels should have partial alpha (not 255, not 0)
+        for pixel in rgba.pixels() {
+            let a = pixel.0[3];
+            assert!(
+                a > 100 && a < 200,
+                "DXT3 pixel alpha should be ~128, got {}",
+                a
+            );
+        }
+    }
+
+    #[test]
+    fn dxt5_falls_through_to_image_crate() {
+        // DXT5 (BC3): 16 bytes per block = 2 bytes alpha endpoints + 6 bytes alpha indices + 8 bytes color
+        // Build a 4x4 DXT5 DDS — alpha0=255, alpha1=0, all indices=0 → all alpha=255
+        let mut block = [0u8; 16];
+        block[0] = 255; // alpha0
+        block[1] = 0;   // alpha1
+        // Alpha indices: all 0 (3 bits each, 16 pixels = 48 bits = 6 bytes, all zero)
+        // block[2..8] already zeroed
+        // Color: white, all indices 0
+        block[8] = 0xFF; block[9] = 0xFF; // color0 = white
+        block[10] = 0x00; block[11] = 0x00; // color1 = black
+        // Color indices: all 0
+        block[12] = 0x00; block[13] = 0x00; block[14] = 0x00; block[15] = 0x00;
+
+        let dds = build_dds(4, 4, FOURCC_DXT5, &block);
+        let img = decode_dds_with_alpha(&dds).expect("DXT5 should decode via image crate");
+        let rgba = img.to_rgba8();
+        assert_eq!(rgba.width(), 4);
+        assert_eq!(rgba.height(), 4);
+
+        // All pixels should be fully opaque (alpha0=255, all indices point to alpha0)
+        for pixel in rgba.pixels() {
+            assert_eq!(
+                pixel.0[3], 255,
+                "DXT5 pixel with alpha0=255, idx=0 should be opaque, got alpha={}",
+                pixel.0[3]
+            );
+        }
+    }
+
+    #[test]
+    fn opaque_material_ignores_texture_alpha() {
+        // Verify that build_lmo_material produces alphaMode: Opaque when
+        // alpha_test_enabled=false, even if a texture might have alpha.
+        // This ensures DXT1 garbage alpha in opaque materials is harmless.
+        let mat = lmo::LmoMaterial {
+            diffuse: [1.0, 1.0, 1.0, 1.0],
+            ambient: [0.3, 0.3, 0.3, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
+            opacity: 1.0,
+            transp_type: 0,          // FILTER (non-effect)
+            alpha_test_enabled: false, // NOT alpha tested
+            alpha_ref: 0,
+            src_blend: None,
+            dest_blend: None,
+            cull_mode: None,
+            tex_filename: Some("might_have_alpha.dds".to_string()),
+        };
+        let mut builder = GltfBuilder::new();
+        let tmp = std::env::temp_dir();
+        build_lmo_material(&mut builder, &mat, "opaque_wall", &tmp, false);
+        let gltf_mat = &builder.materials[0];
+
+        assert_eq!(
+            gltf_mat.alpha_mode,
+            Checked::Valid(gltf_json::material::AlphaMode::Opaque),
+            "opaque material (no alpha test, no effect, opacity=1) must be Opaque"
+        );
+        assert!(
+            gltf_mat.alpha_cutoff.is_none(),
+            "opaque material should have no alpha cutoff"
+        );
+    }
+
+    #[test]
+    fn synthetic_dxt1_deterministic_fixture() {
+        // Deterministic 8x8 DXT1 image (4 blocks arranged in 2x2 grid).
+        // Each block has a known pattern:
+        //
+        // Block (0,0) — top-left: opaque red (color0=red > color1=black, all idx 0)
+        // Block (1,0) — top-right: opaque blue (color0=blue > color1=black, all idx 0)
+        // Block (0,1) — bottom-left: all transparent (punch-through, all idx 3)
+        // Block (1,1) — bottom-right: opaque green (color0=green > color1=black, all idx 0)
+
+        let red_block: [u8; 8] = [
+            0x00, 0xF8, // color0 = 0xF800 (red RGB565)
+            0x00, 0x00, // color1 = 0x0000 (black)
+            0x00, 0x00, 0x00, 0x00, // all index 0 → color0
+        ];
+        let blue_block: [u8; 8] = [
+            0x1F, 0x00, // color0 = 0x001F (blue RGB565)
+            0x00, 0x00, // color1 = 0x0000 (black)
+            0x00, 0x00, 0x00, 0x00,
+        ];
+        let transparent_block: [u8; 8] = [
+            0x00, 0x00, // color0 = 0
+            0xFF, 0xFF, // color1 = 0xFFFF (color0 < color1 → punch-through)
+            0xFF, 0xFF, 0xFF, 0xFF, // all index 3 → transparent
+        ];
+        let green_block: [u8; 8] = [
+            0xE0, 0x07, // color0 = 0x07E0 (green RGB565)
+            0x00, 0x00, // color1 = 0x0000
+            0x00, 0x00, 0x00, 0x00,
+        ];
+
+        // DXT1 block layout for 8x8: blocks stored row-major
+        // Row 0: block(0,0), block(1,0)
+        // Row 1: block(0,1), block(1,1)
+        let mut blocks = Vec::new();
+        blocks.extend_from_slice(&red_block);
+        blocks.extend_from_slice(&blue_block);
+        blocks.extend_from_slice(&transparent_block);
+        blocks.extend_from_slice(&green_block);
+
+        let dds = build_dxt1_dds(8, 8, &blocks);
+        let img = decode_dds_with_alpha(&dds).expect("decode 8x8 DXT1");
+        let rgba = img.to_rgba8();
+
+        assert_eq!(rgba.width(), 8);
+        assert_eq!(rgba.height(), 8);
+
+        // Top-left quadrant (0-3, 0-3): red, opaque
+        let p = rgba.get_pixel(0, 0).0;
+        assert!(p[0] > 200 && p[3] == 255, "top-left should be opaque red: {:?}", p);
+
+        // Top-right quadrant (4-7, 0-3): blue, opaque
+        let p = rgba.get_pixel(4, 0).0;
+        assert!(p[2] > 200 && p[3] == 255, "top-right should be opaque blue: {:?}", p);
+
+        // Bottom-left quadrant (0-3, 4-7): fully transparent
+        let p = rgba.get_pixel(0, 4).0;
+        assert_eq!(p[3], 0, "bottom-left should be transparent: {:?}", p);
+
+        // Bottom-right quadrant (4-7, 4-7): green, opaque
+        let p = rgba.get_pixel(4, 4).0;
+        assert!(p[1] > 200 && p[3] == 255, "bottom-right should be opaque green: {:?}", p);
+
+        // Count: exactly 16 transparent pixels (one 4x4 block)
+        let transparent_count = rgba.pixels().filter(|p| p.0[3] == 0).count();
+        assert_eq!(transparent_count, 16, "exactly one block should be transparent");
+    }
 }
