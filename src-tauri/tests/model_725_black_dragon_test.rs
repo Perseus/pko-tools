@@ -269,10 +269,10 @@ fn test_black_dragon_multipart_export() {
 
     // Export both mesh parts as primitives first
     let primitive0 = lgo_part0
-        .get_gltf_mesh_primitive(&project_dir, &mut fields_to_aggregate)
+        .get_gltf_mesh_primitive(&project_dir, &mut fields_to_aggregate, false)
         .expect("Failed to export part 0");
     let primitive1 = lgo_part1
-        .get_gltf_mesh_primitive(&project_dir, &mut fields_to_aggregate)
+        .get_gltf_mesh_primitive(&project_dir, &mut fields_to_aggregate, false)
         .expect("Failed to export part 1");
 
     // Build TWO separate meshes (idiomatic glTF structure)
@@ -292,7 +292,7 @@ fn test_black_dragon_multipart_export() {
     };
 
     // Export skeleton with 2 mesh nodes
-    let (skin, nodes) = lab.to_gltf_skin_and_nodes_multi(&mut fields_to_aggregate, 2);
+    let (skin, nodes) = lab.to_gltf_skin_and_nodes_multi(&mut fields_to_aggregate, 2, false);
     fields_to_aggregate.skin.push(skin);
     fields_to_aggregate.nodes.extend(nodes);
 
@@ -302,7 +302,7 @@ fn test_black_dragon_multipart_export() {
     fields_to_aggregate.nodes.extend(helper_nodes_0.clone());
     fields_to_aggregate.nodes.extend(helper_nodes_1.clone());
 
-    lab.to_gltf_animations_and_sampler(&mut fields_to_aggregate);
+    lab.to_gltf_animations_and_sampler(&mut fields_to_aggregate, false);
 
     println!("  ✓ glTF has 2 meshes (idiomatic structure)");
 
@@ -434,8 +434,8 @@ fn roundtrip_725_lab() {
         nodes: vec![],
     };
     // Use 0 meshes since this is just a skeleton test (no mesh data)
-    let (skin, mut nodes) = original_lab.to_gltf_skin_and_nodes_multi(&mut fields_to_aggregate, 0);
-    original_lab.to_gltf_animations_and_sampler(&mut fields_to_aggregate);
+    let (skin, mut nodes) = original_lab.to_gltf_skin_and_nodes_multi(&mut fields_to_aggregate, 0, false);
+    original_lab.to_gltf_animations_and_sampler(&mut fields_to_aggregate, false);
 
     let gltf_root = gltf::json::Root {
         accessors: fields_to_aggregate.accessor,
@@ -619,12 +619,12 @@ fn roundtrip_725_lgo_part0() {
     fields_to_aggregate.nodes.extend(nodes);
 
     let primitive = original_lgo
-        .get_gltf_mesh_primitive(&project_dir, &mut fields_to_aggregate)
+        .get_gltf_mesh_primitive(&project_dir, &mut fields_to_aggregate, false)
         .expect("Failed to export mesh");
 
     let helper_nodes = original_lgo.get_gltf_helper_nodes();
     fields_to_aggregate.nodes.extend(helper_nodes.clone());
-    original_lab.to_gltf_animations_and_sampler(&mut fields_to_aggregate);
+    original_lab.to_gltf_animations_and_sampler(&mut fields_to_aggregate, false);
 
     let mesh_node_index = fields_to_aggregate.nodes.len() - helper_nodes.len() - 1;
     let mut scene_nodes = vec![
@@ -815,10 +815,10 @@ fn test_multipart_import_creates_two_lgo_files() {
 
     // Export both mesh parts as primitives
     let primitive0 = original_lgo_part0
-        .get_gltf_mesh_primitive(&project_dir, &mut fields_to_aggregate)
+        .get_gltf_mesh_primitive(&project_dir, &mut fields_to_aggregate, false)
         .expect("Failed to export part 0");
     let primitive1 = original_lgo_part1
-        .get_gltf_mesh_primitive(&project_dir, &mut fields_to_aggregate)
+        .get_gltf_mesh_primitive(&project_dir, &mut fields_to_aggregate, false)
         .expect("Failed to export part 1");
 
     // Build TWO separate meshes (idiomatic structure)
@@ -838,7 +838,7 @@ fn test_multipart_import_creates_two_lgo_files() {
     };
 
     // Export skeleton with 2 mesh nodes
-    let (skin, nodes) = original_lab.to_gltf_skin_and_nodes_multi(&mut fields_to_aggregate, 2);
+    let (skin, nodes) = original_lab.to_gltf_skin_and_nodes_multi(&mut fields_to_aggregate, 2, false);
     fields_to_aggregate.skin.push(skin);
     fields_to_aggregate.nodes.extend(nodes);
 
@@ -847,7 +847,7 @@ fn test_multipart_import_creates_two_lgo_files() {
     let helper_nodes_1 = original_lgo_part1.get_gltf_helper_nodes();
     fields_to_aggregate.nodes.extend(helper_nodes_0.clone());
     fields_to_aggregate.nodes.extend(helper_nodes_1.clone());
-    original_lab.to_gltf_animations_and_sampler(&mut fields_to_aggregate);
+    original_lab.to_gltf_animations_and_sampler(&mut fields_to_aggregate, false);
 
     // Build scene
     let total_helper_nodes = helper_nodes_0.len() + helper_nodes_1.len();
@@ -1219,7 +1219,7 @@ fn test_ui_export_path_black_dragon() {
     );
 
     // Call the same function the UI uses
-    let result = character.get_gltf_json(game_client_path);
+    let result = character.get_gltf_json(game_client_path, false);
 
     match result {
         Ok(gltf_json) => {
@@ -1327,10 +1327,10 @@ fn test_bounding_sphere_roundtrip() {
 
     // Export both mesh parts as primitives
     let primitive0 = original_lgo_part0
-        .get_gltf_mesh_primitive(&project_dir, &mut fields_to_aggregate)
+        .get_gltf_mesh_primitive(&project_dir, &mut fields_to_aggregate, false)
         .expect("Failed to export part 0");
     let primitive1 = original_lgo_part1
-        .get_gltf_mesh_primitive(&project_dir, &mut fields_to_aggregate)
+        .get_gltf_mesh_primitive(&project_dir, &mut fields_to_aggregate, false)
         .expect("Failed to export part 1");
 
     // Build TWO separate meshes (idiomatic structure)
@@ -1351,13 +1351,13 @@ fn test_bounding_sphere_roundtrip() {
 
     // Export skeleton with 2 mesh nodes
     let (skin, nodes) =
-        original_lab.to_gltf_skin_and_nodes_multi(&mut fields_to_aggregate, mesh_count);
+        original_lab.to_gltf_skin_and_nodes_multi(&mut fields_to_aggregate, mesh_count, false);
     fields_to_aggregate.skin.push(skin);
     fields_to_aggregate.nodes.extend(nodes);
 
     // Add helpers with mesh_index association (KEY PART OF THIS TEST!)
-    let helper_nodes_0 = original_lgo_part0.get_gltf_helper_nodes_for_mesh(0);
-    let helper_nodes_1 = original_lgo_part1.get_gltf_helper_nodes_for_mesh(1);
+    let helper_nodes_0 = original_lgo_part0.get_gltf_helper_nodes_for_mesh(0, false);
+    let helper_nodes_1 = original_lgo_part1.get_gltf_helper_nodes_for_mesh(1, false);
 
     println!(
         "  Exported helper nodes: {} from part 0, {} from part 1",
@@ -1369,7 +1369,7 @@ fn test_bounding_sphere_roundtrip() {
     fields_to_aggregate.nodes.extend(helper_nodes_1.clone());
 
     // Add animations
-    original_lab.to_gltf_animations_and_sampler(&mut fields_to_aggregate);
+    original_lab.to_gltf_animations_and_sampler(&mut fields_to_aggregate, false);
 
     let total_helper_nodes = helper_nodes_0.len() + helper_nodes_1.len();
 
