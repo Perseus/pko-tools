@@ -2021,36 +2021,15 @@ pub fn build_terrain_section_glb(
         None
     };
 
-    // ----- Material: reference atlas by URI, not embedded -----
-    let (images, textures, samplers, base_color_texture) = if has_atlas {
-        let images = vec![gltf::Image {
-            buffer_view: None,
-            mime_type: Some(gltf::image::MimeType("image/png".to_string())),
-            uri: Some("../terrain_atlas.png".into()),
-            name: Some("terrain_atlas".into()),
-            extensions: None, extras: None,
-        }];
-        let samplers = vec![gltf::texture::Sampler {
-            mag_filter: Some(Checked::Valid(gltf::texture::MagFilter::Linear)),
-            min_filter: Some(Checked::Valid(gltf::texture::MinFilter::Linear)),
-            wrap_s: Checked::Valid(gltf::texture::WrappingMode::ClampToEdge),
-            wrap_t: Checked::Valid(gltf::texture::WrappingMode::ClampToEdge),
-            name: None, extensions: None, extras: None,
-        }];
-        let textures = vec![gltf::Texture {
-            sampler: Some(gltf::Index::new(0)),
-            source: gltf::Index::new(0),
-            name: None, extensions: None, extras: None,
-        }];
-        let tex_info = Some(gltf::texture::Info {
-            index: gltf::Index::new(0),
-            tex_coord: 0,
-            extensions: None, extras: None,
-        });
-        (images, textures, samplers, tex_info)
-    } else {
-        (vec![], vec![], vec![], None)
-    };
+    // ----- Material: no texture reference -----
+    // Section GLBs intentionally omit the terrain_atlas.png URI reference.
+    // Unity's TOPMaterialReplacer sets the correct material at runtime.
+    // Referencing a 150+ MB atlas PNG via URI causes glTFast's ScriptedImporter
+    // to resolve it for every section, making 1024-section imports extremely slow.
+    let images: Vec<gltf::Image> = vec![];
+    let textures: Vec<gltf::Texture> = vec![];
+    let samplers: Vec<gltf::texture::Sampler> = vec![];
+    let base_color_texture: Option<gltf::texture::Info> = None;
 
     // Build mesh
     let mut attributes = std::collections::BTreeMap::new();
@@ -4912,18 +4891,16 @@ mod tests {
     }
 
     #[test]
-    fn build_section_glb_atlas_uri_reference() {
+    fn build_section_glb_no_texture_reference() {
         let map = make_test_map(4, 4, 2);
         let normals = compute_global_normals(&map);
         let (json, _bin) = build_terrain_section_glb(&map, true, &normals, 2, 0, 0)
             .expect("section glb");
         let root: serde_json::Value = serde_json::from_str(&json).expect("parse");
 
-        // Atlas image referenced by URI, not embedded
-        let uri = root["images"][0]["uri"].as_str().unwrap();
-        assert_eq!(uri, "../terrain_atlas.png");
-        // No buffer_view on image (external reference)
-        assert!(root["images"][0]["bufferView"].is_null());
+        // Section GLBs should have no images (atlas URI removed for import speed)
+        assert!(root["images"].as_array().map_or(true, |a| a.is_empty()),
+            "section GLBs should not reference terrain_atlas.png");
     }
 
     #[test]
