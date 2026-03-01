@@ -26,6 +26,7 @@ const CUR_VERSION_NO: i32 = 780627; // MP_MAP_FLAG(780624) + 3
 // Original PKO terrain/sea defaults (Engine/sdk/include/MPMap.h)
 pub(crate) const UNDERWATER_HEIGHT: f32 = -2.0;
 pub(crate) const UNDERWATER_TEXNO: u8 = 22;
+const SEA_LEVEL: f32 = 0.0;
 
 // PKO native unit scale exported to glTF scene (1 PKO unit = 1 glTF/Unity unit)
 pub(crate) const MAP_VISUAL_SCALE: f32 = 1.0;
@@ -299,6 +300,46 @@ pub(crate) fn get_tile<'a>(map: &'a ParsedMap, tx: i32, ty: i32) -> Option<&'a M
 /// Export uses PKO native units (no extra visual scale), so Y equals fHeight.
 fn tile_height(tile: &MapTile) -> f32 {
     (tile.c_height as f32 * 10.0) / 100.0 / MAP_VISUAL_SCALE
+}
+
+/// Sample terrain height using the original engine's static placement path:
+/// MPMap::GetHeight(fX,fY) + CGameScene::GetTerrainHeight sea-level clamp.
+///
+/// MPMap::GetHeight interpolates across one tile using two triangles:
+/// (0,0)-(1,0)-(0,1) and (0,1)-(1,0)-(1,1), with corner heights read from
+/// GetGroupTile(nX, nY, 0..3) where nX/nY are integer-truncated world coords.
+/// Missing tiles resolve to the default tile (height 0.0 / sea level).
+fn sample_scene_terrain_height(map: &ParsedMap, world_x: f32, world_y: f32) -> f32 {
+    // Match C++ cast semantics in MPMap::GetHeight (truncate toward zero).
+    let nx = world_x as i32;
+    let ny = world_y as i32;
+
+    let h00 = get_tile(map, nx, ny)
+        .map(tile_height)
+        .unwrap_or(SEA_LEVEL / MAP_VISUAL_SCALE);
+    let h10 = get_tile(map, nx + 1, ny)
+        .map(tile_height)
+        .unwrap_or(SEA_LEVEL / MAP_VISUAL_SCALE);
+    let h01 = get_tile(map, nx, ny + 1)
+        .map(tile_height)
+        .unwrap_or(SEA_LEVEL / MAP_VISUAL_SCALE);
+    let h11 = get_tile(map, nx + 1, ny + 1)
+        .map(tile_height)
+        .unwrap_or(SEA_LEVEL / MAP_VISUAL_SCALE);
+
+    let lx = world_x - nx as f32;
+    let ly = world_y - ny as f32;
+
+    let raw = if lx + ly <= 1.0 {
+        // Triangle v0(0,0)-v1(1,0)-v2(0,1)
+        h00 + lx * (h10 - h00) + ly * (h01 - h00)
+    } else {
+        // Triangle v2(0,1)-v1(1,0)-v3(1,1)
+        h11 + (1.0 - lx) * (h01 - h11) + (1.0 - ly) * (h10 - h11)
+    };
+
+    // CGameScene::GetTerrainHeight clamps to sea level.
+    raw.max(SEA_LEVEL / MAP_VISUAL_SCALE)
 }
 
 /// Resolve the terrain tile used for a render vertex.
@@ -948,10 +989,8 @@ pub fn build_terrain_gltf(
                 "scale": obj.scale,
             }))?;
 
-            // Look up terrain height at the object's XZ position
-            let terrain_h = get_tile(parsed_map, obj.world_x as i32, obj.world_y as i32)
-                .map(|t| tile_height(t))
-                .unwrap_or(UNDERWATER_HEIGHT / MAP_VISUAL_SCALE);
+            // Match PKO SceneObj placement: GetTerrainHeight(x, y) + height offset.
+            let terrain_h = sample_scene_terrain_height(parsed_map, obj.world_x, obj.world_y);
 
             // Check if we have a loaded mesh for this type-0 object
             let mesh_ref = if obj.obj_type == 0 {
@@ -3182,9 +3221,8 @@ pub fn export_map_for_unity(
                 continue;
             }
 
-            let terrain_h = get_tile(&parsed_map, obj.world_x as i32, obj.world_y as i32)
-                .map(|t| tile_height(t))
-                .unwrap_or(UNDERWATER_HEIGHT / MAP_VISUAL_SCALE);
+            // Match PKO SceneObj placement: GetTerrainHeight(x, y) + height offset.
+            let terrain_h = sample_scene_terrain_height(&parsed_map, obj.world_x, obj.world_y);
             let position = [obj.world_x, terrain_h + obj.world_z, obj.world_y];
 
             if obj.obj_type == 0 {
@@ -4446,6 +4484,103 @@ mod tests {
         assert_eq!(read_i16(6), -2000, "vertex (0,2) → edge → UNDERWATER_HEIGHT");
         assert_eq!(read_i16(7), -2000, "vertex (1,2) → edge → UNDERWATER_HEIGHT");
         assert_eq!(read_i16(8), -2000, "vertex (2,2) → edge → UNDERWATER_HEIGHT");
+    }
+
+    #[test]
+    fn scene_object_terrain_height_matches_engine_triangle_interpolation() {
+        // Corners mirror a harbor edge slope:
+        // (0,0)=1.7, (1,0)=1.7, (0,1)=-0.6, (1,1)=-0.6.
+        // At (0.4,0.5), MPMap::GetHeight() intersects triangle
+        // v0-v1-v2 and yields 0.55 (not 1.7 from integer tile sampling).
+        let parsed = ParsedMap {
+            header: MapHeader {
+                n_map_flag: CUR_VERSION_NO,
+                n_width: 2,
+                n_height: 2,
+                n_section_width: 2,
+                n_section_height: 2,
+            },
+            section_cnt_x: 1,
+            section_cnt_y: 1,
+            section_offsets: vec![0],
+            sections: vec![Some(MapSection {
+                tiles: vec![
+                    MapTile {
+                        dw_tile_info: 0,
+                        bt_tile_info: 0,
+                        s_color: 0,
+                        c_height: 17,
+                        s_region: 0,
+                        bt_island: 0,
+                        bt_block: [0; 4],
+                    },
+                    MapTile {
+                        dw_tile_info: 0,
+                        bt_tile_info: 0,
+                        s_color: 0,
+                        c_height: 17,
+                        s_region: 0,
+                        bt_island: 0,
+                        bt_block: [0; 4],
+                    },
+                    MapTile {
+                        dw_tile_info: 0,
+                        bt_tile_info: 0,
+                        s_color: 0,
+                        c_height: -6,
+                        s_region: 0,
+                        bt_island: 0,
+                        bt_block: [0; 4],
+                    },
+                    MapTile {
+                        dw_tile_info: 0,
+                        bt_tile_info: 0,
+                        s_color: 0,
+                        c_height: -6,
+                        s_region: 0,
+                        bt_island: 0,
+                        bt_block: [0; 4],
+                    },
+                ],
+            })],
+        };
+
+        let h = super::sample_scene_terrain_height(&parsed, 0.4, 0.5);
+        assert!((h - 0.55).abs() < 0.001, "expected 0.55, got {}", h);
+    }
+
+    #[test]
+    fn scene_object_terrain_height_clamps_to_sea_level() {
+        // Original CGameScene::GetTerrainHeight returns max(GetHeight, SEA_LEVEL).
+        let parsed = ParsedMap {
+            header: MapHeader {
+                n_map_flag: CUR_VERSION_NO,
+                n_width: 2,
+                n_height: 2,
+                n_section_width: 2,
+                n_section_height: 2,
+            },
+            section_cnt_x: 1,
+            section_cnt_y: 1,
+            section_offsets: vec![0],
+            sections: vec![Some(MapSection {
+                tiles: vec![
+                    MapTile {
+                        dw_tile_info: 0,
+                        bt_tile_info: 0,
+                        s_color: 0,
+                        c_height: -20,
+                        s_region: 0,
+                        bt_island: 0,
+                        bt_block: [0; 4],
+                    };
+                    4
+                ],
+            })],
+        };
+
+        let h = super::sample_scene_terrain_height(&parsed, 0.25, 0.25);
+        assert_eq!(h, 0.0, "terrain height should clamp to sea level");
     }
 
     #[test]
