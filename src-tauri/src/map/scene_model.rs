@@ -20,6 +20,7 @@ use gltf_json::{
 use crate::item::model::decode_pko_texture;
 
 use super::lmo::{self, D3DCULL_NONE, LmoGeomObject, LmoModel};
+use super::lmo_loader;
 use super::scene_obj::SceneObject;
 use super::scene_obj_info::SceneObjModelInfo;
 
@@ -837,7 +838,7 @@ fn build_geom_primitives(
 
 /// Build glTF node extras JSON for texuv/teximg/mtlopac animation data.
 /// Returns None if the geom object has no texture/opacity animations.
-fn build_anim_extras(geom: &LmoGeomObject) -> gltf_json::extras::Extras {
+fn build_anim_extras(geom: &LmoGeomObject, geom_index: usize) -> gltf_json::extras::Extras {
     if geom.texuv_anims.is_empty()
         && geom.teximg_anims.is_empty()
         && geom.mtlopac_anims.is_empty()
@@ -846,6 +847,9 @@ fn build_anim_extras(geom: &LmoGeomObject) -> gltf_json::extras::Extras {
     }
 
     let mut extras = serde_json::Map::new();
+
+    // Stable geometry index for animation binding (matches node name "geom_node_{gi}")
+    extras.insert("geom_index".to_string(), serde_json::json!(geom_index));
 
     // texuv: array of { subset, stage, frame_num, matrices: [[16 floats]...] }
     if !geom.texuv_anims.is_empty() {
@@ -1077,7 +1081,7 @@ fn build_animations(
 
 /// Build a complete glTF JSON string for a single LMO building model.
 pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String> {
-    let model = lmo::load_lmo(lmo_path)?;
+    let model = lmo_loader::load_lmo(lmo_path)?;
 
     if model.geom_objects.is_empty() {
         return Err(anyhow!("LMO file has no geometry objects"));
@@ -1148,7 +1152,7 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         });
 
         let node_idx = builder.nodes.len() as u32;
-        let anim_extras = build_anim_extras(geom);
+        let anim_extras = build_anim_extras(geom, gi);
         builder.nodes.push(gltf_json::Node {
             mesh: Some(gltf_json::Index::new(mesh_idx)),
             name: Some(format!("geom_node_{}", gi)),
@@ -1212,7 +1216,7 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
 /// Uses the same mesh/material/animation logic as `build_gltf_from_lmo`, but
 /// packs all buffer data into a single binary buffer for GLB writing.
 pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String, Vec<u8>)> {
-    let model = lmo::load_lmo(lmo_path)?;
+    let model = lmo_loader::load_lmo(lmo_path)?;
 
     if model.geom_objects.is_empty() {
         return Err(anyhow!("LMO file has no geometry objects"));
@@ -1282,7 +1286,7 @@ pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String
         });
 
         let node_idx = builder.nodes.len() as u32;
-        let anim_extras = build_anim_extras(geom);
+        let anim_extras = build_anim_extras(geom, gi);
         builder.nodes.push(gltf_json::Node {
             mesh: Some(gltf_json::Index::new(mesh_idx)),
             name: Some(format!("geom_node_{}", gi)),
@@ -1524,7 +1528,7 @@ pub fn load_scene_models(
             None => continue,
         };
 
-        let model = match lmo::load_lmo_no_animation(&lmo_path) {
+        let model = match lmo_loader::load_lmo_no_animation(&lmo_path) {
             Ok(m) => m,
             Err(_) => continue,
         };

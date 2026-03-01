@@ -9,7 +9,8 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "kaitai:sync": "node scripts/sync-kaitai-formats.mjs"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.4",

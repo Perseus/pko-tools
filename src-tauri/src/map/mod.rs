@@ -4,6 +4,7 @@ pub mod glb;
 pub mod grid_images;
 pub mod lit;
 pub mod lmo;
+pub mod lmo_loader;
 pub mod mapinfo;
 pub mod scene_model;
 pub mod scene_obj;
