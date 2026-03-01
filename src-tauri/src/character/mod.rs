@@ -381,7 +381,8 @@ impl Character {
 
             // File naming: model_id * 1000000 + mesh_idx
             // e.g., model 725: 0725000000.lgo, 0725000001.lgo
-            let mesh_file_name = format!("{:0>10}.lgo", model_id * 1000000 + mesh_idx as u32);
+            let base_id = (model_id as u64) * 1_000_000u64 + mesh_idx as u64;
+            let mesh_file_name = format!("{:0>10}.lgo", base_id);
 
             let file = File::create(format!("./imports/character/model/{}", mesh_file_name))?;
             let mut writer = BufWriter::new(file);
@@ -391,10 +392,10 @@ impl Character {
         }
 
         // Return the first mesh file name for backwards compatibility
-        let mesh_file_name = mesh_file_names
-            .first()
-            .cloned()
-            .unwrap_or_else(|| format!("{:0>10}.lgo", model_id * 1000000));
+        let mesh_file_name = mesh_file_names.first().cloned().unwrap_or_else(|| {
+            let base_id = (model_id as u64) * 1_000_000u64;
+            format!("{:0>10}.lgo", base_id)
+        });
 
         Ok((animation_file_name, mesh_file_name))
     }
@@ -434,7 +435,8 @@ impl Character {
                 mesh_idx,
             )?;
 
-            let mesh_file_name = format!("{:0>10}.lgo", model_id * 1000000 + mesh_idx as u32);
+            let base_id = (model_id as u64) * 1_000_000u64 + mesh_idx as u64;
+            let mesh_file_name = format!("{:0>10}.lgo", base_id);
 
             let file = File::create(format!("./imports/character/model/{}", mesh_file_name))?;
             let mut writer = BufWriter::new(file);
