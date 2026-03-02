@@ -6,6 +6,7 @@ pub mod lit;
 pub mod lmo;
 pub mod lmo_loader;
 pub mod mapinfo;
+pub mod obj_loader;
 pub mod scene_model;
 pub mod scene_obj;
 pub mod scene_obj_info;

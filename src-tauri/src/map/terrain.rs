@@ -15,7 +15,8 @@ use serde_json::value::RawValue;
 use super::{MapEntry, MapMetadata};
 use crate::effect::model::EffFile;
 use crate::map::scene_model::LoadedSceneModels;
-use crate::map::scene_obj::{parse_obj_file, ParsedObjFile};
+use crate::map::obj_loader;
+use crate::map::scene_obj::ParsedObjFile;
 
 // ============================================================================
 // Map file constants
@@ -2380,7 +2381,7 @@ pub fn export_terrain_gltf(
     let obj_path = project_dir.join("map").join(format!("{}.obj", map_name));
     let objects = if obj_path.exists() {
         let obj_data = std::fs::read(&obj_path)?;
-        parse_obj_file(&obj_data).ok()
+        obj_loader::load_obj(&obj_data).ok()
     } else {
         None
     };
@@ -2426,7 +2427,7 @@ pub fn build_map_viewer_gltf(project_dir: &Path, map_name: &str) -> Result<Strin
     let obj_path = project_dir.join("map").join(format!("{}.obj", map_name));
     let objects = if obj_path.exists() {
         let obj_data = std::fs::read(&obj_path)?;
-        parse_obj_file(&obj_data).ok()
+        obj_loader::load_obj(&obj_data).ok()
     } else {
         None
     };
@@ -3020,7 +3021,7 @@ pub fn export_map_for_unity(
     let obj_path = project_dir.join("map").join(format!("{}.obj", map_name));
     let objects = if obj_path.exists() {
         let obj_data = std::fs::read(&obj_path)?;
-        Some(parse_obj_file(&obj_data)?)
+        Some(obj_loader::load_obj(&obj_data)?)
     } else {
         None
     };
@@ -3793,7 +3794,7 @@ pub fn get_metadata(project_dir: &Path, map_name: &str) -> Result<MapMetadata> {
     let obj_path = project_dir.join("map").join(format!("{}.obj", map_name));
     let object_count = if obj_path.exists() {
         let obj_data = std::fs::read(&obj_path)?;
-        parse_obj_file(&obj_data)
+        obj_loader::load_obj(&obj_data)
             .map(|o| o.objects.len() as u32)
             .unwrap_or(0)
     } else {
