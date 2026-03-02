@@ -2234,6 +2234,131 @@ mod tests {
     }
 
     // ====================================================================
+    // Animation export tests
+    // ====================================================================
+
+    /// Create a test model with one static geom and one animated geom.
+    fn make_animated_test_model() -> LmoModel {
+        let static_geom = LmoGeomObject {
+            id: 1,
+            parent_id: 0xFFFFFFFF,
+            obj_type: 0,
+            mat_local: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            normals: vec![[0.0, 0.0, 1.0]; 3],
+            texcoords: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+            vertex_colors: vec![],
+            indices: vec![0, 1, 2],
+            subsets: vec![lmo::LmoSubset {
+                primitive_num: 1,
+                start_index: 0,
+                vertex_num: 3,
+                min_index: 0,
+            }],
+            materials: vec![lmo::LmoMaterial {
+                diffuse: [0.8, 0.2, 0.1, 1.0],
+                ambient: [0.3, 0.3, 0.3, 1.0],
+                emissive: [0.0, 0.0, 0.0, 0.0],
+                opacity: 1.0,
+                transp_type: 0,
+                alpha_test_enabled: false,
+                alpha_ref: 0,
+                src_blend: None,
+                dest_blend: None,
+                cull_mode: None,
+                tex_filename: None,
+            }],
+            animation: None,
+            texuv_anims: Vec::new(),
+            teximg_anims: Vec::new(),
+            mtlopac_anims: Vec::new(),
+        };
+
+        let mut animated_geom = static_geom.clone();
+        animated_geom.id = 2;
+        animated_geom.animation = Some(lmo::LmoAnimData {
+            frame_num: 3,
+            translations: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+            rotations: vec![[0.0, 0.0, 0.0, 1.0]; 3],
+        });
+
+        LmoModel {
+            version: 0x1005,
+            geom_objects: vec![static_geom, animated_geom],
+        }
+    }
+
+    #[test]
+    fn build_animations_produces_channels_for_animated_nodes() {
+        let model = make_animated_test_model();
+        let mut builder = GltfBuilder::new();
+
+        // Simulate what build_gltf_from_lmo does: collect animated nodes
+        let animated_nodes: Vec<(u32, &LmoGeomObject)> = model
+            .geom_objects
+            .iter()
+            .enumerate()
+            .filter(|(_, g)| g.animation.is_some())
+            .map(|(i, g)| (i as u32, g))
+            .collect();
+
+        let anims = build_animations(&mut builder, &animated_nodes);
+
+        assert_eq!(anims.len(), 1, "should produce exactly one Animation");
+        let anim = &anims[0];
+        // Each animated node gets 2 channels (translation + rotation)
+        assert_eq!(anim.channels.len(), 2, "should have translation + rotation channels");
+        assert_eq!(anim.samplers.len(), 2, "should have translation + rotation samplers");
+    }
+
+    #[test]
+    fn build_animations_empty_for_static_only_model() {
+        let mut builder = GltfBuilder::new();
+        let animated_nodes: Vec<(u32, &LmoGeomObject)> = vec![];
+
+        let anims = build_animations(&mut builder, &animated_nodes);
+        assert!(anims.is_empty(), "static-only model should produce no animations");
+    }
+
+    #[test]
+    fn build_anim_extras_includes_transform_anim_and_geom_index() {
+        let model = make_animated_test_model();
+        let animated_geom = &model.geom_objects[1];
+
+        let extras = build_anim_extras(animated_geom, 5);
+        assert!(extras.is_some(), "animated geom should produce extras");
+
+        let json_str = extras.unwrap().to_string();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(parsed["geom_index"], 5, "geom_index should match the gi parameter");
+        assert!(parsed["transform_anim"].is_object(), "should have transform_anim");
+        assert_eq!(parsed["transform_anim"]["frame_num"], 3);
+        assert_eq!(
+            parsed["transform_anim"]["translations"].as_array().unwrap().len(),
+            3
+        );
+        assert_eq!(
+            parsed["transform_anim"]["rotations"].as_array().unwrap().len(),
+            3
+        );
+    }
+
+    #[test]
+    fn build_anim_extras_none_for_static_geom() {
+        let model = make_test_model();
+        let static_geom = &model.geom_objects[0];
+
+        let extras = build_anim_extras(static_geom, 0);
+        assert!(extras.is_none(), "static geom with no anims should produce None");
+    }
+
+    // ====================================================================
     // Real-data test (skipped if top-client not present)
     // ====================================================================
 
