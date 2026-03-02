@@ -1,29 +1,30 @@
 # Session Context
 
 ## Plan
-- **File:** ~/.claude/plans/parser-parity-audit-fixes.md
-- **Feature:** LMO Parser & Rendering Parity Fixes
-- **Started:** 2026-02-26
-- **Completed:** 2026-02-26
+- **File:** `~/.claude/plans/harmonic-napping-reef.md`
+- **Started:** 2026-03-02T07:49Z
+- **Completed:** 2026-03-02T09:00Z
+- **Linear Parent:** [PKO-136](https://linear.app/pko-new/issue/PKO-136) — Kaitai LMO Adapter: Replace Hand-Written Parser
 
 ## Progress
-| Phase | Repo | Branch | Status | Commit |
-|-------|------|--------|--------|--------|
-| Phase A0: Tile color grid default | pko-tools | feat/parser-parity-phase-a0 | complete | 8e1555e |
-| Phase A: Lighting + alpha test | pko-tools | feat/parser-parity-phase-a | complete | fe04ef2 |
-| Phase A1: Lighting constants | client-unity | feat/parser-parity-phase-a | complete | 00a4778 |
-| Phase B: Cull mode parsing | pko-tools | feat/parser-parity-phase-b-cull | complete | 82bf8e3 |
-| Phase C: Transp type remapping | pko-tools | feat/parser-parity-phase-c | complete | 25682c0 |
-
-## Final Test Results
-- **pko-tools:** 290 passed, 1 failed (pre-existing test_tile_color_png_round_trip), 9 ignored
-- **client-unity:** WorldSystemsTests updated to match new lighting defaults (needs Unity compile verification)
+| Phase | Branch | Linear | Status | Commit |
+|-------|--------|--------|--------|--------|
+| Phase 0: Fix compile blockers | feat/kaitai-lmo-adapter-phase-a | PKO-137 | done | bed3fef |
+| Phase 1: Shared utilities | feat/kaitai-lmo-adapter-phase-b | PKO-138 | done | 7286ca3 |
+| Phase 2: kaitai_to_lmo adapter | feat/kaitai-lmo-adapter-phase-c | PKO-139 | done | c690f63 |
+| Phase 3: No-animation path | feat/kaitai-lmo-adapter-phase-d | PKO-140 | done | 2dcc25d |
+| Phase 4: Exhaustive testing | feat/kaitai-lmo-adapter-phase-e | PKO-141 | done | c94b949 |
 
 ## Decisions
-1. **Phase A0 round-trip test:** The `test_tile_color_png_round_trip` test now fails because it expects 0 for missing tiles but we changed the default to -1i16 (0xFFFF). This is a test maintenance issue, not a regression — the new behavior is correct. Left as known issue.
-2. **Character vs scene object lighting:** Plan correctly identifies these as intentionally separate. GameConfig/RegionLighting now has scene object values. CLAUDE.md still references old character values — should be updated as a follow-up.
+1. **Kaitai runtime**: Used `kaitai-io/kaitai_struct_rust_runtime` git dep (rev 9959613) instead of `kaitai = "0.1.2"` crate (requires nightly Rust).
+2. **Generated code fixes**: Applied 4 categories of post-generation patches to `pko_lmo.rs` (deref usize, type mismatches, literal overflow, arithmetic overflow).
+3. **BytesReader clone bug**: `_io.pos()` returns stale position on cloned reader. Worked around in adapter by re-reading indices from raw mesh bytes for header_kind=0 files with legacy pre-index pair.
+4. **load_lmo_no_animation**: Pinned to native backend for perf-critical batch path.
 
 ## Known Issues
-- Pre-existing test failure: map::grid_images::tests::test_tile_color_png_round_trip (now expected to fail due to Phase A0 default change)
-- client-unity CLAUDE.md TOP Shader section still references old character lighting values (-1,-1,-1 / 0.6 / 0.4)
-- client-unity changes not yet Unity compile-verified (no Unity CLI available in this session)
+- BytesReader clone bug in kaitai_struct_rust_runtime makes `_io.pos` unreliable in computed instances. Filed workaround in adapter, upstream fix would need shared ReaderState.
+- Generated `pko_lmo.rs` requires manual post-generation patches. Documented in Phase 0 commit.
+
+## Test Results
+- **1,177/1,177** .lmo files pass exhaustive parity test (0 both-failed)
+- **376** total tests pass (321 lib + 55 integration), 0 failures

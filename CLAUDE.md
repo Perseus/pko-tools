@@ -129,6 +129,8 @@ This project involves PKO (Pirate King Online) game engine files. Coordinate sys
 
 When fixing visual/rendering bugs, verify the fix actually resolves the visual issue — don't assume the first hypothesis is correct. Common pitfalls: emissive factors preserved without their textures, wrong atlas regions/sprite coordinates, texture encoding mismatches (PKO-encoded vs standard BMP/DDS).
 
+**DDS texture alpha:** Always verify alpha channel preservation when converting DDS textures. DXT1/BC1 has 1-bit punch-through alpha that the `image` crate v0.25 silently discards (decodes as Rgb8). Use `decode_dds_with_alpha()` from `scene_model.rs` for any DDS→PNG path that needs alpha. DXT3/DXT5 are handled correctly by the `image` crate. The `texture2ddecoder` crate outputs BGRA byte order — must convert to RGBA.
+
 ## Import/Export Pipeline
 
 When working on import/export pipelines (GLB, glTF, PKO models), always verify binary size matches expected format by checking FVF flags, vertex color data inclusion, and texture path resolution (character folder vs items folder depending on model type).

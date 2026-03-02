@@ -20,6 +20,7 @@ use gltf_json::{
 use crate::item::model::decode_pko_texture;
 
 use super::lmo::{self, D3DCULL_NONE, LmoGeomObject, LmoModel};
+use super::lmo_loader;
 use super::scene_obj::SceneObject;
 use super::scene_obj_info::SceneObjModelInfo;
 
@@ -292,24 +293,87 @@ pub fn find_texture_file(project_dir: &Path, tex_name: &str) -> Option<std::path
     None
 }
 
+/// DDS FourCC constants.
+const DDS_MAGIC: &[u8; 4] = b"DDS ";
+const FOURCC_DXT1: u32 = u32::from_le_bytes(*b"DXT1");
+const FOURCC_DXT3: u32 = u32::from_le_bytes(*b"DXT3");
+const FOURCC_DXT5: u32 = u32::from_le_bytes(*b"DXT5");
+
+/// Decode raw texture bytes into an RGBA8 `DynamicImage`, preserving DXT1 punch-through alpha.
+///
+/// The `image` crate (v0.25) decodes DXT1 as Rgb8, permanently discarding the 1-bit alpha.
+/// This function detects DXT1 DDS files and uses `texture2ddecoder::decode_bc1a()` which
+/// correctly preserves punch-through alpha (transparent pixels where color0 <= color1).
+///
+/// For DXT3/DXT5 and non-DDS formats, falls through to the `image` crate.
+pub(crate) fn decode_dds_with_alpha(data: &[u8]) -> Option<image::DynamicImage> {
+    // Check DDS magic (4 bytes) + minimum header size (124 bytes) + pixelformat
+    if data.len() >= 128 && &data[0..4] == DDS_MAGIC {
+        // DDS_PIXELFORMAT.dwFlags at offset 76+4=80 from file start
+        // (header starts at offset 4, pixelformat at offset 76 within header)
+        let pf_flags = u32::from_le_bytes([data[80], data[81], data[82], data[83]]);
+        let has_fourcc = pf_flags & 0x4 != 0; // DDPF_FOURCC
+
+        if has_fourcc {
+            let fourcc = u32::from_le_bytes([data[84], data[85], data[86], data[87]]);
+
+            if fourcc == FOURCC_DXT1 {
+                // Parse dimensions from header
+                let height = u32::from_le_bytes([data[12], data[13], data[14], data[15]]) as usize;
+                let width = u32::from_le_bytes([data[16], data[17], data[18], data[19]]) as usize;
+
+                if width == 0 || height == 0 {
+                    return None;
+                }
+
+                // Compressed data starts at offset 128 (4 magic + 124 header)
+                let compressed = &data[128..];
+                let mut pixels = vec![0u32; width * height];
+
+                if texture2ddecoder::decode_bc1a(compressed, width, height, &mut pixels).is_err() {
+                    return None;
+                }
+
+                // Convert u32 pixels to ImageRgba8
+                // texture2ddecoder outputs pixels as u32 where LE bytes = [B, G, R, A]
+                let mut rgba_bytes = Vec::with_capacity(width * height * 4);
+                for pixel in &pixels {
+                    let [b, g, r, a] = pixel.to_le_bytes();
+                    rgba_bytes.extend_from_slice(&[r, g, b, a]);
+                }
+
+                let img_buf = image::RgbaImage::from_raw(width as u32, height as u32, rgba_bytes)?;
+                return Some(image::DynamicImage::ImageRgba8(img_buf));
+            }
+            // DXT3/DXT5: fall through to image crate (handles alpha correctly)
+        }
+    }
+
+    // Non-DDS or non-DXT1: use image crate as before
+    image::load_from_memory(data).ok()
+}
+
 /// Load a texture from disk, decode PKO encoding, convert to PNG, return base64 data URI.
+/// Uses `decode_dds_with_alpha` to preserve DXT1 punch-through alpha.
 fn load_texture_as_data_uri(path: &Path) -> Option<String> {
     let raw_bytes = std::fs::read(path).ok()?;
     let decoded = decode_pko_texture(&raw_bytes);
-    let img = match image::load_from_memory(&decoded) {
-        Ok(img) => img,
-        Err(e) => {
+    let img = match decode_dds_with_alpha(&decoded) {
+        Some(img) => img,
+        None => {
             eprintln!(
-                "Warning: failed to decode texture {}: {}",
+                "Warning: failed to decode texture {}",
                 path.display(),
-                e
             );
             return None;
         }
     };
+    let rgba = img.to_rgba8();
     let mut png_data = Vec::new();
     let mut cursor = std::io::Cursor::new(&mut png_data);
-    img.write_to(&mut cursor, image::ImageFormat::Png).ok()?;
+    image::DynamicImage::ImageRgba8(rgba)
+        .write_to(&mut cursor, image::ImageFormat::Png)
+        .ok()?;
     Some(format!(
         "data:image/png;base64,{}",
         BASE64_STANDARD.encode(&png_data)
@@ -772,17 +836,24 @@ fn build_geom_primitives(
 // Texture/opacity animation → glTF node extras
 // ============================================================================
 
-/// Build glTF node extras JSON for texuv/teximg/mtlopac animation data.
-/// Returns None if the geom object has no texture/opacity animations.
-fn build_anim_extras(geom: &LmoGeomObject) -> gltf_json::extras::Extras {
-    if geom.texuv_anims.is_empty()
-        && geom.teximg_anims.is_empty()
-        && geom.mtlopac_anims.is_empty()
-    {
+/// Build glTF node extras JSON for texuv/teximg/mtlopac/transform animation data.
+/// Returns None if the geom object has no animations of any kind.
+fn build_anim_extras(geom: &LmoGeomObject, geom_index: usize) -> gltf_json::extras::Extras {
+    let has_property_anims = !geom.texuv_anims.is_empty()
+        || !geom.teximg_anims.is_empty()
+        || !geom.mtlopac_anims.is_empty();
+    let has_transform_anim = geom
+        .animation
+        .as_ref()
+        .map_or(false, |a| a.frame_num > 0);
+    if !has_property_anims && !has_transform_anim {
         return None;
     }
 
     let mut extras = serde_json::Map::new();
+
+    // Stable geometry index for animation binding (matches node name "geom_node_{gi}")
+    extras.insert("geom_index".to_string(), serde_json::json!(geom_index));
 
     // texuv: array of { subset, stage, frame_num, matrices: [[16 floats]...] }
     if !geom.texuv_anims.is_empty() {
@@ -851,12 +922,44 @@ fn build_anim_extras(geom: &LmoGeomObject) -> gltf_json::extras::Extras {
         extras.insert("mtlopac_anims".to_string(), serde_json::json!(mtlopac_arr));
     }
 
+    // transform_anim: { frame_num, translations: [[x,y,z]...], rotations: [[x,y,z,w]...] }
+    // Values are in glTF Y-up space (same transform build_animations() used to apply).
+    if let Some(anim) = &geom.animation {
+        if anim.frame_num > 0 {
+            let translations: Vec<serde_json::Value> = anim
+                .translations
+                .iter()
+                .map(|t| {
+                    let yt = z_up_to_y_up_vec3(*t);
+                    serde_json::json!([yt[0], yt[1], yt[2]])
+                })
+                .collect();
+            let rotations: Vec<serde_json::Value> = anim
+                .rotations
+                .iter()
+                .map(|r| {
+                    let yr = z_up_to_y_up_quat(*r);
+                    serde_json::json!([yr[0], yr[1], yr[2], yr[3]])
+                })
+                .collect();
+            extras.insert(
+                "transform_anim".to_string(),
+                serde_json::json!({
+                    "frame_num": anim.frame_num,
+                    "frame_rate": FRAME_RATE,
+                    "translations": translations,
+                    "rotations": rotations,
+                }),
+            );
+        }
+    }
+
     let json_str = serde_json::to_string(&extras).ok()?;
     serde_json::value::RawValue::from_string(json_str).ok()
 }
 
 // ============================================================================
-// Animation: convert LMO matrix keyframes → glTF animation tracks
+// Coordinate helpers (used by build_anim_extras and build_animations)
 // ============================================================================
 
 const FRAME_RATE: f32 = 30.0;
@@ -871,6 +974,10 @@ fn z_up_to_y_up_vec3(v: [f32; 3]) -> [f32; 3] {
 fn z_up_to_y_up_quat(q: [f32; 4]) -> [f32; 4] {
     [q[0], q[2], -q[1], q[3]]
 }
+
+// ============================================================================
+// Animation: convert LMO matrix keyframes → glTF animation tracks
+// ============================================================================
 
 /// Build glTF animations for animated geometry objects.
 ///
@@ -1014,7 +1121,7 @@ fn build_animations(
 
 /// Build a complete glTF JSON string for a single LMO building model.
 pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String> {
-    let model = lmo::load_lmo(lmo_path)?;
+    let model = lmo_loader::load_lmo(lmo_path)?;
 
     if model.geom_objects.is_empty() {
         return Err(anyhow!("LMO file has no geometry objects"));
@@ -1085,7 +1192,7 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         });
 
         let node_idx = builder.nodes.len() as u32;
-        let anim_extras = build_anim_extras(geom);
+        let anim_extras = build_anim_extras(geom, gi);
         builder.nodes.push(gltf_json::Node {
             mesh: Some(gltf_json::Index::new(mesh_idx)),
             name: Some(format!("geom_node_{}", gi)),
@@ -1149,7 +1256,7 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
 /// Uses the same mesh/material/animation logic as `build_gltf_from_lmo`, but
 /// packs all buffer data into a single binary buffer for GLB writing.
 pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String, Vec<u8>)> {
-    let model = lmo::load_lmo(lmo_path)?;
+    let model = lmo_loader::load_lmo(lmo_path)?;
 
     if model.geom_objects.is_empty() {
         return Err(anyhow!("LMO file has no geometry objects"));
@@ -1219,7 +1326,7 @@ pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String
         });
 
         let node_idx = builder.nodes.len() as u32;
-        let anim_extras = build_anim_extras(geom);
+        let anim_extras = build_anim_extras(geom, gi);
         builder.nodes.push(gltf_json::Node {
             mesh: Some(gltf_json::Index::new(mesh_idx)),
             name: Some(format!("geom_node_{}", gi)),
@@ -1461,7 +1568,7 @@ pub fn load_scene_models(
             None => continue,
         };
 
-        let model = match lmo::load_lmo_no_animation(&lmo_path) {
+        let model = match lmo_loader::load_lmo_no_animation(&lmo_path) {
             Ok(m) => m,
             Err(_) => continue,
         };
@@ -2129,6 +2236,132 @@ mod tests {
     }
 
     // ====================================================================
+    // Animation export tests
+    // ====================================================================
+
+    /// Create a test model with one static geom and one animated geom.
+    fn make_animated_test_model() -> LmoModel {
+        let static_geom = LmoGeomObject {
+            id: 1,
+            parent_id: 0xFFFFFFFF,
+            obj_type: 0,
+            mat_local: [
+                [1.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ],
+            vertices: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            normals: vec![[0.0, 0.0, 1.0]; 3],
+            texcoords: vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]],
+            vertex_colors: vec![],
+            indices: vec![0, 1, 2],
+            subsets: vec![lmo::LmoSubset {
+                primitive_num: 1,
+                start_index: 0,
+                vertex_num: 3,
+                min_index: 0,
+            }],
+            materials: vec![lmo::LmoMaterial {
+                diffuse: [0.8, 0.2, 0.1, 1.0],
+                ambient: [0.3, 0.3, 0.3, 1.0],
+                emissive: [0.0, 0.0, 0.0, 0.0],
+                opacity: 1.0,
+                transp_type: 0,
+                alpha_test_enabled: false,
+                alpha_ref: 0,
+                src_blend: None,
+                dest_blend: None,
+                cull_mode: None,
+                tex_filename: None,
+            }],
+            animation: None,
+            texuv_anims: Vec::new(),
+            teximg_anims: Vec::new(),
+            mtlopac_anims: Vec::new(),
+        };
+
+        let mut animated_geom = static_geom.clone();
+        animated_geom.id = 2;
+        animated_geom.animation = Some(lmo::LmoAnimData {
+            frame_num: 3,
+            translations: vec![[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [2.0, 0.0, 0.0]],
+            rotations: vec![[0.0, 0.0, 0.0, 1.0]; 3],
+        });
+
+        LmoModel {
+            version: 0x1005,
+            geom_objects: vec![static_geom, animated_geom],
+        }
+    }
+
+    #[test]
+    fn build_animations_produces_channels_for_animated_nodes() {
+        let model = make_animated_test_model();
+        let mut builder = GltfBuilder::new();
+
+        // Simulate what build_gltf_from_lmo does: collect animated nodes
+        let animated_nodes: Vec<(u32, &LmoGeomObject)> = model
+            .geom_objects
+            .iter()
+            .enumerate()
+            .filter(|(_, g)| g.animation.is_some())
+            .map(|(i, g)| (i as u32, g))
+            .collect();
+
+        let anims = build_animations(&mut builder, &animated_nodes);
+
+        assert_eq!(anims.len(), 1, "should produce exactly one Animation");
+        let anim = &anims[0];
+        // Each animated node gets 2 channels (translation + rotation)
+        assert_eq!(anim.channels.len(), 2, "should have translation + rotation channels");
+        assert_eq!(anim.samplers.len(), 2, "should have translation + rotation samplers");
+    }
+
+    #[test]
+    fn build_animations_empty_for_static_only_model() {
+        let mut builder = GltfBuilder::new();
+        let animated_nodes: Vec<(u32, &LmoGeomObject)> = vec![];
+
+        let anims = build_animations(&mut builder, &animated_nodes);
+        assert!(anims.is_empty(), "static-only model should produce no animations");
+    }
+
+    #[test]
+    fn build_anim_extras_includes_transform_anim_and_geom_index() {
+        let model = make_animated_test_model();
+        let animated_geom = &model.geom_objects[1];
+
+        let extras = build_anim_extras(animated_geom, 5);
+        assert!(extras.is_some(), "animated geom should produce extras");
+
+        let json_str = extras.unwrap().to_string();
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(parsed["geom_index"], 5, "geom_index should match the gi parameter");
+        assert!(parsed["transform_anim"].is_object(), "should have transform_anim");
+        assert_eq!(parsed["transform_anim"]["frame_num"], 3);
+        assert_eq!(parsed["transform_anim"]["frame_rate"], 30.0);
+        assert_eq!(
+            parsed["transform_anim"]["translations"].as_array().unwrap().len(),
+            3
+        );
+        assert_eq!(
+            parsed["transform_anim"]["rotations"].as_array().unwrap().len(),
+            3
+        );
+    }
+
+    #[test]
+    fn build_anim_extras_none_for_static_geom() {
+        let model = make_test_model();
+        let static_geom = &model.geom_objects[0];
+
+        let extras = build_anim_extras(static_geom, 0);
+        assert!(extras.is_none(), "static geom with no anims should produce None");
+    }
+
+    // ====================================================================
     // Real-data test (skipped if top-client not present)
     // ====================================================================
 
@@ -2597,5 +2830,745 @@ mod tests {
             "type 0 full opacity should have no suffix, got: {}",
             name
         );
+    }
+
+    // ====================================================================
+    // GLB index buffer integrity tests
+    // ====================================================================
+
+    /// Helper: write an LmoModel to a temp LMO file and return its path.
+    fn write_temp_lmo(model: &LmoModel, dir: &Path, name: &str) -> std::path::PathBuf {
+        let lmo_path = dir.join(name);
+        let mut data = Vec::new();
+        data.extend_from_slice(&model.version.to_le_bytes());
+        let obj_count = model.geom_objects.len() as u32;
+        data.extend_from_slice(&obj_count.to_le_bytes());
+
+        // Build all geom blobs first to compute header entries
+        let blobs: Vec<Vec<u8>> = model
+            .geom_objects
+            .iter()
+            .map(|g| build_test_geom_blob(g))
+            .collect();
+
+        // Header table: 4 (version) + 4 (count) + obj_count * 12 (entries)
+        let header_end = 4 + 4 + model.geom_objects.len() * 12;
+        let mut offset = header_end;
+        for blob in &blobs {
+            data.extend_from_slice(&1u32.to_le_bytes()); // type = GEOMETRY
+            data.extend_from_slice(&(offset as u32).to_le_bytes());
+            data.extend_from_slice(&(blob.len() as u32).to_le_bytes());
+            offset += blob.len();
+        }
+        for blob in &blobs {
+            data.extend_from_slice(blob);
+        }
+
+        std::fs::write(&lmo_path, &data).unwrap();
+        lmo_path
+    }
+
+    /// Helper: parse GLB binary, extract JSON and BIN chunks.
+    fn parse_glb(glb: &[u8]) -> (serde_json::Value, Vec<u8>) {
+        assert!(glb.len() >= 12, "GLB too short");
+        assert_eq!(&glb[0..4], b"glTF", "not a GLB");
+        let json_len = u32::from_le_bytes(glb[12..16].try_into().unwrap()) as usize;
+        let json_data = &glb[20..20 + json_len];
+        let bin_offset = 20 + json_len;
+        let bin_len = u32::from_le_bytes(glb[bin_offset..bin_offset + 4].try_into().unwrap()) as usize;
+        let bin_data = glb[bin_offset + 8..bin_offset + 8 + bin_len].to_vec();
+        let parsed: serde_json::Value = serde_json::from_slice(json_data).unwrap();
+        (parsed, bin_data)
+    }
+
+    /// Helper: extract index values from GLB binary using the accessor/bufferView metadata.
+    fn extract_indices(json: &serde_json::Value, bin: &[u8], accessor_idx: usize) -> Vec<u32> {
+        let acc = &json["accessors"][accessor_idx];
+        let bv_idx = acc["bufferView"].as_u64().unwrap() as usize;
+        let bv = &json["bufferViews"][bv_idx];
+        let byte_offset = bv["byteOffset"].as_u64().unwrap_or(0) as usize
+            + acc["byteOffset"].as_u64().unwrap_or(0) as usize;
+        let count = acc["count"].as_u64().unwrap() as usize;
+        let comp_type = acc["componentType"].as_u64().unwrap();
+
+        match comp_type {
+            5123 => {
+                // UNSIGNED_SHORT
+                (0..count)
+                    .map(|i| {
+                        let off = byte_offset + i * 2;
+                        u16::from_le_bytes(bin[off..off + 2].try_into().unwrap()) as u32
+                    })
+                    .collect()
+            }
+            5125 => {
+                // UNSIGNED_INT
+                (0..count)
+                    .map(|i| {
+                        let off = byte_offset + i * 4;
+                        u32::from_le_bytes(bin[off..off + 4].try_into().unwrap())
+                    })
+                    .collect()
+            }
+            _ => panic!("unexpected componentType {}", comp_type),
+        }
+    }
+
+    /// Helper: serialize GLB from JSON string + binary data.
+    fn build_glb_bytes(json_str: &str, bin: &[u8]) -> Vec<u8> {
+        let json_bytes = json_str.as_bytes();
+        // Pad JSON to 4-byte alignment
+        let json_pad = (4 - (json_bytes.len() % 4)) % 4;
+        let json_chunk_len = json_bytes.len() + json_pad;
+        // Pad BIN to 4-byte alignment
+        let bin_pad = (4 - (bin.len() % 4)) % 4;
+        let bin_chunk_len = bin.len() + bin_pad;
+
+        let total = 12 + 8 + json_chunk_len + 8 + bin_chunk_len;
+        let mut out = Vec::with_capacity(total);
+        out.extend_from_slice(b"glTF");
+        out.extend_from_slice(&2u32.to_le_bytes());
+        out.extend_from_slice(&(total as u32).to_le_bytes());
+        // JSON chunk
+        out.extend_from_slice(&(json_chunk_len as u32).to_le_bytes());
+        out.extend_from_slice(&0x4E4F534Au32.to_le_bytes()); // "JSON"
+        out.extend_from_slice(json_bytes);
+        out.extend(std::iter::repeat(0x20u8).take(json_pad));
+        // BIN chunk
+        out.extend_from_slice(&(bin_chunk_len as u32).to_le_bytes());
+        out.extend_from_slice(&0x004E4942u32.to_le_bytes()); // "BIN\0"
+        out.extend_from_slice(bin);
+        out.extend(std::iter::repeat(0u8).take(bin_pad));
+        out
+    }
+
+    /// Make a test model with multiple geometry objects, optionally with vertex colors.
+    fn make_multi_geom_model(geom_count: usize, with_vertex_colors: bool) -> LmoModel {
+        let mut geom_objects = Vec::new();
+        for gi in 0..geom_count {
+            let vert_count = 4;
+            let vertices = vec![
+                [gi as f32, 0.0, 0.0],
+                [gi as f32 + 1.0, 0.0, 0.0],
+                [gi as f32, 1.0, 0.0],
+                [gi as f32 + 1.0, 1.0, 0.0],
+            ];
+            let normals = vec![[0.0, 0.0, 1.0]; vert_count];
+            let texcoords = vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0], [1.0, 1.0]];
+            let vertex_colors = if with_vertex_colors {
+                // D3DCOLOR: 0xAARRGGBB
+                vec![0xFFFF0000; vert_count] // opaque red
+            } else {
+                vec![]
+            };
+            // Two triangles: (0,1,2), (1,3,2)
+            let indices = vec![0, 1, 2, 1, 3, 2];
+
+            geom_objects.push(LmoGeomObject {
+                id: (gi + 1) as u32,
+                parent_id: 0xFFFFFFFF,
+                obj_type: 0,
+                mat_local: [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                    [0.0, 0.0, 0.0, 1.0],
+                ],
+                vertices,
+                normals,
+                texcoords,
+                vertex_colors,
+                indices,
+                subsets: vec![lmo::LmoSubset {
+                    primitive_num: 2,
+                    start_index: 0,
+                    vertex_num: vert_count as u32,
+                    min_index: 0,
+                }],
+                materials: vec![lmo::LmoMaterial {
+                    diffuse: [0.8, 0.2, 0.1, 1.0],
+                    ambient: [0.3, 0.3, 0.3, 1.0],
+                    emissive: [0.0, 0.0, 0.0, 0.0],
+                    opacity: 1.0,
+                    transp_type: 0,
+                    alpha_test_enabled: false,
+                    alpha_ref: 0,
+                    src_blend: None,
+                    dest_blend: None,
+                    cull_mode: None,
+                    tex_filename: None,
+                }],
+                animation: None,
+                texuv_anims: Vec::new(),
+                teximg_anims: Vec::new(),
+                mtlopac_anims: Vec::new(),
+            });
+        }
+        LmoModel {
+            version: 0x1005,
+            geom_objects,
+        }
+    }
+
+    /// Validate that all index values in a GLB are within vertex count bounds.
+    /// Returns a list of (mesh_name, bad_index_value, vertex_count) for any failures.
+    fn validate_glb_indices(json: &serde_json::Value, bin: &[u8]) -> Vec<(String, u32, u64)> {
+        let mut errors = Vec::new();
+        let meshes = json["meshes"].as_array().unwrap();
+        for mesh in meshes {
+            let mesh_name = mesh["name"].as_str().unwrap_or("?").to_string();
+            for prim in mesh["primitives"].as_array().unwrap() {
+                let idx_acc = prim["indices"].as_u64().unwrap() as usize;
+                let pos_acc = prim["attributes"]["POSITION"].as_u64().unwrap() as usize;
+                let vert_count = json["accessors"][pos_acc]["count"].as_u64().unwrap();
+
+                let indices = extract_indices(json, bin, idx_acc);
+                for &idx in &indices {
+                    if idx as u64 >= vert_count {
+                        errors.push((mesh_name.clone(), idx, vert_count));
+                        break; // one error per mesh is enough
+                    }
+                }
+            }
+        }
+        errors
+    }
+
+    #[test]
+    fn glb_index_integrity_without_vertex_colors() {
+        let tmp_dir = std::env::temp_dir().join("pko_test_glb_idx_no_color");
+        let _ = std::fs::create_dir_all(&tmp_dir);
+
+        let model = make_multi_geom_model(4, false);
+        let lmo_path = write_temp_lmo(&model, &tmp_dir, "no_colors.lmo");
+
+        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir).unwrap();
+        let glb = build_glb_bytes(&json_str, &bin);
+        let (json, bin_data) = parse_glb(&glb);
+
+        let errors = validate_glb_indices(&json, &bin_data);
+        assert!(
+            errors.is_empty(),
+            "GLB without vertex colors should have valid indices, got errors: {:?}",
+            errors
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn glb_index_integrity_with_vertex_colors() {
+        let tmp_dir = std::env::temp_dir().join("pko_test_glb_idx_with_color");
+        let _ = std::fs::create_dir_all(&tmp_dir);
+
+        let model = make_multi_geom_model(4, true);
+        let lmo_path = write_temp_lmo(&model, &tmp_dir, "with_colors.lmo");
+
+        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir).unwrap();
+        let glb = build_glb_bytes(&json_str, &bin);
+        let (json, bin_data) = parse_glb(&glb);
+
+        let errors = validate_glb_indices(&json, &bin_data);
+        assert!(
+            errors.is_empty(),
+            "GLB with vertex colors should have valid indices, got errors: {:?}",
+            errors
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    #[test]
+    fn glb_index_integrity_mixed_color_geoms() {
+        // Model where some geom objects have vertex colors and others don't —
+        // this is the pattern most likely to trigger buffer offset misalignment.
+        let tmp_dir = std::env::temp_dir().join("pko_test_glb_idx_mixed");
+        let _ = std::fs::create_dir_all(&tmp_dir);
+
+        let mut model = make_multi_geom_model(4, false);
+        // Add vertex colors to geom 1 and 3 only
+        model.geom_objects[1].vertex_colors = vec![0xFFFF0000; 4];
+        model.geom_objects[3].vertex_colors = vec![0xFF00FF00; 4];
+
+        let lmo_path = write_temp_lmo(&model, &tmp_dir, "mixed_colors.lmo");
+
+        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir).unwrap();
+        let glb = build_glb_bytes(&json_str, &bin);
+        let (json, bin_data) = parse_glb(&glb);
+
+        let errors = validate_glb_indices(&json, &bin_data);
+        assert!(
+            errors.is_empty(),
+            "GLB with mixed vertex colors should have valid indices, got errors: {:?}",
+            errors
+        );
+
+        let _ = std::fs::remove_dir_all(&tmp_dir);
+    }
+
+    /// Test against actual building GLB files on disk (skipped if not present).
+    /// This test validates that the exporter produces correct index buffers.
+    /// Any failure here means the GLB has corrupt indices — the index data region
+    /// contains vertex float data instead of triangle indices.
+    #[test]
+    fn real_glb_buildings_have_valid_indices() {
+        let buildings_dir = std::path::Path::new(
+            "../../client-unity/pko-client/Assets/Maps/Shared/buildings",
+        );
+        if !buildings_dir.exists() {
+            return; // skip if building files not available
+        }
+
+        let mut total = 0;
+        let mut corrupt = Vec::new();
+
+        for entry in std::fs::read_dir(buildings_dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if path.extension().map(|e| e == "glb").unwrap_or(false) {
+                total += 1;
+                let glb = std::fs::read(&path).unwrap();
+                if glb.len() < 20 || &glb[0..4] != b"glTF" {
+                    continue;
+                }
+                let (json, bin_data) = parse_glb(&glb);
+                let errors = validate_glb_indices(&json, &bin_data);
+                if !errors.is_empty() {
+                    let name = path.file_name().unwrap().to_string_lossy().to_string();
+                    corrupt.push((name, errors));
+                }
+            }
+        }
+
+        assert!(
+            corrupt.is_empty(),
+            "Found {} corrupt GLBs out of {} total:\n{}",
+            corrupt.len(),
+            total,
+            corrupt
+                .iter()
+                .map(|(name, errs)| format!(
+                    "  {}: mesh '{}' has index {} but only {} vertices",
+                    name, errs[0].0, errs[0].1, errs[0].2
+                ))
+                .collect::<Vec<_>>()
+                .join("\n")
+        );
+    }
+
+    /// Reproduce the index corruption bug by round-tripping a known-corrupt LMO
+    /// through build_glb_from_lmo and checking the output (skipped if not present).
+    #[test]
+    fn real_lmo_roundtrip_produces_valid_glb_indices() {
+        let lmo_candidates = [
+            "../../top-client/model/scene/nml-bd167.lmo",
+            "../top-client/model/scene/nml-bd167.lmo",
+        ];
+        let lmo_path = lmo_candidates
+            .iter()
+            .map(std::path::Path::new)
+            .find(|p| p.exists());
+
+        let Some(lmo_path) = lmo_path else {
+            return; // skip if LMO source not available
+        };
+
+        let project_dir = lmo_path.parent().unwrap().parent().unwrap();
+        let (json_str, bin) = build_glb_from_lmo(lmo_path, project_dir).unwrap();
+        let glb = build_glb_bytes(&json_str, &bin);
+        let (json, bin_data) = parse_glb(&glb);
+
+        let errors = validate_glb_indices(&json, &bin_data);
+        assert!(
+            errors.is_empty(),
+            "Round-tripped nml-bd167.lmo should produce valid GLB indices, got errors: {:?}",
+            errors
+        );
+    }
+
+    /// Verify that parsing nml-bd167.lmo (which has FVF=0x1118 with blend data)
+    /// produces valid index values after the lwBlendInfo size fix.
+    #[test]
+    fn real_lmo_parse_produces_valid_indices() {
+        let lmo_candidates = [
+            "../../top-client/model/scene/nml-bd167.lmo",
+            "../top-client/model/scene/nml-bd167.lmo",
+        ];
+        let lmo_path = lmo_candidates
+            .iter()
+            .map(std::path::Path::new)
+            .find(|p| p.exists());
+
+        let Some(lmo_path) = lmo_path else {
+            return;
+        };
+
+        let model = lmo::load_lmo(lmo_path).unwrap();
+        for (gi, geom) in model.geom_objects.iter().enumerate() {
+            let vert_count = geom.vertices.len();
+            let max_idx = geom.indices.iter().copied().max().unwrap_or(0);
+            assert!(
+                (max_idx as usize) < vert_count,
+                "geom[{}]: max index {} >= vertex count {} — LMO parser read indices from wrong offset",
+                gi, max_idx, vert_count
+            );
+        }
+    }
+
+    // ========================================================================
+    // DDS decode tests (DXT1 alpha preservation)
+    // ========================================================================
+
+    /// Build a minimal synthetic DDS file with DXT1 compression.
+    /// `width` and `height` must be multiples of 4. `block_data` is the raw compressed blocks.
+    fn build_dxt1_dds(width: u32, height: u32, block_data: &[u8]) -> Vec<u8> {
+        build_dds(width, height, FOURCC_DXT1, block_data)
+    }
+
+    fn build_dds(width: u32, height: u32, fourcc: u32, block_data: &[u8]) -> Vec<u8> {
+        let mut file = Vec::with_capacity(128 + block_data.len());
+
+        // Magic
+        file.extend_from_slice(b"DDS ");
+
+        // DDS_HEADER (124 bytes)
+        file.extend_from_slice(&124u32.to_le_bytes()); // dwSize
+        file.extend_from_slice(&0x81007u32.to_le_bytes()); // dwFlags
+        file.extend_from_slice(&height.to_le_bytes()); // dwHeight
+        file.extend_from_slice(&width.to_le_bytes()); // dwWidth
+        file.extend_from_slice(&(block_data.len() as u32).to_le_bytes()); // dwPitchOrLinearSize
+        file.extend_from_slice(&0u32.to_le_bytes()); // dwDepth
+        file.extend_from_slice(&1u32.to_le_bytes()); // dwMipMapCount
+        // dwReserved1[11]
+        for _ in 0..11 {
+            file.extend_from_slice(&0u32.to_le_bytes());
+        }
+        // DDS_PIXELFORMAT (32 bytes)
+        file.extend_from_slice(&32u32.to_le_bytes()); // dwSize
+        file.extend_from_slice(&0x4u32.to_le_bytes()); // dwFlags = DDPF_FOURCC
+        file.extend_from_slice(&fourcc.to_le_bytes()); // dwFourCC
+        file.extend_from_slice(&0u32.to_le_bytes()); // dwRGBBitCount
+        for _ in 0..4 {
+            file.extend_from_slice(&0u32.to_le_bytes()); // RGBA masks
+        }
+        // Caps
+        file.extend_from_slice(&0x1000u32.to_le_bytes()); // dwCaps = TEXTURE
+        for _ in 0..4 {
+            file.extend_from_slice(&0u32.to_le_bytes()); // dwCaps2-4 + dwReserved2
+        }
+
+        assert_eq!(file.len(), 128, "DDS header must be exactly 128 bytes");
+
+        // Compressed data
+        file.extend_from_slice(block_data);
+        file
+    }
+
+    #[test]
+    fn dxt1_alpha_preservation_punch_through() {
+        // Build a single 4x4 DXT1 block with punch-through alpha.
+        // When color0 <= color1, index 3 = transparent black.
+        //
+        // color0 = 0x0000 (black, RGB565)
+        // color1 = 0xFFFF (white, RGB565)
+        // Since color0 (0) < color1 (0xFFFF), this is punch-through mode.
+        // Index bits: all 0b11 = index 3 = transparent for all 16 pixels.
+        let mut block = [0u8; 8];
+        block[0] = 0x00; block[1] = 0x00; // color0 = 0 (black)
+        block[2] = 0xFF; block[3] = 0xFF; // color1 = 0xFFFF (white)
+        // All pixels = index 3 (0b11 repeated 16 times = 0xFFFFFFFF)
+        block[4] = 0xFF;
+        block[5] = 0xFF;
+        block[6] = 0xFF;
+        block[7] = 0xFF;
+
+        let dds = build_dxt1_dds(4, 4, &block);
+        let img = decode_dds_with_alpha(&dds).expect("should decode DXT1 DDS");
+        let rgba = img.to_rgba8();
+
+        assert_eq!(rgba.width(), 4);
+        assert_eq!(rgba.height(), 4);
+
+        // All 16 pixels should have alpha=0 (transparent)
+        let transparent_count = rgba.pixels().filter(|p| p.0[3] == 0).count();
+        assert_eq!(
+            transparent_count, 16,
+            "all pixels with index 3 in punch-through mode should be transparent, got {} transparent",
+            transparent_count
+        );
+    }
+
+    #[test]
+    fn dxt1_opaque_no_unexpected_holes() {
+        // Build a 4x4 DXT1 block in opaque mode (color0 > color1).
+        // All indices = 0 → all pixels = color0.
+        //
+        // color0 = 0xF800 (bright red, RGB565)
+        // color1 = 0x001F (bright blue, RGB565)
+        // Since color0 (0xF800) > color1 (0x001F), this is 4-color opaque mode.
+        let mut block = [0u8; 8];
+        block[0] = 0x00; block[1] = 0xF8; // color0 = 0xF800 (red)
+        block[2] = 0x1F; block[3] = 0x00; // color1 = 0x001F (blue)
+        // All pixels = index 0 → color0 (red)
+        block[4] = 0x00;
+        block[5] = 0x00;
+        block[6] = 0x00;
+        block[7] = 0x00;
+
+        let dds = build_dxt1_dds(4, 4, &block);
+        let img = decode_dds_with_alpha(&dds).expect("should decode opaque DXT1 DDS");
+        let rgba = img.to_rgba8();
+
+        // All 16 pixels should have alpha=255 (fully opaque)
+        let opaque_count = rgba.pixels().filter(|p| p.0[3] == 255).count();
+        assert_eq!(
+            opaque_count, 16,
+            "opaque DXT1 block should have all pixels alpha=255, got {} opaque",
+            opaque_count
+        );
+
+        // First pixel should be red-ish (R high, G low, B low)
+        let p = rgba.get_pixel(0, 0).0;
+        assert!(p[0] > 200, "red channel should be high, got R={} G={} B={} A={}", p[0], p[1], p[2], p[3]);
+        assert!(p[1] < 10, "green channel should be low, got {}", p[1]);
+        assert!(p[2] < 10, "blue channel should be low, got {}", p[2]);
+    }
+
+    #[test]
+    fn non_dds_falls_through_to_image_crate() {
+        // Create a tiny 1x1 PNG in memory
+        let mut png_data = Vec::new();
+        let img = image::RgbaImage::from_pixel(1, 1, image::Rgba([255, 0, 128, 200]));
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(
+                &mut std::io::Cursor::new(&mut png_data),
+                image::ImageFormat::Png,
+            )
+            .unwrap();
+
+        let result = decode_dds_with_alpha(&png_data).expect("should decode PNG via fallback");
+        let rgba = result.to_rgba8();
+        let p = rgba.get_pixel(0, 0).0;
+        assert_eq!(p, [255, 0, 128, 200], "PNG pixel should round-trip exactly");
+    }
+
+    #[test]
+    fn truncated_dds_returns_none() {
+        // DDS magic but truncated header
+        let data = b"DDS short";
+        assert!(
+            decode_dds_with_alpha(data).is_none(),
+            "truncated DDS should return None"
+        );
+    }
+
+    #[test]
+    fn dxt1_mixed_opaque_and_transparent_pixels() {
+        // 4x4 block: top-left 4 pixels = opaque (index 0), bottom-right 4 = transparent (index 3)
+        // Punch-through mode: color0 <= color1
+        //
+        // color0 = 0x07E0 (green, RGB565) = 0xE0, 0x07
+        // color1 = 0xFFFF (white) = 0xFF, 0xFF
+        // color0 (0x07E0) < color1 (0xFFFF) → punch-through mode
+        //
+        // Row layout (4 pixels per row, 2 bits each = 1 byte per row):
+        // Row 0: 0,0,0,0 → 0b00_00_00_00 = 0x00
+        // Row 1: 0,0,0,0 → 0x00
+        // Row 2: 3,3,3,3 → 0b11_11_11_11 = 0xFF
+        // Row 3: 3,3,3,3 → 0xFF
+        let block: [u8; 8] = [
+            0xE0, 0x07, // color0 = green
+            0xFF, 0xFF, // color1 = white
+            0x00, // row 0: all index 0 (color0 = green, opaque)
+            0x00, // row 1: all index 0
+            0xFF, // row 2: all index 3 (transparent)
+            0xFF, // row 3: all index 3
+        ];
+
+        let dds = build_dxt1_dds(4, 4, &block);
+        let img = decode_dds_with_alpha(&dds).expect("decode mixed block");
+        let rgba = img.to_rgba8();
+
+        // Top half: opaque
+        for y in 0..2 {
+            for x in 0..4 {
+                let a = rgba.get_pixel(x, y).0[3];
+                assert_eq!(a, 255, "pixel ({},{}) should be opaque, got alpha={}", x, y, a);
+            }
+        }
+        // Bottom half: transparent
+        for y in 2..4 {
+            for x in 0..4 {
+                let a = rgba.get_pixel(x, y).0[3];
+                assert_eq!(a, 0, "pixel ({},{}) should be transparent, got alpha={}", x, y, a);
+            }
+        }
+    }
+
+    #[test]
+    fn dxt3_falls_through_to_image_crate() {
+        // DXT3 (BC2): 16 bytes per block = 8 bytes explicit alpha + 8 bytes DXT1 color
+        // Build a 4x4 DXT3 DDS with half-alpha (0x88 per pixel = ~53% alpha)
+        let mut block = [0u8; 16];
+        // Alpha section: 4 bits per pixel, 16 pixels = 8 bytes
+        // All pixels get alpha nibble 0x8 = 128/255 ≈ 50%
+        for i in 0..8 {
+            block[i] = 0x88; // two nibbles per byte, each 0x8
+        }
+        // Color section: color0 > color1 (opaque mode), all index 0 = white
+        block[8] = 0xFF; block[9] = 0xFF; // color0 = white
+        block[10] = 0x00; block[11] = 0x00; // color1 = black
+        // All indices 0
+        block[12] = 0x00; block[13] = 0x00; block[14] = 0x00; block[15] = 0x00;
+
+        let dds = build_dds(4, 4, FOURCC_DXT3, &block);
+        // DXT3 falls through to image crate — should decode with alpha preserved
+        let img = decode_dds_with_alpha(&dds).expect("DXT3 should decode via image crate");
+        let rgba = img.to_rgba8();
+        assert_eq!(rgba.width(), 4);
+        assert_eq!(rgba.height(), 4);
+
+        // All pixels should have partial alpha (not 255, not 0)
+        for pixel in rgba.pixels() {
+            let a = pixel.0[3];
+            assert!(
+                a > 100 && a < 200,
+                "DXT3 pixel alpha should be ~128, got {}",
+                a
+            );
+        }
+    }
+
+    #[test]
+    fn dxt5_falls_through_to_image_crate() {
+        // DXT5 (BC3): 16 bytes per block = 2 bytes alpha endpoints + 6 bytes alpha indices + 8 bytes color
+        // Build a 4x4 DXT5 DDS — alpha0=255, alpha1=0, all indices=0 → all alpha=255
+        let mut block = [0u8; 16];
+        block[0] = 255; // alpha0
+        block[1] = 0;   // alpha1
+        // Alpha indices: all 0 (3 bits each, 16 pixels = 48 bits = 6 bytes, all zero)
+        // block[2..8] already zeroed
+        // Color: white, all indices 0
+        block[8] = 0xFF; block[9] = 0xFF; // color0 = white
+        block[10] = 0x00; block[11] = 0x00; // color1 = black
+        // Color indices: all 0
+        block[12] = 0x00; block[13] = 0x00; block[14] = 0x00; block[15] = 0x00;
+
+        let dds = build_dds(4, 4, FOURCC_DXT5, &block);
+        let img = decode_dds_with_alpha(&dds).expect("DXT5 should decode via image crate");
+        let rgba = img.to_rgba8();
+        assert_eq!(rgba.width(), 4);
+        assert_eq!(rgba.height(), 4);
+
+        // All pixels should be fully opaque (alpha0=255, all indices point to alpha0)
+        for pixel in rgba.pixels() {
+            assert_eq!(
+                pixel.0[3], 255,
+                "DXT5 pixel with alpha0=255, idx=0 should be opaque, got alpha={}",
+                pixel.0[3]
+            );
+        }
+    }
+
+    #[test]
+    fn opaque_material_ignores_texture_alpha() {
+        // Verify that build_lmo_material produces alphaMode: Opaque when
+        // alpha_test_enabled=false, even if a texture might have alpha.
+        // This ensures DXT1 garbage alpha in opaque materials is harmless.
+        let mat = lmo::LmoMaterial {
+            diffuse: [1.0, 1.0, 1.0, 1.0],
+            ambient: [0.3, 0.3, 0.3, 1.0],
+            emissive: [0.0, 0.0, 0.0, 0.0],
+            opacity: 1.0,
+            transp_type: 0,          // FILTER (non-effect)
+            alpha_test_enabled: false, // NOT alpha tested
+            alpha_ref: 0,
+            src_blend: None,
+            dest_blend: None,
+            cull_mode: None,
+            tex_filename: Some("might_have_alpha.dds".to_string()),
+        };
+        let mut builder = GltfBuilder::new();
+        let tmp = std::env::temp_dir();
+        build_lmo_material(&mut builder, &mat, "opaque_wall", &tmp, false);
+        let gltf_mat = &builder.materials[0];
+
+        assert_eq!(
+            gltf_mat.alpha_mode,
+            Checked::Valid(gltf_json::material::AlphaMode::Opaque),
+            "opaque material (no alpha test, no effect, opacity=1) must be Opaque"
+        );
+        assert!(
+            gltf_mat.alpha_cutoff.is_none(),
+            "opaque material should have no alpha cutoff"
+        );
+    }
+
+    #[test]
+    fn synthetic_dxt1_deterministic_fixture() {
+        // Deterministic 8x8 DXT1 image (4 blocks arranged in 2x2 grid).
+        // Each block has a known pattern:
+        //
+        // Block (0,0) — top-left: opaque red (color0=red > color1=black, all idx 0)
+        // Block (1,0) — top-right: opaque blue (color0=blue > color1=black, all idx 0)
+        // Block (0,1) — bottom-left: all transparent (punch-through, all idx 3)
+        // Block (1,1) — bottom-right: opaque green (color0=green > color1=black, all idx 0)
+
+        let red_block: [u8; 8] = [
+            0x00, 0xF8, // color0 = 0xF800 (red RGB565)
+            0x00, 0x00, // color1 = 0x0000 (black)
+            0x00, 0x00, 0x00, 0x00, // all index 0 → color0
+        ];
+        let blue_block: [u8; 8] = [
+            0x1F, 0x00, // color0 = 0x001F (blue RGB565)
+            0x00, 0x00, // color1 = 0x0000 (black)
+            0x00, 0x00, 0x00, 0x00,
+        ];
+        let transparent_block: [u8; 8] = [
+            0x00, 0x00, // color0 = 0
+            0xFF, 0xFF, // color1 = 0xFFFF (color0 < color1 → punch-through)
+            0xFF, 0xFF, 0xFF, 0xFF, // all index 3 → transparent
+        ];
+        let green_block: [u8; 8] = [
+            0xE0, 0x07, // color0 = 0x07E0 (green RGB565)
+            0x00, 0x00, // color1 = 0x0000
+            0x00, 0x00, 0x00, 0x00,
+        ];
+
+        // DXT1 block layout for 8x8: blocks stored row-major
+        // Row 0: block(0,0), block(1,0)
+        // Row 1: block(0,1), block(1,1)
+        let mut blocks = Vec::new();
+        blocks.extend_from_slice(&red_block);
+        blocks.extend_from_slice(&blue_block);
+        blocks.extend_from_slice(&transparent_block);
+        blocks.extend_from_slice(&green_block);
+
+        let dds = build_dxt1_dds(8, 8, &blocks);
+        let img = decode_dds_with_alpha(&dds).expect("decode 8x8 DXT1");
+        let rgba = img.to_rgba8();
+
+        assert_eq!(rgba.width(), 8);
+        assert_eq!(rgba.height(), 8);
+
+        // Top-left quadrant (0-3, 0-3): red, opaque
+        let p = rgba.get_pixel(0, 0).0;
+        assert!(p[0] > 200 && p[3] == 255, "top-left should be opaque red: {:?}", p);
+
+        // Top-right quadrant (4-7, 0-3): blue, opaque
+        let p = rgba.get_pixel(4, 0).0;
+        assert!(p[2] > 200 && p[3] == 255, "top-right should be opaque blue: {:?}", p);
+
+        // Bottom-left quadrant (0-3, 4-7): fully transparent
+        let p = rgba.get_pixel(0, 4).0;
+        assert_eq!(p[3], 0, "bottom-left should be transparent: {:?}", p);
+
+        // Bottom-right quadrant (4-7, 4-7): green, opaque
+        let p = rgba.get_pixel(4, 4).0;
+        assert!(p[1] > 200 && p[3] == 255, "bottom-right should be opaque green: {:?}", p);
+
+        // Count: exactly 16 transparent pixels (one 4x4 block)
+        let transparent_count = rgba.pixels().filter(|p| p.0[3] == 0).count();
+        assert_eq!(transparent_count, 16, "exactly one block should be transparent");
     }
 }

@@ -36,6 +36,7 @@ use crate::character::{
     GLTFFieldsToAggregate,
 };
 use crate::d3d::{D3DFormat, D3DPool, D3DPrimitiveType, D3DVertexElement9};
+use crate::map::scene_model::decode_dds_with_alpha;
 use crate::math::{LwMatrix44, LwSphere, LwVector2, LwVector3};
 
 use super::{Item, ItemMetadata};
@@ -1722,10 +1723,11 @@ fn build_single_material(
                     }
                     if let Ok(raw_bytes) = std::fs::read(&candidate) {
                         let decoded = decode_pko_texture(&raw_bytes);
-                        if let Ok(img) = image::load_from_memory(&decoded) {
+                        if let Some(img) = decode_dds_with_alpha(&decoded) {
+                            let rgba = img.to_rgba8();
                             let mut png_data = Vec::new();
                             let mut cursor = std::io::Cursor::new(&mut png_data);
-                            if img.write_to(&mut cursor, image::ImageFormat::Png).is_ok() {
+                            if image::DynamicImage::ImageRgba8(rgba).write_to(&mut cursor, image::ImageFormat::Png).is_ok() {
                                 let data_uri = format!(
                                     "data:image/png;base64,{}",
                                     BASE64_STANDARD.encode(&png_data)

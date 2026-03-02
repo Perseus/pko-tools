@@ -37,6 +37,25 @@ This tool is designed for converting game client assets into standard formats (s
 
 ## Usage Guide
 
+### Kaitai Scaffold
+
+- The repository now includes shared Kaitai specs under `formats/`:
+  - `pko_lmo.ksy`
+  - `pko_lgo.ksy`
+  - `pko_map.ksy`
+  - `terrain_info.ksy`
+- Sync specs from `../pko-map-lab/formats`:
+  - `pnpm kaitai:sync`
+- Rust Kaitai codegen runs from `src-tauri/build.rs` during Cargo builds.
+  - Source specs: `../formats`
+  - Generated output: `src-tauri/gen/kaitai`
+  - Optional env overrides:
+    - `KSC_BIN=/path/to/ksc`
+    - `PKO_KAITAI_BUILD=0` (skip regeneration, use checked-in generated files)
+- Runtime parser scaffold switch for LMO loading:
+  - `PKO_LMO_PARSER=native` (default)
+  - `PKO_LMO_PARSER=kaitai` (currently scaffold fallback to native parser)
+
 ### Exporting to glTF
 
 - Click the **"Export to glTF"** button.

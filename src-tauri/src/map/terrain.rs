@@ -26,6 +26,7 @@ const CUR_VERSION_NO: i32 = 780627; // MP_MAP_FLAG(780624) + 3
 // Original PKO terrain/sea defaults (Engine/sdk/include/MPMap.h)
 pub(crate) const UNDERWATER_HEIGHT: f32 = -2.0;
 pub(crate) const UNDERWATER_TEXNO: u8 = 22;
+const SEA_LEVEL: f32 = 0.0;
 
 // PKO native unit scale exported to glTF scene (1 PKO unit = 1 glTF/Unity unit)
 pub(crate) const MAP_VISUAL_SCALE: f32 = 1.0;
@@ -299,6 +300,46 @@ pub(crate) fn get_tile<'a>(map: &'a ParsedMap, tx: i32, ty: i32) -> Option<&'a M
 /// Export uses PKO native units (no extra visual scale), so Y equals fHeight.
 fn tile_height(tile: &MapTile) -> f32 {
     (tile.c_height as f32 * 10.0) / 100.0 / MAP_VISUAL_SCALE
+}
+
+/// Sample terrain height using the original engine's static placement path:
+/// MPMap::GetHeight(fX,fY) + CGameScene::GetTerrainHeight sea-level clamp.
+///
+/// MPMap::GetHeight interpolates across one tile using two triangles:
+/// (0,0)-(1,0)-(0,1) and (0,1)-(1,0)-(1,1), with corner heights read from
+/// GetGroupTile(nX, nY, 0..3) where nX/nY are integer-truncated world coords.
+/// Missing tiles resolve to the default tile (height 0.0 / sea level).
+fn sample_scene_terrain_height(map: &ParsedMap, world_x: f32, world_y: f32) -> f32 {
+    // Match C++ cast semantics in MPMap::GetHeight (truncate toward zero).
+    let nx = world_x as i32;
+    let ny = world_y as i32;
+
+    let h00 = get_tile(map, nx, ny)
+        .map(tile_height)
+        .unwrap_or(SEA_LEVEL / MAP_VISUAL_SCALE);
+    let h10 = get_tile(map, nx + 1, ny)
+        .map(tile_height)
+        .unwrap_or(SEA_LEVEL / MAP_VISUAL_SCALE);
+    let h01 = get_tile(map, nx, ny + 1)
+        .map(tile_height)
+        .unwrap_or(SEA_LEVEL / MAP_VISUAL_SCALE);
+    let h11 = get_tile(map, nx + 1, ny + 1)
+        .map(tile_height)
+        .unwrap_or(SEA_LEVEL / MAP_VISUAL_SCALE);
+
+    let lx = world_x - nx as f32;
+    let ly = world_y - ny as f32;
+
+    let raw = if lx + ly <= 1.0 {
+        // Triangle v0(0,0)-v1(1,0)-v2(0,1)
+        h00 + lx * (h10 - h00) + ly * (h01 - h00)
+    } else {
+        // Triangle v2(0,1)-v1(1,0)-v3(1,1)
+        h11 + (1.0 - lx) * (h01 - h11) + (1.0 - ly) * (h10 - h11)
+    };
+
+    // CGameScene::GetTerrainHeight clamps to sea level.
+    raw.max(SEA_LEVEL / MAP_VISUAL_SCALE)
 }
 
 /// Resolve the terrain tile used for a render vertex.
@@ -948,10 +989,8 @@ pub fn build_terrain_gltf(
                 "scale": obj.scale,
             }))?;
 
-            // Look up terrain height at the object's XZ position
-            let terrain_h = get_tile(parsed_map, obj.world_x as i32, obj.world_y as i32)
-                .map(|t| tile_height(t))
-                .unwrap_or(UNDERWATER_HEIGHT / MAP_VISUAL_SCALE);
+            // Match PKO SceneObj placement: GetTerrainHeight(x, y) + height offset.
+            let terrain_h = sample_scene_terrain_height(parsed_map, obj.world_x, obj.world_y);
 
             // Check if we have a loaded mesh for this type-0 object
             let mesh_ref = if obj.obj_type == 0 {
@@ -2021,36 +2060,15 @@ pub fn build_terrain_section_glb(
         None
     };
 
-    // ----- Material: reference atlas by URI, not embedded -----
-    let (images, textures, samplers, base_color_texture) = if has_atlas {
-        let images = vec![gltf::Image {
-            buffer_view: None,
-            mime_type: Some(gltf::image::MimeType("image/png".to_string())),
-            uri: Some("../terrain_atlas.png".into()),
-            name: Some("terrain_atlas".into()),
-            extensions: None, extras: None,
-        }];
-        let samplers = vec![gltf::texture::Sampler {
-            mag_filter: Some(Checked::Valid(gltf::texture::MagFilter::Linear)),
-            min_filter: Some(Checked::Valid(gltf::texture::MinFilter::Linear)),
-            wrap_s: Checked::Valid(gltf::texture::WrappingMode::ClampToEdge),
-            wrap_t: Checked::Valid(gltf::texture::WrappingMode::ClampToEdge),
-            name: None, extensions: None, extras: None,
-        }];
-        let textures = vec![gltf::Texture {
-            sampler: Some(gltf::Index::new(0)),
-            source: gltf::Index::new(0),
-            name: None, extensions: None, extras: None,
-        }];
-        let tex_info = Some(gltf::texture::Info {
-            index: gltf::Index::new(0),
-            tex_coord: 0,
-            extensions: None, extras: None,
-        });
-        (images, textures, samplers, tex_info)
-    } else {
-        (vec![], vec![], vec![], None)
-    };
+    // ----- Material: no texture reference -----
+    // Section GLBs intentionally omit the terrain_atlas.png URI reference.
+    // Unity's TOPMaterialReplacer sets the correct material at runtime.
+    // Referencing a 150+ MB atlas PNG via URI causes glTFast's ScriptedImporter
+    // to resolve it for every section, making 1024-section imports extremely slow.
+    let images: Vec<gltf::Image> = vec![];
+    let textures: Vec<gltf::Texture> = vec![];
+    let samplers: Vec<gltf::texture::Sampler> = vec![];
+    let base_color_texture: Option<gltf::texture::Info> = None;
 
     // Build mesh
     let mut attributes = std::collections::BTreeMap::new();
@@ -2665,6 +2683,47 @@ fn load_effect_file(project_dir: &Path, eff_filename: &str) -> Option<EffFile> {
     None
 }
 
+/// Compute the relative path from `from_dir` to `to_dir`.
+/// Used to create manifest paths that reference the shared assets directory.
+/// e.g., from "/export/07xmas2-v3" to "/export/Shared" → "../Shared"
+fn compute_shared_rel_path(from_dir: &Path, to_dir: &Path) -> String {
+    // Canonicalize both paths if possible, otherwise use as-is
+    let from = std::fs::canonicalize(from_dir).unwrap_or_else(|_| from_dir.to_path_buf());
+    let to = std::fs::canonicalize(to_dir).unwrap_or_else(|_| to_dir.to_path_buf());
+
+    // Find common prefix
+    let from_parts: Vec<_> = from.components().collect();
+    let to_parts: Vec<_> = to.components().collect();
+
+    let common_len = from_parts
+        .iter()
+        .zip(to_parts.iter())
+        .take_while(|(a, b)| a == b)
+        .count();
+
+    // Build relative path: go up from `from` to common ancestor, then down to `to`
+    let ups = from_parts.len() - common_len;
+    let mut rel = String::new();
+    for _ in 0..ups {
+        if !rel.is_empty() {
+            rel.push('/');
+        }
+        rel.push_str("..");
+    }
+    for part in &to_parts[common_len..] {
+        if !rel.is_empty() {
+            rel.push('/');
+        }
+        rel.push_str(&part.as_os_str().to_string_lossy());
+    }
+
+    if rel.is_empty() {
+        ".".to_string()
+    } else {
+        rel
+    }
+}
+
 /// Copy effect textures referenced by parsed EffFile definitions.
 /// Walks each sub-effect's tex_name and frame_tex_names, finds the source
 /// TGA/BMP in texture/effect/, converts to PNG in effects/textures/.
@@ -2815,7 +2874,7 @@ fn copy_teximg_textures(
             None => continue,
         };
 
-        let model = match super::lmo::load_lmo(&lmo_path) {
+        let model = match super::lmo_loader::load_lmo(&lmo_path) {
             Ok(m) => m,
             Err(_) => continue,
         };
@@ -3017,53 +3076,76 @@ pub fn export_map_for_unity(
         .unwrap_or_default();
 
     // 7. Export buildings — glTF (v2) or GLB (v3)
+    // When shared_assets_dir is set, buildings are in the shared dir — don't re-export.
     std::fs::create_dir_all(output_dir)?;
-    let buildings_dir = output_dir.join("buildings");
-    std::fs::create_dir_all(&buildings_dir)?;
+    let use_shared = options.shared_assets_dir.is_some();
 
     let mut building_entries = Vec::new();
     let ext = if v3 { "glb" } else { "gltf" };
 
-    for &obj_id in &unique_obj_ids {
-        let info = match obj_info.get(&(obj_id as u32)) {
-            Some(info) => info,
-            None => continue,
-        };
-
-        let lmo_path = match super::scene_model::find_lmo_path(project_dir, &info.filename) {
-            Some(p) => p,
-            None => continue,
-        };
-
-        let stem = info
-            .filename
-            .strip_suffix(".lmo")
-            .or_else(|| info.filename.strip_suffix(".LMO"))
-            .unwrap_or(&info.filename);
-        let out_filename = format!("{}.{}", stem, ext);
-        let out_path = buildings_dir.join(&out_filename);
-
-        if v3 {
-            match super::scene_model::build_glb_from_lmo(&lmo_path, project_dir) {
-                Ok((json, bin)) => {
-                    super::glb::write_glb(&json, &bin, &out_path)?;
-                }
-                Err(_) => continue,
-            }
-        } else {
-            match super::scene_model::build_gltf_from_lmo(&lmo_path, project_dir) {
-                Ok(json) => {
-                    std::fs::write(&out_path, json.as_bytes())?;
-                }
-                Err(_) => continue,
-            }
+    if use_shared {
+        // Build entries from obj_info without exporting — buildings live in shared dir
+        for &obj_id in &unique_obj_ids {
+            let info = match obj_info.get(&(obj_id as u32)) {
+                Some(info) => info,
+                None => continue,
+            };
+            let stem = info
+                .filename
+                .strip_suffix(".lmo")
+                .or_else(|| info.filename.strip_suffix(".LMO"))
+                .unwrap_or(&info.filename);
+            building_entries.push(super::BuildingExportEntry {
+                obj_id: obj_id as u32,
+                filename: info.filename.clone(),
+                gltf_path: format!("buildings/{}.glb", stem),
+            });
         }
+    } else {
+        let buildings_dir = output_dir.join("buildings");
+        std::fs::create_dir_all(&buildings_dir)?;
 
-        building_entries.push(super::BuildingExportEntry {
-            obj_id: obj_id as u32,
-            filename: info.filename.clone(),
-            gltf_path: out_path.to_string_lossy().to_string(),
-        });
+        for &obj_id in &unique_obj_ids {
+            let info = match obj_info.get(&(obj_id as u32)) {
+                Some(info) => info,
+                None => continue,
+            };
+
+            let lmo_path = match super::scene_model::find_lmo_path(project_dir, &info.filename) {
+                Some(p) => p,
+                None => continue,
+            };
+
+            let stem = info
+                .filename
+                .strip_suffix(".lmo")
+                .or_else(|| info.filename.strip_suffix(".LMO"))
+                .unwrap_or(&info.filename);
+            let out_filename = format!("{}.{}", stem, ext);
+            let out_path = buildings_dir.join(&out_filename);
+
+            if v3 {
+                match super::scene_model::build_glb_from_lmo(&lmo_path, project_dir) {
+                    Ok((json, bin)) => {
+                        super::glb::write_glb(&json, &bin, &out_path)?;
+                    }
+                    Err(_) => continue,
+                }
+            } else {
+                match super::scene_model::build_gltf_from_lmo(&lmo_path, project_dir) {
+                    Ok(json) => {
+                        std::fs::write(&out_path, json.as_bytes())?;
+                    }
+                    Err(_) => continue,
+                }
+            }
+
+            building_entries.push(super::BuildingExportEntry {
+                obj_id: obj_id as u32,
+                filename: info.filename.clone(),
+                gltf_path: out_path.to_string_lossy().to_string(),
+            });
+        }
     }
 
     // 8. Build placements + effects
@@ -3083,8 +3165,15 @@ pub fn export_map_for_unity(
             .or_else(|| entry.filename.strip_suffix(".LMO"))
             .unwrap_or(&entry.filename);
 
+        let glb_path = if use_shared {
+            let shared_dir = options.shared_assets_dir.as_ref().unwrap();
+            let shared_rel = compute_shared_rel_path(output_dir, shared_dir);
+            format!("{}/buildings/{}.glb", shared_rel, stem)
+        } else {
+            format!("buildings/{}.{}", stem, ext)
+        };
         let mut bldg_json = serde_json::json!({
-            "glb": format!("buildings/{}.{}", stem, ext),
+            "glb": glb_path,
             "filename": entry.filename,
         });
 
@@ -3100,6 +3189,10 @@ pub fn export_map_for_unity(
             obj.insert("flag".into(), serde_json::json!(info.flag));
             obj.insert("size_flag".into(), serde_json::json!(info.size_flag));
             obj.insert("is_really_big".into(), serde_json::json!(info.is_really_big));
+            // Point light data (meaningful when obj_type == 3)
+            obj.insert("point_color".into(), serde_json::json!(info.point_color));
+            obj.insert("point_range".into(), serde_json::json!(info.point_range));
+            obj.insert("point_attenuation".into(), serde_json::json!(info.point_attenuation));
         }
 
         // C4: Add lit overlay data if this building has a matching entry in lit.tx
@@ -3132,9 +3225,8 @@ pub fn export_map_for_unity(
                 continue;
             }
 
-            let terrain_h = get_tile(&parsed_map, obj.world_x as i32, obj.world_y as i32)
-                .map(|t| tile_height(t))
-                .unwrap_or(UNDERWATER_HEIGHT / MAP_VISUAL_SCALE);
+            // Match PKO SceneObj placement: GetTerrainHeight(x, y) + height offset.
+            let terrain_h = sample_scene_terrain_height(&parsed_map, obj.world_x, obj.world_y);
             let position = [obj.world_x, terrain_h + obj.world_z, obj.world_y];
 
             if obj.obj_type == 0 {
@@ -3156,12 +3248,19 @@ pub fn export_map_for_unity(
                                 .unwrap_or(&i.filename)
                         })
                         .unwrap_or("unknown");
+                    let bldg_glb_ref = if use_shared {
+                        let shared_dir = options.shared_assets_dir.as_ref().unwrap();
+                        let shared_rel = compute_shared_rel_path(output_dir, shared_dir);
+                        format!("{}/buildings/{}.glb", shared_rel, stem)
+                    } else {
+                        format!("buildings/{}.glb", stem)
+                    };
                     building_glb_placements.push((
                         obj.obj_id as u32,
                         position,
                         obj.yaw_angle as f32,
                         obj.scale as f32,
-                        format!("buildings/{}.glb", stem),
+                        bldg_glb_ref,
                     ));
                 }
             } else if obj.obj_type == 1 {
@@ -3248,8 +3347,10 @@ pub fn export_map_for_unity(
         std::fs::write(&sidecar_path, sidecar_json.as_bytes())?;
     }
 
-    // 10b. Copy effect textures
-    let _effect_textures = copy_effect_textures(project_dir, output_dir, &effect_definitions);
+    // 10b. Copy effect textures (skip when using shared assets)
+    if !use_shared {
+        let _effect_textures = copy_effect_textures(project_dir, output_dir, &effect_definitions);
+    }
 
     // 11. Write terrain
     let terrain_file_path;
@@ -3339,23 +3440,84 @@ pub fn export_map_for_unity(
         std::fs::write(&terrain_file_path, terrain_gltf_json.as_bytes())?;
     }
 
-    // 11b. Copy teximg animation textures for buildings
-    let _teximg_textures = copy_teximg_textures(
-        project_dir,
-        output_dir,
-        &building_entries,
-        &obj_info,
-    );
+    // 11b. Copy teximg animation textures for buildings (skip when using shared assets)
+    if !use_shared {
+        let _teximg_textures = copy_teximg_textures(
+            project_dir,
+            output_dir,
+            &building_entries,
+            &obj_info,
+        );
+    }
 
     // 12. Copy water textures + terrain textures + alpha atlas
-    let water_textures = copy_water_textures(project_dir, output_dir);
-    let terrain_textures =
-        super::texture::export_terrain_textures(project_dir, &parsed_map, output_dir)
+    // When using shared assets, compute relative paths to the shared dir instead of exporting.
+    let (water_textures, terrain_textures, alpha_atlas_path, alpha_mask_array) = if use_shared {
+        let shared_dir = options.shared_assets_dir.as_ref().unwrap();
+        let shared_rel = compute_shared_rel_path(output_dir, shared_dir);
+
+        // Load shared_manifest.json to get the actual texture list
+        let shared_manifest_path = shared_dir.join("shared_manifest.json");
+        let shared_manifest: serde_json::Value = if shared_manifest_path.exists() {
+            let data = std::fs::read_to_string(&shared_manifest_path)?;
+            serde_json::from_str(&data)?
+        } else {
+            serde_json::json!({})
+        };
+
+        // Water textures: rewrite paths relative to output_dir
+        let water = shared_manifest.get("water_textures")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter()
+                .filter_map(|v| v.as_str().map(|s| format!("{}/{}", shared_rel, s)))
+                .collect::<Vec<_>>())
             .unwrap_or_default();
-    let alpha_atlas_path =
-        super::texture::export_alpha_atlas(project_dir, output_dir).unwrap_or(None);
-    let alpha_mask_array =
-        super::texture::export_alpha_mask_array(project_dir, output_dir).unwrap_or(None);
+
+        // Terrain textures: rewrite paths
+        let terrain = shared_manifest.get("terrain_textures")
+            .and_then(|v| v.as_object())
+            .map(|obj| {
+                let mut map = std::collections::HashMap::new();
+                for (id_str, path_val) in obj {
+                    if let (Ok(id), Some(path)) = (id_str.parse::<u8>(), path_val.as_str()) {
+                        // Only include textures referenced by this map
+                        map.insert(id, format!("{}/{}", shared_rel, path));
+                    }
+                }
+                map
+            })
+            .unwrap_or_default();
+
+        // Filter terrain textures to only those referenced by this map
+        let referenced_ids = super::texture::collect_referenced_tex_ids(&parsed_map);
+        let terrain_filtered: std::collections::HashMap<u8, String> = terrain.into_iter()
+            .filter(|(id, _)| referenced_ids.contains(id))
+            .collect();
+
+        // Alpha atlas
+        let alpha_atlas = shared_manifest.get("alpha_atlas")
+            .and_then(|v| v.as_str())
+            .map(|s| format!("{}/{}", shared_rel, s));
+
+        // Alpha masks
+        let alpha_masks = shared_manifest.get("alpha_masks")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter()
+                .filter_map(|v| v.as_str().map(|s| format!("{}/{}", shared_rel, s)))
+                .collect::<Vec<_>>());
+
+        (water, terrain_filtered, alpha_atlas, alpha_masks)
+    } else {
+        let water = copy_water_textures(project_dir, output_dir);
+        let terrain =
+            super::texture::export_terrain_textures(project_dir, &parsed_map, output_dir)
+                .unwrap_or_default();
+        let alpha_atlas =
+            super::texture::export_alpha_atlas(project_dir, output_dir).unwrap_or(None);
+        let alpha_masks =
+            super::texture::export_alpha_mask_array(project_dir, output_dir).unwrap_or(None);
+        (water, terrain, alpha_atlas, alpha_masks)
+    };
 
     // 13. Build manifest
     let mut manifest_map = serde_json::Map::new();
@@ -3371,6 +3533,11 @@ pub fn export_map_for_unity(
         manifest_map.insert("terrain_gltf".into(), serde_json::json!("terrain.glb")); // alias for ManifestShell compat
         if let Some(ref sections_info) = terrain_sections_info {
             manifest_map.insert("terrain_sections".into(), sections_info.clone());
+        }
+        if use_shared {
+            let shared_dir = options.shared_assets_dir.as_ref().unwrap();
+            let shared_rel = compute_shared_rel_path(output_dir, shared_dir);
+            manifest_map.insert("shared_assets".into(), serde_json::json!(shared_rel));
         }
         manifest_map.insert("map_name".into(), serde_json::json!(map_name));
         manifest_map.insert("coordinate_system".into(), serde_json::json!("y_up"));
@@ -4324,6 +4491,103 @@ mod tests {
     }
 
     #[test]
+    fn scene_object_terrain_height_matches_engine_triangle_interpolation() {
+        // Corners mirror a harbor edge slope:
+        // (0,0)=1.7, (1,0)=1.7, (0,1)=-0.6, (1,1)=-0.6.
+        // At (0.4,0.5), MPMap::GetHeight() intersects triangle
+        // v0-v1-v2 and yields 0.55 (not 1.7 from integer tile sampling).
+        let parsed = ParsedMap {
+            header: MapHeader {
+                n_map_flag: CUR_VERSION_NO,
+                n_width: 2,
+                n_height: 2,
+                n_section_width: 2,
+                n_section_height: 2,
+            },
+            section_cnt_x: 1,
+            section_cnt_y: 1,
+            section_offsets: vec![0],
+            sections: vec![Some(MapSection {
+                tiles: vec![
+                    MapTile {
+                        dw_tile_info: 0,
+                        bt_tile_info: 0,
+                        s_color: 0,
+                        c_height: 17,
+                        s_region: 0,
+                        bt_island: 0,
+                        bt_block: [0; 4],
+                    },
+                    MapTile {
+                        dw_tile_info: 0,
+                        bt_tile_info: 0,
+                        s_color: 0,
+                        c_height: 17,
+                        s_region: 0,
+                        bt_island: 0,
+                        bt_block: [0; 4],
+                    },
+                    MapTile {
+                        dw_tile_info: 0,
+                        bt_tile_info: 0,
+                        s_color: 0,
+                        c_height: -6,
+                        s_region: 0,
+                        bt_island: 0,
+                        bt_block: [0; 4],
+                    },
+                    MapTile {
+                        dw_tile_info: 0,
+                        bt_tile_info: 0,
+                        s_color: 0,
+                        c_height: -6,
+                        s_region: 0,
+                        bt_island: 0,
+                        bt_block: [0; 4],
+                    },
+                ],
+            })],
+        };
+
+        let h = super::sample_scene_terrain_height(&parsed, 0.4, 0.5);
+        assert!((h - 0.55).abs() < 0.001, "expected 0.55, got {}", h);
+    }
+
+    #[test]
+    fn scene_object_terrain_height_clamps_to_sea_level() {
+        // Original CGameScene::GetTerrainHeight returns max(GetHeight, SEA_LEVEL).
+        let parsed = ParsedMap {
+            header: MapHeader {
+                n_map_flag: CUR_VERSION_NO,
+                n_width: 2,
+                n_height: 2,
+                n_section_width: 2,
+                n_section_height: 2,
+            },
+            section_cnt_x: 1,
+            section_cnt_y: 1,
+            section_offsets: vec![0],
+            sections: vec![Some(MapSection {
+                tiles: vec![
+                    MapTile {
+                        dw_tile_info: 0,
+                        bt_tile_info: 0,
+                        s_color: 0,
+                        c_height: -20,
+                        s_region: 0,
+                        bt_island: 0,
+                        bt_block: [0; 4],
+                    };
+                    4
+                ],
+            })],
+        };
+
+        let h = super::sample_scene_terrain_height(&parsed, 0.25, 0.25);
+        assert_eq!(h, 0.0, "terrain height should clamp to sea level");
+    }
+
+    #[test]
     fn diagnostic_btblock_height_xmas() {
         // Load the xmas map to analyze btBlock height data.
         // Skip silently if top-client data not present.
@@ -4766,18 +5030,16 @@ mod tests {
     }
 
     #[test]
-    fn build_section_glb_atlas_uri_reference() {
+    fn build_section_glb_no_texture_reference() {
         let map = make_test_map(4, 4, 2);
         let normals = compute_global_normals(&map);
         let (json, _bin) = build_terrain_section_glb(&map, true, &normals, 2, 0, 0)
             .expect("section glb");
         let root: serde_json::Value = serde_json::from_str(&json).expect("parse");
 
-        // Atlas image referenced by URI, not embedded
-        let uri = root["images"][0]["uri"].as_str().unwrap();
-        assert_eq!(uri, "../terrain_atlas.png");
-        // No buffer_view on image (external reference)
-        assert!(root["images"][0]["bufferView"].is_null());
+        // Section GLBs should have no images (atlas URI removed for import speed)
+        assert!(root["images"].as_array().map_or(true, |a| a.is_empty()),
+            "section GLBs should not reference terrain_atlas.png");
     }
 
     #[test]

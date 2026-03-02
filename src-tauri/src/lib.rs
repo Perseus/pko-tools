@@ -1,5 +1,17 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
+#[path = "../gen/kaitai/mod.rs"]
+#[allow(
+    unused_imports,
+    non_snake_case,
+    non_camel_case_types,
+    irrefutable_let_patterns,
+    unused_comparisons,
+    dead_code,
+    clippy::all
+)]
+pub(crate) mod kaitai_gen;
+
 pub mod animation;
 mod broadcast;
 pub mod character;
@@ -131,6 +143,7 @@ pub fn run() {
             map::commands::export_map_to_gltf,
             map::commands::export_map_for_unity,
             map::commands::batch_export_maps_for_unity,
+            map::commands::export_shared_assets,
             map::commands::get_building_list,
             map::commands::load_building_model,
             map::commands::export_building_to_gltf,
