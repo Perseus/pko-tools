@@ -1,0 +1,703 @@
+OpenAI Codex v0.106.0 (research preview)
+--------
+workdir: /Users/anirudh/gamedev/pko-tools
+model: gpt-5.3-codex
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: medium
+reasoning summaries: none
+session id: 019cad78-52d9-7c02-8489-0f4eb38a18d3
+--------
+user
+Read the file at /Users/anirudh/gamedev/pko-tools/agents/counselors/1772436669-kaitai-lmo-adapter-review-1772436735674/prompt.md and follow the instructions within it.
+deprecated: `collab` is deprecated. Use `[features].multi_agent` instead.
+  Enable it with `--enable multi_agent` or `[features].multi_agent` in config.toml. See https://developers.openai.com/codex/config-basic#feature-flags for details.
+mcp: unity starting
+mcp: linear starting
+mcp: unity ready
+mcp: linear ready
+mcp startup: ready: unity, linear
+
+thinking
+**Preparing to read file content**
+codex
+I’ll open that `prompt.md` file first, then execute exactly what it asks for. After reading it, I’ll carry out the requested steps end-to-end.
+exec
+/bin/zsh -lc 'cat /Users/anirudh/gamedev/pko-tools/agents/counselors/1772436669-kaitai-lmo-adapter-review-1772436735674/prompt.md' in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+# Review Request
+
+## Question
+
+Review the implementation plan for a Kaitai LMO adapter in the pko-tools Rust project. The plan replaces a hand-written binary parser (~1300 lines) with an adapter that converts Kaitai-generated Rust code (6187 lines) into existing domain types. Please review for correctness, completeness, risks, and suggest improvements.
+
+## Plan Under Review
+
+### Kaitai LMO Adapter: Replace Hand-Written Parser
+
+#### Context
+
+The LMO parser in `src-tauri/src/map/lmo.rs` is ~1300 lines of hand-written cursor-based binary parsing — the most complex parser in pko-tools and the one most prone to subtle bugs (e.g., the `lwBlendInfo` size bug that corrupted 17/565 buildings). PR #37 already scaffolded:
+
+- `.ksy` specs for all PKO binary formats (`formats/pko_lmo.ksy` — 1,226 lines, 50+ types)
+- Generated Rust code at `gen/kaitai/pko_lmo.rs` (6,187 lines)
+- Backend selection in `lmo_loader.rs` with `PKO_LMO_PARSER=kaitai` env var
+- A stub `load_lmo_kaitai()` that falls back to the native parser
+
+The goal: implement the adapter converting `PkoLmo` parsed structs into `LmoModel` domain types so both backends produce identical output and we can eventually deprecate the hand-written parser.
+
+thinking
+**Preparing context for review**
+codex
+I’ve read the review prompt and will now validate the plan against the actual code in `src-tauri` so the feedback is concrete, not generic. I’ll inspect the key files (`lmo.rs`, `lmo_loader.rs`, generated Kaitai module wiring, and build setup) and then give a direct assessment with risks and improvements.
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo_loader.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,320p' /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,240p' /Users/anirudh/gamedev/pko-tools/src-tauri/src/lib.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,280p' /Users/anirudh/gamedev/pko-tools/src-tauri/Cargo.toml" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,260p' /Users/anirudh/gamedev/pko-tools/src-tauri/build.rs" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+use std::path::Path;
+use std::sync::Once;
+
+use anyhow::Result;
+
+use super::lmo::LmoModel;
+
+const ENV_LMO_PARSER: &str = "PKO_LMO_PARSER";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LmoParserBackend {
+    Native,
+    Kaitai,
+}
+
+fn parse_lmo_backend(raw: Option<&str>) -> LmoParserBackend {
+    match raw.map(|v| v.trim().to_ascii_lowercase()) {
+        Some(v) if v == "kaitai" || v == "ksy" => LmoParserBackend::Kaitai,
+        _ => LmoParserBackend::Native,
+    }
+ succeeded in 52ms:
+//! LMO file parser — multi-geometry-object container format for scene buildings/models.
+//!
+//! Binary layout:
+//! ```text
+//! [4 bytes]  version (DWORD, typically 0x1005)
+//! [4 bytes]  obj_num (geometry objects + optional global helper)
+//! [obj_num × 12 bytes]  Header table:
+//!     type(4) — 1=GEOMETRY, 2=HELPER
+//!     addr(4) — absolute file offset
+//!     size(4) — data size
+//!
+//! TYPE 1 (Geometry Object) at each addr:
+//!     [116 bytes]  Header: id(4) + parent_id(4) + type(4) + mat_local(64) +
+//!                  rcci(16) + state_ctrl(8) + mtl_size(4) + mesh_size(4) +
+//!                  helper_size(4) + anim_size(4)
+//!     Materials:   mtl_num(4) + mtl_num × lwMtlTexInfo
+//!     Mesh:        lwMeshInfoHeader + vertices + normals + texcoords + colors + indices + subsets
+//!     Helpers:     (skip)
+//!     Animation:   (skip)
+//! ```
+ succeeded in 51ms:
+// Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+
+pub mod animation;
+mod broadcast;
+pub mod character;
+mod d3d;
+mod db;
+pub mod decompiler;
+pub mod effect;
+pub mod item;
+pub mod map;
+pub mod math;
+pub mod mesh_processing;
+mod preferences;
+mod projects;
+pub mod registration;
+pub mod retarget;
+pub mod texture_pipeline;
+pub mod validation;
+
+ succeeded in 51ms:
+[package]
+name = "pko-tools"
+version = "0.1.4"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "pko_tools_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[profile.dev]
+incremental = true
+
+[profile.release]
+ succeeded in 50ms:
+use std::env;
+use std::ffi::OsStr;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+fn main() {
+    println!("cargo:rerun-if-env-changed=KSC_BIN");
+    println!("cargo:rerun-if-env-changed=PKO_KAITAI_BUILD");
+    println!("cargo:rerun-if-changed=../formats");
+
+    if let Err(err) = build_kaitai_rust_scaffold() {
+        panic!("Kaitai scaffold generation failed: {err}");
+    }
+
+    tauri_build::build();
+}
+
+fn build_kaitai_rust_scaffold() -> Result<(), String> {
+    let enable = env::var("PKO_KAITAI_BUILD")
+
+thinking
+**Inspecting map module details**
+codex
+I confirmed the scaffold state. Next I’m checking module visibility and generated Kaitai code shape (`gen/kaitai/*`) to assess whether the proposed wiring and adapter API are actually viable.
+exec
+/bin/zsh -lc "sed -n '1,220p' /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/mod.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "ls -la /Users/anirudh/gamedev/pko-tools/src-tauri/gen/kaitai | sed -n '1,200p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,260p' /Users/anirudh/gamedev/pko-tools/src-tauri/gen/kaitai/pko_lmo.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,220p' /Users/anirudh/gamedev/pko-tools/src-tauri/gen/kaitai/mod.rs" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+pub mod area_set;
+pub mod commands;
+pub mod glb;
+pub mod grid_images;
+pub mod lit;
+pub mod lmo;
+pub mod lmo_loader;
+pub mod mapinfo;
+pub mod scene_model;
+pub mod scene_obj;
+pub mod scene_obj_info;
+pub mod shared;
+pub mod terrain;
+pub mod texture;
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MapEntry {
+    pub name: String,
+ succeeded in 51ms:
+total 616
+drwxr-xr-x@ 8 anirudh  staff     256 Mar  2 08:08 .
+drwxr-xr-x@ 4 anirudh  staff     128 Mar  2 08:08 ..
+-rw-r--r--@ 1 anirudh  staff       1 Mar  2 08:08 .gitkeep
+-rw-r--r--@ 1 anirudh  staff      73 Mar  2 08:08 mod.rs
+-rw-r--r--@ 1 anirudh  staff    2612 Mar  2 08:08 pko_lgo.rs
+-rw-r--r--@ 1 anirudh  staff  214687 Mar  2 08:08 pko_lmo.rs
+-rw-r--r--@ 1 anirudh  staff   27948 Mar  2 08:08 pko_map.rs
+-rw-r--r--@ 1 anirudh  staff   10424 Mar  2 08:08 terrain_info.rs
+ succeeded in 51ms:
+pub mod pko_lgo;
+pub mod pko_lmo;
+pub mod pko_map;
+pub mod terrain_info;
+ succeeded in 51ms:
+// This is a generated file! Please edit source .ksy file and use kaitai-struct-compiler to rebuild
+
+#![allow(unused_imports)]
+#![allow(non_snake_case)]
+#![allow(non_camel_case_types)]
+#![allow(irrefutable_let_patterns)]
+#![allow(unused_comparisons)]
+
+extern crate kaitai;
+use kaitai::*;
+use std::convert::{TryFrom, TryInto};
+use std::cell::{Ref, Cell, RefCell};
+use std::rc::{Rc, Weak};
+
+/**
+ * Root parser for the lwModelObjInfo-style LMO container.
+ * This phase decodes the object table and slices chunk payloads using
+ * absolute offsets (addr/size), matching client loader behavior.
+ */
+
+
+thinking
+**Inspecting Kaitai usage**
+codex
+I can now see generated code is present and uses `kaitai::*` APIs directly. I’m checking constructor/read entry points and type access patterns to verify integration details (especially `KResult`, `BytesReader`, and `OptRc` handling).
+exec
+/bin/zsh -lc "rg -n \"impl PkoLmo|read_into|from_file|from_bytes|new\\(\" /Users/anirudh/gamedev/pko-tools/src-tauri/gen/kaitai/pko_lmo.rs | sed -n '1,220p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "rg -n \"decompose_matrix43|MaterialRenderState|D3DRS_|LW_MTL_RS_NUM|LW_MAX_TEXTURESTAGE_NUM\" /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs | sed -n '1,240p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "rg -n \"kaitai\" /Users/anirudh/gamedev/pko-tools/src-tauri/src | sed -n '1,200p'" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+70:            *self_rc.model_nodes.borrow_mut() = Vec::new();
+74:                let t = Self::read_into_with_init::<_, PkoLmo_ModelNodeInfo>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()), &f)?.into();
+79:            *self_rc.objects.borrow_mut() = Vec::new();
+82:                let t = Self::read_into::<_, PkoLmo_ObjectEntry>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+89:impl PkoLmo {
+172:impl PkoLmo {
+177:impl PkoLmo {
+182:impl PkoLmo {
+187:impl PkoLmo {
+192:impl PkoLmo {
+197:impl PkoLmo {
+202:impl PkoLmo {
+242:        let t = Self::read_into::<_, PkoLmo_BoneInfoHeader>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+244:        *self_rc.base_seq.borrow_mut() = Vec::new();
+247:            let t = Self::read_into::<_, PkoLmo_BoneBaseInfo>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+250:        *self_rc.invmat_seq.borrow_mut() = Vec::new();
+253:            let t = Self::read_into::<_, PkoLmo_Matrix44>(&*_io, Some(self_rc._root.clone()), None)?.into();
+256:        *self_rc.dummy_seq.borrow_mut() = Vec::new();
+259:            let t = Self::read_into::<_, PkoLmo_BoneDummyInfo>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+262:        *self_rc.key_seq.borrow_mut() = Vec::new();
+ succeeded in 50ms:
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo_loader.rs:18:        Some(v) if v == "kaitai" || v == "ksy" => LmoParserBackend::Kaitai,
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo_loader.rs:31:        LmoParserBackend::Kaitai => load_lmo_kaitai(path, true),
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo_loader.rs:38:        LmoParserBackend::Kaitai => load_lmo_kaitai(path, false),
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo_loader.rs:42:fn load_lmo_kaitai(path: &Path, parse_animations: bool) -> Result<LmoModel> {
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo_loader.rs:46:            "PKO_LMO_PARSER=kaitai selected, but Kaitai adapter is scaffold-only; falling back to native parser"
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo_loader.rs:68:    fn backend_accepts_kaitai_markers() {
+/Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo_loader.rs:70:            parse_lmo_backend(Some("kaitai")),
+ succeeded in 52ms:
+46:const LW_MTL_RS_NUM: usize = 8;
+47:const LW_MAX_TEXTURESTAGE_NUM: usize = 4;
+52:const D3DRS_ALPHATESTENABLE: u32 = 15;
+53:const D3DRS_SRCBLEND: u32 = 19;
+54:const D3DRS_DESTBLEND: u32 = 20;
+55:const D3DRS_ALPHAREF: u32 = 24;
+56:const D3DRS_CULLMODE: u32 = 22;
+57:const D3DRS_ALPHAFUNC: u32 = 25;
+76:struct MaterialRenderState {
+85:impl MaterialRenderState {
+224:) -> Result<MaterialRenderState> {
+225:    let mut rs = MaterialRenderState::default();
+232:            D3DRS_ALPHATESTENABLE => {
+235:            D3DRS_CULLMODE => {
+238:            D3DRS_ALPHAREF => {
+241:            D3DRS_ALPHAFUNC => {
+244:            D3DRS_SRCBLEND => {
+247:            D3DRS_DESTBLEND => {
+266:) -> Result<MaterialRenderState> {
+267:    let mut rs = MaterialRenderState::default();
+
+thinking
+**Inspecting parse functions**
+codex
+I’ve verified key constants and visibility constraints. I’m now reviewing the native parser’s control flow for version handling and animation toggles, so I can flag exact parity requirements the adapter plan currently misses.
+exec
+/bin/zsh -lc "rg -n \"pub fn load_lmo|load_lmo_no_animation|parse_animations|version|EXP_OBJ_VERSION|OBJ_TYPE_GEOMETRY|parse_anim_section|parse_material_section|parse_mesh_section\" /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs | sed -n '1,260p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '620,980p' /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '980,1280p' /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1280,1620p' /Users/anirudh/gamedev/pko-tools/src-tauri/src/map/lmo.rs" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+mod tests {
+    use super::*;
+
+    // ====================================================================
+    // Helpers for building synthetic LMO binary data
+    // ====================================================================
+
+    fn push_u32(buf: &mut Vec<u8>, v: u32) {
+        buf.extend_from_slice(&v.to_le_bytes());
+    }
+
+    fn push_f32(buf: &mut Vec<u8>, v: f32) {
+        buf.extend_from_slice(&v.to_le_bytes());
+    }
+
+    fn push_zeros(buf: &mut Vec<u8>, n: usize) {
+        buf.extend(std::iter::repeat(0u8).take(n));
+    }
+
+    fn push_alpha_test_rs_atoms(buf: &mut Vec<u8>, enabled: bool, alpha_ref: u8) {
+ succeeded in 51ms:
+            for _ in 0..vertex_num {
+                normals.push([read_f32(cursor)?, read_f32(cursor)?, read_f32(cursor)?]);
+            }
+        }
+
+        // Texture coordinates
+        let tex_count = ((fvf & D3DFVF_TEXCOUNT_MASK) >> D3DFVF_TEXCOUNT_SHIFT) as usize;
+        let mut texcoords = Vec::new();
+        for tc in 0..tex_count {
+            for _ in 0..vertex_num {
+                let u = read_f32(cursor)?;
+                let v = read_f32(cursor)?;
+                if tc == 0 {
+                    texcoords.push([u, v]);
+                }
+            }
+        }
+
+        // Vertex colors
+        let mut vertex_colors = Vec::new();
+ succeeded in 52ms:
+5://! [4 bytes]  version (DWORD, typically 0x1005)
+36:const OBJ_TYPE_GEOMETRY: u32 = 1;
+39:const EXP_OBJ_VERSION_0_0_0_0: u32 = 0;
+40:const EXP_OBJ_VERSION_1_0_0_4: u32 = 0x1004;
+184:    pub version: u32,
+315:/// Material format version determined from the mtl_old_version field.
+448:/// `file_version` is the top-level LMO file version. For version 0, an extra `old_version`
+453:    file_version: u32,
+467:    // For version 0, the mesh section has an embedded old_version prefix
+468:    let mesh_version = if file_version == EXP_OBJ_VERSION_0_0_0_0 {
+471:        file_version
+476:    // Read mesh header — format depends on version
+479:    if mesh_version >= EXP_OBJ_VERSION_1_0_0_4 {
+504:        if mesh_version == 0 {
+509:            // MESH_VERSION0001 / EXP_OBJ_VERSION_1_0_0_0..3: rs_set is lwRenderStateAtom[8]
+516:    if mesh_version >= EXP_OBJ_VERSION_1_0_0_4 {
+657:        // For mesh_version 0, some files have 8 extra bytes (2 DWORDs) before the index
+660:        if mesh_version == 0 && mesh_size > 0 {
+758:    file_version: u32,
+774:    // Size header table (version-dependent layout)
+ succeeded in 51ms:
+        let frame = read_u32(cursor)?;
+        let _slerp_type = read_u32(cursor)?;
+        let opacity = read_f32(cursor)?;
+        keyframes.push(LmoOpacityKeyframe { frame, opacity });
+    }
+
+    Ok(LmoMtlOpacAnim { subset, keyframes })
+}
+
+// ============================================================================
+// Geometry object parsing
+// ============================================================================
+
+fn read_geom_object(
+    data: &[u8],
+    addr: usize,
+    size: usize,
+    file_version: u32,
+    parse_animations: bool,
+) -> Result<LmoGeomObject> {
+
+thinking
+**Checking presence of generation module**
+exec
+/bin/zsh -lc "ls -la /Users/anirudh/gamedev/pko-tools/src-tauri/src | sed -n '1,200p'" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+total 24
+drwxr-xr-x@ 22 anirudh  staff   704 Mar  1 18:17 .
+drwxr-xr-x@ 21 anirudh  staff   672 Mar  2 08:08 ..
+drwxr-xr-x@  4 anirudh  staff   128 Feb 26 15:05 animation
+drwxr-xr-x@  3 anirudh  staff    96 Mar  1 18:17 bin
+drwxr-xr-x@  3 anirudh  staff    96 Jan  5 06:14 broadcast
+drwxr-xr-x@ 10 anirudh  staff   320 Feb 26 15:05 character
+drwxr-xr-x@  3 anirudh  staff    96 Feb  1 18:38 d3d
+drwxr-xr-x@  3 anirudh  staff    96 Jan  5 06:14 db
+drwxr-xr-x   9 anirudh  staff   288 Feb 26 15:05 decompiler
+drwxr-xr-x   5 anirudh  staff   160 Feb 26 15:05 effect
+drwxr-xr-x  10 anirudh  staff   320 Mar  1 18:17 item
+-rw-r--r--@  1 anirudh  staff  5717 Mar  1 18:17 lib.rs
+-rw-r--r--@  1 anirudh  staff   184 Jan  5 06:14 main.rs
+drwxr-xr-x  17 anirudh  staff   544 Mar  2 08:08 map
+drwxr-xr-x@  3 anirudh  staff    96 Feb 26 15:05 math
+drwxr-xr-x   7 anirudh  staff   224 Feb 26 15:05 mesh_processing
+drwxr-xr-x@  3 anirudh  staff    96 Jan  5 06:14 preferences
+drwxr-xr-x@  5 anirudh  staff   160 Feb 12 14:33 projects
+drwxr-xr-x   4 anirudh  staff   128 Feb 26 15:05 registration
+
+thinking
+**Inspecting generated code and structure**
+exec
+/bin/zsh -lc "rg -n \"struct PkoLmo_ObjectEntry|struct PkoLmo_GeometryChunk|struct PkoLmo_MaterialSection|struct PkoLmo_MeshSection|struct PkoLmo_AnimSection|enum PkoLmo_ObjectPayload\" /Users/anirudh/gamedev/pko-tools/src-tauri/gen/kaitai/pko_lmo.rs | sed -n '1,240p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '3020,3360p' /Users/anirudh/gamedev/pko-tools/src-tauri/gen/kaitai/pko_lmo.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '2200,2520p' /Users/anirudh/gamedev/pko-tools/src-tauri/gen/kaitai/pko_lmo.rs" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+764:pub struct PkoLmo_AnimSection {
+2216:pub struct PkoLmo_GeometryChunk {
+3254:pub struct PkoLmo_MaterialSection {
+4012:pub struct PkoLmo_MeshSection {
+4980:pub struct PkoLmo_ObjectEntry {
+ succeeded in 52ms:
+        if ((((*self_rc.helper_type() as u32) & (32 as u32)) as i32) != (0 as i32)) {
+            *self_rc.bsphere_seq.borrow_mut() = Vec::new();
+            let l_bsphere_seq = *self_rc.bsphere_num();
+            for _i in 0..l_bsphere_seq {
+                let t = Self::read_into::<_, PkoLmo_BoundingSphereInfo>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+                self_rc.bsphere_seq.borrow_mut().push(t);
+            }
+        }
+        Ok(())
+    }
+}
+impl PkoLmo_HelperSection {
+    pub fn file_version(&self) -> Ref<'_, u32> {
+        self.file_version.borrow()
+    }
+}
+impl PkoLmo_HelperSection {
+    pub fn set_params(&mut self, file_version: u32) {
+        *self.file_version.borrow_mut() = file_version;
+    }
+ succeeded in 52ms:
+    pub fn helper_size(&self) -> Ref<'_, u32> {
+        self.helper_size.borrow()
+    }
+}
+impl PkoLmo_GeomObjInfoHeaderModern {
+    pub fn anim_size(&self) -> Ref<'_, u32> {
+        self.anim_size.borrow()
+    }
+}
+impl PkoLmo_GeomObjInfoHeaderModern {
+    pub fn _io(&self) -> Ref<'_, BytesReader> {
+        self._io.borrow()
+    }
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct PkoLmo_GeometryChunk {
+    pub _root: SharedType<PkoLmo>,
+    pub _parent: SharedType<KStructUnit>,
+    pub _self: SharedType<Self>,
+
+thinking
+**Extracting object entry snippet**
+exec
+/bin/zsh -lc "sed -n '4960,5320p' /Users/anirudh/gamedev/pko-tools/src-tauri/gen/kaitai/pko_lmo.rs" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+        self.mtl.borrow()
+    }
+}
+impl PkoLmo_MtlTexInfoCurrent {
+    pub fn rs_set(&self) -> Ref<'_, Vec<OptRc<PkoLmo_RenderStateAtom>>> {
+        self.rs_set.borrow()
+    }
+}
+impl PkoLmo_MtlTexInfoCurrent {
+    pub fn tex_seq(&self) -> Ref<'_, Vec<OptRc<PkoLmo_TexInfoCurrent>>> {
+        self.tex_seq.borrow()
+    }
+}
+impl PkoLmo_MtlTexInfoCurrent {
+    pub fn _io(&self) -> Ref<'_, BytesReader> {
+        self._io.borrow()
+    }
+}
+
+#[derive(Default, Debug, Clone)]
+
+thinking
+**Checking parser creation methods**
+exec
+/bin/zsh -lc "rg -n \"new\\(|from\\(|read_into::<BytesReader, PkoLmo>|PkoLmo::read|parse_lmo\" /Users/anirudh/gamedev/pko-tools/src-tauri/gen/kaitai/pko_lmo.rs | sed -n '1,120p'" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+70:            *self_rc.model_nodes.borrow_mut() = Vec::new();
+79:            *self_rc.objects.borrow_mut() = Vec::new();
+244:        *self_rc.base_seq.borrow_mut() = Vec::new();
+250:        *self_rc.invmat_seq.borrow_mut() = Vec::new();
+256:        *self_rc.dummy_seq.borrow_mut() = Vec::new();
+262:        *self_rc.key_seq.borrow_mut() = Vec::new();
+347:        *self_rc.mat_seq.borrow_mut() = Vec::new();
+401:        *self_rc.key_seq.borrow_mut() = Vec::new();
+458:            let _t_data_raw_io = BytesReader::from(data_raw.clone());
+528:            *self_rc.data_seq.borrow_mut() = Vec::new();
+602:            let _t_data_raw_io = BytesReader::from(data_raw.clone());
+671:        *self_rc.mat_seq.borrow_mut() = Vec::new();
+728:            let _t_data_raw_io = BytesReader::from(data_raw.clone());
+807:            *self_rc.data_mtlopac_size.borrow_mut() = Vec::new();
+813:        *self_rc.data_texuv_size.borrow_mut() = Vec::new();
+818:        *self_rc.data_teximg_size.borrow_mut() = Vec::new();
+826:            let _t_anim_bone_raw_io = BytesReader::from(anim_bone_raw.clone());
+834:            let _t_anim_mat_raw_io = BytesReader::from(anim_mat_raw.clone());
+839:            *self_rc.anim_mtlopac.borrow_mut() = Vec::new();
+847:        *self_rc.anim_texuv.borrow_mut() = Vec::new();
+
+thinking
+**Inspecting format descriptions**
+exec
+/bin/zsh -lc "sed -n '1,260p' /Users/anirudh/gamedev/pko-tools/formats/pko_lmo.ksy" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "rg -n \"lwBlendInfo|blend|legacy_pre_index|model_info|has_outer_legacy_prefix|legacy_header|header_size|version 0|material|has_legacy_prefix|1005|1004\" /Users/anirudh/gamedev/pko-tools/formats/pko_lmo.ksy | sed -n '1,260p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '260,620p' /Users/anirudh/gamedev/pko-tools/formats/pko_lmo.ksy" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+meta:
+  id: pko_lmo
+  title: PKO LMO Object-Table Container
+  endian: le
+  file-extension: lmo
+doc: |
+  Root parser for the lwModelObjInfo-style LMO container.
+  This phase decodes the object table and slices chunk payloads using
+  absolute offsets (addr/size), matching client loader behavior.
+
+seq:
+  - id: version
+    type: u4
+  - id: obj_num
+    type: u4
+  - id: model_info_descriptor
+    size: 64
+    if: is_model_info_tree
+  - id: model_info_obj_num
+    type: u4
+ succeeded in 51ms:
+16:  - id: model_info_descriptor
+18:    if: is_model_info_tree
+19:  - id: model_info_obj_num
+21:    if: is_model_info_tree
+26:    if: is_model_info_tree
+31:    if: not is_model_info_tree
+40:  is_model_info_tree:
+44:    if: is_model_info_tree
+47:    if: is_model_info_tree
+49:    value: model_info_obj_num
+50:    if: is_model_info_tree
+130:      - id: has_outer_legacy_prefix
+135:        if: file_version == 0 and has_outer_legacy_prefix != 0
+138:      - id: material
+139:        type: material_section(file_version)
+156:        value: 'file_version == 0 and has_outer_legacy_prefix != 0 ? _io.size - 4 : _io.size'
+158:        value: 'file_version == 0 and has_outer_legacy_prefix != 0 ? 4 : 0'
+160:  material_section:
+167:        if: has_legacy_prefix
+175:        type: material
+ succeeded in 51ms:
+        if: header_kind != 2 and has_lastbeta_ubyte4 and bone_index_num > 0
+      - id: legacy_pre_index_u4
+        type: u4
+        repeat: expr
+        repeat-expr: 2
+        if: has_legacy_pre_index_pair
+      - id: index_seq
+        type: u4
+        repeat: expr
+        repeat-expr: index_num
+        if: index_num > 0
+      - id: subset_seq_new
+        type: subset_info
+        repeat: expr
+        repeat-expr: subset_num
+        if: header_kind == 2
+    instances:
+      effective_version:
+        value: 'file_version == 0 ? legacy_prefix : file_version'
+      header_kind:
+
+thinking
+**Planning detailed parser inspection**
+codex
+The prompt requests an independent critical review, which matches the `counselors` skill criteria. I’m loading that skill’s workflow now and will apply it to structure the review output.
+exec
+/bin/zsh -lc 'cat /Users/anirudh/.codex/skills/counselors/SKILL.md' in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+---
+name: counselors
+description: Run parallel second-opinion reviews with the counselors CLI. Use when the user asks for independent AI reviews, architecture sanity checks, risk analysis from multiple models, or a synthesized consensus and disagreement report across agents.
+---
+
+# Counselors
+
+## Overview
+Use `counselors` to fan out one review prompt to multiple configured AI CLIs in parallel, then synthesize their responses.
+
+## Workflow
+1. Gather context.
+- Parse the user request and scope.
+- Read only relevant files.
+- Capture `git diff HEAD` and `git diff --staged` when code changes matter.
+
+2. Select agents.
+- Run `counselors ls`.
+- Print the full command output for the user.
+- Ask the user which agent IDs to use (or all).
+
+thinking
+**Attempting agent listing before review**
+codex
+I loaded the `counselors` skill and checked whether the `counselors` CLI is available to run multi-agent comparison. If it isn’t available, I’ll proceed with a direct single-agent critical review based on the collected code context.
+exec
+/bin/zsh -lc 'cd /Users/anirudh/gamedev/pko-tools && counselors ls' in /Users/anirudh/gamedev/pko-tools succeeded in 111ms:
+
+Configured tools:
+
+  claude-opus (/Users/anirudh/.local/bin/claude)
+  claude-sonnet (/Users/anirudh/.local/bin/claude)
+  claude-haiku (/Users/anirudh/.local/bin/claude)
+  codex-5.3-high (/opt/homebrew/bin/codex)
+  codex-5.3-xhigh (/opt/homebrew/bin/codex)
+  codex-5.3-medium (/opt/homebrew/bin/codex)
+
+(Use -v to show flags)
+
+
+thinking
+**Summarizing detailed implementation review**
+codex
+**Verdict**
+The plan is directionally correct, but it is not complete enough to implement safely. You are missing several parity-critical behaviors and one major architectural mismatch (`parse_animations=false` cannot currently be honored with the generated parser shape).
+
+**What’s Solid**
+- Replacing the hand-written parser with a Kaitai adapter is the right long-term move.
+- Keeping `LmoModel` as the stable domain boundary is correct.
+- Dual-backend rollout via `PKO_LMO_PARSER` is the right migration strategy.
+- Calling out version branches (`0`, `0x1004`, `0x1005`) is necessary and correct.
+
+**Critical Gaps**
+- `parse_animations=false` is not actually supported by the current generated model.
+  - In `geometry_chunk`, `anim` is in `seq`, so it is eagerly parsed whenever `anim_size > 0`.
+  - Your loader flag only controls adaptation, not parsing cost/failure surface.
+- Module wiring in the plan is underspecified and likely wrong.
+  - Generated files are under `src-tauri/gen/kaitai`, not `src-tauri/src/gen`.
+  - `mod gen;` in `lib.rs` will fail unless you add explicit `#[path = "../gen/..."]`.
+- Native parser behavior is intentionally tolerant; Kaitai defaults are stricter.
+  - Native skips non-geometry objects silently.
+  - Generated `object_entry.type` has validation `any-of [1,2]`, so unknown object types hard-fail root parsing.
+- Plan does not include parity for native quirks that materially affect output:
+  - mesh-level alpha-test promotion to materials
+  - old material alpha overrides (`ALPHAREF=129`, `ALPHAFUNC=GREATER`)
+  - first texcoord channel only
+  - legacy header detection behavior differences (`exact` vs Kaitai’s current `<=` plausibility)
+
+**Kaitai Runtime Risks (0.1.2)**
+- `kaitai` Rust runtime is niche and old; treat as high-risk dependency.
+- Generated code uses heavy `Rc<RefCell<...>>` and `Weak` upgrade/unwrap patterns.
+  - If root ownership is mishandled, runtime panics are possible.
+- Error type mismatch (`KResult/KError` vs `anyhow`) needs explicit mapping with context.
+- Memory overhead is non-trivial: object bodies are copied into `*_raw` buffers and reparsed from `BytesReader`.
+
+**RefCell/Rc Pitfalls You Must Design Around**
+- Do not hold long-lived `Ref<'_, T>` borrows while traversing children.
+- Clone/copy primitive data out immediately; keep borrow scopes tiny.
+- Keep root object alive through full adaptation pass.
+- Never assume `OptRc<T>` is always present; handle `None` and `KError` per object.
+
+**Phasing Issues**
+- Current phase order is too optimistic.
+- “Remove fallback and make Kaitai default” should not be in the initial implementation plan.
+- You need a shadow phase with differential testing and telemetry before default switch.
+
+**Recommended Revised Plan**
+1. Add compile-only integration first.
+   - Wire generated module via explicit `#[path]`.
+   - Pin runtime version exactly (`=0.1.2`) to avoid drift.
+2. Build adapter for core geometry/material/mesh only (no animations).
+   - Keep fallback active.
+   - Add strict per-object error context.
+3. Add parity behaviors from native parser quirks.
+   - Alpha promotion, old-version overrides, texcoord channel selection.
+4. Add animation adaptation.
+   - Either accept eager parse cost, or change `.ksy` so animation is lazily parsed/kept raw.
+5. Differential test suite on real corpus.
+   - Compare both backends object-by-object with float tolerance.
+   - Include known bad files (e.g., prior blend-info failures, v0 legacy headers).
+6. Rollout.
+   - Keep native fallback for at least one release behind env toggle.
+   - Switch default only after corpus pass and no regressions in export paths.
+
+**Testing Additions You Need**
+- Golden corpus across all 3 versions.
+- Property-level parity tests for:
+  - material alpha/cull/blend extraction
+  - subset/index/vertex counts
+  - animation frame counts and matrix decomposition output
+- Failure-mode tests:
+  - unknown object type in table
+  - malformed section sizes
+  - partial-parse recovery parity with native behavior
+
+**Bottom Line**
+Do it, but not with the current plan as-is. The adapter concept is right; the implementation plan needs explicit handling of parser strictness, animation parse semantics, and native behavior quirks before it is safe to ship.
+tokens used
+85,424

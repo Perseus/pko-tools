@@ -1,0 +1,63 @@
+{
+  "timestamp": "2026-03-02T07:39:43.194Z",
+  "slug": "1772436669-kaitai-lmo-adapter-review",
+  "prompt": "file:prompt.md",
+  "promptSource": "file",
+  "readOnlyPolicy": "bestEffort",
+  "tools": [
+    {
+      "toolId": "claude-opus",
+      "status": "success",
+      "exitCode": 0,
+      "durationMs": 134114,
+      "wordCount": 1450,
+      "outputFile": "agents/counselors/1772436669-kaitai-lmo-adapter-review-1772436735674/claude-opus.md",
+      "stderrFile": "agents/counselors/1772436669-kaitai-lmo-adapter-review-1772436735674/claude-opus.stderr"
+    },
+    {
+      "toolId": "claude-sonnet",
+      "status": "success",
+      "exitCode": 0,
+      "durationMs": 196429,
+      "wordCount": 1427,
+      "outputFile": "agents/counselors/1772436669-kaitai-lmo-adapter-review-1772436735674/claude-sonnet.md",
+      "stderrFile": "agents/counselors/1772436669-kaitai-lmo-adapter-review-1772436735674/claude-sonnet.stderr"
+    },
+    {
+      "toolId": "claude-haiku",
+      "status": "success",
+      "exitCode": 0,
+      "durationMs": 53064,
+      "wordCount": 1672,
+      "outputFile": "agents/counselors/1772436669-kaitai-lmo-adapter-review-1772436735674/claude-haiku.md",
+      "stderrFile": "agents/counselors/1772436669-kaitai-lmo-adapter-review-1772436735674/claude-haiku.stderr"
+    },
+    {
+      "toolId": "codex-5.3-high",
+      "status": "success",
+      "exitCode": 0,
+      "durationMs": 246185,
+      "wordCount": 516,
+      "outputFile": "agents/counselors/1772436669-kaitai-lmo-adapter-review-1772436735674/codex-5.3-high.md",
+      "stderrFile": "agents/counselors/1772436669-kaitai-lmo-adapter-review-1772436735674/codex-5.3-high.stderr"
+    },
+    {
+      "toolId": "codex-5.3-xhigh",
+      "status": "success",
+      "exitCode": 0,
+      "durationMs": 394429,
+      "wordCount": 475,
+      "outputFile": "agents/counselors/1772436669-kaitai-lmo-adapter-review-1772436735674/codex-5.3-xhigh.md",
+      "stderrFile": "agents/counselors/1772436669-kaitai-lmo-adapter-review-1772436735674/codex-5.3-xhigh.stderr"
+    },
+    {
+      "toolId": "codex-5.3-medium",
+      "status": "success",
+      "exitCode": 0,
+      "durationMs": 119435,
+      "wordCount": 603,
+      "outputFile": "agents/counselors/1772436669-kaitai-lmo-adapter-review-1772436735674/codex-5.3-medium.md",
+      "stderrFile": "agents/counselors/1772436669-kaitai-lmo-adapter-review-1772436735674/codex-5.3-medium.stderr"
+    }
+  ]
+}
