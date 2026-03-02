@@ -61,7 +61,7 @@ pub const LW_RENDERCTRL_VS_USER: u32 = 0x100;
 pub const LW_RENDERCTRL_VS_INVALID: u32 = 0xffffffff;
 
 #[repr(u32)]
-#[derive(Debug, Default, Copy, Clone)]
+#[derive(Debug, Default, Copy, Clone, Serialize)]
 #[binrw]
 #[br(repr = u32)]
 #[bw(repr = u32)]
@@ -73,7 +73,7 @@ pub enum GeomObjType {
     BB2 = 2,
 }
 
-#[derive(Debug, Default, Copy, Clone)]
+#[derive(Debug, Default, Copy, Clone, Serialize)]
 #[binrw]
 pub struct RenderStateValue {
     pub state: u32,
