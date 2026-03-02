@@ -5,10 +5,8 @@
 //! `LwBoneKeyInfo`).
 
 use anyhow::{bail, Context, Result};
-use binrw::BinRead;
 use cgmath::{Matrix4, Quaternion, Vector3};
 use kaitai::*;
-use std::io::Cursor;
 use std::path::Path;
 
 use super::character::{
@@ -19,7 +17,6 @@ use crate::kaitai_gen::pko_lab::*;
 use crate::math::{LwMatrix43, LwMatrix44, LwQuaternion, LwVector3};
 
 /// Load a `.lab` file from disk via the Kaitai parser.
-/// Falls back to native BinRead for files with version < 0x1000.
 pub fn load_lab(path: impl AsRef<Path>) -> Result<LwBoneFile> {
     let data = std::fs::read(path.as_ref())
         .with_context(|| format!("Failed to read LAB file: {:?}", path.as_ref()))?;
@@ -27,7 +24,6 @@ pub fn load_lab(path: impl AsRef<Path>) -> Result<LwBoneFile> {
 }
 
 /// Load a `.lab` from an in-memory byte slice.
-/// Uses Kaitai for version >= 0x1000, falls back to native BinRead for older files.
 pub fn load_lab_from_bytes(data: &[u8]) -> Result<LwBoneFile> {
     // Check version to decide parser path. Version is first u32 LE.
     if data.len() < 4 {
@@ -36,11 +32,11 @@ pub fn load_lab_from_bytes(data: &[u8]) -> Result<LwBoneFile> {
     let version = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
 
     if version < 0x1000 {
-        // Old format — Kaitai .ksy rejects version < 0x1000. Use native parser.
-        let mut cursor = Cursor::new(data);
-        let bone_file = LwBoneFile::read_le(&mut cursor)
-            .map_err(|e| anyhow::anyhow!("Native LAB parse error (version {}): {:?}", version, e))?;
-        return Ok(bone_file);
+        bail!(
+            "LAB version {} (< 0x1000) is unsupported. \
+             Only 4 ancient files use this format.",
+            version
+        );
     }
 
     let reader = BytesReader::from(data.to_vec());
@@ -270,163 +266,16 @@ fn convert_matrix43(m: &PkoLab_Matrix43) -> LwMatrix43 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use binrw::BinRead;
-    use std::io::Cursor;
-
-    /// Compare two f32 values, treating NaN==NaN as equal (bitwise).
-    fn f32_eq(a: f32, b: f32) -> bool {
-        if a.is_nan() && b.is_nan() {
-            a.to_bits() == b.to_bits()
-        } else {
-            a == b
-        }
-    }
-
-    fn vec3_eq(a: &LwVector3, b: &LwVector3) -> bool {
-        f32_eq(a.0.x, b.0.x) && f32_eq(a.0.y, b.0.y) && f32_eq(a.0.z, b.0.z)
-    }
-
-    fn quat_eq(a: &LwQuaternion, b: &LwQuaternion) -> bool {
-        f32_eq(a.0.s, b.0.s)
-            && f32_eq(a.0.v.x, b.0.v.x)
-            && f32_eq(a.0.v.y, b.0.v.y)
-            && f32_eq(a.0.v.z, b.0.v.z)
-    }
-
-    fn mat44_eq(a: &LwMatrix44, b: &LwMatrix44) -> bool {
-        let sa = a.to_slice();
-        let sb = b.to_slice();
-        sa.iter().zip(sb.iter()).all(|(x, y)| f32_eq(*x, *y))
-    }
-
-    fn mat43_eq(a: &LwMatrix43, b: &LwMatrix43) -> bool {
-        // Compare the 12 meaningful floats via the BinWrite map
-        let sa = [
-            a.0.x.x, a.0.x.y, a.0.x.z, a.0.x.w, a.0.y.x, a.0.y.y, a.0.y.z, a.0.y.w, a.0.z.x,
-            a.0.z.y, a.0.z.z, a.0.z.w, a.0.w.x, a.0.w.y, a.0.w.z, a.0.w.w,
-        ];
-        let sb = [
-            b.0.x.x, b.0.x.y, b.0.x.z, b.0.x.w, b.0.y.x, b.0.y.y, b.0.y.z, b.0.y.w, b.0.z.x,
-            b.0.z.y, b.0.z.z, b.0.z.w, b.0.w.x, b.0.w.y, b.0.w.z, b.0.w.w,
-        ];
-        sa.iter().zip(sb.iter()).all(|(x, y)| f32_eq(*x, *y))
-    }
-
-    fn key_info_eq(a: &LwBoneKeyInfo, b: &LwBoneKeyInfo) -> bool {
-        // mat43_seq
-        match (&a.mat43_seq, &b.mat43_seq) {
-            (Some(va), Some(vb)) => {
-                if va.len() != vb.len() {
-                    return false;
-                }
-                if !va.iter().zip(vb.iter()).all(|(x, y)| mat43_eq(x, y)) {
-                    return false;
-                }
-            }
-            (None, None) => {}
-            _ => return false,
-        }
-        // mat44_seq
-        match (&a.mat44_seq, &b.mat44_seq) {
-            (Some(va), Some(vb)) => {
-                if va.len() != vb.len() {
-                    return false;
-                }
-                if !va.iter().zip(vb.iter()).all(|(x, y)| mat44_eq(x, y)) {
-                    return false;
-                }
-            }
-            (None, None) => {}
-            _ => return false,
-        }
-        // pos_seq
-        match (&a.pos_seq, &b.pos_seq) {
-            (Some(va), Some(vb)) => {
-                if va.len() != vb.len() {
-                    return false;
-                }
-                if !va.iter().zip(vb.iter()).all(|(x, y)| vec3_eq(x, y)) {
-                    return false;
-                }
-            }
-            (None, None) => {}
-            _ => return false,
-        }
-        // quat_seq
-        match (&a.quat_seq, &b.quat_seq) {
-            (Some(va), Some(vb)) => {
-                if va.len() != vb.len() {
-                    return false;
-                }
-                if !va.iter().zip(vb.iter()).all(|(x, y)| quat_eq(x, y)) {
-                    return false;
-                }
-            }
-            (None, None) => {}
-            _ => return false,
-        }
-        true
-    }
-
-    fn bone_file_eq(a: &LwBoneFile, b: &LwBoneFile) -> bool {
-        if a.version != b.version {
-            return false;
-        }
-        // old_version: native sets it for version==0, but Kaitai rejects version<0x1000.
-        // For all valid .lab files, old_version is 0 in both paths.
-        if a.header.bone_num != b.header.bone_num
-            || a.header.frame_num != b.header.frame_num
-            || a.header.dummy_num != b.header.dummy_num
-            || a.header.key_type != b.header.key_type
-        {
-            return false;
-        }
-        if a.base_seq.len() != b.base_seq.len() {
-            return false;
-        }
-        for (ba, bb) in a.base_seq.iter().zip(b.base_seq.iter()) {
-            if ba.name != bb.name || ba.id != bb.id || ba.parent_id != bb.parent_id {
-                return false;
-            }
-        }
-        if a.invmat_seq.len() != b.invmat_seq.len() {
-            return false;
-        }
-        for (ma, mb) in a.invmat_seq.iter().zip(b.invmat_seq.iter()) {
-            if !mat44_eq(ma, mb) {
-                return false;
-            }
-        }
-        if a.dummy_seq.len() != b.dummy_seq.len() {
-            return false;
-        }
-        for (da, db) in a.dummy_seq.iter().zip(b.dummy_seq.iter()) {
-            if da.id != db.id || da.parent_bone_id != db.parent_bone_id || !mat44_eq(&da.mat, &db.mat)
-            {
-                return false;
-            }
-        }
-        if a.key_seq.len() != b.key_seq.len() {
-            return false;
-        }
-        for (ka, kb) in a.key_seq.iter().zip(b.key_seq.iter()) {
-            if !key_info_eq(ka, kb) {
-                return false;
-            }
-        }
-        true
-    }
 
     #[test]
     fn load_all_lab_files() {
         let client_dir = std::path::Path::new("../top-client");
         if !client_dir.exists() {
-            eprintln!("Skipping LAB parity test: ../top-client not found");
+            eprintln!("Skipping LAB regression test: ../top-client not found");
             return;
         }
 
         let mut lab_files: Vec<std::path::PathBuf> = Vec::new();
-        // LAB files are in animation/ directory
         let anim_dir = client_dir.join("animation");
         if anim_dir.exists() {
             collect_lab_files(&anim_dir, &mut lab_files);
@@ -436,6 +285,7 @@ mod tests {
         assert!(!lab_files.is_empty(), "No .lab files found");
 
         let mut pass = 0;
+        let mut skip = 0;
         let mut fail = 0;
 
         for path in &lab_files {
@@ -443,52 +293,48 @@ mod tests {
                 Ok(d) => d,
                 Err(e) => {
                     eprintln!("SKIP {}: read error: {}", path.display(), e);
+                    skip += 1;
                     continue;
                 }
             };
 
-            // Native parse
-            let native = {
-                let mut cursor = Cursor::new(&data);
-                match LwBoneFile::read_le(&mut cursor) {
-                    Ok(f) => f,
-                    Err(e) => {
-                        eprintln!("SKIP {}: native parse error: {}", path.display(), e);
-                        continue;
-                    }
+            // Files with version < 0x1000 are expected to be unsupported
+            if data.len() >= 4 {
+                let version = u32::from_le_bytes([data[0], data[1], data[2], data[3]]);
+                if version < 0x1000 {
+                    skip += 1;
+                    continue;
                 }
-            };
+            }
 
-            // Kaitai parse
-            let kaitai = match load_lab_from_bytes(&data) {
-                Ok(f) => f,
+            match load_lab_from_bytes(&data) {
+                Ok(bone_file) => {
+                    assert_eq!(
+                        bone_file.base_seq.len(),
+                        bone_file.header.bone_num as usize,
+                        "bone count mismatch in {}",
+                        path.display()
+                    );
+                    assert_eq!(
+                        bone_file.key_seq.len(),
+                        bone_file.header.bone_num as usize,
+                        "key_seq count mismatch in {}",
+                        path.display()
+                    );
+                    pass += 1;
+                }
                 Err(e) => {
                     fail += 1;
-                    eprintln!("FAIL {}: kaitai parse error: {}", path.display(), e);
-                    continue;
-                }
-            };
-
-            if bone_file_eq(&native, &kaitai) {
-                pass += 1;
-            } else {
-                fail += 1;
-                eprintln!("FAIL {}: parity mismatch", path.display());
-                // Print first difference for debugging
-                if native.version != kaitai.version {
-                    eprintln!("  version: native={} kaitai={}", native.version, kaitai.version);
-                }
-                if native.header.key_type != kaitai.header.key_type {
-                    eprintln!(
-                        "  key_type: native={} kaitai={}",
-                        native.header.key_type, kaitai.header.key_type
-                    );
+                    eprintln!("FAIL {}: {}", path.display(), e);
                 }
             }
         }
 
-        eprintln!("LAB parity: {} pass, {} fail out of {} files", pass, fail, lab_files.len());
-        assert_eq!(fail, 0, "{} files failed parity check", fail);
+        eprintln!(
+            "LAB regression: {} pass, {} skip, {} fail out of {} files",
+            pass, skip, fail, lab_files.len()
+        );
+        assert_eq!(fail, 0, "{} files failed regression check", fail);
     }
 
     fn collect_lab_files(dir: &std::path::Path, out: &mut Vec<std::path::PathBuf>) {

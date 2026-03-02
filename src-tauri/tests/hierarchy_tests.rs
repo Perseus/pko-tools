@@ -1,9 +1,8 @@
 // Unit tests for hierarchy consistency
 // These tests verify that bone hierarchies are correctly ordered and valid
 
-use binrw::BinReaderExt;
-use pko_tools_lib::animation::character::{LwBoneFile, LW_INVALID_INDEX};
-use std::fs;
+use pko_tools_lib::animation::character::LW_INVALID_INDEX;
+use pko_tools_lib::animation::lab_loader::load_lab;
 
 #[path = "common/mod.rs"]
 mod common;
@@ -21,8 +20,7 @@ fn depth_first_ordering_verified() {
             lab_path.file_name().unwrap().to_string_lossy()
         );
 
-        let mut file = fs::File::open(lab_path).expect("Failed to open LAB");
-        let lab: LwBoneFile = file.read_le().expect("Failed to parse LAB");
+        let lab = load_lab(lab_path).expect("Failed to parse LAB");
 
         // Build child list for each bone
         let mut children: Vec<Vec<usize>> = vec![Vec::new(); lab.base_seq.len()];
@@ -59,8 +57,7 @@ fn parent_references_are_valid() {
     let lab_files = common::get_known_good_lab_files();
 
     for lab_path in lab_files.iter().take(5) {
-        let mut file = fs::File::open(lab_path).expect("Failed to open LAB");
-        let lab: LwBoneFile = file.read_le().expect("Failed to parse LAB");
+        let lab = load_lab(lab_path).expect("Failed to parse LAB");
 
         for (idx, bone) in lab.base_seq.iter().enumerate() {
             if bone.parent_id != LW_INVALID_INDEX {
@@ -97,8 +94,7 @@ fn bone_names_are_valid() {
     let lab_files = common::get_known_good_lab_files();
 
     for lab_path in lab_files.iter().take(5) {
-        let mut file = fs::File::open(lab_path).expect("Failed to open LAB");
-        let lab: LwBoneFile = file.read_le().expect("Failed to parse LAB");
+        let lab = load_lab(lab_path).expect("Failed to parse LAB");
 
         for (idx, bone) in lab.base_seq.iter().enumerate() {
             assert!(!bone.name.is_empty(), "Bone {} has empty name", idx);
@@ -123,8 +119,7 @@ fn root_bone_is_at_index_zero() {
     let lab_files = common::get_known_good_lab_files();
 
     for lab_path in lab_files.iter().take(5) {
-        let mut file = fs::File::open(lab_path).expect("Failed to open LAB");
-        let lab: LwBoneFile = file.read_le().expect("Failed to parse LAB");
+        let lab = load_lab(lab_path).expect("Failed to parse LAB");
 
         if !lab.base_seq.is_empty() {
             assert_eq!(
@@ -150,8 +145,7 @@ fn hierarchy_is_connected() {
     let lab_files = common::get_known_good_lab_files();
 
     for lab_path in lab_files.iter().take(5) {
-        let mut file = fs::File::open(lab_path).expect("Failed to open LAB");
-        let lab: LwBoneFile = file.read_le().expect("Failed to parse LAB");
+        let lab = load_lab(lab_path).expect("Failed to parse LAB");
 
         if lab.base_seq.is_empty() {
             continue;

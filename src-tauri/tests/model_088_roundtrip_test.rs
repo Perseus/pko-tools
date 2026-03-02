@@ -4,6 +4,7 @@
 use base64::Engine;
 use binrw::{BinReaderExt, BinWrite};
 use pko_tools_lib::animation::character::LwBoneFile;
+use pko_tools_lib::animation::lab_loader::load_lab;
 use pko_tools_lib::character::model::CharacterGeometricModel;
 use std::fs;
 use std::io::BufWriter;
@@ -33,10 +34,7 @@ fn roundtrip_088_lab() {
     println!("📂 Step 1: Loading original LAB file...");
     let lab_path = test_dir.join("0088.lab");
 
-    let mut original_lab_file = fs::File::open(&lab_path).expect("Failed to open original LAB");
-    let original_lab: LwBoneFile = original_lab_file
-        .read_le()
-        .expect("Failed to parse original LAB");
+    let original_lab = load_lab(&lab_path).expect("Failed to parse original LAB");
 
     println!("  ✓ Original LAB: {} bones", original_lab.base_seq.len());
     println!("    header.bone_num = {}", original_lab.header.bone_num);
@@ -356,10 +354,7 @@ fn roundtrip_088_lgo() {
     let lab_path = test_dir.join("0088.lab");
     let lgo_path = test_dir.join("0088000000.lgo");
 
-    let mut original_lab_file = fs::File::open(&lab_path).expect("Failed to open original LAB");
-    let original_lab: LwBoneFile = original_lab_file
-        .read_le()
-        .expect("Failed to parse original LAB");
+    let original_lab = load_lab(&lab_path).expect("Failed to parse original LAB");
 
     let mut original_lgo_file = fs::File::open(&lgo_path).expect("Failed to open original LGO");
     let original_lgo: CharacterGeometricModel = original_lgo_file

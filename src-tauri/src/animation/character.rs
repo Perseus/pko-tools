@@ -28,11 +28,10 @@ struct MinimalBone {
     _type: u8,
 }
 
-use binrw::{binrw, BinRead, BinResult, BinWrite, VecArgs};
-use std::io::{Read, Seek};
+use binrw::{BinRead, BinResult, BinWrite};
+use std::io::Seek;
 
 use crate::{
-    broadcast::BroadcastMessage,
     character::GLTFFieldsToAggregate,
     math::{self, matrix4_to_quaternion, LwMatrix43, LwMatrix44, LwQuaternion, LwVector3},
 };
@@ -73,8 +72,7 @@ struct BoneAnimationData {
     rotation: Option<AnimationChannelData<LwQuaternion>>,
 }
 
-#[binrw]
-#[derive(Debug, Clone, Default, serde::Serialize)]
+#[derive(Debug, Clone, Default, serde::Serialize, BinRead, BinWrite)]
 #[br(little)]
 #[bw(little)]
 pub struct LwBoneInfoHeader {
@@ -84,20 +82,19 @@ pub struct LwBoneInfoHeader {
     pub key_type: u32,
 }
 
-#[binrw]
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, BinRead, BinWrite)]
 #[br(little)]
+#[bw(little)]
 pub struct LwBoneBaseInfo {
     #[br(map = |raw_name: [u8; LW_MAX_NAME]| {
         let end = raw_name.iter().position(|&b| b == 0).unwrap_or(LW_MAX_NAME);
         String::from_utf8_lossy(&raw_name[..end]).to_string()
     })]
     #[bw(map = |name: &String| {
-        let mut raw_name = [0; LW_MAX_NAME];
+        let mut raw_name = [0u8; LW_MAX_NAME];
         let bytes = name.as_bytes();
         raw_name[..bytes.len()].copy_from_slice(bytes);
         raw_name[bytes.len()] = b'\0';
-
         raw_name
     })]
     pub name: String,
@@ -112,140 +109,24 @@ pub struct LwBoneBaseInfo {
     pub original_node_index: u32,
 }
 
-#[binrw]
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, BinRead, BinWrite)]
 #[br(little)]
+#[bw(little)]
 pub struct LwBoneDummyInfo {
     pub id: u32,
     pub parent_bone_id: u32,
     pub mat: LwMatrix44,
 }
 
-#[binrw]
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, BinWrite)]
 pub struct LwBoneKeyInfo {
-    #[br(default)]
     pub mat43_seq: Option<Vec<LwMatrix43>>,
 
-    #[br(default)]
     pub mat44_seq: Option<Vec<LwMatrix44>>,
 
-    #[br(default)]
-    #[bw()]
     pub pos_seq: Option<Vec<LwVector3>>,
 
-    #[br(default)]
-    #[bw()]
     pub quat_seq: Option<Vec<LwQuaternion>>,
-}
-
-impl LwBoneKeyInfo {
-    pub fn read_key_data<R: Read + Seek>(
-        reader: &mut R,
-        args: (u32, u32, u32, u32),
-    ) -> BinResult<Self> {
-        let (frame_num, key_type, version, parent_id) = args;
-
-        let mut info = LwBoneKeyInfo {
-            mat43_seq: None,
-            mat44_seq: None,
-            pos_seq: None,
-            quat_seq: None,
-        };
-
-        match key_type {
-            BONE_KEY_TYPE_MAT43 => {
-                let mat43_vec: Vec<LwMatrix43> = BinRead::read_options(
-                    reader,
-                    binrw::Endian::Little,
-                    binrw::VecArgs {
-                        count: frame_num as usize,
-                        inner: (),
-                    },
-                )?;
-                info.mat43_seq = Some(mat43_vec);
-            }
-
-            BONE_KEY_TYPE_MAT44 => {
-                let mat44_vec: Vec<LwMatrix44> = BinRead::read_options(
-                    reader,
-                    binrw::Endian::Little,
-                    binrw::VecArgs {
-                        count: frame_num as usize,
-                        inner: (),
-                    },
-                )?;
-                info.mat44_seq = Some(mat44_vec);
-            }
-
-            BONE_KEY_TYPE_QUAT => {
-                let exp_obj_version_1_0_0_3 = 0x1003;
-                if version >= exp_obj_version_1_0_0_3 {
-                    let pos_vec: Vec<LwVector3> = BinRead::read_options(
-                        reader,
-                        binrw::Endian::Little,
-                        VecArgs {
-                            count: frame_num as usize,
-                            inner: (),
-                        },
-                    )?;
-
-                    let quat_vec: Vec<LwQuaternion> = BinRead::read_options(
-                        reader,
-                        binrw::Endian::Little,
-                        VecArgs {
-                            count: frame_num as usize,
-                            inner: (),
-                        },
-                    )?;
-
-                    info.pos_seq = Some(pos_vec);
-                    info.quat_seq = Some(quat_vec);
-                } else {
-                    let pos_num = if parent_id == LW_INVALID_INDEX {
-                        frame_num
-                    } else {
-                        1
-                    };
-
-                    let mut partial_pos: Vec<LwVector3> = BinRead::read_options(
-                        reader,
-                        binrw::Endian::Little,
-                        VecArgs {
-                            count: pos_num as usize,
-                            inner: (),
-                        },
-                    )?;
-
-                    if pos_num == 1 && !partial_pos.is_empty() {
-                        let first_val = partial_pos[0].clone();
-                        partial_pos.resize(frame_num as usize, first_val);
-                    }
-
-                    let quat_vec: Vec<LwQuaternion> = BinRead::read_options(
-                        reader,
-                        binrw::Endian::Little,
-                        VecArgs {
-                            count: frame_num as usize,
-                            inner: (),
-                        },
-                    )?;
-
-                    info.pos_seq = Some(partial_pos);
-                    info.quat_seq = Some(quat_vec);
-                }
-            }
-
-            _ => {
-                return Err(binrw::Error::AssertFail {
-                    pos: 0,
-                    message: format!("Unknown key type: {}", key_type),
-                })
-            }
-        };
-
-        Ok(info)
-    }
 }
 
 #[derive(Debug, serde::Serialize)]
@@ -262,135 +143,6 @@ pub struct LwBoneFile {
 
     pub dummy_seq: Vec<LwBoneDummyInfo>,
     pub key_seq: Vec<LwBoneKeyInfo>,
-}
-
-impl BinRead for LwBoneFile {
-    type Args<'a> = ();
-
-    fn read_options<R: Read + Seek>(
-        reader: &mut R,
-        opts: binrw::Endian,
-        _args: Self::Args<'_>,
-    ) -> BinResult<Self> {
-        let mut this = LwBoneFile {
-            version: 0,
-            old_version: 0,
-            header: LwBoneInfoHeader {
-                bone_num: 0,
-                frame_num: 0,
-                dummy_num: 0,
-                key_type: 0,
-            },
-            base_seq: Vec::new(),
-            invmat_seq: Vec::new(),
-            dummy_seq: Vec::new(),
-            key_seq: Vec::new(),
-        };
-
-        let total_parsing_steps = 6;
-        let mut current_step = 1;
-
-        let _ = crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate(
-            "Loading animations".to_string(),
-            "Fetching version".to_string(),
-            current_step,
-            total_parsing_steps,
-        ));
-        this.version = u32::read_options(reader, opts, ())?;
-
-        if this.version == 0 {
-            this.old_version = u32::read_options(reader, opts, ())?;
-        }
-
-        current_step += 1;
-
-        let _ = crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate(
-            "Loading animations".to_string(),
-            "Reading header".to_string(),
-            current_step,
-            total_parsing_steps,
-        ));
-        this.header = LwBoneInfoHeader::read_options(reader, opts, ())?;
-
-        current_step += 1;
-        let _ = crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate(
-            "Loading animations".to_string(),
-            "Reading bone hierarchy".to_string(),
-            current_step,
-            total_parsing_steps,
-        ));
-
-        this.base_seq = Vec::read_options(
-            reader,
-            opts,
-            binrw::VecArgs {
-                count: this.header.bone_num as usize,
-                inner: (),
-            },
-        )?;
-
-        current_step += 1;
-        let _ = crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate(
-            "Loading animations".to_string(),
-            "Reading inverse bind matrices".to_string(),
-            current_step,
-            total_parsing_steps,
-        ));
-
-        this.invmat_seq = Vec::read_options(
-            reader,
-            opts,
-            binrw::VecArgs {
-                count: this.header.bone_num as usize,
-                inner: (),
-            },
-        )?;
-
-        current_step += 1;
-        let _ = crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate(
-            "Loading animations".to_string(),
-            "Reading dummy information".to_string(),
-            current_step,
-            total_parsing_steps,
-        ));
-
-        this.dummy_seq = Vec::read_options(
-            reader,
-            opts,
-            binrw::VecArgs {
-                count: this.header.dummy_num as usize,
-                inner: (),
-            },
-        )?;
-
-        current_step += 1;
-        let _ = crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate(
-            "Loading animations".to_string(),
-            "Reading animation keyframe data".to_string(),
-            current_step,
-            total_parsing_steps,
-        ));
-
-        let mut key_infos = Vec::with_capacity(this.header.bone_num as usize);
-        for i in 0..this.header.bone_num {
-            let parent_id = this.base_seq[i as usize].parent_id;
-            let one_key_info = LwBoneKeyInfo::read_key_data(
-                reader,
-                (
-                    this.header.frame_num,
-                    this.header.key_type,
-                    this.version,
-                    parent_id,
-                ),
-            )?;
-
-            key_infos.push(one_key_info);
-        }
-
-        this.key_seq = key_infos;
-
-        Ok(this)
-    }
 }
 
 impl BinWrite for LwBoneFile {
@@ -1263,31 +1015,7 @@ impl LwBoneFile {
         fields_to_aggregate.animation.push(animation);
     }
     pub fn from_file(file_path: PathBuf) -> anyhow::Result<Self> {
-        use std::io::{Seek, SeekFrom};
-
-        let file = File::open(&file_path).map_err(|e| {
-            anyhow::anyhow!("Failed to open LAB file '{}': {}", file_path.display(), e)
-        })?;
-
-        let file_size = file.metadata().map(|m| m.len()).unwrap_or(0);
-
-        let mut reader = std::io::BufReader::new(file);
-
-        let anim: LwBoneFile = BinRead::read_options(&mut reader, binrw::Endian::Little, ())
-            .map_err(|e| {
-                let bytes_read = reader.stream_position().unwrap_or(0);
-                anyhow::anyhow!(
-                    "Failed to parse LAB file '{}': {}\n\
-                     File size: {} bytes, bytes read before error: {} bytes\n\
-                     This may indicate a corrupted or truncated file.",
-                    file_path.display(),
-                    e,
-                    file_size,
-                    bytes_read
-                )
-            })?;
-
-        Ok(anim)
+        super::lab_loader::load_lab(&file_path)
     }
 
     // debugging fn, creates a tree of gltf nodes

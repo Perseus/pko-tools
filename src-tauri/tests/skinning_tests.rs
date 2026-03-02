@@ -2,7 +2,7 @@
 // These tests verify mesh-skeleton linkage is correct
 
 use binrw::BinReaderExt;
-use pko_tools_lib::animation::character::LwBoneFile;
+use pko_tools_lib::animation::lab_loader::load_lab;
 use pko_tools_lib::character::model::CharacterGeometricModel;
 use std::fs;
 
@@ -24,8 +24,7 @@ fn bone_index_seq_values_in_bounds() {
         return;
     }
 
-    let mut lab_file = fs::File::open(&lab_path).expect("Failed to open LAB");
-    let lab: LwBoneFile = lab_file.read_le().expect("Failed to parse LAB");
+    let lab = load_lab(&lab_path).expect("Failed to parse LAB");
 
     // Test all corresponding LGO files
     let lgo_files: Vec<_> = fs::read_dir(&known_good_path)

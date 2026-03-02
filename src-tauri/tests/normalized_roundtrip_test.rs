@@ -1,9 +1,10 @@
 // Round-trip test that normalizes quaternions before byte comparison
 // This accounts for the fact that the original LAB file may have unnormalized quaternions
 
-use binrw::{BinReaderExt, BinWrite};
+use binrw::BinWrite;
 use cgmath::InnerSpace;
 use pko_tools_lib::animation::character::LwBoneFile;
+use pko_tools_lib::animation::lab_loader::load_lab;
 use std::fs;
 use std::io::{BufWriter, Cursor};
 
@@ -33,10 +34,7 @@ fn test_normalized_byte_equality() {
     // Step 1: Load and normalize original LAB
     println!("\n📂 Step 1: Loading and normalizing original LAB...");
     let lab_path = test_dir.join("0725.lab");
-    let mut original_lab_file = fs::File::open(&lab_path).expect("Failed to open original LAB");
-    let original_lab: LwBoneFile = original_lab_file
-        .read_le()
-        .expect("Failed to parse original LAB");
+    let original_lab = load_lab(&lab_path).expect("Failed to parse original LAB");
     let normalized_original_lab = normalize_lab_quaternions(original_lab);
 
     println!("  ✓ Original LAB loaded and normalized");
