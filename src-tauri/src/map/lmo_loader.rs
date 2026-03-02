@@ -41,10 +41,10 @@ pub fn load_lmo(path: &Path) -> Result<LmoModel> {
 }
 
 pub fn load_lmo_no_animation(path: &Path) -> Result<LmoModel> {
-    match selected_lmo_backend() {
-        LmoParserBackend::Native => super::lmo::load_lmo_no_animation(path),
-        LmoParserBackend::Kaitai => load_lmo_kaitai(path, false),
-    }
+    // Always use native for no-animation path (perf-critical batch map loading).
+    // Kaitai parser eagerly parses animation data; keeping this on native avoids
+    // that overhead until the .ksy is modified with lazy animation instances.
+    super::lmo::load_lmo_no_animation(path)
 }
 
 fn load_lmo_kaitai(path: &Path, parse_animations: bool) -> Result<LmoModel> {
