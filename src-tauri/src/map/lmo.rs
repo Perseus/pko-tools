@@ -74,12 +74,12 @@ pub const TRANSP_SUBTRACTIVE: u32 = 5; // Zero/InvSrcColor — darkening/shadow
 
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub(crate) struct MaterialRenderState {
-    alpha_enabled: bool,
-    alpha_ref: Option<u8>,
-    alpha_func: Option<u32>,
-    src_blend: Option<u32>,
-    dest_blend: Option<u32>,
-    cull_mode: Option<u32>,
+    pub(crate) alpha_enabled: bool,
+    pub(crate) alpha_ref: Option<u8>,
+    pub(crate) alpha_func: Option<u32>,
+    pub(crate) src_blend: Option<u32>,
+    pub(crate) dest_blend: Option<u32>,
+    pub(crate) cull_mode: Option<u32>,
 }
 
 impl MaterialRenderState {
