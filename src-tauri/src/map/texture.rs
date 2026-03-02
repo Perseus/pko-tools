@@ -760,7 +760,7 @@ mod tests {
         }
 
         let map_data = std::fs::read(&map_path).unwrap();
-        let parsed = super::super::terrain::parse_map(&map_data).unwrap();
+        let parsed = crate::map::map_loader::load_map(&map_data).unwrap();
 
         let atlas = try_bake_atlas(project_dir, &parsed);
         assert!(atlas.is_some(), "should produce an atlas");

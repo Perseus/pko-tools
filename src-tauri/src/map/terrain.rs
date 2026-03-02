@@ -1,4 +1,3 @@
-use std::io::{Cursor, Read as IoRead};
 use std::path::Path;
 
 use anyhow::{anyhow, Context, Result};
@@ -39,7 +38,7 @@ const SIDECAR_THRESHOLD: usize = 5 * 1024 * 1024; // 5MB
 // Parsed structures
 // ============================================================================
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 pub struct MapHeader {
     pub n_map_flag: i32,
     pub n_width: i32,
@@ -48,7 +47,7 @@ pub struct MapHeader {
     pub n_section_height: i32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct MapTile {
     pub dw_tile_info: u32,
     pub bt_tile_info: u8,
@@ -59,52 +58,18 @@ pub struct MapTile {
     pub bt_block: [u8; 4],
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 pub struct MapSection {
     pub tiles: Vec<MapTile>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 pub struct ParsedMap {
     pub header: MapHeader,
     pub section_cnt_x: i32,
     pub section_cnt_y: i32,
     pub section_offsets: Vec<u32>,
     pub sections: Vec<Option<MapSection>>,
-}
-
-// ============================================================================
-// Byte reading helpers
-// ============================================================================
-
-fn read_i32(cursor: &mut Cursor<&[u8]>) -> Result<i32> {
-    let mut buf = [0u8; 4];
-    cursor.read_exact(&mut buf)?;
-    Ok(i32::from_le_bytes(buf))
-}
-
-fn read_u32(cursor: &mut Cursor<&[u8]>) -> Result<u32> {
-    let mut buf = [0u8; 4];
-    cursor.read_exact(&mut buf)?;
-    Ok(u32::from_le_bytes(buf))
-}
-
-fn read_i16(cursor: &mut Cursor<&[u8]>) -> Result<i16> {
-    let mut buf = [0u8; 2];
-    cursor.read_exact(&mut buf)?;
-    Ok(i16::from_le_bytes(buf))
-}
-
-fn read_u8(cursor: &mut Cursor<&[u8]>) -> Result<u8> {
-    let mut buf = [0u8; 1];
-    cursor.read_exact(&mut buf)?;
-    Ok(buf[0])
-}
-
-fn read_i8(cursor: &mut Cursor<&[u8]>) -> Result<i8> {
-    let mut buf = [0u8; 1];
-    cursor.read_exact(&mut buf)?;
-    Ok(buf[0] as i8)
 }
 
 // ============================================================================
@@ -126,91 +91,6 @@ pub fn rgb565_to_float(color: i16) -> (f32, f32, f32) {
     let g = ((c & 0x07e0) >> 3) as f32 / 255.0;
     let r = ((c & 0x001f) << 3) as f32 / 255.0;
     (r, g, b)
-}
-
-// ============================================================================
-// Map parser
-// ============================================================================
-
-pub fn parse_map(data: &[u8]) -> Result<ParsedMap> {
-    let mut cursor = Cursor::new(data);
-
-    // Read header (20 bytes)
-    let header = MapHeader {
-        n_map_flag: read_i32(&mut cursor)?,
-        n_width: read_i32(&mut cursor)?,
-        n_height: read_i32(&mut cursor)?,
-        n_section_width: read_i32(&mut cursor)?,
-        n_section_height: read_i32(&mut cursor)?,
-    };
-
-    // Validate version
-    if header.n_map_flag != CUR_VERSION_NO {
-        return Err(anyhow!(
-            "Unsupported map version: {}. Expected {}",
-            header.n_map_flag,
-            CUR_VERSION_NO
-        ));
-    }
-
-    let section_cnt_x = header.n_width / header.n_section_width;
-    let section_cnt_y = header.n_height / header.n_section_height;
-    let section_cnt = (section_cnt_x * section_cnt_y) as usize;
-
-    // Read section offsets
-    let mut section_offsets = Vec::with_capacity(section_cnt);
-    for _ in 0..section_cnt {
-        section_offsets.push(read_u32(&mut cursor)?);
-    }
-
-    // Track the data start position (after header + offset table)
-    let _data_start = cursor.position();
-
-    // Read each section's tile data
-    let tiles_per_section = (header.n_section_width * header.n_section_height) as usize;
-    let mut sections = Vec::with_capacity(section_cnt);
-
-    for offset in &section_offsets {
-        if *offset == 0 {
-            sections.push(None);
-            continue;
-        }
-
-        // Offsets are absolute file positions; the data after the offset table
-        // was read into memory starting at data_start, so we need to subtract
-        // data_start to get the memory offset.
-        // Actually, from the client source, offsets are stored as absolute file
-        // positions. We have the full file data, so we seek to the absolute offset.
-        cursor.set_position(*offset as u64);
-
-        let mut tiles = Vec::with_capacity(tiles_per_section);
-        for _ in 0..tiles_per_section {
-            let tile = MapTile {
-                dw_tile_info: read_u32(&mut cursor)?,
-                bt_tile_info: read_u8(&mut cursor)?,
-                s_color: read_i16(&mut cursor)?,
-                c_height: read_i8(&mut cursor)?,
-                s_region: read_i16(&mut cursor)?,
-                bt_island: read_u8(&mut cursor)?,
-                bt_block: {
-                    let mut b = [0u8; 4];
-                    cursor.read_exact(&mut b)?;
-                    b
-                },
-            };
-            tiles.push(tile);
-        }
-
-        sections.push(Some(MapSection { tiles }));
-    }
-
-    Ok(ParsedMap {
-        header,
-        section_cnt_x,
-        section_cnt_y,
-        section_offsets,
-        sections,
-    })
 }
 
 /// Scan `project_dir/map/` for `.map` files and build a list of available maps.
@@ -241,13 +121,12 @@ pub fn scan_maps(project_dir: &Path) -> Result<Vec<MapEntry>> {
             continue;
         }
 
-        let mut cursor = Cursor::new(data.as_slice());
-        let flag = read_i32(&mut cursor)?;
+        let flag = i32::from_le_bytes([data[0], data[1], data[2], data[3]]);
         if flag != CUR_VERSION_NO {
             continue;
         }
-        let width = read_i32(&mut cursor)?;
-        let height = read_i32(&mut cursor)?;
+        let width = i32::from_le_bytes([data[4], data[5], data[6], data[7]]);
+        let height = i32::from_le_bytes([data[8], data[9], data[10], data[11]]);
 
         let obj_path = map_dir.join(format!("{}.obj", file_name));
         let rbo_path = map_dir.join(format!("{}.rbo", file_name));
@@ -2375,7 +2254,7 @@ pub fn export_terrain_gltf(
     let map_path = project_dir.join("map").join(format!("{}.map", map_name));
     let map_data = std::fs::read(&map_path)
         .with_context(|| format!("Failed to read map file: {}", map_path.display()))?;
-    let parsed_map = parse_map(&map_data)?;
+    let parsed_map = super::map_loader::load_map(&map_data)?;
 
     // Try to load .obj file
     let obj_path = project_dir.join("map").join(format!("{}.obj", map_name));
@@ -2421,7 +2300,7 @@ pub fn build_map_viewer_gltf(project_dir: &Path, map_name: &str) -> Result<Strin
     let map_path = project_dir.join("map").join(format!("{}.map", map_name));
     let map_data = std::fs::read(&map_path)
         .with_context(|| format!("Failed to read map file: {}", map_path.display()))?;
-    let parsed_map = parse_map(&map_data)?;
+    let parsed_map = super::map_loader::load_map(&map_data)?;
 
     // Try to load .obj file
     let obj_path = project_dir.join("map").join(format!("{}.obj", map_name));
@@ -3015,7 +2894,7 @@ pub fn export_map_for_unity(
     let map_path = project_dir.join("map").join(format!("{}.map", map_name));
     let map_data = std::fs::read(&map_path)
         .with_context(|| format!("Failed to read map file: {}", map_path.display()))?;
-    let parsed_map = parse_map(&map_data)?;
+    let parsed_map = super::map_loader::load_map(&map_data)?;
 
     // 2. Parse .obj file (scene objects)
     let obj_path = project_dir.join("map").join(format!("{}.obj", map_name));
@@ -3779,7 +3658,7 @@ pub fn get_metadata(project_dir: &Path, map_name: &str) -> Result<MapMetadata> {
     let map_path = project_dir.join("map").join(format!("{}.map", map_name));
     let map_data = std::fs::read(&map_path)
         .with_context(|| format!("Failed to read map file: {}", map_path.display()))?;
-    let parsed_map = parse_map(&map_data)?;
+    let parsed_map = super::map_loader::load_map(&map_data)?;
 
     let total_sections = parsed_map.section_offsets.len() as u32;
     let non_empty = parsed_map
@@ -4141,7 +4020,7 @@ mod tests {
         }
 
         let data = std::fs::read(map_path).unwrap();
-        let parsed = parse_map(&data).unwrap();
+        let parsed = crate::map::map_loader::load_map(&data).unwrap();
 
         assert!(parsed.header.n_width > 0);
         assert!(parsed.header.n_height > 0);
@@ -4275,7 +4154,7 @@ mod tests {
         }
 
         let data = std::fs::read(map_path).unwrap();
-        let parsed = parse_map(&data).unwrap();
+        let parsed = crate::map::map_loader::load_map(&data).unwrap();
 
         let gltf_json = build_terrain_gltf(&parsed, None, None, None).unwrap();
         assert!(gltf_json.contains("\"asset\""));
@@ -4599,7 +4478,7 @@ mod tests {
         }
 
         let data = std::fs::read(map_path).unwrap();
-        let parsed = parse_map(&data).unwrap();
+        let parsed = crate::map::map_loader::load_map(&data).unwrap();
 
         let tw = parsed.header.n_width;
         let th = parsed.header.n_height;
@@ -4891,7 +4770,7 @@ mod tests {
                 return;
             }
         };
-        let map = parse_map(&data).expect("can't parse map");
+        let map = crate::map::map_loader::load_map(&data).expect("can't parse map");
 
         let mut zero_count = 0u64;
         let mut nonzero_count = 0u64;
