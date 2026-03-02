@@ -3,7 +3,6 @@ pub mod commands;
 pub mod glb;
 pub mod grid_images;
 pub mod lit;
-pub mod lmo;
 pub mod lmo_loader;
 pub mod lmo_types;
 pub mod map_loader;
