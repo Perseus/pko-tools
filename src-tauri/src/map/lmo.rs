@@ -49,14 +49,14 @@ const LW_MAX_SUBSET_NUM: usize = 16;
 const RENDER_STATE_ATOM_SIZE: usize = 12; // state(4) + value0(4) + value1(4)
 
 // D3D9 render state constants used by PKO scene materials/meshes.
-const D3DRS_ALPHATESTENABLE: u32 = 15;
-const D3DRS_SRCBLEND: u32 = 19;
-const D3DRS_DESTBLEND: u32 = 20;
-const D3DRS_ALPHAREF: u32 = 24;
-const D3DRS_CULLMODE: u32 = 22;
-const D3DRS_ALPHAFUNC: u32 = 25;
-const D3DCMP_GREATER: u32 = 5;
-const LW_INVALID_INDEX: u32 = 0xFFFFFFFF;
+pub(crate) const D3DRS_ALPHATESTENABLE: u32 = 15;
+pub(crate) const D3DRS_SRCBLEND: u32 = 19;
+pub(crate) const D3DRS_DESTBLEND: u32 = 20;
+pub(crate) const D3DRS_ALPHAREF: u32 = 24;
+pub(crate) const D3DRS_CULLMODE: u32 = 22;
+pub(crate) const D3DRS_ALPHAFUNC: u32 = 25;
+pub(crate) const D3DCMP_GREATER: u32 = 5;
+pub(crate) const LW_INVALID_INDEX: u32 = 0xFFFFFFFF;
 
 // D3DCULL values
 pub const D3DCULL_NONE: u32 = 1;
@@ -72,8 +72,8 @@ pub const TRANSP_ADDITIVE3: u32 = 4; // SrcAlpha/DestAlpha — alpha-weighted ad
 pub const TRANSP_SUBTRACTIVE: u32 = 5; // Zero/InvSrcColor — darkening/shadow
 // Types 6-8 fall through to ONE/ONE in engine — identical to type 1
 
-#[derive(Debug, Clone, Copy, Default)]
-struct MaterialRenderState {
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub(crate) struct MaterialRenderState {
     alpha_enabled: bool,
     alpha_ref: Option<u8>,
     alpha_func: Option<u32>,
@@ -83,17 +83,17 @@ struct MaterialRenderState {
 }
 
 impl MaterialRenderState {
-    fn normalized_alpha_enabled(self) -> bool {
+    pub(crate) fn normalized_alpha_enabled(self) -> bool {
         self.alpha_enabled && self.alpha_func.map(|f| f == D3DCMP_GREATER).unwrap_or(true)
     }
 
-    fn effective_alpha_ref(self) -> u8 {
+    pub(crate) fn effective_alpha_ref(self) -> u8 {
         self.alpha_ref.unwrap_or(129)
     }
 }
 
 /// Animation data for a geometry object — decomposed from matrix keyframes.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LmoAnimData {
     pub frame_num: u32,
     pub translations: Vec<[f32; 3]>, // per-frame translation (Z-up game space)
@@ -102,7 +102,7 @@ pub struct LmoAnimData {
 
 /// UV animation data — per-frame 4×4 texture coordinate transform matrix.
 /// Stored per (subset_index, stage_index).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LmoTexUvAnim {
     pub subset: usize,
     pub stage: usize,
@@ -112,7 +112,7 @@ pub struct LmoTexUvAnim {
 
 /// Texture image animation — frame-by-frame texture swap.
 /// Stored per (subset_index, stage_index).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LmoTexImgAnim {
     pub subset: usize,
     pub stage: usize,
@@ -120,21 +120,21 @@ pub struct LmoTexImgAnim {
 }
 
 /// Material opacity keyframe — sparse keyed float.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LmoOpacityKeyframe {
     pub frame: u32,
     pub opacity: f32,
 }
 
 /// Material opacity animation — sparse keyframes for a single subset.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LmoMtlOpacAnim {
     pub subset: usize,
     pub keyframes: Vec<LmoOpacityKeyframe>,
 }
 
 /// A single geometry object within an LMO file.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LmoGeomObject {
     pub id: u32,
     pub parent_id: u32,
@@ -154,7 +154,7 @@ pub struct LmoGeomObject {
 }
 
 /// A mesh subset — defines a range of indices rendered with a specific material.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LmoSubset {
     pub primitive_num: u32,
     pub start_index: u32,
@@ -163,7 +163,7 @@ pub struct LmoSubset {
 }
 
 /// Material info extracted from an LMO geometry object.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LmoMaterial {
     pub diffuse: [f32; 4],
     pub ambient: [f32; 4],
@@ -179,7 +179,7 @@ pub struct LmoMaterial {
 }
 
 /// A parsed LMO model containing multiple geometry objects.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LmoModel {
     pub version: u32,
     pub geom_objects: Vec<LmoGeomObject>,
@@ -692,7 +692,7 @@ fn read_mesh(
 ///
 /// File layout: 12 floats in row-major order → 3 basis vectors (rows 0-2) + translation (row 3).
 /// We construct a column-major Matrix4 matching the `LwMatrix43` convention from `math/mod.rs`.
-fn decompose_matrix43(raw: &[f32; 12]) -> ([f32; 3], [f32; 4]) {
+pub(crate) fn decompose_matrix43(raw: &[f32; 12]) -> ([f32; 3], [f32; 4]) {
     // Construct column-major Matrix4 (same layout as LwMatrix43's br(map)):
     // Column 0: [raw[0], raw[1], raw[2], 0]
     // Column 1: [raw[3], raw[4], raw[5], 0]
