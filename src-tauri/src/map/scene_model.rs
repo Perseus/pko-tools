@@ -13,6 +13,7 @@ use base64::Engine;
 use gltf::json as gltf_json;
 use gltf_json::{
     accessor::{ComponentType, GenericComponentType},
+    animation::{Channel, Sampler, Target},
     validation::{Checked, USize64},
 };
 
@@ -956,8 +957,10 @@ fn build_anim_extras(geom: &LmoGeomObject, geom_index: usize) -> gltf_json::extr
 }
 
 // ============================================================================
-// Coordinate helpers (used by build_anim_extras for TRS data)
+// Coordinate helpers (used by build_anim_extras and build_animations)
 // ============================================================================
+
+const FRAME_RATE: f32 = 30.0;
 
 /// Transform a position vector from Z-up game space to Y-up glTF space.
 fn z_up_to_y_up_vec3(v: [f32; 3]) -> [f32; 3] {
@@ -968,6 +971,146 @@ fn z_up_to_y_up_vec3(v: [f32; 3]) -> [f32; 3] {
 /// Input/output in glTF [x, y, z, w] order.
 fn z_up_to_y_up_quat(q: [f32; 4]) -> [f32; 4] {
     [q[0], q[2], -q[1], q[3]]
+}
+
+// ============================================================================
+// Animation: convert LMO matrix keyframes → glTF animation tracks
+// ============================================================================
+
+/// Build glTF animations for animated geometry objects.
+///
+/// Each animated object gets translation + rotation channels targeting its node.
+/// Returns a vec of animations (empty if none are animated).
+fn build_animations(
+    builder: &mut GltfBuilder,
+    animated_nodes: &[(u32, &LmoGeomObject)],
+) -> Vec<gltf_json::Animation> {
+    if animated_nodes.is_empty() {
+        return vec![];
+    }
+
+    let mut channels: Vec<Channel> = Vec::new();
+    let mut samplers: Vec<Sampler> = Vec::new();
+
+    for &(node_idx, geom) in animated_nodes {
+        let anim = match &geom.animation {
+            Some(a) => a,
+            None => continue,
+        };
+
+        let frame_num = anim.frame_num as usize;
+        if frame_num == 0 {
+            continue;
+        }
+
+        // Build keyframe timings: [0, 1/30, 2/30, ..., (N-1)/30]
+        let timings: Vec<f32> = (0..frame_num).map(|f| f as f32 / FRAME_RATE).collect();
+        let time_min = 0.0f32;
+        let time_max = timings.last().copied().unwrap_or(0.0);
+
+        let time_acc_idx = builder.add_accessor_f32(
+            &timings,
+            &format!("anim_time_node{}", node_idx),
+            gltf_json::accessor::Type::Scalar,
+            1,
+            Some(serde_json::json!([time_min])),
+            Some(serde_json::json!([time_max])),
+        );
+
+        // Build translation output: Vec3 per frame with Z→Y coordinate transform
+        let translations: Vec<f32> = anim
+            .translations
+            .iter()
+            .flat_map(|t| {
+                let yt = z_up_to_y_up_vec3(*t);
+                yt.into_iter()
+            })
+            .collect();
+
+        let trans_acc_idx = builder.add_accessor_f32(
+            &translations,
+            &format!("anim_trans_node{}", node_idx),
+            gltf_json::accessor::Type::Vec3,
+            3,
+            None,
+            None,
+        );
+
+        // Build rotation output: Vec4 quaternion per frame with Z→Y transform
+        let rotations: Vec<f32> = anim
+            .rotations
+            .iter()
+            .flat_map(|r| {
+                let yr = z_up_to_y_up_quat(*r);
+                yr.into_iter()
+            })
+            .collect();
+
+        let rot_acc_idx = builder.add_accessor_f32(
+            &rotations,
+            &format!("anim_rot_node{}", node_idx),
+            gltf_json::accessor::Type::Vec4,
+            4,
+            None,
+            None,
+        );
+
+        // Samplers: translation + rotation
+        let trans_sampler_idx = samplers.len() as u32;
+        samplers.push(Sampler {
+            input: gltf_json::Index::new(time_acc_idx),
+            interpolation: Checked::Valid(gltf_json::animation::Interpolation::Linear),
+            output: gltf_json::Index::new(trans_acc_idx),
+            extensions: None,
+            extras: None,
+        });
+
+        let rot_sampler_idx = samplers.len() as u32;
+        samplers.push(Sampler {
+            input: gltf_json::Index::new(time_acc_idx),
+            interpolation: Checked::Valid(gltf_json::animation::Interpolation::Linear),
+            output: gltf_json::Index::new(rot_acc_idx),
+            extensions: None,
+            extras: None,
+        });
+
+        // Channels targeting the geometry object's node
+        channels.push(Channel {
+            sampler: gltf_json::Index::new(trans_sampler_idx),
+            target: Target {
+                node: gltf_json::Index::new(node_idx),
+                path: Checked::Valid(gltf_json::animation::Property::Translation),
+                extensions: None,
+                extras: None,
+            },
+            extensions: None,
+            extras: None,
+        });
+
+        channels.push(Channel {
+            sampler: gltf_json::Index::new(rot_sampler_idx),
+            target: Target {
+                node: gltf_json::Index::new(node_idx),
+                path: Checked::Valid(gltf_json::animation::Property::Rotation),
+                extensions: None,
+                extras: None,
+            },
+            extensions: None,
+            extras: None,
+        });
+    }
+
+    if channels.is_empty() {
+        return vec![];
+    }
+
+    vec![gltf_json::Animation {
+        name: Some("BuildingAnimation".to_string()),
+        channels,
+        samplers,
+        extensions: None,
+        extras: None,
+    }]
 }
 
 // ============================================================================
@@ -984,6 +1127,7 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
 
     let mut builder = GltfBuilder::new();
     let mut child_indices = Vec::new();
+    let mut animated_nodes: Vec<(u32, &LmoGeomObject)> = Vec::new();
 
     for (gi, geom) in model.geom_objects.iter().enumerate() {
         let prefix = format!("geom{}", gi);
@@ -1054,11 +1198,19 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
             ..Default::default()
         });
         child_indices.push(gltf_json::Index::new(node_idx));
+
+        // Track animated objects for glTF animation generation
+        if has_animation {
+            animated_nodes.push((node_idx, geom));
+        }
     }
 
     if child_indices.is_empty() {
         return Err(anyhow!("No renderable geometry in LMO file"));
     }
+
+    // Build animation if any objects are animated
+    let animations = build_animations(&mut builder, &animated_nodes);
 
     // Root node
     let root_idx = builder.nodes.len() as u32;
@@ -1090,6 +1242,7 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         images: builder.images,
         samplers: builder.samplers,
         textures: builder.textures,
+        animations,
         ..Default::default()
     };
 
@@ -1110,6 +1263,7 @@ pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String
     // Build using the same GltfBuilder approach as build_gltf_from_lmo
     let mut builder = GltfBuilder::new();
     let mut child_indices = Vec::new();
+    let mut animated_nodes: Vec<(u32, &LmoGeomObject)> = Vec::new();
 
     for (gi, geom) in model.geom_objects.iter().enumerate() {
         let prefix = format!("geom{}", gi);
@@ -1178,11 +1332,17 @@ pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String
             ..Default::default()
         });
         child_indices.push(gltf_json::Index::new(node_idx));
+
+        if has_animation {
+            animated_nodes.push((node_idx, geom));
+        }
     }
 
     if child_indices.is_empty() {
         return Err(anyhow!("No renderable geometry in LMO file"));
     }
+
+    let animations = build_animations(&mut builder, &animated_nodes);
 
     let root_idx = builder.nodes.len() as u32;
     builder.nodes.push(gltf_json::Node {
@@ -1264,6 +1424,7 @@ pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String
         images: images_out,
         samplers: builder.samplers,
         textures: builder.textures,
+        animations,
         ..Default::default()
     };
 
