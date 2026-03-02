@@ -74,7 +74,7 @@ struct BoneAnimationData {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 #[br(little)]
 #[bw(little)]
 pub struct LwBoneInfoHeader {
@@ -85,7 +85,7 @@ pub struct LwBoneInfoHeader {
 }
 
 #[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 #[br(little)]
 pub struct LwBoneBaseInfo {
     #[br(map = |raw_name: [u8; LW_MAX_NAME]| {
@@ -113,7 +113,7 @@ pub struct LwBoneBaseInfo {
 }
 
 #[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 #[br(little)]
 pub struct LwBoneDummyInfo {
     pub id: u32,
@@ -122,7 +122,7 @@ pub struct LwBoneDummyInfo {
 }
 
 #[binrw]
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 pub struct LwBoneKeyInfo {
     #[br(default)]
     pub mat43_seq: Option<Vec<LwMatrix43>>,
@@ -248,7 +248,7 @@ impl LwBoneKeyInfo {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 pub struct LwBoneFile {
     pub version: u32,
 
