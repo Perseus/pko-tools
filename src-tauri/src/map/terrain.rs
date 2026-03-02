@@ -2874,7 +2874,7 @@ fn copy_teximg_textures(
             None => continue,
         };
 
-        let model = match super::lmo::load_lmo(&lmo_path) {
+        let model = match super::lmo_loader::load_lmo(&lmo_path) {
             Ok(m) => m,
             Err(_) => continue,
         };
@@ -3189,6 +3189,10 @@ pub fn export_map_for_unity(
             obj.insert("flag".into(), serde_json::json!(info.flag));
             obj.insert("size_flag".into(), serde_json::json!(info.size_flag));
             obj.insert("is_really_big".into(), serde_json::json!(info.is_really_big));
+            // Point light data (meaningful when obj_type == 3)
+            obj.insert("point_color".into(), serde_json::json!(info.point_color));
+            obj.insert("point_range".into(), serde_json::json!(info.point_range));
+            obj.insert("point_attenuation".into(), serde_json::json!(info.point_attenuation));
         }
 
         // C4: Add lit overlay data if this building has a matching entry in lit.tx
