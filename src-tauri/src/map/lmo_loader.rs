@@ -150,12 +150,57 @@ fn convert_geometry_chunk(
     // Parse mesh
     let mesh_size = *header.mesh_size()
         .map_err(|e| anyhow::anyhow!("header.mesh_size error: {:?}", e))?;
-    let (vertices, normals, texcoords, vertex_colors, indices, subsets, mesh_alpha) = if mesh_size > 0 {
+    let (vertices, normals, texcoords, vertex_colors, mut indices, subsets, mesh_alpha) = if mesh_size > 0 {
         let mesh_section = chunk.mesh().clone();
         convert_mesh_section(&mesh_section, file_version)?
     } else {
         (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), MaterialRenderState::default())
     };
+
+    // Workaround: Kaitai runtime BytesReader clone bug — _io.pos() returns 0
+    // on the cloned reader, making has_legacy_pre_index_pair always false.
+    // For header_kind == 0 files with a legacy 8-byte pre-index pair, re-read
+    // indices from raw mesh bytes at the correct offset.
+    if mesh_size > 0 && !indices.is_empty() {
+        let mesh_section = chunk.mesh().clone();
+        let header_kind = *mesh_section.header_kind()
+            .map_err(|e| anyhow::anyhow!("header_kind: {:?}", e))?;
+        if header_kind == 0 {
+            let index_num = *mesh_section.index_num()
+                .map_err(|e| anyhow::anyhow!("index_num: {:?}", e))? as usize;
+            let mesh_raw = chunk.mesh_raw().clone();
+            let expected_index_bytes = index_num * 4;
+            let raw_len = mesh_raw.len();
+            // Native parser logic: if remaining == index_bytes + 8, skip 8
+            if raw_len >= expected_index_bytes + 8 {
+                let tail_offset = raw_len - expected_index_bytes;
+                if tail_offset == expected_index_bytes + 8
+                    || (raw_len > expected_index_bytes
+                        && raw_len - expected_index_bytes >= 8
+                        && {
+                            // Check if kaitai's indices look wrong (first value >= vertex count)
+                            let vcount = vertices.len() as u32;
+                            !indices.is_empty() && indices[0] >= vcount && vcount > 0
+                        })
+                {
+                    // Re-read indices from the correct offset (skip the 8-byte legacy pair)
+                    let idx_start = raw_len - expected_index_bytes;
+                    let mut fixed_indices = Vec::with_capacity(index_num);
+                    for i in 0..index_num {
+                        let off = idx_start + i * 4;
+                        if off + 4 <= raw_len {
+                            let val = u32::from_le_bytes([
+                                mesh_raw[off], mesh_raw[off+1],
+                                mesh_raw[off+2], mesh_raw[off+3],
+                            ]);
+                            fixed_indices.push(val);
+                        }
+                    }
+                    indices = fixed_indices;
+                }
+            }
+        }
+    }
 
     // Mesh-level alpha promotion to materials (semantic parity #1)
     if mesh_alpha.normalized_alpha_enabled() {
@@ -857,5 +902,271 @@ mod tests {
         }
 
         eprintln!("Parity test passed on: {}", path.display());
+    }
+
+    // ========================================================================
+    // Exhaustive equivalence test — all .lmo files in both client dirs
+    // ========================================================================
+
+    const FLOAT_EPSILON: f32 = 1e-6;
+
+    fn floats_eq(a: f32, b: f32) -> bool {
+        if a.is_nan() && b.is_nan() { return true; }
+        (a - b).abs() < FLOAT_EPSILON
+    }
+
+    fn vec3_eq(a: &[f32; 3], b: &[f32; 3]) -> bool {
+        floats_eq(a[0], b[0]) && floats_eq(a[1], b[1]) && floats_eq(a[2], b[2])
+    }
+
+    fn vec2_eq(a: &[f32; 2], b: &[f32; 2]) -> bool {
+        floats_eq(a[0], b[0]) && floats_eq(a[1], b[1])
+    }
+
+    /// Quaternion equality with sign ambiguity: q == -q
+    fn quat_eq(a: &[f32; 4], b: &[f32; 4]) -> bool {
+        let direct = floats_eq(a[0], b[0]) && floats_eq(a[1], b[1])
+            && floats_eq(a[2], b[2]) && floats_eq(a[3], b[3]);
+        if direct { return true; }
+        // Try negated
+        floats_eq(a[0], -b[0]) && floats_eq(a[1], -b[1])
+            && floats_eq(a[2], -b[2]) && floats_eq(a[3], -b[3])
+    }
+
+    fn mat44_eq(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> bool {
+        for r in 0..4 {
+            for c in 0..4 {
+                if !floats_eq(a[r][c], b[r][c]) { return false; }
+            }
+        }
+        true
+    }
+
+    /// Field-by-field comparison with float epsilon and quat sign handling.
+    /// Returns Ok(()) on match, Err(description) on first divergence.
+    fn assert_models_equal(n: &LmoModel, k: &LmoModel) -> Result<(), String> {
+        if n.version != k.version {
+            return Err(format!("version: {} vs {}", n.version, k.version));
+        }
+        if n.geom_objects.len() != k.geom_objects.len() {
+            return Err(format!(
+                "geom_objects count: {} vs {}",
+                n.geom_objects.len(), k.geom_objects.len()
+            ));
+        }
+
+        for (i, (ng, kg)) in n.geom_objects.iter().zip(k.geom_objects.iter()).enumerate() {
+            let ctx = format!("geom_object[{}]", i);
+
+            if ng.id != kg.id {
+                return Err(format!("{}.id: {} vs {}", ctx, ng.id, kg.id));
+            }
+            if ng.parent_id != kg.parent_id {
+                return Err(format!("{}.parent_id: {} vs {}", ctx, ng.parent_id, kg.parent_id));
+            }
+            if ng.obj_type != kg.obj_type {
+                return Err(format!("{}.obj_type: {} vs {}", ctx, ng.obj_type, kg.obj_type));
+            }
+            if !mat44_eq(&ng.mat_local, &kg.mat_local) {
+                return Err(format!("{}.mat_local differs", ctx));
+            }
+
+            // Vertices
+            if ng.vertices.len() != kg.vertices.len() {
+                return Err(format!("{}.vertices count: {} vs {}", ctx, ng.vertices.len(), kg.vertices.len()));
+            }
+            for (j, (nv, kv)) in ng.vertices.iter().zip(kg.vertices.iter()).enumerate() {
+                if !vec3_eq(nv, kv) {
+                    return Err(format!("{}.vertices[{}]: {:?} vs {:?}", ctx, j, nv, kv));
+                }
+            }
+
+            // Normals
+            if ng.normals.len() != kg.normals.len() {
+                return Err(format!("{}.normals count: {} vs {}", ctx, ng.normals.len(), kg.normals.len()));
+            }
+            for (j, (nn, kn)) in ng.normals.iter().zip(kg.normals.iter()).enumerate() {
+                if !vec3_eq(nn, kn) {
+                    return Err(format!("{}.normals[{}]: {:?} vs {:?}", ctx, j, nn, kn));
+                }
+            }
+
+            // Texcoords
+            if ng.texcoords.len() != kg.texcoords.len() {
+                return Err(format!("{}.texcoords count: {} vs {}", ctx, ng.texcoords.len(), kg.texcoords.len()));
+            }
+            for (j, (nt, kt)) in ng.texcoords.iter().zip(kg.texcoords.iter()).enumerate() {
+                if !vec2_eq(nt, kt) {
+                    return Err(format!("{}.texcoords[{}]: {:?} vs {:?}", ctx, j, nt, kt));
+                }
+            }
+
+            // Vertex colors
+            if ng.vertex_colors != kg.vertex_colors {
+                return Err(format!("{}.vertex_colors differ", ctx));
+            }
+
+            // Indices
+            if ng.indices != kg.indices {
+                if ng.indices.len() != kg.indices.len() {
+                    return Err(format!("{}.indices count: {} vs {}", ctx, ng.indices.len(), kg.indices.len()));
+                }
+                // Find first divergent index
+                for (j, (ni, ki)) in ng.indices.iter().zip(kg.indices.iter()).enumerate() {
+                    if ni != ki {
+                        return Err(format!("{}.indices[{}]: {} vs {} (of {})", ctx, j, ni, ki, ng.indices.len()));
+                    }
+                }
+            }
+
+            // Subsets
+            if ng.subsets != kg.subsets {
+                return Err(format!("{}.subsets differ", ctx));
+            }
+
+            // Materials
+            if ng.materials.len() != kg.materials.len() {
+                return Err(format!("{}.materials count: {} vs {}", ctx, ng.materials.len(), kg.materials.len()));
+            }
+            for (j, (nm, km)) in ng.materials.iter().zip(kg.materials.iter()).enumerate() {
+                if nm != km {
+                    return Err(format!("{}.materials[{}] differs:\n  native:  {:?}\n  kaitai:  {:?}", ctx, j, nm, km));
+                }
+            }
+
+            // Animation
+            match (&ng.animation, &kg.animation) {
+                (Some(na), Some(ka)) => {
+                    if na.frame_num != ka.frame_num {
+                        return Err(format!("{}.anim.frame_num: {} vs {}", ctx, na.frame_num, ka.frame_num));
+                    }
+                    if na.translations.len() != ka.translations.len() {
+                        return Err(format!("{}.anim.translations count: {} vs {}", ctx, na.translations.len(), ka.translations.len()));
+                    }
+                    for (j, (nt, kt)) in na.translations.iter().zip(ka.translations.iter()).enumerate() {
+                        if !vec3_eq(nt, kt) {
+                            return Err(format!("{}.anim.translations[{}]: {:?} vs {:?}", ctx, j, nt, kt));
+                        }
+                    }
+                    if na.rotations.len() != ka.rotations.len() {
+                        return Err(format!("{}.anim.rotations count: {} vs {}", ctx, na.rotations.len(), ka.rotations.len()));
+                    }
+                    for (j, (nr, kr)) in na.rotations.iter().zip(ka.rotations.iter()).enumerate() {
+                        if !quat_eq(nr, kr) {
+                            return Err(format!("{}.anim.rotations[{}]: {:?} vs {:?}", ctx, j, nr, kr));
+                        }
+                    }
+                }
+                (None, None) => {}
+                (Some(_), None) => return Err(format!("{}.animation: native has Some, kaitai has None", ctx)),
+                (None, Some(_)) => return Err(format!("{}.animation: native has None, kaitai has Some", ctx)),
+            }
+
+            // Texture UV animations
+            if ng.texuv_anims.len() != kg.texuv_anims.len() {
+                return Err(format!("{}.texuv_anims count: {} vs {}", ctx, ng.texuv_anims.len(), kg.texuv_anims.len()));
+            }
+            for (j, (na, ka)) in ng.texuv_anims.iter().zip(kg.texuv_anims.iter()).enumerate() {
+                if na.subset != ka.subset || na.stage != ka.stage
+                    || na.frame_num != ka.frame_num
+                {
+                    return Err(format!("{}.texuv_anims[{}] header differs", ctx, j));
+                }
+                if na.matrices.len() != ka.matrices.len() {
+                    return Err(format!("{}.texuv_anims[{}].matrices count: {} vs {}", ctx, j, na.matrices.len(), ka.matrices.len()));
+                }
+                for (f, (nm, km)) in na.matrices.iter().zip(ka.matrices.iter()).enumerate() {
+                    if !mat44_eq(nm, km) {
+                        return Err(format!("{}.texuv_anims[{}].matrices[{}] differs", ctx, j, f));
+                    }
+                }
+            }
+
+            // Texture image animations
+            if ng.teximg_anims.len() != kg.teximg_anims.len() {
+                return Err(format!("{}.teximg_anims count: {} vs {}", ctx, ng.teximg_anims.len(), kg.teximg_anims.len()));
+            }
+            for (j, (na, ka)) in ng.teximg_anims.iter().zip(kg.teximg_anims.iter()).enumerate() {
+                if na != ka {
+                    return Err(format!("{}.teximg_anims[{}] differs", ctx, j));
+                }
+            }
+
+            // Material opacity animations
+            if ng.mtlopac_anims.len() != kg.mtlopac_anims.len() {
+                return Err(format!("{}.mtlopac_anims count: {} vs {}", ctx, ng.mtlopac_anims.len(), kg.mtlopac_anims.len()));
+            }
+            for (j, (na, ka)) in ng.mtlopac_anims.iter().zip(kg.mtlopac_anims.iter()).enumerate() {
+                if na != ka {
+                    return Err(format!("{}.mtlopac_anims[{}] differs", ctx, j));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Exhaustive parity test: both backends must produce identical output
+    /// on ALL .lmo files across both client directories.
+    #[test]
+    fn kaitai_matches_native_on_all_lmo_files() {
+        let client_dirs = [
+            std::path::Path::new("../top-client/model/scene"),
+            std::path::Path::new("../top-client/corsairs-online-public/client/model/scene"),
+            std::path::Path::new("../top-client/texture/scene"),
+            std::path::Path::new("../top-client/corsairs-online-public/client/texture/scene"),
+        ];
+
+        let mut tested = 0u32;
+        let mut both_failed = 0u32;
+        let mut failed = Vec::new();
+
+        for dir in &client_dirs {
+            if !dir.exists() { continue; }
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.extension() != Some("lmo".as_ref()) { continue; }
+
+                let data = std::fs::read(&path).unwrap();
+
+                let native = super::super::lmo::parse_lmo(&data);
+                let kaitai_result = kaitai_to_lmo(&data, true);
+
+                match (native, kaitai_result) {
+                    (Ok(n), Ok(k)) => {
+                        if let Err(diff) = assert_models_equal(&n, &k) {
+                            failed.push(format!("{}: {}", path.display(), diff));
+                        }
+                    }
+                    (Err(e), Ok(_)) => {
+                        failed.push(format!(
+                            "{}: native failed ({}) but kaitai succeeded",
+                            path.display(), e
+                        ));
+                    }
+                    (Ok(_), Err(e)) => {
+                        failed.push(format!(
+                            "{}: kaitai failed ({}) but native succeeded",
+                            path.display(), e
+                        ));
+                    }
+                    (Err(_), Err(_)) => {
+                        both_failed += 1;
+                    }
+                }
+                tested += 1;
+            }
+        }
+
+        assert!(tested > 0, "no .lmo files found — check top-client paths");
+        assert!(
+            failed.is_empty(),
+            "PARITY FAILURES ({}/{} files):\n{}",
+            failed.len(), tested, failed.join("\n")
+        );
+        eprintln!(
+            "All {} .lmo files parsed identically by both backends ({} both-failed, skipped)",
+            tested, both_failed
+        );
     }
 }

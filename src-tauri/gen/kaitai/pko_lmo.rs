@@ -1964,7 +1964,14 @@ impl PkoLmo_GeomObjInfoHeader {
             return Ok(self.modern_plausible.borrow());
         }
         self.f_modern_plausible.set(true);
-        *self.modern_plausible.borrow_mut() = (((((((((*self.modern_mtl_size_probe()? as u32) + (*self.modern_mesh_size_probe()? as u32)) as i32) + (*self.modern_helper_size_probe()? as i32)) as i32) + (*self.modern_anim_size_probe()? as i32)) as i32) <= (*self.chunk_payload_size() as i32))) as bool;
+        *self.modern_plausible.borrow_mut() = (|| -> Option<bool> {
+            let mtl = *self.modern_mtl_size_probe().ok()? as i64;
+            let mesh = *self.modern_mesh_size_probe().ok()? as i64;
+            let helper = *self.modern_helper_size_probe().ok()? as i64;
+            let anim = *self.modern_anim_size_probe().ok()? as i64;
+            let payload = *self.chunk_payload_size() as i64;
+            Some((mtl + mesh + helper + anim) <= payload)
+        })().unwrap_or(false);
         Ok(self.modern_plausible.borrow())
     }
     pub fn mtl_size(
