@@ -98,7 +98,7 @@ impl PkoLmo {
             return Ok(self.descriptor_magic.borrow());
         }
         self.f_descriptor_magic.set(true);
-        if ((*_io.size() as i32) >= (19 as i32)) {
+        if ((_io.size() as i32) >= (19 as i32)) {
             let _pos = _io.pos();
             _io.seek(8 as usize)?;
             *self.descriptor_magic.borrow_mut() = bytes_to_str(&_io.read_bytes(11 as usize)?.into(), "ASCII")?;
@@ -200,6 +200,57 @@ impl PkoLmo {
     }
 }
 impl PkoLmo {
+    pub fn _io(&self) -> Ref<'_, BytesReader> {
+        self._io.borrow()
+    }
+}
+
+#[derive(Default, Debug, Clone)]
+pub struct PkoLmo_Aabb {
+    pub _root: SharedType<PkoLmo>,
+    pub _parent: SharedType<KStructUnit>,
+    pub _self: SharedType<Self>,
+    center: RefCell<OptRc<PkoLmo_Vector3>>,
+    radius: RefCell<OptRc<PkoLmo_Vector3>>,
+    _io: RefCell<BytesReader>,
+}
+impl KStruct for PkoLmo_Aabb {
+    type Root = PkoLmo;
+    type Parent = KStructUnit;
+
+    fn read<S: KStream>(
+        self_rc: &OptRc<Self>,
+        _io: &S,
+        _root: SharedType<Self::Root>,
+        _parent: SharedType<Self::Parent>,
+    ) -> KResult<()> {
+        *self_rc._io.borrow_mut() = _io.clone();
+        self_rc._root.set(_root.get());
+        self_rc._parent.set(_parent.get());
+        self_rc._self.set(Ok(self_rc.clone()));
+        let _rrc = self_rc._root.get_value().borrow().upgrade();
+        let _prc = self_rc._parent.get_value().borrow().upgrade();
+        let _r = _rrc.as_ref().unwrap();
+        let t = Self::read_into::<_, PkoLmo_Vector3>(&*_io, Some(self_rc._root.clone()), None)?.into();
+        *self_rc.center.borrow_mut() = t;
+        let t = Self::read_into::<_, PkoLmo_Vector3>(&*_io, Some(self_rc._root.clone()), None)?.into();
+        *self_rc.radius.borrow_mut() = t;
+        Ok(())
+    }
+}
+impl PkoLmo_Aabb {
+}
+impl PkoLmo_Aabb {
+    pub fn center(&self) -> Ref<'_, OptRc<PkoLmo_Vector3>> {
+        self.center.borrow()
+    }
+}
+impl PkoLmo_Aabb {
+    pub fn radius(&self) -> Ref<'_, OptRc<PkoLmo_Vector3>> {
+        self.radius.borrow()
+    }
+}
+impl PkoLmo_Aabb {
     pub fn _io(&self) -> Ref<'_, BytesReader> {
         self._io.borrow()
     }
@@ -1282,7 +1333,7 @@ impl PkoLmo_BoneKeyInfo {
             return Ok(self.pos_num.borrow());
         }
         self.f_pos_num.set(true);
-        *self.pos_num.borrow_mut() = (if ((*self.version() as i32) >= (4099 as i32)) { *self.frame_num() } else { if ((*self.parent_id() as i32) == (4294967295 as i32)) { *self.frame_num() } else { 1 } }) as u32;
+        *self.pos_num.borrow_mut() = (if ((*self.version() as i32) >= (4099 as i32)) { *self.frame_num() } else { if (*self.parent_id() == 4294967295u32) { *self.frame_num() } else { 1 } }) as u32;
         Ok(self.pos_num.borrow())
     }
 }
@@ -1318,7 +1369,7 @@ pub struct PkoLmo_BoundingBoxInfo {
     pub _parent: SharedType<PkoLmo_HelperSection>,
     pub _self: SharedType<Self>,
     id: RefCell<u32>,
-    box: RefCell<OptRc<PkoLmo_Box>>,
+    bbox: RefCell<OptRc<PkoLmo_Aabb>>,
     mat: RefCell<OptRc<PkoLmo_Matrix44>>,
     _io: RefCell<BytesReader>,
 }
@@ -1340,8 +1391,8 @@ impl KStruct for PkoLmo_BoundingBoxInfo {
         let _prc = self_rc._parent.get_value().borrow().upgrade();
         let _r = _rrc.as_ref().unwrap();
         *self_rc.id.borrow_mut() = _io.read_u4le()?.into();
-        let t = Self::read_into::<_, PkoLmo_Box>(&*_io, Some(self_rc._root.clone()), None)?.into();
-        *self_rc.box.borrow_mut() = t;
+        let t = Self::read_into::<_, PkoLmo_Aabb>(&*_io, Some(self_rc._root.clone()), None)?.into();
+        *self_rc.bbox.borrow_mut() = t;
         let t = Self::read_into::<_, PkoLmo_Matrix44>(&*_io, Some(self_rc._root.clone()), None)?.into();
         *self_rc.mat.borrow_mut() = t;
         Ok(())
@@ -1355,8 +1406,8 @@ impl PkoLmo_BoundingBoxInfo {
     }
 }
 impl PkoLmo_BoundingBoxInfo {
-    pub fn box(&self) -> Ref<'_, OptRc<PkoLmo_Box>> {
-        self.box.borrow()
+    pub fn bbox(&self) -> Ref<'_, OptRc<PkoLmo_Aabb>> {
+        self.bbox.borrow()
     }
 }
 impl PkoLmo_BoundingBoxInfo {
@@ -1423,57 +1474,6 @@ impl PkoLmo_BoundingSphereInfo {
     }
 }
 impl PkoLmo_BoundingSphereInfo {
-    pub fn _io(&self) -> Ref<'_, BytesReader> {
-        self._io.borrow()
-    }
-}
-
-#[derive(Default, Debug, Clone)]
-pub struct PkoLmo_Box {
-    pub _root: SharedType<PkoLmo>,
-    pub _parent: SharedType<KStructUnit>,
-    pub _self: SharedType<Self>,
-    center: RefCell<OptRc<PkoLmo_Vector3>>,
-    radius: RefCell<OptRc<PkoLmo_Vector3>>,
-    _io: RefCell<BytesReader>,
-}
-impl KStruct for PkoLmo_Box {
-    type Root = PkoLmo;
-    type Parent = KStructUnit;
-
-    fn read<S: KStream>(
-        self_rc: &OptRc<Self>,
-        _io: &S,
-        _root: SharedType<Self::Root>,
-        _parent: SharedType<Self::Parent>,
-    ) -> KResult<()> {
-        *self_rc._io.borrow_mut() = _io.clone();
-        self_rc._root.set(_root.get());
-        self_rc._parent.set(_parent.get());
-        self_rc._self.set(Ok(self_rc.clone()));
-        let _rrc = self_rc._root.get_value().borrow().upgrade();
-        let _prc = self_rc._parent.get_value().borrow().upgrade();
-        let _r = _rrc.as_ref().unwrap();
-        let t = Self::read_into::<_, PkoLmo_Vector3>(&*_io, Some(self_rc._root.clone()), None)?.into();
-        *self_rc.center.borrow_mut() = t;
-        let t = Self::read_into::<_, PkoLmo_Vector3>(&*_io, Some(self_rc._root.clone()), None)?.into();
-        *self_rc.radius.borrow_mut() = t;
-        Ok(())
-    }
-}
-impl PkoLmo_Box {
-}
-impl PkoLmo_Box {
-    pub fn center(&self) -> Ref<'_, OptRc<PkoLmo_Vector3>> {
-        self.center.borrow()
-    }
-}
-impl PkoLmo_Box {
-    pub fn radius(&self) -> Ref<'_, OptRc<PkoLmo_Vector3>> {
-        self.radius.borrow()
-    }
-}
-impl PkoLmo_Box {
     pub fn _io(&self) -> Ref<'_, BytesReader> {
         self._io.borrow()
     }
@@ -2321,7 +2321,7 @@ impl PkoLmo_GeometryChunk {
             return Ok(self.chunk_payload_size.borrow());
         }
         self.f_chunk_payload_size.set(true);
-        *self.chunk_payload_size.borrow_mut() = (if  ((((*self.file_version() as u32) == (0 as u32))) && (((*self.has_outer_legacy_prefix() as u8) != (0 as u8))))  { ((*_io.size() as i32) - (4 as i32)) } else { *_io.size() }) as i32;
+        *self.chunk_payload_size.borrow_mut() = (if  ((((*self.file_version() as u32) == (0 as u32))) && (((*self.has_outer_legacy_prefix() as u8) != (0 as u8))))  { ((_io.size() as i32) - (4 as i32)) } else { _io.size() as i32 }) as i32;
         Ok(self.chunk_payload_size.borrow())
     }
     pub fn header_offset(
@@ -2401,9 +2401,9 @@ pub struct PkoLmo_HelperBoxInfo {
     pub _parent: SharedType<PkoLmo_HelperSection>,
     pub _self: SharedType<Self>,
     id: RefCell<u32>,
-    type: RefCell<u32>,
+    obj_type: RefCell<u32>,
     state: RefCell<u32>,
-    box: RefCell<OptRc<PkoLmo_Box>>,
+    bbox: RefCell<OptRc<PkoLmo_Aabb>>,
     mat: RefCell<OptRc<PkoLmo_Matrix44>>,
     name: RefCell<Vec<u8>>,
     _io: RefCell<BytesReader>,
@@ -2426,10 +2426,10 @@ impl KStruct for PkoLmo_HelperBoxInfo {
         let _prc = self_rc._parent.get_value().borrow().upgrade();
         let _r = _rrc.as_ref().unwrap();
         *self_rc.id.borrow_mut() = _io.read_u4le()?.into();
-        *self_rc.type.borrow_mut() = _io.read_u4le()?.into();
+        *self_rc.obj_type.borrow_mut() = _io.read_u4le()?.into();
         *self_rc.state.borrow_mut() = _io.read_u4le()?.into();
-        let t = Self::read_into::<_, PkoLmo_Box>(&*_io, Some(self_rc._root.clone()), None)?.into();
-        *self_rc.box.borrow_mut() = t;
+        let t = Self::read_into::<_, PkoLmo_Aabb>(&*_io, Some(self_rc._root.clone()), None)?.into();
+        *self_rc.bbox.borrow_mut() = t;
         let t = Self::read_into::<_, PkoLmo_Matrix44>(&*_io, Some(self_rc._root.clone()), None)?.into();
         *self_rc.mat.borrow_mut() = t;
         *self_rc.name.borrow_mut() = _io.read_bytes(32 as usize)?.into();
@@ -2444,8 +2444,8 @@ impl PkoLmo_HelperBoxInfo {
     }
 }
 impl PkoLmo_HelperBoxInfo {
-    pub fn type(&self) -> Ref<'_, u32> {
-        self.type.borrow()
+    pub fn obj_type(&self) -> Ref<'_, u32> {
+        self.obj_type.borrow()
     }
 }
 impl PkoLmo_HelperBoxInfo {
@@ -2454,8 +2454,8 @@ impl PkoLmo_HelperBoxInfo {
     }
 }
 impl PkoLmo_HelperBoxInfo {
-    pub fn box(&self) -> Ref<'_, OptRc<PkoLmo_Box>> {
-        self.box.borrow()
+    pub fn bbox(&self) -> Ref<'_, OptRc<PkoLmo_Aabb>> {
+        self.bbox.borrow()
     }
 }
 impl PkoLmo_HelperBoxInfo {
@@ -2808,12 +2808,12 @@ pub struct PkoLmo_HelperMeshInfo {
     pub _parent: SharedType<PkoLmo_HelperSection>,
     pub _self: SharedType<Self>,
     id: RefCell<u32>,
-    type: RefCell<u32>,
+    obj_type: RefCell<u32>,
     sub_type: RefCell<u32>,
     name: RefCell<Vec<u8>>,
     state: RefCell<u32>,
     mat: RefCell<OptRc<PkoLmo_Matrix44>>,
-    box: RefCell<OptRc<PkoLmo_Box>>,
+    bbox: RefCell<OptRc<PkoLmo_Aabb>>,
     vertex_num: RefCell<u32>,
     face_num: RefCell<u32>,
     vertex_seq: RefCell<Vec<OptRc<PkoLmo_Vector3>>>,
@@ -2838,14 +2838,14 @@ impl KStruct for PkoLmo_HelperMeshInfo {
         let _prc = self_rc._parent.get_value().borrow().upgrade();
         let _r = _rrc.as_ref().unwrap();
         *self_rc.id.borrow_mut() = _io.read_u4le()?.into();
-        *self_rc.type.borrow_mut() = _io.read_u4le()?.into();
+        *self_rc.obj_type.borrow_mut() = _io.read_u4le()?.into();
         *self_rc.sub_type.borrow_mut() = _io.read_u4le()?.into();
         *self_rc.name.borrow_mut() = _io.read_bytes(32 as usize)?.into();
         *self_rc.state.borrow_mut() = _io.read_u4le()?.into();
         let t = Self::read_into::<_, PkoLmo_Matrix44>(&*_io, Some(self_rc._root.clone()), None)?.into();
         *self_rc.mat.borrow_mut() = t;
-        let t = Self::read_into::<_, PkoLmo_Box>(&*_io, Some(self_rc._root.clone()), None)?.into();
-        *self_rc.box.borrow_mut() = t;
+        let t = Self::read_into::<_, PkoLmo_Aabb>(&*_io, Some(self_rc._root.clone()), None)?.into();
+        *self_rc.bbox.borrow_mut() = t;
         *self_rc.vertex_num.borrow_mut() = _io.read_u4le()?.into();
         *self_rc.face_num.borrow_mut() = _io.read_u4le()?.into();
         *self_rc.vertex_seq.borrow_mut() = Vec::new();
@@ -2871,8 +2871,8 @@ impl PkoLmo_HelperMeshInfo {
     }
 }
 impl PkoLmo_HelperMeshInfo {
-    pub fn type(&self) -> Ref<'_, u32> {
-        self.type.borrow()
+    pub fn obj_type(&self) -> Ref<'_, u32> {
+        self.obj_type.borrow()
     }
 }
 impl PkoLmo_HelperMeshInfo {
@@ -2896,8 +2896,8 @@ impl PkoLmo_HelperMeshInfo {
     }
 }
 impl PkoLmo_HelperMeshInfo {
-    pub fn box(&self) -> Ref<'_, OptRc<PkoLmo_Box>> {
-        self.box.borrow()
+    pub fn bbox(&self) -> Ref<'_, OptRc<PkoLmo_Aabb>> {
+        self.bbox.borrow()
     }
 }
 impl PkoLmo_HelperMeshInfo {
@@ -3384,7 +3384,7 @@ impl PkoLmo_MaterialSection {
             return Ok(self.has_legacy_prefix.borrow());
         }
         self.f_has_legacy_prefix.set(true);
-        *self.has_legacy_prefix.borrow_mut() = ( ((((*self.file_version() as u32) == (0 as u32))) && (((*_io.size() as i32) >= (8 as i32))) && (*self.known_version_marker()?) && (((*self.second_u4()? as i32) <= (65535 as i32)))) ) as bool;
+        *self.has_legacy_prefix.borrow_mut() = ( ((((*self.file_version() as u32) == (0 as u32))) && (((_io.size() as i32) >= (8 as i32))) && (*self.known_version_marker()?) && (((*self.second_u4()? as i32) <= (65535 as i32)))) ) as bool;
         Ok(self.has_legacy_prefix.borrow())
     }
     pub fn known_version_marker(
@@ -3412,7 +3412,7 @@ impl PkoLmo_MaterialSection {
             return Ok(self.legacy_extra_mtl_possible.borrow());
         }
         self.f_legacy_extra_mtl_possible.set(true);
-        *self.legacy_extra_mtl_possible.borrow_mut() = ( ((((*self.file_version() as u32) == (0 as u32))) && (!(*self.has_legacy_prefix()?)) && (*self.format_hint()? == 1000) && (((*_io.size() as i32) - (_io.pos() as i32)) == ((*self.mtl_num() as u32) * (68 as u32)))) ) as bool;
+        *self.legacy_extra_mtl_possible.borrow_mut() = ( ((((*self.file_version() as u32) == (0 as u32))) && (!(*self.has_legacy_prefix()?)) && (*self.format_hint()? == 1000) && (((_io.size() as i32) - (_io.pos() as i32)) == ((*self.mtl_num() as i32) * (68 as i32)))) ) as bool;
         Ok(self.legacy_extra_mtl_possible.borrow())
     }
     pub fn second_u4(
@@ -3426,7 +3426,7 @@ impl PkoLmo_MaterialSection {
             return Ok(self.second_u4.borrow());
         }
         self.f_second_u4.set(true);
-        if ((*_io.size() as i32) >= (8 as i32)) {
+        if ((_io.size() as i32) >= (8 as i32)) {
             let _pos = _io.pos();
             _io.seek(4 as usize)?;
             *self.second_u4.borrow_mut() = _io.read_u4le()?.into();
@@ -4293,7 +4293,7 @@ impl PkoLmo_MeshSection {
             return Ok(self.has_legacy_pre_index_pair.borrow());
         }
         self.f_has_legacy_pre_index_pair.set(true);
-        *self.has_legacy_pre_index_pair.borrow_mut() = ( ((((*self.header_kind()? as u8) == (0 as u8))) && (((*_io.size() as i32) - (_io.pos() as i32)) == ((((*self.index_num()? as u32) * (4 as u32)) as i32) + (8 as i32)))) ) as bool;
+        *self.has_legacy_pre_index_pair.borrow_mut() = ( ((((*self.header_kind()? as u8) == (0 as u8))) && (((_io.size() as i32) - (_io.pos() as i32)) == ((((*self.index_num()? as u32) * (4 as u32)) as i32) + (8 as i32)))) ) as bool;
         Ok(self.has_legacy_pre_index_pair.borrow())
     }
     pub fn has_normals(
@@ -4501,7 +4501,7 @@ pub struct PkoLmo_ModelNodeHeadInfo {
     pub _parent: SharedType<PkoLmo_ModelNodeInfo>,
     pub _self: SharedType<Self>,
     handle: RefCell<u32>,
-    type: RefCell<u32>,
+    obj_type: RefCell<u32>,
     id: RefCell<u32>,
     descriptor: RefCell<Vec<u8>>,
     parent_handle: RefCell<u32>,
@@ -4527,8 +4527,8 @@ impl KStruct for PkoLmo_ModelNodeHeadInfo {
         let _prc = self_rc._parent.get_value().borrow().upgrade();
         let _r = _rrc.as_ref().unwrap();
         *self_rc.handle.borrow_mut() = _io.read_u4le()?.into();
-        *self_rc.type.borrow_mut() = _io.read_u4le()?.into();
-        if !( ((((*self_rc.type() as u32) == (1 as u32))) || (((*self_rc.type() as u32) == (2 as u32))) || (((*self_rc.type() as u32) == (3 as u32))) || (((*self_rc.type() as u32) == (4 as u32)))) ) {
+        *self_rc.obj_type.borrow_mut() = _io.read_u4le()?.into();
+        if !( ((((*self_rc.obj_type() as u32) == (1 as u32))) || (((*self_rc.obj_type() as u32) == (2 as u32))) || (((*self_rc.obj_type() as u32) == (3 as u32))) || (((*self_rc.obj_type() as u32) == (4 as u32)))) ) {
             return Err(KError::ValidationFailed(ValidationFailedError { kind: ValidationKind::NotAnyOf, src_path: "/types/model_node_head_info/seq/1".to_string() }));
         }
         *self_rc.id.borrow_mut() = _io.read_u4le()?.into();
@@ -4547,8 +4547,8 @@ impl PkoLmo_ModelNodeHeadInfo {
     }
 }
 impl PkoLmo_ModelNodeHeadInfo {
-    pub fn type(&self) -> Ref<'_, u32> {
-        self.type.borrow()
+    pub fn obj_type(&self) -> Ref<'_, u32> {
+        self.obj_type.borrow()
     }
 }
 impl PkoLmo_ModelNodeHeadInfo {
@@ -4614,21 +4614,21 @@ impl KStruct for PkoLmo_ModelNodeInfo {
         let _r = _rrc.as_ref().unwrap();
         let t = Self::read_into::<_, PkoLmo_ModelNodeHeadInfo>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
         *self_rc.head.borrow_mut() = t;
-        if ((*self_rc.head().type() as u32) == (1 as u32)) {
+        if ((*self_rc.head().obj_type() as u32) == (1 as u32)) {
             let f = |t : &mut PkoLmo_GeometryChunk| Ok(t.set_params((*self_rc.file_version()).try_into().map_err(|_| KError::CastError)?, (0).try_into().map_err(|_| KError::CastError)?));
             let t = Self::read_into_with_init::<_, PkoLmo_GeometryChunk>(&*_io, Some(self_rc._root.clone()), None, &f)?.into();
             *self_rc.node_primitive.borrow_mut() = t;
         }
-        if ((*self_rc.head().type() as u32) == (2 as u32)) {
+        if ((*self_rc.head().obj_type() as u32) == (2 as u32)) {
             let f = |t : &mut PkoLmo_AnimDataBone| Ok(t.set_params((*self_rc.file_version()).try_into().map_err(|_| KError::CastError)?));
             let t = Self::read_into_with_init::<_, PkoLmo_AnimDataBone>(&*_io, Some(self_rc._root.clone()), None, &f)?.into();
             *self_rc.node_bonectrl.borrow_mut() = t;
         }
-        if ((*self_rc.head().type() as u32) == (3 as u32)) {
+        if ((*self_rc.head().obj_type() as u32) == (3 as u32)) {
             let t = Self::read_into::<_, PkoLmo_HelperDummyObjInfo>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
             *self_rc.node_dummy.borrow_mut() = t;
         }
-        if ((*self_rc.head().type() as u32) == (4 as u32)) {
+        if ((*self_rc.head().obj_type() as u32) == (4 as u32)) {
             let f = |t : &mut PkoLmo_HelperSection| Ok(t.set_params((*self_rc.file_version()).try_into().map_err(|_| KError::CastError)?));
             let t = Self::read_into_with_init::<_, PkoLmo_HelperSection>(&*_io, Some(self_rc._root.clone()), None, &f)?.into();
             *self_rc.node_helper.borrow_mut() = t;
@@ -4981,7 +4981,7 @@ pub struct PkoLmo_ObjectEntry {
     pub _root: SharedType<PkoLmo>,
     pub _parent: SharedType<PkoLmo>,
     pub _self: SharedType<Self>,
-    type: RefCell<u32>,
+    obj_type: RefCell<u32>,
     addr: RefCell<u32>,
     size: RefCell<u32>,
     _io: RefCell<BytesReader>,
@@ -5009,8 +5009,8 @@ impl KStruct for PkoLmo_ObjectEntry {
         let _rrc = self_rc._root.get_value().borrow().upgrade();
         let _prc = self_rc._parent.get_value().borrow().upgrade();
         let _r = _rrc.as_ref().unwrap();
-        *self_rc.type.borrow_mut() = _io.read_u4le()?.into();
-        if !( ((((*self_rc.type() as u32) == (1 as u32))) || (((*self_rc.type() as u32) == (2 as u32)))) ) {
+        *self_rc.obj_type.borrow_mut() = _io.read_u4le()?.into();
+        if !( ((((*self_rc.obj_type() as u32) == (1 as u32))) || (((*self_rc.obj_type() as u32) == (2 as u32)))) ) {
             return Err(KError::ValidationFailed(ValidationFailedError { kind: ValidationKind::NotAnyOf, src_path: "/types/object_entry/seq/0".to_string() }));
         }
         *self_rc.addr.borrow_mut() = _io.read_u4le()?.into();
@@ -5029,7 +5029,7 @@ impl PkoLmo_ObjectEntry {
         if self.f_body_geometry.get() {
             return Ok(self.body_geometry.borrow());
         }
-        if ((*self.type() as u32) == (1 as u32)) {
+        if ((*self.obj_type() as u32) == (1 as u32)) {
             let _pos = _io.pos();
             _io.seek(*self.addr() as usize)?;
             *self.body_geometry_raw.borrow_mut() = _io.read_bytes(*self.size() as usize)?.into();
@@ -5052,7 +5052,7 @@ impl PkoLmo_ObjectEntry {
         if self.f_body_helper.get() {
             return Ok(self.body_helper.borrow());
         }
-        if ((*self.type() as u32) == (2 as u32)) {
+        if ((*self.obj_type() as u32) == (2 as u32)) {
             let _pos = _io.pos();
             _io.seek(*self.addr() as usize)?;
             *self.body_helper_raw.borrow_mut() = _io.read_bytes(*self.size() as usize)?.into();
@@ -5067,8 +5067,8 @@ impl PkoLmo_ObjectEntry {
     }
 }
 impl PkoLmo_ObjectEntry {
-    pub fn type(&self) -> Ref<'_, u32> {
-        self.type.borrow()
+    pub fn obj_type(&self) -> Ref<'_, u32> {
+        self.obj_type.borrow()
     }
 }
 impl PkoLmo_ObjectEntry {

@@ -873,6 +873,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cp437"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "891a48ae269a368d5e45e0b13ee401f90d3d400da92d881f7cb67bc9da711c14"
+
+[[package]]
 name = "cpufeatures"
 version = "0.2.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1277,6 +1283,56 @@ name = "embed_plist"
 version = "1.2.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ef6b89e5b37196644d8796de5268852ff179b44e96276cf4290264843743bb7"
+
+[[package]]
+name = "encoding-next"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a9608b0ee6675c72999ffd7f741cce94952ced799a1db80724eab2a77791a994"
+dependencies = [
+ "encoding-next-index-japanese",
+ "encoding-next-index-korean",
+ "encoding-next-index-simpchinese",
+ "encoding-next-index-singlebyte",
+ "encoding-next-index-tradchinese",
+ "encoding-next-types",
+]
+
+[[package]]
+name = "encoding-next-index-japanese"
+version = "1.20180106.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3cf1797243d6c8f00a269ec6abc8b13a3b74c30d76f2834a6e801a814204f257"
+
+[[package]]
+name = "encoding-next-index-korean"
+version = "1.20180106.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f43fb584f42bbc55eae6c98ce2cb6d7f546a83eca694eb4866016dce5d9ea677"
+
+[[package]]
+name = "encoding-next-index-simpchinese"
+version = "1.20180106.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1dc69fd6a1f1c5fc2206ba488c73ab401587039539dad3d708a5074e7ae4a20"
+
+[[package]]
+name = "encoding-next-index-singlebyte"
+version = "1.20180106.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e02c0bac231a1cc5f494a7d78ef01b4a2e8927d34b9b5c8436cd486dc06d9a85"
+
+[[package]]
+name = "encoding-next-index-tradchinese"
+version = "1.20180106.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ee153a743b1f854f1595037b8fd285c8660ebf20ccb4384b81768b6d5f65ec5c"
+
+[[package]]
+name = "encoding-next-types"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "140d4fb15765d628e2b75335e8a8697bcbb4cdd2e639130335ce09985857e50f"
 
 [[package]]
 name = "encoding_rs"
@@ -2637,6 +2693,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "kaitai"
+version = "0.11.0"
+source = "git+https://github.com/kaitai-io/kaitai_struct_rust_runtime.git?rev=9959613#99596131793229cdee71775e1b4c72f18467ef79"
+dependencies = [
+ "cp437",
+ "encoding-next",
+ "flate2",
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "keyboard-types"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3794,6 +3861,7 @@ dependencies = [
  "csv",
  "gltf",
  "image",
+ "kaitai",
  "ptree",
  "rusqlite",
  "sentry",

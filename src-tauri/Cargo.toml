@@ -52,6 +52,7 @@ image = { version = "0.25.5", features = ["default", "dds"] }
 texture2ddecoder = "0.1"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 sentry = { version = "0.36.0", features = ["anyhow"] }
+kaitai = { git = "https://github.com/kaitai-io/kaitai_struct_rust_runtime.git", rev = "9959613" }
 
 [dev-dependencies]
 tempfile = "3"

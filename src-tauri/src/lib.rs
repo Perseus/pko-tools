@@ -1,5 +1,17 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
+#[path = "../gen/kaitai/mod.rs"]
+#[allow(
+    unused_imports,
+    non_snake_case,
+    non_camel_case_types,
+    irrefutable_let_patterns,
+    unused_comparisons,
+    dead_code,
+    clippy::all
+)]
+pub(crate) mod kaitai_gen;
+
 pub mod animation;
 mod broadcast;
 pub mod character;
