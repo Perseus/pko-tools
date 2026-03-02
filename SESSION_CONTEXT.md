@@ -1,24 +1,30 @@
 # Session Context
 
 ## Plan
-- **File:** ~/.claude/plans/lexical-snacking-bumblebee.md
-- **Linear Parent:** [PKO-121](https://linear.app/pko-new/issue/PKO-121) — Fix: DXT1 textures losing alpha channel in LMO→GLB export
-- **Started:** 2026-02-28T15:11Z
+- **File:** `~/.claude/plans/harmonic-napping-reef.md`
+- **Started:** 2026-03-02T07:49Z
+- **Completed:** 2026-03-02T09:00Z
+- **Linear Parent:** [PKO-136](https://linear.app/pko-new/issue/PKO-136) — Kaitai LMO Adapter: Replace Hand-Written Parser
 
 ## Progress
 | Phase | Branch | Linear | Status | Commit |
 |-------|--------|--------|--------|--------|
-| Phase A: Add dep + decode helper | feat/dxt1-alpha-phase-a | PKO-122 | done | 0037b6c |
-| Phase B: Update scene_model.rs | feat/dxt1-alpha-phase-b | PKO-123 | done | 338e973 |
-| Phase C: Fix item/model.rs | feat/dxt1-alpha-phase-c | PKO-124 | done | 26499a0 |
-| Phase D: Regression tests | feat/dxt1-alpha-phase-d | PKO-125 | done | e5c588b |
-| Phase E: Documentation | feat/dxt1-alpha-phase-e | PKO-126 | done | (this commit) |
+| Phase 0: Fix compile blockers | feat/kaitai-lmo-adapter-phase-a | PKO-137 | done | bed3fef |
+| Phase 1: Shared utilities | feat/kaitai-lmo-adapter-phase-b | PKO-138 | done | 7286ca3 |
+| Phase 2: kaitai_to_lmo adapter | feat/kaitai-lmo-adapter-phase-c | PKO-139 | done | c690f63 |
+| Phase 3: No-animation path | feat/kaitai-lmo-adapter-phase-d | PKO-140 | done | 2dcc25d |
+| Phase 4: Exhaustive testing | feat/kaitai-lmo-adapter-phase-e | PKO-141 | done | c94b949 |
 
 ## Decisions
-- **Other texture sites left unchanged:** `shared.rs`, `texture.rs`, `terrain.rs`, and `effect/commands.rs` also use `image::load_from_memory` after `decode_pko_texture`. These were NOT changed because they output standalone image files (terrain PNGs, effect textures), not embedded GLB materials with alpha test. DXT1 alpha only matters for building/item materials that use `alphaMode: Mask`. If needed later, they can be migrated to `decode_dds_with_alpha()`.
-- **BGRA byte order:** `texture2ddecoder` outputs u32 pixels where LE bytes = [B,G,R,A]. We swap to [R,G,B,A] for `image::RgbaImage`.
-- **texture2ddecoder v0.1 (latest):** Used v0.1.2 instead of the plan's suggested v0.0.5. Pure Rust, no-std, same API.
+1. **Kaitai runtime**: Used `kaitai-io/kaitai_struct_rust_runtime` git dep (rev 9959613) instead of `kaitai = "0.1.2"` crate (requires nightly Rust).
+2. **Generated code fixes**: Applied 4 categories of post-generation patches to `pko_lmo.rs` (deref usize, type mismatches, literal overflow, arithmetic overflow).
+3. **BytesReader clone bug**: `_io.pos()` returns stale position on cloned reader. Worked around in adapter by re-reading indices from raw mesh bytes for header_kind=0 files with legacy pre-index pair.
+4. **load_lmo_no_animation**: Pinned to native backend for perf-critical batch path.
 
 ## Known Issues
-- Pre-existing test failure: `test_tile_color_png_round_trip` (not caused by our changes)
-- Pre-existing: `model_088_roundtrip_test` signature mismatch (not caused by our changes)
+- BytesReader clone bug in kaitai_struct_rust_runtime makes `_io.pos` unreliable in computed instances. Filed workaround in adapter, upstream fix would need shared ReaderState.
+- Generated `pko_lmo.rs` requires manual post-generation patches. Documented in Phase 0 commit.
+
+## Test Results
+- **1,177/1,177** .lmo files pass exhaustive parity test (0 both-failed)
+- **376** total tests pass (321 lib + 55 integration), 0 failures

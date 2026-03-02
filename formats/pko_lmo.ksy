@@ -54,7 +54,7 @@ types:
     seq:
       - id: handle
         type: u4
-      - id: type
+      - id: obj_type
         type: u4
         valid:
           any-of: [1, 2, 3, 4]
@@ -90,20 +90,20 @@ types:
         type: model_node_head_info
       - id: node_primitive
         type: geometry_chunk(file_version, 0)
-        if: head.type == 1
+        if: head.obj_type == 1
       - id: node_bonectrl
         type: anim_data_bone(file_version)
-        if: head.type == 2
+        if: head.obj_type == 2
       - id: node_dummy
         type: helper_dummy_obj_info
-        if: head.type == 3
+        if: head.obj_type == 3
       - id: node_helper
         type: helper_section(file_version)
-        if: head.type == 4
+        if: head.obj_type == 4
 
   object_entry:
     seq:
-      - id: type
+      - id: obj_type
         type: u4
         valid:
           any-of: [1, 2]
@@ -115,12 +115,12 @@ types:
       body_geometry:
         pos: addr
         size: size
-        if: type == 1
+        if: obj_type == 1
         type: geometry_chunk(_root.version, 1)
       body_helper:
         pos: addr
         size: size
-        if: type == 2
+        if: obj_type == 2
         type: helper_section(_root.version)
 
   geometry_chunk:
@@ -926,7 +926,7 @@ types:
       - id: d
         type: f4
 
-  box:
+  aabb:
     seq:
       - id: center
         type: vector3
@@ -976,12 +976,12 @@ types:
     seq:
       - id: id
         type: u4
-      - id: type
+      - id: obj_type
         type: u4
       - id: state
         type: u4
-      - id: box
-        type: box
+      - id: bbox
+        type: aabb
       - id: mat
         type: matrix44
       - id: name
@@ -1006,7 +1006,7 @@ types:
     seq:
       - id: id
         type: u4
-      - id: type
+      - id: obj_type
         type: u4
       - id: sub_type
         type: u4
@@ -1016,8 +1016,8 @@ types:
         type: u4
       - id: mat
         type: matrix44
-      - id: box
-        type: box
+      - id: bbox
+        type: aabb
       - id: vertex_num
         type: u4
       - id: face_num
@@ -1035,8 +1035,8 @@ types:
     seq:
       - id: id
         type: u4
-      - id: box
-        type: box
+      - id: bbox
+        type: aabb
       - id: mat
         type: matrix44
 
