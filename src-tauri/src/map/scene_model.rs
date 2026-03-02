@@ -945,6 +945,7 @@ fn build_anim_extras(geom: &LmoGeomObject, geom_index: usize) -> gltf_json::extr
                 "transform_anim".to_string(),
                 serde_json::json!({
                     "frame_num": anim.frame_num,
+                    "frame_rate": FRAME_RATE,
                     "translations": translations,
                     "rotations": rotations,
                 }),
@@ -2339,6 +2340,7 @@ mod tests {
         assert_eq!(parsed["geom_index"], 5, "geom_index should match the gi parameter");
         assert!(parsed["transform_anim"].is_object(), "should have transform_anim");
         assert_eq!(parsed["transform_anim"]["frame_num"], 3);
+        assert_eq!(parsed["transform_anim"]["frame_rate"], 30.0);
         assert_eq!(
             parsed["transform_anim"]["translations"].as_array().unwrap().len(),
             3
