@@ -1,4 +1,4 @@
-use std::io::{Read, Write};
+use std::io::Write;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -75,46 +75,13 @@ pub struct CylinderParams {
 
 impl EffFile {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        let mut reader = std::io::Cursor::new(bytes);
-        Self::read_from(&mut reader)
+        super::eff_loader::load_eff(bytes)
     }
 
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
         let mut buffer = Vec::new();
         self.write_to(&mut buffer)?;
         Ok(buffer)
-    }
-
-    pub fn read_from<R: Read>(reader: &mut R) -> Result<Self> {
-        let version = read_u32(reader)?;
-        let idx_tech = read_i32(reader)?;
-        let use_path = read_bool(reader)?;
-        let path_name = read_fixed_string(reader)?;
-        let use_sound = read_bool(reader)?;
-        let sound_name = read_fixed_string(reader)?;
-        let rotating = read_bool(reader)?;
-        let rota_vec = read_vec3(reader)?;
-        let rota_vel = read_f32(reader)?;
-        let eff_num = read_i32(reader)?;
-
-        let mut sub_effects = Vec::with_capacity(eff_num.max(0) as usize);
-        for _ in 0..eff_num.max(0) {
-            sub_effects.push(SubEffect::read_from(reader, version)?);
-        }
-
-        Ok(Self {
-            version,
-            idx_tech,
-            use_path,
-            path_name,
-            use_sound,
-            sound_name,
-            rotating,
-            rota_vec,
-            rota_vel,
-            eff_num,
-            sub_effects,
-        })
     }
 
     pub fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
@@ -138,159 +105,6 @@ impl EffFile {
 }
 
 impl SubEffect {
-    fn read_from<R: Read>(reader: &mut R, version: u32) -> Result<Self> {
-        let effect_name = read_fixed_string(reader)?;
-        let effect_type = read_i32(reader)?;
-        let src_blend = read_blend(reader)?;
-        let dest_blend = read_blend(reader)?;
-        let length = read_f32(reader)?;
-        let frame_count = read_u16(reader)?;
-
-        let mut frame_times = Vec::with_capacity(frame_count as usize);
-        for _ in 0..frame_count {
-            frame_times.push(read_f32(reader)?);
-        }
-
-        let mut frame_sizes = Vec::with_capacity(frame_count as usize);
-        let mut frame_angles = Vec::with_capacity(frame_count as usize);
-        let mut frame_positions = Vec::with_capacity(frame_count as usize);
-        let mut frame_colors = Vec::with_capacity(frame_count as usize);
-        for _ in 0..frame_count {
-            frame_sizes.push(read_vec3(reader)?);
-        }
-        for _ in 0..frame_count {
-            frame_angles.push(read_vec3(reader)?);
-        }
-        for _ in 0..frame_count {
-            frame_positions.push(read_vec3(reader)?);
-        }
-        for _ in 0..frame_count {
-            frame_colors.push(read_vec4(reader)?);
-        }
-
-        let ver_count = read_u16(reader)?;
-        let coord_count = read_u16(reader)?;
-        let coord_frame_time = read_f32(reader)?;
-        let coord_list = read_coord_list(reader, coord_count, ver_count)?;
-
-        let tex_count = read_u16(reader)?;
-        let tex_frame_time = read_f32(reader)?;
-        let tex_name = read_fixed_string(reader)?;
-        let tex_list = read_coord_list(reader, tex_count, ver_count)?;
-
-        let model_name = read_fixed_string(reader)?;
-        let billboard = read_bool(reader)?;
-        let vs_index = read_i32(reader)?;
-
-        let (segments, height, top_radius, bot_radius) = if version > 1 {
-            (
-                read_i32(reader)?,
-                read_f32(reader)?,
-                read_f32(reader)?,
-                read_f32(reader)?,
-            )
-        } else {
-            (0, 0.0, 0.0, 0.0)
-        };
-
-        let (frame_tex_count, frame_tex_time, frame_tex_names, frame_tex_time2) = if version > 2 {
-            let frame_tex_count = read_u16(reader)?;
-            let frame_tex_time = read_f32(reader)?;
-            let mut frame_tex_names = Vec::with_capacity(frame_tex_count as usize);
-            for _ in 0..frame_tex_count {
-                frame_tex_names.push(read_fixed_string(reader)?);
-            }
-            let frame_tex_time2 = read_f32(reader)?;
-
-            (
-                frame_tex_count,
-                frame_tex_time,
-                frame_tex_names,
-                frame_tex_time2,
-            )
-        } else {
-            (0, 0.0, Vec::new(), 0.0)
-        };
-
-        let (use_param, per_frame_cylinder) = if version > 3 {
-            let use_param = read_i32(reader)?;
-            let mut per_frame_cylinder = Vec::new();
-            if use_param > 0 {
-                per_frame_cylinder.reserve(frame_count as usize);
-                for _ in 0..frame_count {
-                    per_frame_cylinder.push(CylinderParams {
-                        segments: read_i32(reader)?,
-                        height: read_f32(reader)?,
-                        top_radius: read_f32(reader)?,
-                        bot_radius: read_f32(reader)?,
-                    });
-                }
-            }
-
-            (use_param, per_frame_cylinder)
-        } else {
-            (0, Vec::new())
-        };
-
-        let (rota_loop, rota_loop_vec) = if version > 4 {
-            let rota_loop = read_bool(reader)?;
-            let rota_loop_vec = read_vec4(reader)?;
-            (rota_loop, rota_loop_vec)
-        } else {
-            (false, [0.0, 0.0, 0.0, 0.0])
-        };
-
-        let alpha = if version > 5 {
-            read_bool(reader)?
-        } else {
-            false
-        };
-        let rota_board = if version > 6 {
-            read_bool(reader)?
-        } else {
-            false
-        };
-
-        Ok(Self {
-            effect_name,
-            effect_type,
-            src_blend,
-            dest_blend,
-            length,
-            frame_count,
-            frame_times,
-            frame_sizes,
-            frame_angles,
-            frame_positions,
-            frame_colors,
-            ver_count,
-            coord_count,
-            coord_frame_time,
-            coord_list,
-            tex_count,
-            tex_frame_time,
-            tex_name,
-            tex_list,
-            model_name,
-            billboard,
-            vs_index,
-            segments,
-            height,
-            top_radius,
-            bot_radius,
-            frame_tex_count,
-            frame_tex_time,
-            frame_tex_names,
-            frame_tex_time2,
-            use_param,
-            per_frame_cylinder,
-            rota_loop,
-            rota_loop_vec,
-            alpha,
-            rota_board,
-        })
-    }
-
     fn write_to<W: Write>(&self, writer: &mut W, version: u32) -> Result<()> {
         write_fixed_string(writer, &self.effect_name)?;
         write_i32(writer, self.effect_type)?;
@@ -374,23 +188,6 @@ impl SubEffect {
     }
 }
 
-fn read_coord_list<R: Read>(
-    reader: &mut R,
-    count: u16,
-    ver_count: u16,
-) -> Result<Vec<Vec<[f32; 2]>>> {
-    let mut coord_list = Vec::with_capacity(count as usize);
-    for _ in 0..count {
-        let mut frame = Vec::with_capacity(ver_count as usize);
-        for _ in 0..ver_count {
-            frame.push(read_vec2(reader)?);
-        }
-        coord_list.push(frame);
-    }
-
-    Ok(coord_list)
-}
-
 fn write_coord_list<W: Write>(
     writer: &mut W,
     coord_list: &[Vec<[f32; 2]>],
@@ -413,13 +210,6 @@ fn write_coord_list<W: Write>(
     Ok(())
 }
 
-fn read_fixed_string<R: Read>(reader: &mut R) -> Result<String> {
-    let mut buffer = [0u8; FIXED_NAME_LEN];
-    reader.read_exact(&mut buffer)?;
-    let end = buffer.iter().position(|b| *b == 0).unwrap_or(buffer.len());
-    Ok(String::from_utf8_lossy(&buffer[..end]).to_string())
-}
-
 fn write_fixed_string<W: Write>(writer: &mut W, value: &str) -> Result<()> {
     let mut buffer = [0u8; FIXED_NAME_LEN];
     let bytes = value.as_bytes();
@@ -427,62 +217,6 @@ fn write_fixed_string<W: Write>(writer: &mut W, value: &str) -> Result<()> {
     buffer[..len].copy_from_slice(&bytes[..len]);
     writer.write_all(&buffer)?;
     Ok(())
-}
-
-fn read_u8<R: Read>(reader: &mut R) -> Result<u8> {
-    let mut buffer = [0u8; 1];
-    reader.read_exact(&mut buffer)?;
-    Ok(buffer[0])
-}
-
-fn read_u16<R: Read>(reader: &mut R) -> Result<u16> {
-    let mut buffer = [0u8; 2];
-    reader.read_exact(&mut buffer)?;
-    Ok(u16::from_le_bytes(buffer))
-}
-
-fn read_u32<R: Read>(reader: &mut R) -> Result<u32> {
-    let mut buffer = [0u8; 4];
-    reader.read_exact(&mut buffer)?;
-    Ok(u32::from_le_bytes(buffer))
-}
-
-fn read_i32<R: Read>(reader: &mut R) -> Result<i32> {
-    let mut buffer = [0u8; 4];
-    reader.read_exact(&mut buffer)?;
-    Ok(i32::from_le_bytes(buffer))
-}
-
-fn read_f32<R: Read>(reader: &mut R) -> Result<f32> {
-    let mut buffer = [0u8; 4];
-    reader.read_exact(&mut buffer)?;
-    Ok(f32::from_le_bytes(buffer))
-}
-
-fn read_bool<R: Read>(reader: &mut R) -> Result<bool> {
-    Ok(read_u8(reader)? != 0)
-}
-
-fn read_vec2<R: Read>(reader: &mut R) -> Result<[f32; 2]> {
-    Ok([read_f32(reader)?, read_f32(reader)?])
-}
-
-fn read_vec3<R: Read>(reader: &mut R) -> Result<[f32; 3]> {
-    Ok([read_f32(reader)?, read_f32(reader)?, read_f32(reader)?])
-}
-
-fn read_vec4<R: Read>(reader: &mut R) -> Result<[f32; 4]> {
-    Ok([
-        read_f32(reader)?,
-        read_f32(reader)?,
-        read_f32(reader)?,
-        read_f32(reader)?,
-    ])
-}
-
-fn read_blend<R: Read>(reader: &mut R) -> Result<D3DBlend> {
-    let value = read_u32(reader)?;
-    D3DBlend::try_from(value).map_err(|e| anyhow::anyhow!(e))
 }
 
 fn write_u8<W: Write>(writer: &mut W, value: u8) -> Result<()> {

@@ -1,4 +1,5 @@
 pub mod commands;
+pub mod eff_loader;
 pub mod model;
 
 use std::path::Path;
