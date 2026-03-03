@@ -1,7 +1,7 @@
 import { currentProjectAtom } from "@/store/project";
 import { useAtom, useAtomValue } from "jotai";
 import { useVirtualizer, Virtualizer } from "@tanstack/react-virtual";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ScrollAreaVirtualizable } from "@/components/ui/scroll-area-virtualizable";
 import { SidebarHeader } from "@/components/ui/sidebar";
 import { MapEntry } from "@/types/map";
@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { Download, Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { LatestOnly } from "@/lib/latestOnly";
+import { actionIds, useRegisterActionRuntime } from "@/features/actions";
 
 export default function MapNavigator() {
   const [maps, setMaps] = useState<MapEntry[]>([]);
@@ -128,6 +129,26 @@ export default function MapNavigator() {
       setExporting(false);
     }
   }
+
+  const mapExportActionRuntime = useMemo(
+    () => ({
+      run: () => {
+        if (!exporting) {
+          void handleExport();
+        }
+      },
+      isEnabled: () => Boolean(currentProject && selectedMap && !exporting),
+      disabledReason: () => {
+        if (!currentProject) return "No project selected";
+        if (!selectedMap) return "No map selected";
+        if (exporting) return "Export already in progress";
+        return undefined;
+      },
+    }),
+    [currentProject, exporting, selectedMap],
+  );
+
+  useRegisterActionRuntime(actionIds.mapExportGltf, mapExportActionRuntime);
 
   return (
     <>

@@ -1,7 +1,7 @@
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, GizmoHelper, GizmoViewport } from "@react-three/drei";
 import { useAtomValue, useAtom } from "jotai";
-import { Suspense, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { mapGltfJsonAtom, mapLoadingAtom, mapMetadataAtom, mapViewConfigAtom, selectedMapAtom } from "@/store/map";
 import { currentProjectAtom } from "@/store/project";
 import MapTerrainViewer from "./MapTerrainViewer";
@@ -9,6 +9,14 @@ import { Loader2, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { exportMapForUnity } from "@/commands/map";
 import { toast } from "@/hooks/use-toast";
+import { actionIds, ContextualActionMenu, useRegisterActionRuntime } from "@/features/actions";
+
+const MAP_CONTEXT_ACTIONS = [
+  actionIds.mapToggleObjectMarkers,
+  actionIds.mapToggleWireframe,
+  actionIds.mapExportGltf,
+  actionIds.mapExportUnity,
+];
 
 function MapViewToolbar() {
   const [viewConfig, setViewConfig] = useAtom(mapViewConfigAtom);
@@ -35,6 +43,52 @@ function MapViewToolbar() {
       setExporting(false);
     }
   };
+
+  const mapToggleObjectsActionRuntime = useMemo(
+    () => ({
+      run: () => {
+        setViewConfig((prev) => ({
+          ...prev,
+          showObjectMarkers: !prev.showObjectMarkers,
+        }));
+      },
+      isEnabled: () => true,
+    }),
+    [setViewConfig],
+  );
+  const mapToggleWireframeActionRuntime = useMemo(
+    () => ({
+      run: () => {
+        setViewConfig((prev) => ({
+          ...prev,
+          showWireframe: !prev.showWireframe,
+        }));
+      },
+      isEnabled: () => true,
+    }),
+    [setViewConfig],
+  );
+  const mapExportUnityActionRuntime = useMemo(
+    () => ({
+      run: () => {
+        if (!exporting) {
+          void handleExportForUnity();
+        }
+      },
+      isEnabled: () => Boolean(currentProject && selectedMap && !exporting),
+      disabledReason: () => {
+        if (!currentProject) return "No project selected";
+        if (!selectedMap) return "No map selected";
+        if (exporting) return "Export already in progress";
+        return undefined;
+      },
+    }),
+    [currentProject, exporting, selectedMap],
+  );
+
+  useRegisterActionRuntime(actionIds.mapToggleObjectMarkers, mapToggleObjectsActionRuntime);
+  useRegisterActionRuntime(actionIds.mapToggleWireframe, mapToggleWireframeActionRuntime);
+  useRegisterActionRuntime(actionIds.mapExportUnity, mapExportUnityActionRuntime);
 
   return (
     <div className="absolute top-2 left-2 z-10 flex gap-1">
@@ -145,7 +199,11 @@ export default function MapWorkbench() {
   }
 
   return (
-    <div className="relative h-full w-full">
+    <ContextualActionMenu
+      actionIds={MAP_CONTEXT_ACTIONS}
+      requireShiftKey
+      className="relative h-full w-full"
+    >
       <MapViewToolbar />
       <MapMetadataPanel />
       <Canvas
@@ -185,6 +243,6 @@ export default function MapWorkbench() {
           <GizmoViewport />
         </GizmoHelper>
       </Canvas>
-    </div>
+    </ContextualActionMenu>
   );
 }
