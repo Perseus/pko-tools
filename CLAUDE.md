@@ -121,6 +121,33 @@ The Tauri backend is organized into domain modules:
 4. **Export:** Rust reads `.lgo` + `.lab` files → converts to glTF JSON → frontend downloads file
 5. **Import:** User selects glTF file → Rust parses glTF → writes `.lgo`, `.lab`, `.bmp` files to `imports/` folder
 
+## Kaitai Binary Parsers
+
+All PKO binary formats are parsed through **Kaitai Struct** adapters. The pipeline is:
+
+1. `.ksy` spec in `formats/` describes the binary layout
+2. `ksc` (Kaitai compiler) generates Rust code into `src-tauri/gen/kaitai/`
+3. Adapter modules convert Kaitai types → domain types with `Serialize`
+
+**Adapter modules:**
+
+| Format | Adapter | Domain Type | Loader Function |
+|--------|---------|-------------|-----------------|
+| `.lmo` | `map/lmo_loader.rs` | `LmoModel` | `load_lmo(path)` |
+| `.lgo` | `character/lgo_loader.rs` | `CharacterGeometricModel` | `load_lgo(path)` |
+| `.lab` | `animation/lab_loader.rs` | `LwBoneFile` | `load_lab(path)` |
+| `.map` | `map/map_loader.rs` | `ParsedMap` | `load_map(data)` |
+| `.obj` | `map/obj_loader.rs` | `ParsedObjFile` | `load_obj(data)` |
+| `.eff` | `effect/eff_loader.rs` | `EffFile` | `load_eff(data)` |
+
+**Key patterns:**
+- Domain types live separately from adapters (e.g., `lmo_types.rs`)
+- All domain types derive `serde::Serialize` for JSON inspection
+- Set `PKO_KAITAI_BUILD=0` to skip Kaitai code regeneration during builds
+- Golden reference snapshots in `tests/golden_reference_tests.rs` catch parser regressions
+
+**CLI Inspector:** `cargo run --bin pko_inspect -- <file>` parses any supported format and prints JSON.
+
 ## 3D/Engine Conventions
 
 This project involves PKO (Pirate King Online) game engine files. Coordinate systems differ between PKO/glTF (right-handed) and Unity (left-handed) — always account for coordinate handedness conversions when working with 3D positions, especially Z-axis flipping and terrain height offsets.
