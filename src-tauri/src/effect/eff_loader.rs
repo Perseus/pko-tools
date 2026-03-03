@@ -193,6 +193,127 @@ fn kaitai_fixed_str(s: &str) -> String {
 mod tests {
     use super::*;
 
+    /// Corpus feature sweep — reporting tool, always passes.
+    /// Run with `cargo test corpus_feature_sweep -- --nocapture` to see output.
+    #[test]
+    fn corpus_feature_sweep() {
+        use std::collections::HashMap;
+
+        let eff_dir = std::path::Path::new("../top-client/effect");
+        if !eff_dir.exists() {
+            eprintln!("Skipping corpus_feature_sweep: ../top-client/effect not found");
+            return;
+        }
+
+        let mut eff_files: Vec<_> = std::fs::read_dir(eff_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .map_or(false, |ext| ext.eq_ignore_ascii_case("eff"))
+            })
+            .map(|e| e.path())
+            .collect();
+        eff_files.sort();
+
+        let mut model_name_freq: HashMap<String, usize> = HashMap::new();
+        let mut effect_type_freq: HashMap<i32, usize> = HashMap::new();
+        let mut technique_freq: HashMap<i32, usize> = HashMap::new();
+        let mut blend_pair_freq: HashMap<String, usize> = HashMap::new();
+        let mut billboard_count = 0usize;
+        let mut rota_board_count = 0usize;
+        let mut rota_loop_count = 0usize;
+        let mut use_param_count = 0usize;
+        let mut alpha_count = 0usize;
+        let mut use_path_count = 0usize;
+        let mut zero_scale_frames = 0usize;
+        let mut total_sub_effects = 0usize;
+
+        for path in &eff_files {
+            let data = std::fs::read(path).unwrap();
+            let parsed = match load_eff(&data) {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("WARN: failed to parse {}: {}", path.display(), e);
+                    continue;
+                }
+            };
+
+            *technique_freq.entry(parsed.idx_tech).or_default() += 1;
+            if parsed.use_path {
+                use_path_count += 1;
+            }
+
+            for sub in &parsed.sub_effects {
+                total_sub_effects += 1;
+
+                let name = if sub.model_name.trim().is_empty() {
+                    "(empty)".to_string()
+                } else {
+                    sub.model_name.trim().to_string()
+                };
+                *model_name_freq.entry(name).or_default() += 1;
+                *effect_type_freq.entry(sub.effect_type).or_default() += 1;
+
+                let blend_key = format!("{:?}/{:?}", sub.src_blend, sub.dest_blend);
+                *blend_pair_freq.entry(blend_key).or_default() += 1;
+
+                if sub.billboard { billboard_count += 1; }
+                if sub.rota_board { rota_board_count += 1; }
+                if sub.rota_loop { rota_loop_count += 1; }
+                if sub.use_param > 0 { use_param_count += 1; }
+                if sub.alpha { alpha_count += 1; }
+
+                for size in &sub.frame_sizes {
+                    if size[0] == 0.0 && size[1] == 0.0 && size[2] == 0.0 {
+                        zero_scale_frames += 1;
+                    }
+                }
+            }
+        }
+
+        eprintln!("\n=== CORPUS FEATURE SWEEP ({} files, {} sub-effects) ===\n", eff_files.len(), total_sub_effects);
+
+        eprintln!("--- modelName frequency ---");
+        let mut model_names: Vec<_> = model_name_freq.into_iter().collect();
+        model_names.sort_by(|a, b| b.1.cmp(&a.1));
+        for (name, count) in &model_names {
+            eprintln!("  {:20} {}", name, count);
+        }
+
+        eprintln!("\n--- effectType distribution ---");
+        let mut types: Vec<_> = effect_type_freq.into_iter().collect();
+        types.sort_by_key(|&(k, _)| k);
+        for (t, count) in &types {
+            eprintln!("  type {} : {}", t, count);
+        }
+
+        eprintln!("\n--- technique index distribution ---");
+        let mut techs: Vec<_> = technique_freq.into_iter().collect();
+        techs.sort_by_key(|&(k, _)| k);
+        for (t, count) in &techs {
+            eprintln!("  tech {} : {}", t, count);
+        }
+
+        eprintln!("\n--- blend pair frequency (top 15) ---");
+        let mut blends: Vec<_> = blend_pair_freq.into_iter().collect();
+        blends.sort_by(|a, b| b.1.cmp(&a.1));
+        for (pair, count) in blends.iter().take(15) {
+            eprintln!("  {:40} {}", pair, count);
+        }
+
+        eprintln!("\n--- feature flags ---");
+        eprintln!("  billboard:  {}", billboard_count);
+        eprintln!("  rotaBoard:  {}", rota_board_count);
+        eprintln!("  rotaLoop:   {}", rota_loop_count);
+        eprintln!("  useParam:   {}", use_param_count);
+        eprintln!("  alpha:      {}", alpha_count);
+        eprintln!("  usePath:    {}", use_path_count);
+        eprintln!("  zero-scale: {}", zero_scale_frames);
+        eprintln!("\n=== END CORPUS SWEEP ===\n");
+    }
+
     /// Regression test: parse every .eff file and roundtrip through to_bytes.
     #[test]
     fn load_all_eff_files() {

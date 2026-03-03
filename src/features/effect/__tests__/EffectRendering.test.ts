@@ -11,6 +11,7 @@ import {
   resolveTextureCandidates,
   resolveTextureName,
 } from "@/features/effect/rendering";
+import { interpolateFrame } from "@/features/effect/animation";
 import { EffectFile, SubEffect } from "@/types/effect";
 import * as THREE from "three";
 
@@ -233,5 +234,32 @@ describe("effect rendering helpers", () => {
   it("uses frame times when available", () => {
     const durations = resolveFrameDurations(baseSubEffect);
     expect(durations).toEqual([0.2, 0.3]);
+  });
+});
+
+describe("zero-scale regression", () => {
+  it("interpolateFrame returns (0,0,0) size at t=0 when first frame is zero-scale", () => {
+    const zeroScaleSubEffect: SubEffect = {
+      ...baseSubEffect,
+      frameSizes: [[0, 0, 0], [2, 2, 2]],
+      frameTimes: [0.5, 0.5],
+      frameCount: 2,
+    };
+    const result = interpolateFrame(zeroScaleSubEffect, 0, true);
+    expect(result.size).toEqual([0, 0, 0]);
+  });
+
+  it("interpolateFrame preserves zero components during interpolation", () => {
+    const zeroScaleSubEffect: SubEffect = {
+      ...baseSubEffect,
+      frameSizes: [[0, 0, 0], [2, 2, 2]],
+      frameTimes: [1.0, 1.0],
+      frameCount: 2,
+    };
+    // At t=0.5 (midpoint of first frame), lerp = 0.5
+    const result = interpolateFrame(zeroScaleSubEffect, 0.5, true);
+    expect(result.size[0]).toBeCloseTo(1.0, 5);
+    expect(result.size[1]).toBeCloseTo(1.0, 5);
+    expect(result.size[2]).toBeCloseTo(1.0, 5);
   });
 });
