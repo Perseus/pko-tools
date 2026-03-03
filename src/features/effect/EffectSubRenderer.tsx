@@ -486,6 +486,17 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
     return null;
   }
 
+  // Per-sub-effect duration cutoff: hide when elapsed time exceeds layer length.
+  // Only applies during playback in non-looping mode.
+  if (
+    playback.isPlaying &&
+    !playback.isLooping &&
+    subEffect.length > 0 &&
+    playback.currentTime > subEffect.length
+  ) {
+    return null;
+  }
+
   const materialColor = new THREE.Color(color[0], color[1], color[2]);
   const opacity = Math.min(Math.max(color[3], 0), 1);
   const previewOpacity = Math.max(opacity, EDITOR_MIN_OPACITY);

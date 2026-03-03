@@ -1,5 +1,38 @@
-import { EffectFile, SubEffect } from "@/types/effect";
+import type { EffectFile, SubEffect } from "@/types/effect";
 import * as THREE from "three";
+
+// D3D8-accurate sub-effect shaders — shared between EffectSubRenderer and HitSubEffect.
+// ALPHAOP = MODULATE(TEXTURE, DIFFUSE): textureAlpha × vertexAlpha per fragment.
+
+export const subEffectVertexShader = /* glsl */ `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+`;
+
+export const subEffectFragmentShader = /* glsl */ `
+uniform vec3 uColor;
+uniform float uOpacity;
+uniform sampler2D uTexture;
+uniform bool uHasTexture;
+uniform float uAlphaTest;
+
+varying vec2 vUv;
+
+void main() {
+  if (uHasTexture) {
+    vec4 texColor = texture2D(uTexture, vUv);
+    float finalAlpha = texColor.a * uOpacity;
+    if (finalAlpha < uAlphaTest) discard;
+    gl_FragColor = vec4(uColor * texColor.rgb, finalAlpha);
+  } else {
+    if (uOpacity < uAlphaTest) discard;
+    gl_FragColor = vec4(uColor, uOpacity);
+  }
+}
+`;
 
 export type FrameRenderData = {
   subEffect: SubEffect;

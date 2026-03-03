@@ -1,6 +1,6 @@
 /// <reference types="@react-three/fiber" />
-import { PARTICLE_TYPE } from "@/types/particle";
-import { effectPlaybackAtom } from "@/store/effect";
+import { PARTICLE_TYPE, type ParticleSystem } from "@/types/particle";
+import { effectPlaybackAtom, traceRecorderTickAtom } from "@/store/effect";
 import { particleDataAtom, selectedParticleSystemIndexAtom } from "@/store/particle";
 import { currentProjectAtom } from "@/store/project";
 import { useAtomValue } from "jotai";
@@ -21,6 +21,9 @@ import {
   resolveBlendFactors,
   resolveTextureCandidates,
 } from "@/features/effect/rendering";
+import { useEffectModel } from "@/features/effect/useEffectModel";
+import { useHitEffectManager } from "@/features/effect/HitEffectManager";
+import { parModelDataAtom } from "@/store/strip";
 
 type DecodedTexture = {
   width: number;
@@ -79,39 +82,97 @@ void main() {
 const _dummy = new THREE.Object3D();
 const _color = new THREE.Color();
 
+/** Types that render as ground-plane decals (flat quads at y=0). */
+const SHADE_TYPES = new Set<number>([PARTICLE_TYPE.SHADE]);
+
+/** Types that render as expanding rings. */
+const RANGE_TYPES = new Set<number>([PARTICLE_TYPE.RANGE, PARTICLE_TYPE.RANGE2]);
+
+/** Types that are invisible (position tracking only). */
+const DUMMY_TYPES = new Set<number>([PARTICLE_TYPE.DUMMY]);
+
+/**
+ * Top-level particle simulator.
+ * During playback: renders ALL systems simultaneously (matching C++ CMPPartCtrl::Render).
+ * When stopped: renders only the selected system for editing.
+ */
 export default function ParticleSimulator() {
   const particleData = useAtomValue(particleDataAtom);
   const selectedIndex = useAtomValue(selectedParticleSystemIndexAtom);
   const playback = useAtomValue(effectPlaybackAtom);
 
-  const system = useMemo(() => {
-    if (!particleData || selectedIndex === null) return null;
-    return particleData.systems[selectedIndex] ?? null;
-  }, [particleData, selectedIndex]);
+  if (!particleData || particleData.systems.length === 0) return null;
 
-  const isModelType = system?.type === PARTICLE_TYPE.MODEL;
+  // During playback: render ALL systems simultaneously
+  if (playback.isPlaying) {
+    return (
+      <group>
+        {particleData.systems.map((sys, i) => (
+          <SingleSystemRenderer key={i} system={sys} index={i} />
+        ))}
+      </group>
+    );
+  }
 
+  // When stopped: render only the selected system for editing
+  if (selectedIndex === null) return null;
+  const system = particleData.systems[selectedIndex];
+  if (!system) return null;
+
+  return <SingleSystemRenderer system={system} index={selectedIndex} />;
+}
+
+/** Renders a single particle system with its own pool, tick loop, and hit effects. */
+function SingleSystemRenderer({
+  system,
+  index,
+}: {
+  system: ParticleSystem;
+  index: number;
+}) {
+  const playback = useAtomValue(effectPlaybackAtom);
+  const currentProject = useAtomValue(currentProjectAtom);
   const poolRef = useRef<ParticlePool>(createPool());
+  const { onParticleDeath, HitEffects } = useHitEffectManager(
+    currentProject?.id,
+    currentProject?.projectDirectory,
+  );
+  const selectedIndex = useAtomValue(selectedParticleSystemIndexAtom);
+  const traceRecorderTick = useAtomValue(traceRecorderTickAtom);
 
   // Reset pool when system changes
   useEffect(() => {
     resetPool(poolRef.current);
   }, [system]);
 
-  // Simulation loop (shared between both render modes)
+  // Simulation loop
   useFrame((_state, delta) => {
-    if (!system || !playback.isPlaying) return;
+    if (!playback.isPlaying) return;
     const clampedDelta = Math.min(delta, 0.05);
-    tickPool(poolRef.current, system, clampedDelta);
+    tickPool(poolRef.current, system, clampedDelta, system.hitEffect ? onParticleDeath : undefined);
+
+    // Record trace for the selected system during playback
+    if (traceRecorderTick && index === selectedIndex) {
+      traceRecorderTick(poolRef.current, playback.currentTime);
+    }
   });
 
-  if (!system) return null;
+  // DUMMY particles are invisible — only render hit effects
+  if (DUMMY_TYPES.has(system.type as number)) return <HitEffects />;
 
-  if (isModelType) {
-    return <ModelParticles pool={poolRef} system={system} />;
+  if (system.type === PARTICLE_TYPE.MODEL) {
+    return <><ModelParticles pool={poolRef} system={system} index={index} /><HitEffects /></>;
   }
 
-  return <BillboardParticles pool={poolRef} system={system} />;
+  if (SHADE_TYPES.has(system.type as number)) {
+    return <><ShadeParticles pool={poolRef} system={system} /><HitEffects /></>;
+  }
+
+  if (RANGE_TYPES.has(system.type as number)) {
+    return <><RangeParticles pool={poolRef} system={system} /><HitEffects /></>;
+  }
+
+  return <><BillboardParticles pool={poolRef} system={system} /><HitEffects /></>;
 }
 
 /** Billboard particles rendered with THREE.Points + ShaderMaterial. */
@@ -267,19 +328,46 @@ function BillboardParticles({
   return <points ref={pointsRef} geometry={geometry} material={material} />;
 }
 
-/** Model-type particles rendered with THREE.InstancedMesh. */
+/** Model-type particles rendered with THREE.InstancedMesh.
+ *  Loads actual .lgo geometry when modelName is set; falls back to sphere. */
 function ModelParticles({
   pool: poolRef,
   system,
+  index,
 }: {
   pool: React.RefObject<ParticlePool>;
-  system: { srcBlend: number; destBlend: number };
+  system: { modelName: string; srcBlend: number; destBlend: number };
+  index: number;
 }) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
+  const currentProject = useAtomValue(currentProjectAtom);
+  const parModels = useAtomValue(parModelDataAtom);
+
+  // Try loading actual .lgo model geometry
+  const loadedGeometry = useEffectModel(
+    system.modelName?.trim() || undefined,
+    currentProject?.id,
+  );
+
+  const particleData = useAtomValue(particleDataAtom);
+
+  // Compute model data index by counting MODEL-type systems before this index.
+  // The parModels array maps 1:1 to MODEL-type systems in order of appearance.
+  const modelData = useMemo(() => {
+    if (!parModels || !particleData) return null;
+    let modelIdx = 0;
+    for (let i = 0; i < index; i++) {
+      if (particleData.systems[i]?.type === PARTICLE_TYPE.MODEL) {
+        modelIdx++;
+      }
+    }
+    return parModels[modelIdx] ?? null;
+  }, [parModels, particleData, index]);
 
   const blendState = useMemo(() => {
-    const src = system.srcBlend;
-    const dst = system.destBlend;
+    // Model data blend overrides system-level blend
+    const src = modelData?.srcBlend || system.srcBlend;
+    const dst = modelData?.destBlend || system.destBlend;
     if (!src && !dst) {
       return { blending: THREE.AdditiveBlending as THREE.Blending };
     }
@@ -289,9 +377,13 @@ function ModelParticles({
       blendSrc,
       blendDst,
     };
-  }, [system.srcBlend, system.destBlend]);
+  }, [system.srcBlend, system.destBlend, modelData]);
 
-  const baseGeometry = useMemo(() => new THREE.SphereGeometry(0.5, 8, 8), []);
+  // Use loaded model geometry or fall back to sphere
+  const baseGeometry = useMemo(
+    () => loadedGeometry ?? new THREE.SphereGeometry(0.5, 8, 8),
+    [loadedGeometry],
+  );
   const baseMaterial = useMemo(() => {
     const mat = new THREE.MeshBasicMaterial({
       transparent: true,
@@ -302,13 +394,35 @@ function ModelParticles({
       mat.blendSrc = blendState.blendSrc!;
       mat.blendDst = blendState.blendDst!;
     }
+    // Apply color tint from ParModelData
+    if (modelData) {
+      mat.color = new THREE.Color(modelData.color[0], modelData.color[1], modelData.color[2]);
+      mat.opacity = modelData.color[3];
+    }
     return mat;
-  }, [blendState]);
+  }, [blendState, modelData]);
 
-  useFrame(() => {
+  // Log warning for skeletal animation
+  useEffect(() => {
+    if (modelData && modelData.curPose > 0) {
+      console.warn(
+        `[ModelParticles] System index ${index}: curPose=${modelData.curPose} — skeletal animation not yet supported`,
+      );
+    }
+  }, [modelData, index]);
+
+  // playType-based continuous rotation
+  const rotationRef = useRef(0);
+
+  useFrame((_state, delta) => {
     const pool = poolRef.current;
     const mesh = meshRef.current;
     if (!pool || !mesh) return;
+
+    // playType=1: continuous Y rotation at velocity rad/s
+    if (modelData?.playType === 1) {
+      rotationRef.current += delta * (modelData.velocity || 1);
+    }
 
     let visibleCount = 0;
     for (let i = 0; i < MAX_PARTICLES; i++) {
@@ -322,6 +436,16 @@ function ModelParticles({
         pool.positions[i3 + 1],
         pool.positions[i3 + 2],
       );
+      // Apply per-particle rotation (Euler YXZ matching PKO convention)
+      _dummy.rotation.set(
+        pool.rotations[i3],
+        pool.rotations[i3 + 1],
+        pool.rotations[i3 + 2],
+      );
+      // playType=1: add continuous Y rotation
+      if (modelData?.playType === 1) {
+        _dummy.rotation.y += rotationRef.current;
+      }
       _dummy.scale.setScalar(size);
       _dummy.updateMatrix();
 
@@ -342,5 +466,168 @@ function ModelParticles({
       ref={meshRef}
       args={[baseGeometry, baseMaterial, MAX_PARTICLES]}
     />
+  );
+}
+
+/** SHADE (type 13): Ground-plane decal quads at y=0.
+ *  Each particle renders as a flat quad scaled by frame size, textured. */
+function ShadeParticles({
+  pool: poolRef,
+  system,
+}: {
+  pool: React.RefObject<ParticlePool>;
+  system: { textureName: string; srcBlend: number; destBlend: number };
+}) {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+  const currentProject = useAtomValue(currentProjectAtom);
+  const [texture, setTexture] = useState<THREE.Texture | null>(null);
+  const textureRef = useRef<THREE.Texture | null>(null);
+
+  // Load texture
+  useEffect(() => {
+    const texName = system.textureName?.trim();
+    if (!texName || !currentProject) { setTexture(null); return; }
+    const isTauri = typeof window !== "undefined" && ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
+    if (!isTauri) { setTexture(null); return; }
+
+    const candidates = resolveTextureCandidates(texName, currentProject.projectDirectory);
+    let isActive = true;
+    const tryLoad = async (index: number) => {
+      if (index >= candidates.length) { setTexture(null); return; }
+      try {
+        const decoded = await invoke<{ width: number; height: number; data: string }>("decode_texture", { path: candidates[index] });
+        if (!isActive) return;
+        const binary = Uint8Array.from(atob(decoded.data), (c) => c.charCodeAt(0));
+        const loaded = createEffectTexture(binary, decoded.width, decoded.height);
+        textureRef.current?.dispose();
+        textureRef.current = loaded;
+        setTexture(loaded);
+      } catch { void tryLoad(index + 1); }
+    };
+    void tryLoad(0);
+    return () => { isActive = false; textureRef.current?.dispose(); };
+  }, [system.textureName, currentProject]);
+
+  const blendState = useMemo(() => {
+    const src = system.srcBlend;
+    const dst = system.destBlend;
+    if (!src && !dst) return { blending: THREE.AdditiveBlending as THREE.Blending };
+    const { blendSrc, blendDst } = resolveBlendFactors(src, dst);
+    return { blending: THREE.CustomBlending as THREE.Blending, blendSrc, blendDst };
+  }, [system.srcBlend, system.destBlend]);
+
+  // Flat quad geometry lying on XZ plane (y=0)
+  const baseGeometry = useMemo(() => new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2), []);
+  const baseMaterial = useMemo(() => {
+    const mat = new THREE.MeshBasicMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: blendState.blending,
+      map: texture,
+      side: THREE.DoubleSide,
+    });
+    if (blendState.blending === THREE.CustomBlending && "blendSrc" in blendState) {
+      mat.blendSrc = blendState.blendSrc!;
+      mat.blendDst = blendState.blendDst!;
+    }
+    return mat;
+  }, [blendState, texture]);
+
+  useFrame(() => {
+    const pool = poolRef.current;
+    const mesh = meshRef.current;
+    if (!pool || !mesh) return;
+
+    let visibleCount = 0;
+    for (let i = 0; i < MAX_PARTICLES; i++) {
+      if (!pool.alive[i]) continue;
+      const i3 = i * 3;
+      const size = pool.sizes[i];
+
+      // Position on ground plane (y=0), scale by particle size
+      _dummy.position.set(pool.positions[i3], 0, pool.positions[i3 + 2]);
+      _dummy.rotation.set(0, 0, 0);
+      _dummy.scale.set(size, 1, size);
+      _dummy.updateMatrix();
+
+      mesh.setMatrixAt(visibleCount, _dummy.matrix);
+      _color.setRGB(pool.colors[i3], pool.colors[i3 + 1], pool.colors[i3 + 2]);
+      mesh.setColorAt(visibleCount, _color);
+      visibleCount++;
+    }
+
+    mesh.count = visibleCount;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  });
+
+  return (
+    <instancedMesh ref={meshRef} args={[baseGeometry, baseMaterial, MAX_PARTICLES]} />
+  );
+}
+
+/** RANGE/RANGE2 (types 14, 15): Expanding ring (annulus) at y=0. */
+function RangeParticles({
+  pool: poolRef,
+  system,
+}: {
+  pool: React.RefObject<ParticlePool>;
+  system: { srcBlend: number; destBlend: number };
+}) {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+
+  const blendState = useMemo(() => {
+    const src = system.srcBlend;
+    const dst = system.destBlend;
+    if (!src && !dst) return { blending: THREE.AdditiveBlending as THREE.Blending };
+    const { blendSrc, blendDst } = resolveBlendFactors(src, dst);
+    return { blending: THREE.CustomBlending as THREE.Blending, blendSrc, blendDst };
+  }, [system.srcBlend, system.destBlend]);
+
+  // Ring geometry: torus with small tube radius (flat ring appearance)
+  const baseGeometry = useMemo(() => new THREE.RingGeometry(0.8, 1.0, 32).rotateX(-Math.PI / 2), []);
+  const baseMaterial = useMemo(() => {
+    const mat = new THREE.MeshBasicMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: blendState.blending,
+      side: THREE.DoubleSide,
+    });
+    if (blendState.blending === THREE.CustomBlending && "blendSrc" in blendState) {
+      mat.blendSrc = blendState.blendSrc!;
+      mat.blendDst = blendState.blendDst!;
+    }
+    return mat;
+  }, [blendState]);
+
+  useFrame(() => {
+    const pool = poolRef.current;
+    const mesh = meshRef.current;
+    if (!pool || !mesh) return;
+
+    let visibleCount = 0;
+    for (let i = 0; i < MAX_PARTICLES; i++) {
+      if (!pool.alive[i]) continue;
+      const i3 = i * 3;
+      const size = pool.sizes[i];
+
+      _dummy.position.set(pool.positions[i3], 0, pool.positions[i3 + 2]);
+      _dummy.rotation.set(0, 0, 0);
+      _dummy.scale.setScalar(size);
+      _dummy.updateMatrix();
+
+      mesh.setMatrixAt(visibleCount, _dummy.matrix);
+      _color.setRGB(pool.colors[i3], pool.colors[i3 + 1], pool.colors[i3 + 2]);
+      mesh.setColorAt(visibleCount, _color);
+      visibleCount++;
+    }
+
+    mesh.count = visibleCount;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  });
+
+  return (
+    <instancedMesh ref={meshRef} args={[baseGeometry, baseMaterial, MAX_PARTICLES]} />
   );
 }
