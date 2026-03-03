@@ -30,6 +30,7 @@ import {
 } from "@/commands/item";
 import { WorkbenchDummy } from "@/types/item";
 import { actionIds, ContextualActionMenu } from "@/features/actions";
+import { PerfFrameProbe, PerfOverlay } from "@/features/perf";
 
 const ITEM_CONTEXT_ACTIONS = [
   actionIds.itemExportGltf,
@@ -218,7 +219,9 @@ export default function ItemWorkbench() {
               )}
               <OrbitControls />
               <gridHelper args={[20, 20, 20]} position-y={0.01} />
+              <PerfFrameProbe surface="items" />
             </Canvas>
+            <PerfOverlay surface="items" className="bottom-8 right-3" />
           </ContextualActionMenu>
         </div>
       </div>
