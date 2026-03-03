@@ -1,6 +1,6 @@
 import { Canvas, useFrame } from "@react-three/fiber";
 import { OrbitControls } from "@react-three/drei";
-import React, { Suspense, useEffect, useRef } from "react";
+import React, { Suspense, useRef } from "react";
 import EffectSubRenderer from "@/features/effect/EffectSubRenderer";
 import EffectPlaybackDriver from "@/features/effect/EffectPlaybackDriver";
 import ParticleSimulator from "@/features/effect/particle/ParticleSimulator";
@@ -71,24 +71,6 @@ export default function EffectViewport() {
   const [, setReloadToken] = useAtom(effectTextureReloadAtom);
   const [gizmoMode, setGizmoMode] = useAtom(gizmoModeAtom);
   const [compositePreview, setCompositePreview] = useAtom(compositePreviewAtom);
-
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      // Skip if user is typing in an input
-      const tag = (event.target as HTMLElement)?.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
-
-      const key = event.key.toLowerCase();
-      if (key === "t") setGizmoMode("translate");
-      else if (key === "r" && !event.metaKey && !event.ctrlKey) setGizmoMode("rotate");
-      else if (key === "s" && !event.metaKey && !event.ctrlKey) setGizmoMode("scale");
-      else if (key === "escape") setGizmoMode("off");
-      else if (key === "c") setCompositePreview(prev => !prev);
-    }
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [setGizmoMode, setCompositePreview]);
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-xl border border-border bg-muted/40">

@@ -21,6 +21,7 @@ import WorkspaceNavigator from "./components/WorkspaceNavigator/WorkspaceNavigat
 import ProjectCreator from "./pages/project-creator/ProjectCreator";
 import { Toaster } from "./components/ui/toaster";
 import { ImportWizard } from "./features/import/ImportWizard";
+import { ActionKernelProvider } from "./features/actions";
 
 function App() {
   const [, setCurrentProject] = useAtom(currentProjectAtom);
@@ -47,25 +48,27 @@ function App() {
 
   return (
     <SidebarProvider>
-      <div className="grid h-screen w-screen">
-        <main className="grid grid-cols-[auto,1fr,auto] h-full">
-          <SideNav />
-          <Routes>
-            <Route path="/" element={<div />} />
-            <Route path="/project-creator" element={<ProjectCreator />} />
-            <Route path="/characters" element={<CharacterPage/>} />
-            <Route path="/effects" element={<EffectsPage />} />
-            <Route path="/items" element={<ItemsPage />} />
-            <Route path="/maps" element={<MapsPage />} />
-            <Route path="/buildings" element={<BuildingsPage />} />
-            <Route path="*" element={<div />} />
-          </Routes>
-          <WorkspaceNavigator />
-        </main>
-        <ImportWizard />
-        <Toaster />
-        <StatusBar className="fixed bottom-0 z-20" />
-      </div>
+      <ActionKernelProvider>
+        <div className="grid h-screen w-screen">
+          <main className="grid grid-cols-[auto,1fr,auto] h-full">
+            <SideNav />
+            <Routes>
+              <Route path="/" element={<div />} />
+              <Route path="/project-creator" element={<ProjectCreator />} />
+              <Route path="/characters" element={<CharacterPage/>} />
+              <Route path="/effects" element={<EffectsPage />} />
+              <Route path="/items" element={<ItemsPage />} />
+              <Route path="/maps" element={<MapsPage />} />
+              <Route path="/buildings" element={<BuildingsPage />} />
+              <Route path="*" element={<div />} />
+            </Routes>
+            <WorkspaceNavigator />
+          </main>
+          <ImportWizard />
+          <Toaster />
+          <StatusBar className="fixed bottom-0 z-20" />
+        </div>
+      </ActionKernelProvider>
     </SidebarProvider>
   );
 }
