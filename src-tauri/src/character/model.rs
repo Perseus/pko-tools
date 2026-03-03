@@ -145,6 +145,7 @@ pub struct StateCtrl {
     pub _state_seq: [u8; 8],
 }
 
+#[derive(Serialize)]
 #[binrw]
 pub struct CharGeoModelInfoHeader {
     pub id: u32,
@@ -179,6 +180,7 @@ pub struct CharGeoModelInfoHeader {
 
 // the LGO model structure
 // FILE: lwExpObj.cpp, FN: lwGeomObjInfo::Load
+#[derive(Serialize)]
 #[binrw]
 pub struct CharacterGeometricModel {
     pub version: u32,
@@ -325,7 +327,12 @@ impl CharacterGeometricModel {
     }
 
     pub fn from_file(file_path: PathBuf) -> anyhow::Result<Self> {
-        use std::io::{Seek, SeekFrom};
+        // Default: native (binrw). Set PKO_LGO_PARSER=kaitai to use Kaitai adapter.
+        if std::env::var("PKO_LGO_PARSER").ok().as_deref() == Some("kaitai") {
+            return super::lgo_loader::load_lgo(&file_path);
+        }
+
+        use std::io::Seek;
 
         let file = File::open(&file_path).map_err(|e| {
             anyhow::anyhow!("Failed to open LGO file '{}': {}", file_path.display(), e)
