@@ -1,4 +1,5 @@
 import { perfPanelEnabled } from "@/features/perf/flags";
+import { evaluatePerfSnapshot } from "@/features/perf/health";
 import {
   getPerfMetricsSnapshot,
   subscribePerfMetrics,
@@ -35,6 +36,12 @@ export function PerfOverlay({
   }
 
   const surfaceMetrics = snapshot.surfaces[surface];
+  const health = evaluatePerfSnapshot(snapshot, {
+    requiredSurfaces: [surface],
+    minFrameSamples: 60,
+    strictSamples: false,
+    maxP95FrameMs: snapshot.thresholds.frameBudgetMs,
+  });
   const hasFrameData = surfaceMetrics.samples > 0;
 
   return (
@@ -47,14 +54,19 @@ export function PerfOverlay({
     >
       <div className="flex items-center justify-between">
         <span className="font-semibold uppercase tracking-wide">{surface}</span>
-        <span
-          className={cn(
-            "text-[9px]",
-            surfaceMetrics.overBudget ? "text-destructive" : "text-emerald-500",
-          )}
-        >
-          p95 {snapshot.thresholds.frameBudgetMs.toFixed(0)}ms budget
-        </span>
+        <div className="flex items-center gap-2">
+          <span
+            className={cn(
+              "text-[9px]",
+              surfaceMetrics.overBudget ? "text-destructive" : "text-emerald-500",
+            )}
+          >
+            p95 {snapshot.thresholds.frameBudgetMs.toFixed(0)}ms budget
+          </span>
+          <span className={cn("text-[9px]", health.ok ? "text-emerald-500" : "text-destructive")}>
+            {health.ok ? "PASS" : "FAIL"}
+          </span>
+        </div>
       </div>
 
       <div className="mt-1 grid grid-cols-2 gap-x-2 gap-y-0.5 text-muted-foreground">
