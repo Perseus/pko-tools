@@ -16,6 +16,7 @@ import PathVisualizer from "@/features/effect/PathVisualizer";
 import { getPathPosition } from "@/features/effect/animation";
 import * as THREE from "three";
 import { CanvasErrorBoundary } from "@/components/CanvasErrorBoundary";
+import { playbackClockStore } from "@/features/effect/playbackClock";
 
 /** Default path velocity when no explicit velocity is provided in the .csf file. */
 const DEFAULT_PATH_VELOCITY = 2.0;
@@ -39,9 +40,10 @@ function PathFollower({ children }: { children: React.ReactNode }) {
       pathPoints.length >= 2 &&
       playback.isPlaying
     ) {
+      const currentTime = playbackClockStore.get();
       const pos = getPathPosition(
         pathPoints,
-        playback.currentTime,
+        currentTime,
         DEFAULT_PATH_VELOCITY,
         playback.isLooping,
       );
