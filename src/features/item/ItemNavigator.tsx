@@ -25,6 +25,7 @@ import { openImportWizardAtom } from "@/store/import";
 import { isWorkbenchModeAtom, activeWorkbenchAtom, dummyPlacementModeAtom } from "@/store/workbench";
 import { toast } from "@/hooks/use-toast";
 import { LatestOnly } from "@/lib/latestOnly";
+import { actionIds, useRegisterActionRuntime } from "@/features/actions";
 
 export default function ItemNavigator() {
   const [items, setItems] = useState<Item[]>([]);
@@ -185,6 +186,53 @@ export default function ItemNavigator() {
       setSaving(false);
     }
   }
+
+  const itemExportActionRuntime = useMemo(
+    () => ({
+      run: () => {
+        setShowExport(true);
+      },
+      isEnabled: () => Boolean(!isWorkbenchMode && selectedItem && itemGltfJson),
+      disabledReason: () => {
+        if (isWorkbenchMode) return "Unavailable while editing a workbench";
+        if (!selectedItem || !itemGltfJson) return "No item preview loaded";
+        return undefined;
+      },
+    }),
+    [isWorkbenchMode, itemGltfJson, selectedItem],
+  );
+  const itemImportActionRuntime = useMemo(
+    () => ({
+      run: () => {
+        openImportWizard("item");
+      },
+      isEnabled: () => !isWorkbenchMode,
+      disabledReason: () => (isWorkbenchMode ? "Exit workbench mode first" : undefined),
+    }),
+    [isWorkbenchMode, openImportWizard],
+  );
+  const itemWorkbenchSaveActionRuntime = useMemo(
+    () => ({
+      run: () => {
+        if (!saving) {
+          void handleSaveWorkbench();
+        }
+      },
+      isEnabled: () => Boolean(isWorkbenchMode && activeWorkbench && currentProject && !saving),
+      disabledReason: () => {
+        if (!isWorkbenchMode) return "Not in workbench mode";
+        if (!activeWorkbench) return "No active workbench";
+        if (!currentProject) return "No project selected";
+        if (saving) return "Save already in progress";
+        return undefined;
+      },
+    }),
+    [activeWorkbench, currentProject, handleSaveWorkbench, isWorkbenchMode, saving],
+  );
+
+  useRegisterActionRuntime(actionIds.itemExportGltf, itemExportActionRuntime);
+  useRegisterActionRuntime(actionIds.itemImportGltf, itemImportActionRuntime);
+  useRegisterActionRuntime(actionIds.itemWorkbenchSave, itemWorkbenchSaveActionRuntime);
 
   // ── Workbench mode: replace navigator with editing tools ──
   if (isWorkbenchMode && activeWorkbench) {

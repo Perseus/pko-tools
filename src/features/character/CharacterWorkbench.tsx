@@ -10,6 +10,12 @@ import { SkeletonDebugHelpers } from './SkeletonDebugHelpers';
 import { CharacterMetadataPanel } from './CharacterMetadataPanel';
 import { extractMeshes, MeshHighlights, getUniqueMeshIndices } from './MeshHighlights';
 import { useGltfResource } from "@/hooks/use-gltf-resource";
+import { actionIds, ContextualActionMenu } from "@/features/actions";
+
+const CHARACTER_CONTEXT_ACTIONS = [
+  actionIds.characterExportGltf,
+  actionIds.characterImportGltf,
+];
 
 function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
   const { scene, animations } = useGLTF(gltfDataURI);
@@ -229,21 +235,27 @@ export default function CharacterWorkbench() {
   return <div className="h-full w-full relative">
     <Leva collapsed={false} />
     <CharacterMetadataPanel metadata={characterMetadata} />
-    <Canvas style={{ height: '100%', width: '100%' }} shadows camera={{ position: [10, 12, 12], fov: 25 }}>
-      <ambientLight intensity={1} />
-      <directionalLight position={[5, 5, 5]} castShadow />
-      <Environment background>
-        <mesh scale={100}>
-          <sphereGeometry args={[1, 16, 16]} />
-          <meshBasicMaterial color="#393939" side={THREE.BackSide} />
-        </mesh>
-      </Environment>
-      <Suspense fallback={<>Loading...</>}>
-        <Character />
-      </Suspense>
-      <OrbitControls />
-      <gridHelper args={[60, 60, 60]} position-y=".01" />
-      <CameraControls />
-    </Canvas>
+    <ContextualActionMenu
+      actionIds={CHARACTER_CONTEXT_ACTIONS}
+      requireShiftKey
+      className="h-full w-full"
+    >
+      <Canvas style={{ height: '100%', width: '100%' }} shadows camera={{ position: [10, 12, 12], fov: 25 }}>
+        <ambientLight intensity={1} />
+        <directionalLight position={[5, 5, 5]} castShadow />
+        <Environment background>
+          <mesh scale={100}>
+            <sphereGeometry args={[1, 16, 16]} />
+            <meshBasicMaterial color="#393939" side={THREE.BackSide} />
+          </mesh>
+        </Environment>
+        <Suspense fallback={<>Loading...</>}>
+          <Character />
+        </Suspense>
+        <OrbitControls />
+        <gridHelper args={[60, 60, 60]} position-y=".01" />
+        <CameraControls />
+      </Canvas>
+    </ContextualActionMenu>
   </div>;
 }

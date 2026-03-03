@@ -5,6 +5,9 @@ import { Suspense } from "react";
 import { buildingGltfJsonAtom, buildingLoadingAtom, selectedBuildingAtom } from "@/store/buildings";
 import BuildingsModelViewer from "./BuildingsModelViewer";
 import { Loader2 } from "lucide-react";
+import { actionIds, ContextualActionMenu } from "@/features/actions";
+
+const BUILDING_CONTEXT_ACTIONS = [actionIds.buildingExportGltf];
 
 function BuildingInfoPanel() {
   const building = useAtomValue(selectedBuildingAtom);
@@ -43,7 +46,11 @@ export default function BuildingsWorkbench() {
   }
 
   return (
-    <div className="relative h-full w-full">
+    <ContextualActionMenu
+      actionIds={BUILDING_CONTEXT_ACTIONS}
+      requireShiftKey
+      className="relative h-full w-full"
+    >
       <BuildingInfoPanel />
       <Canvas
         camera={{
@@ -71,6 +78,6 @@ export default function BuildingsWorkbench() {
 
         <gridHelper args={[50, 50, "#888888", "#444444"]} />
       </Canvas>
-    </div>
+    </ContextualActionMenu>
   );
 }

@@ -1,7 +1,7 @@
 import { currentProjectAtom } from "@/store/project";
 import { useAtom, useAtomValue } from "jotai";
 import { useVirtualizer, Virtualizer } from "@tanstack/react-virtual";
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ScrollAreaVirtualizable } from "@/components/ui/scroll-area-virtualizable";
 import { SidebarHeader } from "@/components/ui/sidebar";
 import { BuildingEntry } from "@/types/buildings";
@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Download, Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
 import { LatestOnly } from "@/lib/latestOnly";
+import { actionIds, useRegisterActionRuntime } from "@/features/actions";
 
 export default function BuildingsNavigator() {
   const [buildings, setBuildings] = useState<BuildingEntry[]>([]);
@@ -139,6 +140,26 @@ export default function BuildingsNavigator() {
       setExporting(false);
     }
   }
+
+  const buildingExportActionRuntime = useMemo(
+    () => ({
+      run: () => {
+        if (!exporting) {
+          void handleExport();
+        }
+      },
+      isEnabled: () => Boolean(currentProject && selectedBuilding && !exporting),
+      disabledReason: () => {
+        if (!currentProject) return "No project selected";
+        if (!selectedBuilding) return "No building selected";
+        if (exporting) return "Export already in progress";
+        return undefined;
+      },
+    }),
+    [currentProject, exporting, selectedBuilding],
+  );
+
+  useRegisterActionRuntime(actionIds.buildingExportGltf, buildingExportActionRuntime);
 
   return (
     <>
