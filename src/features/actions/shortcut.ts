@@ -8,10 +8,10 @@ function normalizeKey(key: string): string {
 }
 
 export function isTextInputTarget(target: EventTarget | null): boolean {
-  const element = target as HTMLElement | null;
-  if (!element) {
+  if (!(target instanceof HTMLElement)) {
     return false;
   }
+  const element = target;
 
   const tag = element.tagName;
   if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") {
