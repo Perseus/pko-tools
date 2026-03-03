@@ -17,7 +17,8 @@ import { getPathPosition } from "@/features/effect/animation";
 import * as THREE from "three";
 import { CanvasErrorBoundary } from "@/components/CanvasErrorBoundary";
 import { playbackClockStore } from "@/features/effect/playbackClock";
-import { ContextualActionMenu, actionIds } from "@/features/actions";
+import { actionIds } from "@/features/actions/actionIds";
+import { ContextualActionMenu } from "@/features/actions/ContextualActionMenu";
 import { PerfFrameProbe, PerfOverlay } from "@/features/perf";
 
 /** Default path velocity when no explicit velocity is provided in the .csf file. */
