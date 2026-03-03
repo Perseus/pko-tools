@@ -1,0 +1,199 @@
+//! LMO domain types — shared between `lmo.rs` (native parser) and `lmo_loader.rs` (Kaitai adapter).
+//!
+//! Extracted from `lmo.rs` so that `lmo.rs` can be deleted once the Kaitai adapter
+//! achieves full parity (PR 8b).
+
+use cgmath::{InnerSpace, Matrix3, Matrix4, Quaternion, Vector3};
+use serde::Serialize;
+
+// ============================================================================
+// D3D render state constants used by PKO scene materials/meshes
+// ============================================================================
+
+pub(crate) const D3DRS_ALPHATESTENABLE: u32 = 15;
+pub(crate) const D3DRS_SRCBLEND: u32 = 19;
+pub(crate) const D3DRS_DESTBLEND: u32 = 20;
+pub(crate) const D3DRS_ALPHAREF: u32 = 24;
+pub(crate) const D3DRS_CULLMODE: u32 = 22;
+pub(crate) const D3DRS_ALPHAFUNC: u32 = 25;
+pub(crate) const D3DCMP_GREATER: u32 = 5;
+pub(crate) const LW_INVALID_INDEX: u32 = 0xFFFFFFFF;
+
+// D3DCULL values
+pub const D3DCULL_NONE: u32 = 1;
+#[allow(dead_code)]
+pub const D3DCULL_CCW: u32 = 2;
+
+/// Transparency type enum matching lwMtlTexInfoTransparencyTypeEnum.
+pub const TRANSP_FILTER: u32 = 0;
+pub const TRANSP_ADDITIVE: u32 = 1;
+pub const TRANSP_ADDITIVE1: u32 = 2; // SrcColor/One — high-brightness additive
+pub const TRANSP_ADDITIVE2: u32 = 3; // SrcColor/InvSrcColor — soft/low additive
+pub const TRANSP_ADDITIVE3: u32 = 4; // SrcAlpha/DestAlpha — alpha-weighted additive
+pub const TRANSP_SUBTRACTIVE: u32 = 5; // Zero/InvSrcColor — darkening/shadow
+// Types 6-8 fall through to ONE/ONE in engine — identical to type 1
+
+// ============================================================================
+// Domain types
+// ============================================================================
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+pub(crate) struct MaterialRenderState {
+    pub(crate) alpha_enabled: bool,
+    pub(crate) alpha_ref: Option<u8>,
+    pub(crate) alpha_func: Option<u32>,
+    pub(crate) src_blend: Option<u32>,
+    pub(crate) dest_blend: Option<u32>,
+    pub(crate) cull_mode: Option<u32>,
+}
+
+impl MaterialRenderState {
+    pub(crate) fn normalized_alpha_enabled(self) -> bool {
+        self.alpha_enabled && self.alpha_func.map(|f| f == D3DCMP_GREATER).unwrap_or(true)
+    }
+
+    pub(crate) fn effective_alpha_ref(self) -> u8 {
+        self.alpha_ref.unwrap_or(129)
+    }
+}
+
+/// Animation data for a geometry object — decomposed from matrix keyframes.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LmoAnimData {
+    pub frame_num: u32,
+    pub translations: Vec<[f32; 3]>, // per-frame translation (Z-up game space)
+    pub rotations: Vec<[f32; 4]>,    // per-frame quaternion [x,y,z,w] (Z-up game space)
+}
+
+/// UV animation data — per-frame 4×4 texture coordinate transform matrix.
+/// Stored per (subset_index, stage_index).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LmoTexUvAnim {
+    pub subset: usize,
+    pub stage: usize,
+    pub frame_num: u32,
+    pub matrices: Vec<[[f32; 4]; 4]>, // per-frame 4×4 UV transform matrix
+}
+
+/// Texture image animation — frame-by-frame texture swap.
+/// Stored per (subset_index, stage_index).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LmoTexImgAnim {
+    pub subset: usize,
+    pub stage: usize,
+    pub textures: Vec<String>, // texture filenames per frame
+}
+
+/// Material opacity keyframe — sparse keyed float.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LmoOpacityKeyframe {
+    pub frame: u32,
+    pub opacity: f32,
+}
+
+/// Material opacity animation — sparse keyframes for a single subset.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LmoMtlOpacAnim {
+    pub subset: usize,
+    pub keyframes: Vec<LmoOpacityKeyframe>,
+}
+
+/// A single geometry object within an LMO file.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LmoGeomObject {
+    pub id: u32,
+    pub parent_id: u32,
+    pub obj_type: u32,
+    pub mat_local: [[f32; 4]; 4],
+    pub vertices: Vec<[f32; 3]>,
+    pub normals: Vec<[f32; 3]>,
+    pub texcoords: Vec<[f32; 2]>,
+    pub vertex_colors: Vec<u32>,
+    pub indices: Vec<u32>,
+    pub subsets: Vec<LmoSubset>,
+    pub materials: Vec<LmoMaterial>,
+    pub animation: Option<LmoAnimData>,
+    pub texuv_anims: Vec<LmoTexUvAnim>,
+    pub teximg_anims: Vec<LmoTexImgAnim>,
+    pub mtlopac_anims: Vec<LmoMtlOpacAnim>,
+}
+
+/// A mesh subset — defines a range of indices rendered with a specific material.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LmoSubset {
+    pub primitive_num: u32,
+    pub start_index: u32,
+    pub vertex_num: u32,
+    pub min_index: u32,
+}
+
+/// Material info extracted from an LMO geometry object.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LmoMaterial {
+    pub diffuse: [f32; 4],
+    pub ambient: [f32; 4],
+    pub emissive: [f32; 4],
+    pub opacity: f32,
+    pub transp_type: u32,
+    pub alpha_test_enabled: bool,
+    pub alpha_ref: u8,
+    pub src_blend: Option<u32>,
+    pub dest_blend: Option<u32>,
+    pub cull_mode: Option<u32>,
+    pub tex_filename: Option<String>,
+}
+
+/// A parsed LMO model containing multiple geometry objects.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LmoModel {
+    pub version: u32,
+    pub geom_objects: Vec<LmoGeomObject>,
+}
+
+// ============================================================================
+// Utility functions
+// ============================================================================
+
+/// Decompose a 4×3 row-major matrix (12 floats) into translation [x,y,z] and
+/// quaternion [x,y,z,w] in Z-up game coordinate space.
+pub(crate) fn decompose_matrix43(raw: &[f32; 12]) -> ([f32; 3], [f32; 4]) {
+    // Construct column-major Matrix4 (same layout as LwMatrix43's br(map)):
+    // Column 0: [raw[0], raw[1], raw[2], 0]
+    // Column 1: [raw[3], raw[4], raw[5], 0]
+    // Column 2: [raw[6], raw[7], raw[8], 0]
+    // Column 3: [raw[9], raw[10], raw[11], 1]
+    let mat = Matrix4::new(
+        raw[0], raw[1], raw[2], 0.0, raw[3], raw[4], raw[5], 0.0, raw[6], raw[7], raw[8], 0.0,
+        raw[9], raw[10], raw[11], 1.0,
+    );
+
+    // Translation = 4th column
+    let translation = [mat.w.x, mat.w.y, mat.w.z];
+
+    // Extract column vectors for rotation
+    let mut col0 = Vector3::new(mat.x.x, mat.x.y, mat.x.z);
+    let mut col1 = Vector3::new(mat.y.x, mat.y.y, mat.y.z);
+    let mut col2 = Vector3::new(mat.z.x, mat.z.y, mat.z.z);
+
+    let scale_x = col0.magnitude();
+    let scale_y = col1.magnitude();
+    let scale_z = col2.magnitude();
+
+    if scale_x > 1e-8 {
+        col0 /= scale_x;
+    }
+    if scale_y > 1e-8 {
+        col1 /= scale_y;
+    }
+    if scale_z > 1e-8 {
+        col2 /= scale_z;
+    }
+
+    let rotation_matrix = Matrix3::from_cols(col0, col1, col2);
+    let q = Quaternion::from(rotation_matrix);
+
+    // glTF quaternion order: [x, y, z, w]
+    let rotation = [q.v.x, q.v.y, q.v.z, q.s];
+
+    (translation, rotation)
+}

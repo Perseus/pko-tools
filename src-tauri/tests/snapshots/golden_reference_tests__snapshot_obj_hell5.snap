@@ -1,0 +1,1905 @@
+---
+source: tests/golden_reference_tests.rs
+expression: obj
+---
+section_cnt_x: 32
+section_cnt_y: 27
+section_width: 8
+section_height: 8
+objects:
+  - raw_type_id: 221
+    obj_type: 0
+    obj_id: 221
+    world_x: 141.2
+    world_y: 28.8
+    world_z: 0
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 331
+    obj_type: 0
+    obj_id: 331
+    world_x: 197.9
+    world_y: 24.1
+    world_z: 0
+    yaw_angle: -135
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 197.8
+    world_y: 24.2
+    world_z: 0
+    yaw_angle: -120
+    scale: 0
+  - raw_type_id: 221
+    obj_type: 0
+    obj_id: 221
+    world_x: 30.5
+    world_y: 32.3
+    world_z: 0
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 221
+    obj_type: 0
+    obj_id: 221
+    world_x: 86.7
+    world_y: 32.2
+    world_z: 0
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 330
+    obj_type: 0
+    obj_id: 330
+    world_x: 204.7
+    world_y: 33.5
+    world_z: 0
+    yaw_angle: -75
+    scale: 0
+  - raw_type_id: 592
+    obj_type: 0
+    obj_id: 592
+    world_x: 203.1
+    world_y: 34.7
+    world_z: 0
+    yaw_angle: -135
+    scale: 9
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 203.6
+    world_y: 36.6
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 203.8
+    world_y: 33.3
+    world_z: 0
+    yaw_angle: -120
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 205.1
+    world_y: 34.2
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 330
+    obj_type: 0
+    obj_id: 330
+    world_x: 197.5
+    world_y: 59.4
+    world_z: 0
+    yaw_angle: -165
+    scale: 0
+  - raw_type_id: 331
+    obj_type: 0
+    obj_id: 331
+    world_x: 198.5
+    world_y: 62
+    world_z: 0
+    yaw_angle: -105
+    scale: 0
+  - raw_type_id: 592
+    obj_type: 0
+    obj_id: 592
+    world_x: 197.2
+    world_y: 60.6
+    world_z: 0
+    yaw_angle: -60
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 197.1
+    world_y: 62.8
+    world_z: 0
+    yaw_angle: -30
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 197.1
+    world_y: 59.7
+    world_z: 0
+    yaw_angle: -75
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 199.3
+    world_y: 60.2
+    world_z: 0
+    yaw_angle: -120
+    scale: 0
+  - raw_type_id: 331
+    obj_type: 0
+    obj_id: 331
+    world_x: 215.8
+    world_y: 69.1
+    world_z: 0
+    yaw_angle: -45
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 216
+    world_y: 69.7
+    world_z: 0
+    yaw_angle: -60
+    scale: 0
+  - raw_type_id: 330
+    obj_type: 0
+    obj_id: 330
+    world_x: 187.2
+    world_y: 82.7
+    world_z: 0
+    yaw_angle: -135
+    scale: 0
+  - raw_type_id: 331
+    obj_type: 0
+    obj_id: 331
+    world_x: 187.5
+    world_y: 85.2
+    world_z: 0
+    yaw_angle: 30
+    scale: 0
+  - raw_type_id: 592
+    obj_type: 0
+    obj_id: 592
+    world_x: 187.4
+    world_y: 81.1
+    world_z: 0
+    yaw_angle: -15
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 186.1
+    world_y: 86.3
+    world_z: 0
+    yaw_angle: -75
+    scale: 0
+  - raw_type_id: 592
+    obj_type: 0
+    obj_id: 592
+    world_x: 186.5
+    world_y: 84.6
+    world_z: 0
+    yaw_angle: 15
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 186
+    world_y: 83.5
+    world_z: 0
+    yaw_angle: -105
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 188.4
+    world_y: 82.5
+    world_z: 0
+    yaw_angle: -60
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 213.4
+    world_y: 87.9
+    world_z: 0.16
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 331
+    obj_type: 0
+    obj_id: 331
+    world_x: 209.8
+    world_y: 87.7
+    world_z: 0
+    yaw_angle: -75
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 208.7
+    world_y: 87.2
+    world_z: 0
+    yaw_angle: -165
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 33.5
+    world_y: 89.4
+    world_z: 0
+    yaw_angle: -330
+    scale: 0
+  - raw_type_id: 331
+    obj_type: 0
+    obj_id: 331
+    world_x: 33.7
+    world_y: 89.3
+    world_z: 0
+    yaw_angle: -330
+    scale: 0
+  - raw_type_id: 330
+    obj_type: 0
+    obj_id: 330
+    world_x: 58.3
+    world_y: 91
+    world_z: 0
+    yaw_angle: -150
+    scale: 0
+  - raw_type_id: 592
+    obj_type: 0
+    obj_id: 592
+    world_x: 58.4
+    world_y: 92.6
+    world_z: 0
+    yaw_angle: 105
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 59.9
+    world_y: 90.8
+    world_z: 0.26
+    yaw_angle: 120
+    scale: 20
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 57.5
+    world_y: 89.9
+    world_z: 0
+    yaw_angle: -330
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 59.2
+    world_y: 90.9
+    world_z: 0.26
+    yaw_angle: 120
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 58.6
+    world_y: 92
+    world_z: 0
+    yaw_angle: -300
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 125.8
+    world_y: 92.7
+    world_z: 0
+    yaw_angle: -285
+    scale: 0
+  - raw_type_id: 331
+    obj_type: 0
+    obj_id: 331
+    world_x: 126.2
+    world_y: 92.2
+    world_z: 0
+    yaw_angle: -225
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 166.4
+    world_y: 95.7
+    world_z: 0.2
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 330
+    obj_type: 0
+    obj_id: 330
+    world_x: 167.3
+    world_y: 93.7
+    world_z: 0
+    yaw_angle: -30
+    scale: 0
+  - raw_type_id: 592
+    obj_type: 0
+    obj_id: 592
+    world_x: 165
+    world_y: 95.5
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 331
+    obj_type: 0
+    obj_id: 331
+    world_x: 164.6
+    world_y: 93.9
+    world_z: 0
+    yaw_angle: -180
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 167
+    world_y: 95.7
+    world_z: 0.2
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 164
+    world_y: 95.6
+    world_z: 0
+    yaw_angle: -285
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 165.6
+    world_y: 93.3
+    world_z: 0
+    yaw_angle: -330
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 191.8
+    world_y: 93.5
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 194.6
+    world_y: 92.4
+    world_z: -0.62
+    yaw_angle: -270
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 199.2
+    world_y: 92.4
+    world_z: -0.62
+    yaw_angle: -270
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 196.9
+    world_y: 92.4
+    world_z: -0.62
+    yaw_angle: -270
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 193.1
+    world_y: 92.7
+    world_z: 0
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 557
+    obj_type: 0
+    obj_id: 557
+    world_x: 193.3
+    world_y: 92.4
+    world_z: -1.56
+    yaw_angle: -360
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 201.5
+    world_y: 92.4
+    world_z: -0.62
+    yaw_angle: -270
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 206.1
+    world_y: 92.4
+    world_z: -0.62
+    yaw_angle: -270
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 203.8
+    world_y: 92.4
+    world_z: -0.62
+    yaw_angle: -270
+    scale: 0
+  - raw_type_id: 330
+    obj_type: 0
+    obj_id: 330
+    world_x: 212.7
+    world_y: 89.8
+    world_z: 0
+    yaw_angle: -225
+    scale: 0
+  - raw_type_id: 331
+    obj_type: 0
+    obj_id: 331
+    world_x: 214.7
+    world_y: 92.2
+    world_z: -0.46
+    yaw_angle: 30
+    scale: 0
+  - raw_type_id: 592
+    obj_type: 0
+    obj_id: 592
+    world_x: 213.6
+    world_y: 90.4
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 215.8
+    world_y: 93.4
+    world_z: 0
+    yaw_angle: -120
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 213
+    world_y: 92.9
+    world_z: 0
+    yaw_angle: -360
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 214.2
+    world_y: 93.6
+    world_z: 0
+    yaw_angle: -270
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 212.8
+    world_y: 88.2
+    world_z: 0.16
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 212
+    world_y: 89.6
+    world_z: 0
+    yaw_angle: -120
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 214.3
+    world_y: 91.5
+    world_z: -0.04
+    yaw_angle: 75
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 208.4
+    world_y: 92.4
+    world_z: -0.62
+    yaw_angle: -270
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 214.6
+    world_y: 95.8
+    world_z: -0.62
+    yaw_angle: -180
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 210.7
+    world_y: 92.4
+    world_z: -0.62
+    yaw_angle: -270
+    scale: 0
+  - raw_type_id: 557
+    obj_type: 0
+    obj_id: 557
+    world_x: 214.6
+    world_y: 94.3
+    world_z: -1.34
+    yaw_angle: -270
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 45.8
+    world_y: 101.8
+    world_z: -0.12
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 127
+    obj_type: 0
+    obj_id: 127
+    world_x: 41.9
+    world_y: 103.5
+    world_z: -0.06
+    yaw_angle: -180
+    scale: 0
+  - raw_type_id: 129
+    obj_type: 0
+    obj_id: 129
+    world_x: 42.7
+    world_y: 102.6
+    world_z: -0.06
+    yaw_angle: -360
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 51.8
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 57.7
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 63.6
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 69.5
+    world_y: 101.8
+    world_z: -0.06
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 75.5
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 87.4
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 81.5
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 87.8
+    world_y: 97.7
+    world_z: 0
+    yaw_angle: -270
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 93.3
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 330
+    obj_type: 0
+    obj_id: 330
+    world_x: 90.4
+    world_y: 99.1
+    world_z: 0
+    yaw_angle: -105
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 91
+    world_y: 97.3
+    world_z: 0
+    yaw_angle: -315
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 89.6
+    world_y: 99.7
+    world_z: 0
+    yaw_angle: -315
+    scale: 0
+  - raw_type_id: 592
+    obj_type: 0
+    obj_id: 592
+    world_x: 91.9
+    world_y: 98.6
+    world_z: 0
+    yaw_angle: 15
+    scale: 0
+  - raw_type_id: 331
+    obj_type: 0
+    obj_id: 331
+    world_x: 88.6
+    world_y: 96.5
+    world_z: 0
+    yaw_angle: -270
+    scale: 0
+  - raw_type_id: 592
+    obj_type: 0
+    obj_id: 592
+    world_x: 90
+    world_y: 98.1
+    world_z: 0
+    yaw_angle: 75
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 99.3
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 111.3
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 105.3
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 117.3
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 123.3
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 129.3
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 135.3
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 141.3
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 330
+    obj_type: 0
+    obj_id: 330
+    world_x: 142.1
+    world_y: 99.3
+    world_z: 0
+    yaw_angle: -75
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 140.1
+    world_y: 99.4
+    world_z: 0
+    yaw_angle: -285
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 142.3
+    world_y: 99.5
+    world_z: 0
+    yaw_angle: -315
+    scale: 0
+  - raw_type_id: 592
+    obj_type: 0
+    obj_id: 592
+    world_x: 140.5
+    world_y: 100.3
+    world_z: 0
+    yaw_angle: -30
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 147.2
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 127
+    obj_type: 0
+    obj_id: 127
+    world_x: 156.5
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 159.2
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 153.1
+    world_y: 101.8
+    world_z: -0.12
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 165.1
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 171
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 182.8
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 176.8
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 188.7
+    world_y: 101.8
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 592
+    obj_type: 0
+    obj_id: 592
+    world_x: 189.7
+    world_y: 100.3
+    world_z: 0
+    yaw_angle: 15
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 189.1
+    world_y: 100.8
+    world_z: 0
+    yaw_angle: -45
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 191.4
+    world_y: 96.2
+    world_z: -0.62
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 191.4
+    world_y: 98.5
+    world_z: -0.62
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 191.4
+    world_y: 100.8
+    world_z: -0.62
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 191.4
+    world_y: 103.1
+    world_z: -0.62
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 353
+    obj_type: 0
+    obj_id: 353
+    world_x: 215.1
+    world_y: 96.3
+    world_z: 0.1
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 353
+    obj_type: 0
+    obj_id: 353
+    world_x: 215.1
+    world_y: 98.1
+    world_z: 0.1
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 214.6
+    world_y: 100.4
+    world_z: -0.62
+    yaw_angle: -180
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 214.6
+    world_y: 98.1
+    world_z: -0.62
+    yaw_angle: -180
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 214.6
+    world_y: 102.7
+    world_z: -0.62
+    yaw_angle: -180
+    scale: 0
+  - raw_type_id: 127
+    obj_type: 0
+    obj_id: 127
+    world_x: 41.9
+    world_y: 105.5
+    world_z: -0.06
+    yaw_angle: -180
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 41.9
+    world_y: 109.4
+    world_z: -0.06
+    yaw_angle: -180
+    scale: 0
+  - raw_type_id: 67
+    obj_type: 0
+    obj_id: 67
+    world_x: 189.8
+    world_y: 107.7
+    world_z: -0.5
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 191.4
+    world_y: 105.4
+    world_z: -0.62
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 191.4
+    world_y: 107.7
+    world_z: -0.62
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 191.4
+    world_y: 110
+    world_z: -0.62
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 353
+    obj_type: 0
+    obj_id: 353
+    world_x: 215.1
+    world_y: 104.6
+    world_z: 0.1
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 353
+    obj_type: 0
+    obj_id: 353
+    world_x: 215.1
+    world_y: 111.5
+    world_z: 0.1
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 214.6
+    world_y: 105
+    world_z: -0.62
+    yaw_angle: -180
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 214.6
+    world_y: 111.9
+    world_z: -0.62
+    yaw_angle: -180
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 214.6
+    world_y: 109.6
+    world_z: -0.62
+    yaw_angle: -180
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 214.6
+    world_y: 107.3
+    world_z: -0.62
+    yaw_angle: -180
+    scale: 0
+  - raw_type_id: 129
+    obj_type: 0
+    obj_id: 129
+    world_x: 42.7
+    world_y: 113.1
+    world_z: -0.12
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 127
+    obj_type: 0
+    obj_id: 127
+    world_x: 44
+    world_y: 113.9
+    world_z: -0.14
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 46.8
+    world_y: 113.9
+    world_z: -0.18
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 52.8
+    world_y: 113.9
+    world_z: -0.12
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 49.1
+    world_y: 119.3
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 58.7
+    world_y: 113.9
+    world_z: -0.12
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 64.7
+    world_y: 113.9
+    world_z: -0.1
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 70.6
+    world_y: 113.9
+    world_z: -0.12
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 76.5
+    world_y: 113.9
+    world_z: -0.14
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 82.4
+    world_y: 113.9
+    world_z: -0.16
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 94
+    world_y: 113.9
+    world_z: -0.08
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 88.3
+    world_y: 113.9
+    world_z: -0.18
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 99.9
+    world_y: 113.9
+    world_z: 0.12
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 111.4
+    world_y: 113.9
+    world_z: -0.06
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 330
+    obj_type: 0
+    obj_id: 330
+    world_x: 109.5
+    world_y: 114.9
+    world_z: 0
+    yaw_angle: -135
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 110.4
+    world_y: 116.5
+    world_z: 0
+    yaw_angle: -105
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 105.7
+    world_y: 113.9
+    world_z: 0.08
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 592
+    obj_type: 0
+    obj_id: 592
+    world_x: 112.3
+    world_y: 116
+    world_z: 0
+    yaw_angle: 120
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 117.3
+    world_y: 113.9
+    world_z: -0.1
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 114.1
+    world_y: 115.4
+    world_z: 0
+    yaw_angle: -150
+    scale: 0
+  - raw_type_id: 331
+    obj_type: 0
+    obj_id: 331
+    world_x: 120.2
+    world_y: 119.2
+    world_z: 0
+    yaw_angle: -30
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 123.2
+    world_y: 113.9
+    world_z: -0.1
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 120.4
+    world_y: 119.2
+    world_z: 0
+    yaw_angle: -135
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 135.2
+    world_y: 113.9
+    world_z: -0.16
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 129.2
+    world_y: 113.9
+    world_z: -0.1
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 141.1
+    world_y: 113.9
+    world_z: -0.16
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 147.1
+    world_y: 113.9
+    world_z: -0.16
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 159
+    world_y: 113.9
+    world_z: -0.14
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 158.4
+    world_y: 118.8
+    world_z: 0
+    yaw_angle: -315
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 153.1
+    world_y: 113.9
+    world_z: -0.14
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 165
+    world_y: 113.9
+    world_z: -0.12
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 161.5
+    world_y: 119
+    world_z: 0.1
+    yaw_angle: 90
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 162.1
+    world_y: 119
+    world_z: 0.1
+    yaw_angle: 90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 171
+    world_y: 113.9
+    world_z: -0.1
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 177
+    world_y: 113.9
+    world_z: -0.12
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 182.9
+    world_y: 113.9
+    world_z: -0.1
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 191.4
+    world_y: 116.9
+    world_z: -0.62
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 128
+    obj_type: 0
+    obj_id: 128
+    world_x: 188.8
+    world_y: 113.9
+    world_z: -0.08
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 191.4
+    world_y: 119.2
+    world_z: -0.62
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 190.8
+    world_y: 119.9
+    world_z: 0.1
+    yaw_angle: 90
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 191.4
+    world_y: 112.3
+    world_z: -0.62
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 191.4
+    world_y: 114.6
+    world_z: -0.62
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 214.6
+    world_y: 116.5
+    world_z: -0.62
+    yaw_angle: -180
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 214.6
+    world_y: 114.2
+    world_z: -0.62
+    yaw_angle: -180
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 214.6
+    world_y: 118.8
+    world_z: -0.62
+    yaw_angle: -180
+    scale: 0
+  - raw_type_id: 353
+    obj_type: 0
+    obj_id: 353
+    world_x: 215.1
+    world_y: 118.5
+    world_z: 0.1
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 331
+    obj_type: 0
+    obj_id: 331
+    world_x: 223.2
+    world_y: 117
+    world_z: 0
+    yaw_angle: -15
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 223.1
+    world_y: 117.6
+    world_z: 0
+    yaw_angle: -135
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 47.6
+    world_y: 123.7
+    world_z: 0
+    yaw_angle: -75
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 45.5
+    world_y: 121.2
+    world_z: 0
+    yaw_angle: -15
+    scale: 0
+  - raw_type_id: 592
+    obj_type: 0
+    obj_id: 592
+    world_x: 46.8
+    world_y: 121
+    world_z: 0
+    yaw_angle: 45
+    scale: 0
+  - raw_type_id: 331
+    obj_type: 0
+    obj_id: 331
+    world_x: 47.4
+    world_y: 122.5
+    world_z: 0
+    yaw_angle: -360
+    scale: 0
+  - raw_type_id: 330
+    obj_type: 0
+    obj_id: 330
+    world_x: 48.1
+    world_y: 120.5
+    world_z: 0
+    yaw_angle: -195
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 48.6
+    world_y: 121.6
+    world_z: 0
+    yaw_angle: -45
+    scale: 0
+  - raw_type_id: 592
+    obj_type: 0
+    obj_id: 592
+    world_x: 49.6
+    world_y: 122.3
+    world_z: 0
+    yaw_angle: 150
+    scale: 0
+  - raw_type_id: 330
+    obj_type: 0
+    obj_id: 330
+    world_x: 160.9
+    world_y: 120.9
+    world_z: 0
+    yaw_angle: -195
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 162.4
+    world_y: 120.1
+    world_z: 0
+    yaw_angle: -285
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 160.1
+    world_y: 120.5
+    world_z: 0
+    yaw_angle: -240
+    scale: 0
+  - raw_type_id: 592
+    obj_type: 0
+    obj_id: 592
+    world_x: 160.2
+    world_y: 120
+    world_z: 0
+    yaw_angle: 75
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 190.7
+    world_y: 121.3
+    world_z: 0.2
+    yaw_angle: 90
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 189.5
+    world_y: 126.2
+    world_z: 0
+    yaw_angle: -240
+    scale: 0
+  - raw_type_id: 331
+    obj_type: 0
+    obj_id: 331
+    world_x: 189.8
+    world_y: 126.3
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 191.3
+    world_y: 122.5
+    world_z: 0.2
+    yaw_angle: 45
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 191.9
+    world_y: 120.2
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 557
+    obj_type: 0
+    obj_id: 557
+    world_x: 191.4
+    world_y: 120.7
+    world_z: -1.36
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 199.7
+    world_y: 122.6
+    world_z: -0.62
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 195.1
+    world_y: 122.6
+    world_z: -0.62
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 197.4
+    world_y: 122.6
+    world_z: -0.62
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 193.3
+    world_y: 121
+    world_z: 0
+    yaw_angle: -45
+    scale: 0
+  - raw_type_id: 592
+    obj_type: 0
+    obj_id: 592
+    world_x: 193.2
+    world_y: 121.2
+    world_z: 0
+    yaw_angle: 60
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 192.6
+    world_y: 120
+    world_z: 0
+    yaw_angle: 30
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 192.7
+    world_y: 123.2
+    world_z: 0.2
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 353
+    obj_type: 0
+    obj_id: 353
+    world_x: 196.9
+    world_y: 123.1
+    world_z: 0.1
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 193.4
+    world_y: 122
+    world_z: 0
+    yaw_angle: -180
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 204.3
+    world_y: 122.6
+    world_z: -0.62
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 206.6
+    world_y: 122.6
+    world_z: -0.62
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 202
+    world_y: 122.6
+    world_z: -0.62
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 353
+    obj_type: 0
+    obj_id: 353
+    world_x: 203.7
+    world_y: 123.1
+    world_z: 0.1
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 208.9
+    world_y: 122.6
+    world_z: -0.62
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 555
+    obj_type: 0
+    obj_id: 555
+    world_x: 211.2
+    world_y: 122.6
+    world_z: -0.62
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 214.2
+    world_y: 121.2
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 557
+    obj_type: 0
+    obj_id: 557
+    world_x: 212.7
+    world_y: 122.6
+    world_z: -1.36
+    yaw_angle: -180
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 214.5
+    world_y: 120.2
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 214
+    world_y: 122.8
+    world_z: 0.1
+    yaw_angle: -30
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 214.9
+    world_y: 121.5
+    world_z: 0.1
+    yaw_angle: -75
+    scale: 0
+  - raw_type_id: 353
+    obj_type: 0
+    obj_id: 353
+    world_x: 209.9
+    world_y: 123.1
+    world_z: 0.1
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 213.3
+    world_y: 122.2
+    world_z: 0
+    yaw_angle: -180
+    scale: 0
+  - raw_type_id: 330
+    obj_type: 0
+    obj_id: 330
+    world_x: 202.4
+    world_y: 134.9
+    world_z: 0
+    yaw_angle: -195
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 203.6
+    world_y: 133.4
+    world_z: 0.18
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 356
+    obj_type: 0
+    obj_id: 356
+    world_x: 203.1
+    world_y: 133.3
+    world_z: 0.18
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 592
+    obj_type: 0
+    obj_id: 592
+    world_x: 200.7
+    world_y: 135.4
+    world_z: 0
+    yaw_angle: -135
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 203.5
+    world_y: 135.9
+    world_z: 0
+    yaw_angle: -150
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 204.3
+    world_y: 134.3
+    world_z: 0
+    yaw_angle: -195
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 201.1
+    world_y: 136.8
+    world_z: 0
+    yaw_angle: -120
+    scale: 0
+  - raw_type_id: 331
+    obj_type: 0
+    obj_id: 331
+    world_x: 202.5
+    world_y: 136.7
+    world_z: 0
+    yaw_angle: 15
+    scale: 0
+  - raw_type_id: 331
+    obj_type: 0
+    obj_id: 331
+    world_x: 201.2
+    world_y: 159.7
+    world_z: 0
+    yaw_angle: -45
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 200.7
+    world_y: 159.3
+    world_z: 0
+    yaw_angle: -195
+    scale: 0
+  - raw_type_id: 221
+    obj_type: 0
+    obj_id: 221
+    world_x: 30.2
+    world_y: 175.7
+    world_z: 0
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 221
+    obj_type: 0
+    obj_id: 221
+    world_x: 87
+    world_y: 175.4
+    world_z: 0
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 221
+    obj_type: 0
+    obj_id: 221
+    world_x: 142.8
+    world_y: 175.3
+    world_z: 0
+    yaw_angle: 0
+    scale: 0
+  - raw_type_id: 331
+    obj_type: 0
+    obj_id: 331
+    world_x: 215.5
+    world_y: 172.2
+    world_z: 0
+    yaw_angle: -15
+    scale: 0
+  - raw_type_id: 592
+    obj_type: 0
+    obj_id: 592
+    world_x: 215
+    world_y: 173.7
+    world_z: 0
+    yaw_angle: -75
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 215.6
+    world_y: 174.9
+    world_z: 0
+    yaw_angle: -180
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 214.2
+    world_y: 172.4
+    world_z: 0
+    yaw_angle: -225
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 215.9
+    world_y: 171.1
+    world_z: 0
+    yaw_angle: -270
+    scale: 0
+  - raw_type_id: 330
+    obj_type: 0
+    obj_id: 330
+    world_x: 216.9
+    world_y: 174.1
+    world_z: 0
+    yaw_angle: -90
+    scale: 0
+  - raw_type_id: 316
+    obj_type: 0
+    obj_id: 316
+    world_x: 218.1
+    world_y: 173.7
+    world_z: 0
+    yaw_angle: -210
+    scale: 0
+  - raw_type_id: 592
+    obj_type: 0
+    obj_id: 592
+    world_x: 217
+    world_y: 172.8
+    world_z: 0
+    yaw_angle: 45
+    scale: 0

@@ -150,7 +150,7 @@ fn dump_scene_obj_info(client_dir: &PathBuf, map_name: Option<&str>) {
             }
         };
 
-        let parsed = match pko_tools_lib::map::scene_obj::parse_obj_file(&data) {
+        let parsed = match pko_tools_lib::map::obj_loader::load_obj(&data) {
             Ok(p) => p,
             Err(e) => {
                 eprintln!("Failed to parse .obj file: {:?}", e);

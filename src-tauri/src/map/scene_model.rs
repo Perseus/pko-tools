@@ -19,7 +19,7 @@ use gltf_json::{
 
 use crate::item::model::decode_pko_texture;
 
-use super::lmo::{self, D3DCULL_NONE, LmoGeomObject, LmoModel};
+use super::lmo_types::{self as lmo, D3DCULL_NONE, LmoGeomObject, LmoModel};
 use super::lmo_loader;
 use super::scene_obj::SceneObject;
 use super::scene_obj_info::SceneObjModelInfo;
@@ -3203,7 +3203,7 @@ mod tests {
             return;
         };
 
-        let model = lmo::load_lmo(lmo_path).unwrap();
+        let model = super::lmo_loader::load_lmo(lmo_path).unwrap();
         for (gi, geom) in model.geom_objects.iter().enumerate() {
             let vert_count = geom.vertices.len();
             let max_idx = geom.indices.iter().copied().max().unwrap_or(0);
