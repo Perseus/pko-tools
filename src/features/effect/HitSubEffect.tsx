@@ -6,6 +6,12 @@ import * as THREE from "three";
 import type { SubEffect, Vec3 } from "@/types/effect";
 import {
   createEffectTexture,
+  createRectGeometry,
+  createRectPlaneGeometry,
+  createRectZGeometry,
+  createTriangleGeometry,
+  createTrianglePlaneGeometry,
+  createCylinderGeometry,
   resolveBlendFactors,
   resolveGeometry,
   resolveTextureCandidates,
@@ -49,6 +55,24 @@ export default function HitSubEffect({
     () => resolveGeometry(subEffect),
     [subEffect],
   );
+
+  // Build PKO-correct BufferGeometry for builtin types
+  const builtinGeometry = useMemo(() => {
+    switch (geometry.type) {
+      case "rect": return createRectGeometry();
+      case "rectPlane": return createRectPlaneGeometry();
+      case "rectZ": return createRectZGeometry();
+      case "triangle": return createTriangleGeometry();
+      case "trianglePlane": return createTrianglePlaneGeometry();
+      case "cylinder": return createCylinderGeometry(
+        geometry.topRadius ?? 0.5,
+        geometry.botRadius ?? 0.5,
+        geometry.height ?? 1.0,
+        geometry.segments ?? 16,
+      );
+      default: return null;
+    }
+  }, [geometry.type, geometry.topRadius, geometry.botRadius, geometry.height, geometry.segments]);
 
   // Load texture once per sub-effect
   useEffect(() => {
@@ -167,22 +191,9 @@ export default function HitSubEffect({
         interpolated.size[2] || 1,
       ]}
     >
-      {geometry.type === "plane" && <planeGeometry args={[1, 1]} />}
-      {geometry.type === "cylinder" && (
-        <cylinderGeometry
-          args={[
-            geometry.topRadius ?? 0.5,
-            geometry.botRadius ?? 0.5,
-            geometry.height ?? 1.0,
-            geometry.segments ?? 16,
-          ]}
-        />
-      )}
+      {builtinGeometry && <primitive object={builtinGeometry} attach="geometry" />}
+      {geometry.type === "plane" && !builtinGeometry && <planeGeometry args={[1, 1]} />}
       {geometry.type === "sphere" && <sphereGeometry args={[0.7, 24, 24]} />}
-      {(geometry.type === "rect" || geometry.type === "rectZ" ||
-        geometry.type === "triangle" || geometry.type === "triangleZ") && (
-        <planeGeometry args={[1, 1]} />
-      )}
       {geometry.type === "model" && <boxGeometry args={[0.5, 0.5, 0.5]} />}
       <shaderMaterial
         vertexShader={subEffectVertexShader}

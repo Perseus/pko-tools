@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
   createRectGeometry,
+  createRectPlaneGeometry,
   createRectZGeometry,
   createTriangleGeometry,
-  createTriangleZGeometry,
+  createTrianglePlaneGeometry,
   resolveBlendFactors,
   resolveFrameData,
   resolveFrameDurations,
@@ -90,7 +91,7 @@ describe("effect rendering helpers", () => {
   it("resolves geometry from modelName", () => {
     expect(resolveGeometry({ ...baseSubEffect, modelName: "" }).type).toBe("rect");
     expect(resolveGeometry({ ...baseSubEffect, modelName: "Rect" }).type).toBe("rect");
-    expect(resolveGeometry({ ...baseSubEffect, modelName: "RectPlane" }).type).toBe("rectZ");
+    expect(resolveGeometry({ ...baseSubEffect, modelName: "RectPlane" }).type).toBe("rectPlane");
     expect(resolveGeometry({ ...baseSubEffect, modelName: "Sphere" }).type).toBe("sphere");
   });
 
@@ -109,48 +110,58 @@ describe("effect rendering helpers", () => {
   it("returns correct type for all built-in geometry names", () => {
     expect(resolveGeometry({ ...baseSubEffect, modelName: "Rect" }).type).toBe("rect");
     expect(resolveGeometry({ ...baseSubEffect, modelName: "RectZ" }).type).toBe("rectZ");
-    expect(resolveGeometry({ ...baseSubEffect, modelName: "RectPlane" }).type).toBe("rectZ");
+    expect(resolveGeometry({ ...baseSubEffect, modelName: "RectPlane" }).type).toBe("rectPlane");
     expect(resolveGeometry({ ...baseSubEffect, modelName: "Triangle" }).type).toBe("triangle");
-    expect(resolveGeometry({ ...baseSubEffect, modelName: "TrianglePlane" }).type).toBe("triangleZ");
+    expect(resolveGeometry({ ...baseSubEffect, modelName: "TrianglePlane" }).type).toBe("trianglePlane");
   });
 
-  it("creates Rect geometry with correct XY-plane vertices", () => {
+  it("creates Rect geometry with correct XZ-plane vertices", () => {
     const geo = createRectGeometry();
-    const pos = geo.getAttribute("position");
-    expect(pos.count).toBe(4);
-    // All Z values should be 0 (XY plane)
-    for (let i = 0; i < pos.count; i++) {
-      expect(pos.getZ(i)).toBe(0);
-    }
-    const uv = geo.getAttribute("uv");
-    expect(uv.count).toBe(4);
-  });
-
-  it("creates RectZ geometry with correct XZ-plane vertices", () => {
-    const geo = createRectZGeometry();
     const pos = geo.getAttribute("position");
     expect(pos.count).toBe(4);
     // All Y values should be 0 (XZ plane)
     for (let i = 0; i < pos.count; i++) {
       expect(pos.getY(i)).toBe(0);
     }
+    const uv = geo.getAttribute("uv");
+    expect(uv.count).toBe(4);
   });
 
-  it("creates Triangle geometry with 3 XY-plane vertices", () => {
-    const geo = createTriangleGeometry();
+  it("creates RectPlane geometry with correct XY-plane vertices", () => {
+    const geo = createRectPlaneGeometry();
     const pos = geo.getAttribute("position");
-    expect(pos.count).toBe(3);
+    expect(pos.count).toBe(4);
+    // All Z values should be 0 (XY plane)
     for (let i = 0; i < pos.count; i++) {
       expect(pos.getZ(i)).toBe(0);
     }
   });
 
-  it("creates TriangleZ geometry with 3 XZ-plane vertices", () => {
-    const geo = createTriangleZGeometry();
+  it("creates RectZ geometry with correct YZ-plane vertices", () => {
+    const geo = createRectZGeometry();
+    const pos = geo.getAttribute("position");
+    expect(pos.count).toBe(4);
+    // All X values should be 0 (YZ plane)
+    for (let i = 0; i < pos.count; i++) {
+      expect(pos.getX(i)).toBe(0);
+    }
+  });
+
+  it("creates Triangle geometry with 3 XZ-plane vertices", () => {
+    const geo = createTriangleGeometry();
     const pos = geo.getAttribute("position");
     expect(pos.count).toBe(3);
     for (let i = 0; i < pos.count; i++) {
       expect(pos.getY(i)).toBe(0);
+    }
+  });
+
+  it("creates TrianglePlane geometry with 3 XY-plane vertices", () => {
+    const geo = createTrianglePlaneGeometry();
+    const pos = geo.getAttribute("position");
+    expect(pos.count).toBe(3);
+    for (let i = 0; i < pos.count; i++) {
+      expect(pos.getZ(i)).toBe(0);
     }
   });
 

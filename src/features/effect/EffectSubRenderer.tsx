@@ -21,9 +21,11 @@ import * as THREE from "three";
 import {
   createEffectTexture,
   createRectGeometry,
+  createRectPlaneGeometry,
   createRectZGeometry,
   createTriangleGeometry,
-  createTriangleZGeometry,
+  createTrianglePlaneGeometry,
+  createCylinderGeometry,
   resolveBlendFactors,
   resolveFrameData,
   resolveGeometry,
@@ -93,16 +95,23 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
     [subEffect, selectedFrameIndex]
   );
 
-  // Build PKO-correct BufferGeometry for rect/rectZ/triangle/triangleZ types
+  // Build PKO-correct BufferGeometry for builtin geometry types
   const builtinGeometry = useMemo(() => {
     switch (geometry.type) {
       case "rect": return createRectGeometry();
+      case "rectPlane": return createRectPlaneGeometry();
       case "rectZ": return createRectZGeometry();
       case "triangle": return createTriangleGeometry();
-      case "triangleZ": return createTriangleZGeometry();
+      case "trianglePlane": return createTrianglePlaneGeometry();
+      case "cylinder": return createCylinderGeometry(
+        geometry.topRadius ?? 0.5,
+        geometry.botRadius ?? 0.5,
+        geometry.height ?? 1.0,
+        geometry.segments ?? 16,
+      );
       default: return null;
     }
-  }, [geometry.type]);
+  }, [geometry.type, geometry.topRadius, geometry.botRadius, geometry.height, geometry.segments]);
 
   const modelGeometry = useEffectModel(
     geometry.type === "model" ? geometry.modelName : undefined,
@@ -397,13 +406,13 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
       const curParams = subEffect.perFrameCylinder[interpolated.frameIndex];
       const nxtParams = subEffect.perFrameCylinder[interpolated.nextFrameIndex];
       if (curParams && nxtParams && interpolated.lerp > 0.001) {
-        // Build two temporary cylinder geometries and lerp their vertices
+        // Build two temporary cylinder geometries (Z-axis) and lerp their vertices
         const segs = Math.max(curParams.segments || 16, 3);
-        const curGeo = new THREE.CylinderGeometry(
+        const curGeo = createCylinderGeometry(
           curParams.topRadius || 0.5, curParams.botRadius || 0.5,
           curParams.height || 1.0, segs,
         );
-        const nxtGeo = new THREE.CylinderGeometry(
+        const nxtGeo = createCylinderGeometry(
           nxtParams.topRadius || 0.5, nxtParams.botRadius || 0.5,
           nxtParams.height || 1.0, segs,
         );
@@ -528,16 +537,6 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
     >
       {builtinGeometry && <primitive object={builtinGeometry} attach="geometry" />}
       {geometry.type === "plane" && !builtinGeometry && <planeGeometry args={[1, 1]} />}
-      {geometry.type === "cylinder" && (
-        <cylinderGeometry
-          args={[
-            geometry.topRadius ?? 0.5,
-            geometry.botRadius ?? 0.5,
-            geometry.height ?? 1.0,
-            geometry.segments ?? 16,
-          ]}
-        />
-      )}
       {geometry.type === "sphere" && <sphereGeometry args={[0.7, 24, 24]} />}
       {geometry.type === "model" && modelGeometry && (
         <primitive object={modelGeometry} attach="geometry" />
