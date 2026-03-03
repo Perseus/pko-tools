@@ -32,6 +32,7 @@ import { WorkbenchDummy } from "@/types/item";
 import { actionIds } from "@/features/actions/actionIds";
 import { ContextualActionMenu } from "@/features/actions/ContextualActionMenu";
 import { PerfFrameProbe, PerfOverlay } from "@/features/perf";
+import { CanvasErrorBoundary } from "@/components/CanvasErrorBoundary";
 
 const ITEM_CONTEXT_ACTIONS = [
   actionIds.itemExportGltf,
@@ -186,42 +187,44 @@ export default function ItemWorkbench() {
             requireShiftKey
             className="h-full w-full"
           >
-            <Canvas
-              style={{
-                height: "100%",
-                width: "100%",
-                cursor: placementMode ? "crosshair" : undefined,
-              }}
-              shadows
-              camera={{ position: [3, 4, 4], fov: 35 }}
-            >
-              <ambientLight intensity={1} />
-              <directionalLight position={[5, 5, 5]} castShadow />
-              <Environment background>
-                <mesh scale={100}>
-                  <sphereGeometry args={[1, 16, 16]} />
-                  <meshBasicMaterial color="#393939" side={THREE.BackSide} />
-                </mesh>
-              </Environment>
-              <Suspense fallback={null}>
-                <ItemModelViewer
-                  gltfJson={itemGltfJson}
-                  litInfo={litInfo}
-                  effectConfig={effectConfig}
-                  debugConfig={debugConfig}
-                  projectId={currentProject?.id ?? ""}
-                  projectDir={currentProject?.projectDirectory ?? ""}
-                  forgePreview={forgePreview}
-                  workbenchDummies={isWorkbenchMode ? workbench?.dummies ?? [] : null}
-                />
-              </Suspense>
-              {isWorkbenchMode && (
-                <DummyPlacementOverlay onPlace={handleDummyPlaced} />
-              )}
-              <OrbitControls />
-              <gridHelper args={[20, 20, 20]} position-y={0.01} />
-              <PerfFrameProbe surface="items" />
-            </Canvas>
+            <CanvasErrorBoundary className="absolute inset-0 flex items-center justify-center">
+              <Canvas
+                style={{
+                  height: "100%",
+                  width: "100%",
+                  cursor: placementMode ? "crosshair" : undefined,
+                }}
+                shadows
+                camera={{ position: [3, 4, 4], fov: 35 }}
+              >
+                <ambientLight intensity={1} />
+                <directionalLight position={[5, 5, 5]} castShadow />
+                <Environment background>
+                  <mesh scale={100}>
+                    <sphereGeometry args={[1, 16, 16]} />
+                    <meshBasicMaterial color="#393939" side={THREE.BackSide} />
+                  </mesh>
+                </Environment>
+                <Suspense fallback={null}>
+                  <ItemModelViewer
+                    gltfJson={itemGltfJson}
+                    litInfo={litInfo}
+                    effectConfig={effectConfig}
+                    debugConfig={debugConfig}
+                    projectId={currentProject?.id ?? ""}
+                    projectDir={currentProject?.projectDirectory ?? ""}
+                    forgePreview={forgePreview}
+                    workbenchDummies={isWorkbenchMode ? workbench?.dummies ?? [] : null}
+                  />
+                </Suspense>
+                {isWorkbenchMode && (
+                  <DummyPlacementOverlay onPlace={handleDummyPlaced} />
+                )}
+                <OrbitControls />
+                <gridHelper args={[20, 20, 20]} position-y={0.01} />
+                <PerfFrameProbe surface="items" />
+              </Canvas>
+            </CanvasErrorBoundary>
             <PerfOverlay surface="items" className="bottom-8 right-3" />
           </ContextualActionMenu>
         </div>

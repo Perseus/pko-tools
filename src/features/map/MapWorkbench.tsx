@@ -13,6 +13,7 @@ import { actionIds } from "@/features/actions/actionIds";
 import { ContextualActionMenu } from "@/features/actions/ContextualActionMenu";
 import { useRegisterActionRuntime } from "@/features/actions/ActionKernelProvider";
 import { PerfFrameProbe, PerfOverlay } from "@/features/perf";
+import { CanvasErrorBoundary } from "@/components/CanvasErrorBoundary";
 
 const MAP_CONTEXT_ACTIONS = [
   actionIds.mapToggleObjectMarkers,
@@ -209,44 +210,46 @@ export default function MapWorkbench() {
     >
       <MapViewToolbar />
       <MapMetadataPanel />
-      <Canvas
-        camera={{
-          position: cameraPos,
-          fov: 45,
-          near: 0.1,
-          far: 50000,
-        }}
-        style={{ background: "linear-gradient(180deg, #b0c4de 0%, #dfe6ed 100%)" }}
-      >
-        <ambientLight intensity={0.6} />
-        <directionalLight position={[500, 1000, 500]} intensity={0.8} />
+      <CanvasErrorBoundary className="absolute inset-0 flex items-center justify-center">
+        <Canvas
+          camera={{
+            position: cameraPos,
+            fov: 45,
+            near: 0.1,
+            far: 50000,
+          }}
+          style={{ background: "linear-gradient(180deg, #b0c4de 0%, #dfe6ed 100%)" }}
+        >
+          <ambientLight intensity={0.6} />
+          <directionalLight position={[500, 1000, 500]} intensity={0.8} />
 
-        <Suspense fallback={null}>
-          {gltfJson && (
-            <MapTerrainViewer gltfJson={gltfJson} viewConfig={viewConfig} />
-          )}
-        </Suspense>
+          <Suspense fallback={null}>
+            {gltfJson && (
+              <MapTerrainViewer gltfJson={gltfJson} viewConfig={viewConfig} />
+            )}
+          </Suspense>
 
-        <OrbitControls
-          makeDefault
-          maxDistance={15000}
-          minDistance={1}
-          target={
-            metadata
-              ? [
-                  (metadata.width * mapScale) / 2,
-                  0,
-                  (metadata.height * mapScale) / 2,
-                ]
-              : [0, 0, 0]
-          }
-        />
+          <OrbitControls
+            makeDefault
+            maxDistance={15000}
+            minDistance={1}
+            target={
+              metadata
+                ? [
+                    (metadata.width * mapScale) / 2,
+                    0,
+                    (metadata.height * mapScale) / 2,
+                  ]
+                : [0, 0, 0]
+            }
+          />
 
-        <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
-          <GizmoViewport />
-        </GizmoHelper>
-        <PerfFrameProbe surface="maps" />
-      </Canvas>
+          <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
+            <GizmoViewport />
+          </GizmoHelper>
+          <PerfFrameProbe surface="maps" />
+        </Canvas>
+      </CanvasErrorBoundary>
       <PerfOverlay surface="maps" className="right-3 top-3" />
     </ContextualActionMenu>
   );
