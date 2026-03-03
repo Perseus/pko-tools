@@ -1,5 +1,5 @@
 import { Item, ItemImportResult, ItemLitInfo, ItemMetadata, RefineEffectTable, ForgeEffectPreview, ItemCategoryAvailability, DecompileResult, WorkbenchState, WorkbenchSummary, WorkbenchDummy, ItemInfoPreview } from "@/types/item";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeTimed as invoke } from "@/commands/invokeTimed";
 
 export const getItemList = async (
   projectId: string

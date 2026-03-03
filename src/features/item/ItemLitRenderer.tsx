@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { ItemLitEntry } from "@/types/item";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeTimed as invoke } from "@/commands/invokeTimed";
 
 /** Vertex shader for glow overlay - passes through UVs for fragment animation */
 const glowVertexShader = `

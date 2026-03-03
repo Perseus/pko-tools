@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { selectedItemAtom, selectedModelVariantAtom, itemGltfJsonAtom } from "@/store/item";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeTimed as invoke } from "@/commands/invokeTimed";
 import { revealItemInDir } from "@tauri-apps/plugin-opener";
 import { useToast } from "@/hooks/use-toast";
 import { Loader2 } from "lucide-react";

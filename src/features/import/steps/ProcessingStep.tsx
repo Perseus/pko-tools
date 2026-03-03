@@ -1,10 +1,10 @@
 import { Progress } from "@/components/ui/progress";
 import { Button } from "@/components/ui/button";
+import { invokeTimed as invoke } from "@/commands/invokeTimed";
 import { useAtom } from "jotai";
 import { importWizardStateAtom } from "@/store/import";
 import { Loader2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import { invoke } from "@tauri-apps/api/core";
 import { importItemFromGltf } from "@/commands/item";
 
 export function ProcessingStep() {
