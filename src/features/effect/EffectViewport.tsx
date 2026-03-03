@@ -17,6 +17,7 @@ import { getPathPosition } from "@/features/effect/animation";
 import * as THREE from "three";
 import { CanvasErrorBoundary } from "@/components/CanvasErrorBoundary";
 import { playbackClockStore } from "@/features/effect/playbackClock";
+import { ContextualActionMenu, actionIds } from "@/features/actions";
 
 /** Default path velocity when no explicit velocity is provided in the .csf file. */
 const DEFAULT_PATH_VELOCITY = 2.0;
@@ -63,6 +64,17 @@ const GIZMO_BUTTONS: { mode: GizmoMode; icon: React.FC<{ className?: string }>; 
   { mode: "off", icon: MousePointer, label: "No gizmo (Esc)", key: "escape" },
 ];
 
+const EFFECT_VIEWPORT_CONTEXT_ACTIONS = [
+  actionIds.effectSave,
+  actionIds.effectUndo,
+  actionIds.effectRedo,
+  actionIds.effectGizmoTranslate,
+  actionIds.effectGizmoRotate,
+  actionIds.effectGizmoScale,
+  actionIds.effectGizmoOff,
+  actionIds.effectToggleCompositePreview,
+];
+
 export default function EffectViewport() {
   const effectData = useAtomValue(effectDataAtom);
   const playback = useAtomValue(effectPlaybackAtom);
@@ -73,7 +85,11 @@ export default function EffectViewport() {
   const [compositePreview, setCompositePreview] = useAtom(compositePreviewAtom);
 
   return (
-    <div className="relative h-full w-full overflow-hidden rounded-xl border border-border bg-muted/40">
+    <ContextualActionMenu
+      actionIds={EFFECT_VIEWPORT_CONTEXT_ACTIONS}
+      requireShiftKey
+      className="relative h-full w-full overflow-hidden rounded-xl border border-border bg-muted/40"
+    >
       <CanvasErrorBoundary className="absolute inset-0">
         <Canvas camera={{ position: [6, 6, 6], fov: 35 }} gl={{ preserveDrawingBuffer: false }}>
           <color attach="background" args={["#1e1e2e"]} />
@@ -137,12 +153,12 @@ export default function EffectViewport() {
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 bg-background/70 text-center">
           <div className="text-sm text-muted-foreground">Load an effect to preview it here.</div>
           <div className="text-xs text-muted-foreground/60">Select an .eff file from the sidebar, then choose a sub-effect.</div>
-          <div className="text-[10px] text-muted-foreground/40">Scroll to zoom · Click + drag to rotate · Right-click to pan</div>
+          <div className="text-[10px] text-muted-foreground/40">Scroll to zoom · Click + drag to rotate · Shift + Right-click for context actions</div>
         </div>
       )}
       {effectData && (
         <div className="absolute bottom-3 left-3 text-[10px] text-muted-foreground/50">
-          Scroll to zoom · Drag to orbit · Right-click to pan
+          Scroll to zoom · Drag to orbit · Shift + Right-click for context actions
         </div>
       )}
       {textureStatus.status === "error" && textureStatus.textureName && (
@@ -163,6 +179,6 @@ export default function EffectViewport() {
           </Button>
         </div>
       )}
-    </div>
+    </ContextualActionMenu>
   );
 }
