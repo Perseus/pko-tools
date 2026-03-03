@@ -33,3 +33,25 @@ vi.spyOn(console, "warn").mockImplementation((...args: unknown[]) => {
   }
   originalWarn(...args);
 });
+
+if (typeof window !== "undefined" && !("ResizeObserver" in window)) {
+  class ResizeObserverMock {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+
+  Object.defineProperty(window, "ResizeObserver", {
+    writable: true,
+    configurable: true,
+    value: ResizeObserverMock,
+  });
+}
+
+if (
+  typeof window !== "undefined" &&
+  typeof Element !== "undefined" &&
+  typeof Element.prototype.scrollIntoView !== "function"
+) {
+  Element.prototype.scrollIntoView = () => {};
+}
