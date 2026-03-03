@@ -185,11 +185,7 @@ export default function HitSubEffect({
         interpolated.angle[2],
         "YXZ",
       )}
-      scale={[
-        interpolated.size[0] || 1,
-        interpolated.size[1] || 1,
-        interpolated.size[2] || 1,
-      ]}
+      scale={interpolated.size}
     >
       {builtinGeometry && <primitive object={builtinGeometry} attach="geometry" />}
       {geometry.type === "plane" && !builtinGeometry && <planeGeometry args={[1, 1]} />}

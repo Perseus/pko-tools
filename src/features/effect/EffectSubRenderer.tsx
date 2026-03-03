@@ -533,7 +533,7 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
       ref={meshRef}
       position={position}
       rotation={new THREE.Euler(angle[0], angle[1], angle[2], "YXZ")}
-      scale={[size[0] || 1, size[1] || 1, size[2] || 1]}
+      scale={size}
     >
       {builtinGeometry && <primitive object={builtinGeometry} attach="geometry" />}
       {geometry.type === "plane" && !builtinGeometry && <planeGeometry args={[1, 1]} />}
@@ -570,7 +570,7 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
           <PivotControls
             offset={position}
             rotation={[angle[0], angle[1], angle[2]]}
-            scale={size[0] || 1}
+            scale={Math.max(size[0], 0.01)}
             visible={showGizmo}
             onDrag={handleGizmoDrag}
             onDragEnd={handleGizmoDragEnd}
