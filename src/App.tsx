@@ -21,7 +21,7 @@ import WorkspaceNavigator from "./components/WorkspaceNavigator/WorkspaceNavigat
 import ProjectCreator from "./pages/project-creator/ProjectCreator";
 import { Toaster } from "./components/ui/toaster";
 import { ImportWizard } from "./features/import/ImportWizard";
-import { ActionKernelProvider } from "./features/actions";
+import { ActionKernelProvider, CommandPalette } from "./features/actions";
 
 function App() {
   const [, setCurrentProject] = useAtom(currentProjectAtom);
@@ -65,6 +65,7 @@ function App() {
             <WorkspaceNavigator />
           </main>
           <ImportWizard />
+          <CommandPalette />
           <Toaster />
           <StatusBar className="fixed bottom-0 z-20" />
         </div>
