@@ -1,5 +1,5 @@
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { useActionKernel } from "@/features/actions";
+import { cmdkUiEnabled, useActionKernel } from "@/features/actions";
 import type { ResolvedAction, ShortcutDefinition } from "@/features/actions/types";
 import { Command } from "cmdk";
 import React, { useEffect, useMemo, useState } from "react";
@@ -40,6 +40,10 @@ function actionSearchText(action: ResolvedAction): string {
 
 export function CommandPalette() {
   const { isPaletteOpen, setPaletteOpen, getActionsForCurrentContext, runAction } = useActionKernel();
+
+  if (!cmdkUiEnabled) {
+    return null;
+  }
   const [query, setQuery] = useState("");
 
   const actions = useMemo(() => getActionsForCurrentContext(), [getActionsForCurrentContext, isPaletteOpen]);

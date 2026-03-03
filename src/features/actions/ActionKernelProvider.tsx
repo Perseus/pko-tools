@@ -1,5 +1,6 @@
 import { useSidebar } from "@/components/ui/sidebar";
 import { actionIds } from "@/features/actions/actionIds";
+import { actionKernelEnabled, cmdkUiEnabled } from "@/features/actions/flags";
 import { ActionRegistry, resolveActionEnabled } from "@/features/actions/registry";
 import { isTextInputTarget } from "@/features/actions/shortcut";
 import type {
@@ -57,6 +58,7 @@ function buildCoreActions(params: {
   setGizmoMode: (mode: "translate" | "rotate" | "scale" | "off") => void;
   toggleCompositePreview: () => void;
   openPalette: () => void;
+  cmdkEnabled: boolean;
 }): AppAction[] {
   const {
     navigate,
@@ -64,6 +66,7 @@ function buildCoreActions(params: {
     setGizmoMode,
     toggleCompositePreview,
     openPalette,
+    cmdkEnabled,
   } = params;
 
   return [
@@ -78,6 +81,10 @@ function buildCoreActions(params: {
       run: () => {
         openPalette();
       },
+      isEnabled: () => ({
+        enabled: cmdkEnabled,
+        reason: cmdkEnabled ? undefined : "Cmd+K UI disabled by flag",
+      }),
       priority: 100,
     },
     {
@@ -274,6 +281,7 @@ export function ActionKernelProvider({
         setGizmoMode,
         toggleCompositePreview: () => setCompositePreview((prev) => !prev),
         openPalette: () => setPaletteOpen(true),
+        cmdkEnabled: cmdkUiEnabled,
       }),
     [navigate, toggleSidebar, setGizmoMode, setCompositePreview],
   );
@@ -377,6 +385,10 @@ export function ActionKernelProvider({
   }, [createEventContext, registry]);
 
   useEffect(() => {
+    if (!actionKernelEnabled) {
+      return;
+    }
+
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.repeat) {
         return;
