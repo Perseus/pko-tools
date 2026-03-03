@@ -5,6 +5,7 @@ import {
   effectDataAtom,
   effectDirtyAtom,
   effectOriginalAtom,
+  effectPlaybackAtom,
   selectedEffectAtom,
   selectedFrameIndexAtom,
   selectedSubEffectIndexAtom,
@@ -23,6 +24,7 @@ export default function EffectNavigator() {
   const [, setEffectData] = useAtom(effectDataAtom);
   const [isDirty, setDirty] = useAtom(effectDirtyAtom);
   const [, setOriginalEffect] = useAtom(effectOriginalAtom);
+  const [, setPlayback] = useAtom(effectPlaybackAtom);
   const [, setSelectedSubEffect] = useAtom(selectedSubEffectIndexAtom);
   const [, setSelectedFrame] = useAtom(selectedFrameIndexAtom);
   const [effectFiles, setEffectFiles] = useState<string[]>([]);
@@ -92,6 +94,7 @@ export default function EffectNavigator() {
     setOriginalEffect(structuredClone(data));
     setSelectedSubEffect(data.subEffects.length > 0 ? 0 : null);
     setSelectedFrame(0);
+    setPlayback((prev) => ({ ...prev, isPlaying: false, currentTime: 0 }));
     setDirty(false);
     resetHistory();
     setPendingEffect(null);
