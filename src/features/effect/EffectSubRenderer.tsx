@@ -138,8 +138,8 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
   // Smooth interpolation between keyframes during playback
   const interpolated = useMemo(() => {
     if (!subEffect || !playback.isPlaying) return null;
-    return interpolateFrame(subEffect, playback.currentTime, playback.isLooping);
-  }, [subEffect, playback.isPlaying, playback.currentTime, playback.isLooping]);
+    return interpolateFrame(subEffect, playback.currentTime, true);
+  }, [subEffect, playback.isPlaying, playback.currentTime]);
 
   const textureName = useMemo(() => {
     if (!subEffect) {
@@ -365,7 +365,7 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
 
     // UV animation for effectType 2 (EFFECT_MODELUV) — interpolated UV coords
     if (subEffect && playback.isPlaying && subEffect.effectType === 2 && subEffect.coordList.length > 0) {
-      const uvResult = interpolateUVCoords(subEffect, playback.currentTime, playback.isLooping);
+      const uvResult = interpolateUVCoords(subEffect, playback.currentTime, true);
       if (uvResult && meshRef.current.geometry) {
         const uvAttr = meshRef.current.geometry.getAttribute("uv");
         if (uvAttr && uvAttr.count === uvResult.uvs.length) {
@@ -379,7 +379,7 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
 
     // UV animation for effectType 3 (EFFECT_MODELTEXTURE) — snapped UV sets
     if (subEffect && playback.isPlaying && subEffect.effectType === 3 && subEffect.texList.length > 0) {
-      const texIdx = getTexListFrameIndex(subEffect, playback.currentTime, playback.isLooping);
+      const texIdx = getTexListFrameIndex(subEffect, playback.currentTime, true);
       if (texIdx !== null && subEffect.texList[texIdx] && meshRef.current.geometry) {
         const uvAttr = meshRef.current.geometry.getAttribute("uv");
         const texUVs = subEffect.texList[texIdx];

@@ -124,7 +124,7 @@ export default function HitSubEffect({
 
   // Interpolate animation
   const interpolated = useMemo(
-    () => interpolateFrame(subEffect, elapsed, false),
+    () => interpolateFrame(subEffect, elapsed, true),
     [subEffect, elapsed],
   );
 

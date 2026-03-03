@@ -3,12 +3,18 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { invoke } from "@tauri-apps/api/core";
 import { ParticleEffectInfo } from "@/types/item";
-import { createEffectTexture } from "@/features/effect/rendering";
+import {
+  createEffectTexture,
+  createRectGeometry,
+  createRectPlaneGeometry,
+  createRectZGeometry,
+  createTriangleGeometry,
+  createTrianglePlaneGeometry,
+  createCylinderGeometry,
+} from "@/features/effect/rendering";
 
 /** Effect animation type enum matching game engine I_Effect.h */
 const EFFECT_FRAMETEX = 1;
-const EFFECT_MODELUV = 2;
-const EFFECT_MODELTEXTURE = 3;
 
 /** Matches backend CylinderParams (camelCase via serde rename_all) */
 interface CylinderParams {
@@ -145,49 +151,19 @@ function assembleKeyFrames(sub: SubEffect): KeyFrame[] {
 }
 
 /** Create geometry matching the game's built-in effect primitives.
- *
- *  Game geometry definitions (from I_Effect.cpp):
- *  - "Rect":      XZ plane, X from -0.5 to 0.5, Z from 0 to 1 (NOT centered on Z)
- *  - "RectPlane": XY plane, centered at origin (-0.5 to 0.5 in both X and Y)
- *  - "RectZ":     YZ plane, Y from 0 to 1, Z from 0 to 1
- *  - "Cylinder":  Along Y axis, Y from 0 to height (NOT centered)
- */
+ *  Delegates to shared C++-faithful geometry functions from rendering.ts. */
 function createGeometry(sub: SubEffect): THREE.BufferGeometry {
   const name = (sub.modelName || "").toLowerCase();
 
-  if (name === "cylinder") {
-    const h = sub.height || 1;
-    const geo = new THREE.CylinderGeometry(
-      sub.topRadius || 0.5,
-      sub.botRadius || 0.5,
-      h,
-      sub.segments || 16,
-      1,
-      true // open-ended
-    );
-    // Game cylinder goes from Y=0 to Y=height; Three.js centers at Y=0
-    geo.translate(0, h / 2, 0);
-    return geo;
-  }
-
-  if (name === "rect") {
-    // Game "Rect": XZ plane, X from -0.5 to 0.5, Z from 0 to 1
-    const geo = new THREE.PlaneGeometry(1, 1);
-    geo.rotateX(-Math.PI / 2); // XY → XZ
-    geo.translate(0, 0, 0.5);  // shift Z from [-0.5, 0.5] to [0, 1]
-    return geo;
-  }
-
-  if (name === "rectz") {
-    // Game "RectZ": YZ plane, Y from 0 to 1, Z from 0 to 1
-    const geo = new THREE.PlaneGeometry(1, 1);
-    geo.rotateY(Math.PI / 2); // XY → YZ
-    geo.translate(0, 0.5, 0.5); // shift Y,Z from [-0.5,0.5] to [0,1]
-    return geo;
-  }
-
-  // "RectPlane" and default: XY plane, centered at origin
-  return new THREE.PlaneGeometry(1, 1);
+  if (name === "cylinder" || name === "cone")
+    return createCylinderGeometry(sub.topRadius || 0.5, sub.botRadius || 0.5, sub.height || 1, sub.segments || 16);
+  if (name === "rect" || name === "") return createRectGeometry();
+  if (name === "rectplane") return createRectPlaneGeometry();
+  if (name === "rectz") return createRectZGeometry();
+  if (name === "triangle") return createTriangleGeometry();
+  if (name === "triangleplane") return createTrianglePlaneGeometry();
+  if (name === "sphere") return new THREE.SphereGeometry(0.7, 24, 24);
+  return createRectGeometry(); // default fallback
 }
 
 /** Animates group-level rotation from EffFile.rotating/rotaVec/rotaVel.
@@ -347,53 +323,10 @@ function SingleSubEffect({ sub, keyFrames, textures, forgeAlpha }: SingleEffectP
     }
 
     // --- UV animation (separate timing from keyframe animation) ---
-    if (sub.effectType === EFFECT_MODELUV && sub.coordCount > 0 && sub.coordFrameTime > 0) {
-      // Interpolated per-vertex UV animation (game's GetCurCoord + FillModelUV)
-      uvTimeRef.current += delta;
-      const totalUVTime = sub.coordFrameTime * sub.coordCount;
-      if (uvTimeRef.current >= totalUVTime) uvTimeRef.current %= totalUVTime;
-
-      const uvFrameFloat = uvTimeRef.current / sub.coordFrameTime;
-      const uvIdx = Math.floor(uvFrameFloat) % sub.coordCount;
-      const uvFrac = uvFrameFloat - Math.floor(uvFrameFloat);
-      const uvNext = (uvIdx + 1) % sub.coordCount;
-
-      const uvAttr = meshRef.current.geometry.getAttribute("uv") as THREE.BufferAttribute;
-      if (uvAttr && sub.coordList[uvIdx] && sub.coordList[uvNext]) {
-        const count = Math.min(uvAttr.count, sub.verCount);
-        for (let i = 0; i < count; i++) {
-          const ca = sub.coordList[uvIdx][i];
-          const cb = sub.coordList[uvNext][i];
-          if (ca && cb) {
-            uvAttr.setXY(
-              i,
-              ca[0] + (cb[0] - ca[0]) * uvFrac,
-              ca[1] + (cb[1] - ca[1]) * uvFrac
-            );
-          }
-        }
-        uvAttr.needsUpdate = true;
-      }
-    } else if (sub.effectType === EFFECT_MODELTEXTURE && sub.texCount > 0 && sub.texFrameTime > 0) {
-      // Discrete per-vertex UV switching (game's FillTextureUV — no interpolation)
-      uvTimeRef.current += delta;
-      const totalTexTime = sub.texFrameTime * sub.texCount;
-      if (uvTimeRef.current >= totalTexTime) uvTimeRef.current %= totalTexTime;
-
-      const texIdx = Math.floor(uvTimeRef.current / sub.texFrameTime) % sub.texCount;
-
-      const uvAttr = meshRef.current.geometry.getAttribute("uv") as THREE.BufferAttribute;
-      if (uvAttr && sub.texList[texIdx]) {
-        const count = Math.min(uvAttr.count, sub.verCount);
-        for (let i = 0; i < count; i++) {
-          const uv = sub.texList[texIdx][i];
-          if (uv) {
-            uvAttr.setXY(i, uv[0], uv[1]);
-          }
-        }
-        uvAttr.needsUpdate = true;
-      }
-    } else if (sub.effectType === EFFECT_FRAMETEX && sub.frameTexCount > 0 && sub.frameTexTime > 0 && mat) {
+    // C++ CMPModelEff::FrameMove skips EFFECT_MODELUV (type 2) and
+    // EFFECT_MODELTEXTURE (type 3) when IsItem() == true.
+    // Only EFFECT_FRAMETEX (type 1) texture switching runs for items.
+    if (sub.effectType === EFFECT_FRAMETEX && sub.frameTexCount > 0 && sub.frameTexTime > 0 && mat) {
       // Texture resource switching (game swaps entire texture each frame)
       uvTimeRef.current += delta;
       const totalFTTime = sub.frameTexTime * sub.frameTexCount;
