@@ -383,6 +383,12 @@ export function ActionKernelProvider({
 
   const canRunAction = useCallback(
     (action: AppAction, actionContext: ActionContext, source: ActionSource): boolean => {
+      if (
+        !action.surfaces.includes("global") &&
+        !action.surfaces.includes(actionContext.surface)
+      ) {
+        return false;
+      }
       const enforceKeyboardGuards = source === "shortcut";
       if (enforceKeyboardGuards && actionContext.isTyping && !action.allowInInput) {
         return false;
