@@ -15,6 +15,7 @@ import StripEffectRenderer from "@/features/effect/StripEffectRenderer";
 import PathVisualizer from "@/features/effect/PathVisualizer";
 import { getPathPosition } from "@/features/effect/animation";
 import * as THREE from "three";
+import { CanvasErrorBoundary } from "@/components/CanvasErrorBoundary";
 
 /** Default path velocity when no explicit velocity is provided in the .csf file. */
 const DEFAULT_PATH_VELOCITY = 2.0;
@@ -89,32 +90,34 @@ export default function EffectViewport() {
 
   return (
     <div className="relative h-full w-full overflow-hidden rounded-xl border border-border bg-muted/40">
-      <Canvas camera={{ position: [6, 6, 6], fov: 35 }} gl={{ preserveDrawingBuffer: true }}>
-        <color attach="background" args={["#1e1e2e"]} />
-        <ambientLight intensity={0.8} />
-        <directionalLight position={[6, 8, 4]} intensity={1.2} />
-        {/* During playback or composite preview, render ALL sub-effects simultaneously (PKO behavior).
-            When stopped without composite, render only the selected sub-effect for editing.
-            PathFollower moves the entire effect group along the path during playback. */}
-        <PathFollower>
-          {effectData && (playback.isPlaying || compositePreview)
-            ? effectData.subEffects.map((_, i) => (
-                <EffectSubRenderer key={i} subEffectIndex={i} />
-              ))
-            : selectedSubEffectIndex !== null && (
-                <EffectSubRenderer key={selectedSubEffectIndex} subEffectIndex={selectedSubEffectIndex} />
-              )}
-        </PathFollower>
-        <ParticleSimulator />
-        <StripEffectRenderer />
-        <PathVisualizer />
-        <Suspense fallback={null}>
-          <CharacterPreview />
-        </Suspense>
-        <EffectPlaybackDriver />
-        <gridHelper args={[40, 40, "#2f3239", "#1b1d22"]} />
-        <OrbitControls enablePan enableZoom />
-      </Canvas>
+      <CanvasErrorBoundary className="absolute inset-0">
+        <Canvas camera={{ position: [6, 6, 6], fov: 35 }} gl={{ preserveDrawingBuffer: false }}>
+          <color attach="background" args={["#1e1e2e"]} />
+          <ambientLight intensity={0.8} />
+          <directionalLight position={[6, 8, 4]} intensity={1.2} />
+          {/* During playback or composite preview, render ALL sub-effects simultaneously (PKO behavior).
+              When stopped without composite, render only the selected sub-effect for editing.
+              PathFollower moves the entire effect group along the path during playback. */}
+          <PathFollower>
+            {effectData && (playback.isPlaying || compositePreview)
+              ? effectData.subEffects.map((_, i) => (
+                  <EffectSubRenderer key={i} subEffectIndex={i} />
+                ))
+              : selectedSubEffectIndex !== null && (
+                  <EffectSubRenderer key={selectedSubEffectIndex} subEffectIndex={selectedSubEffectIndex} />
+                )}
+          </PathFollower>
+          <ParticleSimulator />
+          <StripEffectRenderer />
+          <PathVisualizer />
+          <Suspense fallback={null}>
+            <CharacterPreview />
+          </Suspense>
+          <EffectPlaybackDriver />
+          <gridHelper args={[40, 40, "#2f3239", "#1b1d22"]} />
+          <OrbitControls enablePan enableZoom />
+        </Canvas>
+      </CanvasErrorBoundary>
 
       {/* Gizmo mode toolbar */}
       {effectData && (
