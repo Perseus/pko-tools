@@ -90,9 +90,17 @@ describe("getPkoTechniqueState", () => {
     expect(state.addressV).toBe(D3DTADDRESS_WRAP);
   });
 
-  it("techniques 2 and 3 are defaults", () => {
-    expect(getPkoTechniqueState(2)).toEqual(DEFAULT_PKO_TECHNIQUE);
-    expect(getPkoTechniqueState(3)).toEqual(DEFAULT_PKO_TECHNIQUE);
+  it("techniques 2 and 3 use CLAMP addressing", () => {
+    const state2 = getPkoTechniqueState(2);
+    expect(state2.addressU).toBe(D3DTADDRESS_CLAMP);
+    expect(state2.addressV).toBe(D3DTADDRESS_CLAMP);
+    // Other fields match defaults
+    expect(state2.zEnable).toBe(true);
+    expect(state2.alphaBlendEnable).toBe(true);
+
+    const state3 = getPkoTechniqueState(3);
+    expect(state3.addressU).toBe(D3DTADDRESS_CLAMP);
+    expect(state3.addressV).toBe(D3DTADDRESS_CLAMP);
   });
 
   it("technique 4: alpha test with NOTEQUAL", () => {

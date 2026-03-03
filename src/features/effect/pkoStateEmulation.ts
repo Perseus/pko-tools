@@ -53,7 +53,8 @@ export interface PkoTechniqueState {
   destBlend?: number;
 }
 
-/** Default PKO effect technique state (technique 0 base). */
+/** Default PKO effect technique state (technique 0 base).
+ * eff.fx: technique 0 uses WRAP addressing (most techniques do). */
 export const DEFAULT_PKO_TECHNIQUE: PkoTechniqueState = {
   zEnable: true,
   zWriteEnable: false,
@@ -64,8 +65,8 @@ export const DEFAULT_PKO_TECHNIQUE: PkoTechniqueState = {
   cullMode: D3DCULL_NONE,
   minFilter: D3DTEXF_LINEAR,
   magFilter: D3DTEXF_LINEAR,
-  addressU: D3DTADDRESS_CLAMP,
-  addressV: D3DTADDRESS_CLAMP,
+  addressU: D3DTADDRESS_WRAP,
+  addressV: D3DTADDRESS_WRAP,
 };
 
 /** Per-technique state overrides (techniques 0-6). */
@@ -77,8 +78,14 @@ export const PKO_EFFECT_TECHNIQUE_OVERRIDES: Record<number, Partial<PkoTechnique
     addressU: D3DTADDRESS_WRAP,
     addressV: D3DTADDRESS_WRAP,
   },
-  2: {},
-  3: {},
+  2: {
+    addressU: D3DTADDRESS_CLAMP,
+    addressV: D3DTADDRESS_CLAMP,
+  },
+  3: {
+    addressU: D3DTADDRESS_CLAMP,
+    addressV: D3DTADDRESS_CLAMP,
+  },
   4: {
     alphaTestEnable: true,
     alphaFunc: D3DCMP_NOTEQUAL,
@@ -92,6 +99,8 @@ export const PKO_EFFECT_TECHNIQUE_OVERRIDES: Record<number, Partial<PkoTechnique
     cullMode: D3DCULL_CCW,
     minFilter: D3DTEXF_POINT,
     magFilter: D3DTEXF_POINT,
+    addressU: D3DTADDRESS_CLAMP,
+    addressV: D3DTADDRESS_CLAMP,
     srcBlend: D3DBLEND_SRCALPHA,
     destBlend: D3DBLEND_INVSRCALPHA,
   },
