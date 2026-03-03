@@ -8,7 +8,7 @@ import { toast } from "@/hooks/use-toast";
 import { Check, Eye, FolderOpen, Loader2, UserPlus, Wrench } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "react-router";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeTimed as invoke } from "@/commands/invokeTimed";
 import { itemGltfJsonAtom, selectedItemAtom, itemMetadataAtom, itemLitInfoAtom } from "@/store/item";
 import { characterGltfJsonAtom } from "@/store/character";
 import { activeWorkbenchAtom, isWorkbenchModeAtom, workbenchListAtom } from "@/store/workbench";

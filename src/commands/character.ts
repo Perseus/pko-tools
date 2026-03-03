@@ -1,5 +1,5 @@
+import { invokeTimed as invoke } from "@/commands/invokeTimed";
 import { Character, CharacterMetadata } from "@/types/character";
-import { invoke } from "@tauri-apps/api/core";
 
 export const getCharacterList = async (
   projectId: string
