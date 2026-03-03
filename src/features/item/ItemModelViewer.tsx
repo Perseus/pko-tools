@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { ItemLitInfo, WorkbenchDummy } from "@/types/item";
@@ -15,24 +15,7 @@ import {
   ItemDummyHelpers,
   ItemWorkbenchDummyHelpers,
 } from "./ItemDebugOverlays";
-
-function jsonToDataURI(json: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    try {
-      if (!json) {
-        reject(new Error("No JSON provided"));
-        return;
-      }
-      const blob = new Blob([json], { type: "application/json" });
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = (error) => reject(error);
-      reader.readAsDataURL(blob);
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
+import { useGltfResource } from "@/hooks/use-gltf-resource";
 
 /** Extract dummy point matrices from the glTF scene userData */
 export function extractDummyPoints(
@@ -284,19 +267,15 @@ export default function ItemModelViewer({
   forgePreview: ForgeEffectPreview | null;
   workbenchDummies: WorkbenchDummy[] | null;
 }) {
-  const [gltfDataURI, setGltfDataURI] = useState<string | null>(null);
+  const gltfDataURI = useGltfResource(gltfJson);
 
   useEffect(() => {
-    (async () => {
-      if (!gltfJson) {
-        setGltfDataURI(null);
-        return;
+    return () => {
+      if (gltfDataURI) {
+        useGLTF.clear(gltfDataURI);
       }
-      setGltfDataURI(null);
-      const uri = await jsonToDataURI(gltfJson);
-      setGltfDataURI(uri);
-    })();
-  }, [gltfJson]);
+    };
+  }, [gltfDataURI]);
 
   if (!gltfDataURI) {
     return null;

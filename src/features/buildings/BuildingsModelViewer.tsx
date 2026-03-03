@@ -1,24 +1,7 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useGLTF, useAnimations } from "@react-three/drei";
 import * as THREE from "three";
-
-function jsonToDataURI(json: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    try {
-      if (!json) {
-        reject(new Error("No JSON provided"));
-        return;
-      }
-      const blob = new Blob([json], { type: "application/json" });
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = (error) => reject(error);
-      reader.readAsDataURL(blob);
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
+import { useGltfResource } from "@/hooks/use-gltf-resource";
 
 function BuildingModel({ gltfDataURI }: { gltfDataURI: string }) {
   const { scene, animations } = useGLTF(gltfDataURI);
@@ -44,17 +27,15 @@ export default function BuildingsModelViewer({
 }: {
   gltfJson: string;
 }) {
-  const [dataURI, setDataURI] = useState<string | null>(null);
+  const dataURI = useGltfResource(gltfJson);
 
   useEffect(() => {
-    let cancelled = false;
-    jsonToDataURI(gltfJson).then((uri) => {
-      if (!cancelled) setDataURI(uri);
-    });
     return () => {
-      cancelled = true;
+      if (dataURI) {
+        useGLTF.clear(dataURI);
+      }
     };
-  }, [gltfJson]);
+  }, [dataURI]);
 
   if (!dataURI) return null;
 

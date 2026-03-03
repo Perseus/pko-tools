@@ -5,11 +5,12 @@ import { currentProjectAtom } from "@/store/project";
 import { useAtom, useAtomValue } from "jotai";
 import { Loader2, Unlink, X } from "lucide-react";
 import React from "react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import BoneTreeView, { buildBoneTree, type BoneNode } from "@/features/effect/BoneTreeView";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { SmallLabel } from "@/features/effect/HelpTip";
+import { acquireGltfResource } from "@/lib/gltfResource";
 
 /**
  * Extract bones and dummies from a glTF JSON object.
@@ -86,6 +87,7 @@ export default function CharacterBinder() {
   const [charIdInput, setCharIdInput] = useState("");
   const [isExpanded, setIsExpanded] = useState(false);
   const [gltfParsed, setGltfParsed] = useState<Record<string, unknown> | null>(null);
+  const loadedCharacterResourceRef = useRef<{ release: () => void } | null>(null);
 
   const boneTree = useMemo((): BoneNode[] => {
     if (!gltfParsed) return [];
@@ -111,12 +113,14 @@ export default function CharacterBinder() {
       const parsed = JSON.parse(gltfJson) as Record<string, unknown>;
       setGltfParsed(parsed);
 
-      // Create data URI for Three.js rendering
-      const dataUri = `data:model/gltf+json;base64,${btoa(gltfJson)}`;
+      loadedCharacterResourceRef.current?.release();
+      const resource = acquireGltfResource(gltfJson);
+      loadedCharacterResourceRef.current = resource;
+
       setBinding((prev) => ({
         ...prev,
         characterId: id,
-        gltfDataUri: dataUri,
+        gltfDataUri: resource.url,
         boundBoneName: null,
         status: "loaded",
       }));
@@ -126,6 +130,8 @@ export default function CharacterBinder() {
   }, [currentProject, charIdInput, setBinding]);
 
   const handleUnbind = useCallback(() => {
+    loadedCharacterResourceRef.current?.release();
+    loadedCharacterResourceRef.current = null;
     setBinding((prev) => ({
       ...prev,
       characterId: null,
@@ -135,6 +141,13 @@ export default function CharacterBinder() {
     }));
     setGltfParsed(null);
   }, [setBinding]);
+
+  useEffect(() => {
+    return () => {
+      loadedCharacterResourceRef.current?.release();
+      loadedCharacterResourceRef.current = null;
+    };
+  }, []);
 
   const handleBoneSelect = useCallback(
     (name: string) => {
