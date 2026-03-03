@@ -41,8 +41,25 @@ export default defineConfig(async () => ({
           ) {
             return "vendor-drei";
           }
+          if (
+            id.includes("camera-controls")
+          ) {
+            return "vendor-camera-controls";
+          }
+          if (
+            id.includes("react-dropzone") ||
+            id.includes("file-selector") ||
+            id.includes("attr-accept")
+          ) {
+            return "vendor-dropzone";
+          }
+          if (
+            id.includes("/three/examples/")
+          ) {
+            return "vendor-three-extras";
+          }
           if (id.includes("/three/")) {
-            return "vendor-three";
+            return "vendor-three-core";
           }
           if (id.includes("leva")) {
             return "vendor-leva";
