@@ -88,6 +88,18 @@ pub struct RenderStateSetTemplate<const SET_SIZE: usize, const SEQ_SIZE: usize> 
     pub rsv_seq: [[RenderStateValue; SEQ_SIZE]; SET_SIZE],
 }
 
+impl<const SET_SIZE: usize, const SEQ_SIZE: usize> Serialize
+    for RenderStateSetTemplate<SET_SIZE, SEQ_SIZE>
+{
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut s = serializer.serialize_struct("RenderStateSetTemplate", 1)?;
+        let rows: Vec<&[RenderStateValue]> = self.rsv_seq.iter().map(|r| r.as_slice()).collect();
+        s.serialize_field("rsv_seq", &rows)?;
+        s.end()
+    }
+}
+
 impl<const SET_SIZE: usize, const SEQ_SIZE: usize> RenderStateSetTemplate<SET_SIZE, SEQ_SIZE> {
     pub fn new() -> Self {
         let rsv_seq = [[RenderStateValue::default(); SEQ_SIZE]; SET_SIZE];
