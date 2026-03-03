@@ -1,4 +1,4 @@
-import { Dialog, DialogContent } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { cmdkUiEnabled, useActionKernel } from "@/features/actions";
 import type { ResolvedAction, ShortcutDefinition } from "@/features/actions/types";
 import { Command } from "cmdk";
@@ -89,6 +89,10 @@ export function CommandPalette() {
   return (
     <Dialog open={isPaletteOpen} onOpenChange={setPaletteOpen}>
       <DialogContent className="max-w-xl gap-0 overflow-hidden p-0">
+        <DialogTitle className="sr-only">Command Palette</DialogTitle>
+        <DialogDescription className="sr-only">
+          Search and execute contextual application actions.
+        </DialogDescription>
         <Command
           label="Command Palette"
           className="flex max-h-[460px] flex-col"
