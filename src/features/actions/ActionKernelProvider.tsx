@@ -291,11 +291,12 @@ export function ActionKernelProvider({
   );
 
   const canRunAction = useCallback(
-    (action: AppAction, actionContext: ActionContext): boolean => {
-      if (actionContext.isTyping && !action.allowInInput) {
+    (action: AppAction, actionContext: ActionContext, source: ActionSource): boolean => {
+      const enforceKeyboardGuards = source === "shortcut";
+      if (enforceKeyboardGuards && actionContext.isTyping && !action.allowInInput) {
         return false;
       }
-      if (actionContext.hasModalOpen && !action.allowWhenModalOpen) {
+      if (enforceKeyboardGuards && actionContext.hasModalOpen && !action.allowWhenModalOpen) {
         return false;
       }
       if (action.when && !action.when(actionContext)) {
@@ -325,7 +326,7 @@ export function ActionKernelProvider({
       }
 
       const actionContext = createEventContext(document.activeElement);
-      if (!canRunAction(action, actionContext)) {
+      if (!canRunAction(action, actionContext, source)) {
         return false;
       }
 
@@ -383,7 +384,9 @@ export function ActionKernelProvider({
 
       const actionContext = createEventContext(event.target);
       const candidates = registry.resolveShortcut(event, actionContext);
-      const matched = candidates.find((candidate) => canRunAction(candidate, actionContext));
+      const matched = candidates.find((candidate) =>
+        canRunAction(candidate, actionContext, "shortcut")
+      );
       if (!matched) {
         return;
       }
@@ -418,12 +421,16 @@ export function ActionKernelProvider({
 }
 
 export function useActionKernel(): ActionKernelApi {
-  const context = useContext(ActionKernelContext);
+  const context = useOptionalActionKernel();
   if (!context) {
     throw new Error("useActionKernel must be used inside ActionKernelProvider");
   }
 
   return context;
+}
+
+export function useOptionalActionKernel(): ActionKernelApi | null {
+  return useContext(ActionKernelContext);
 }
 
 export function useRegisterActionRuntime(
