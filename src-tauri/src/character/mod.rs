@@ -2,6 +2,7 @@ pub mod animation;
 pub mod commands;
 pub mod helper;
 mod info;
+pub mod lgo_loader;
 pub mod mesh;
 pub mod model;
 pub mod texture;

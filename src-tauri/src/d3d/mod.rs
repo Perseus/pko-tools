@@ -2,7 +2,7 @@ use binrw::{binrw, BinRead};
 use serde::{Deserialize, Serialize};
 
 #[repr(u32)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize)]
 #[binrw]
 #[br(repr = u32)]
 #[bw(repr = u32)]
@@ -62,7 +62,7 @@ pub enum D3DFormat {
 }
 
 #[repr(u32)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize)]
 #[binrw]
 #[br(repr = u32)]
 #[bw(repr = u32)]
@@ -88,7 +88,7 @@ pub enum D3DPool {
 }
 
 #[repr(u32)]
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Serialize)]
 #[binrw]
 #[br(repr = u32)]
 #[bw(repr = u32)]
@@ -175,7 +175,7 @@ pub enum D3DRenderStateType {
     InvalidIndex = 0xffffffff,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 #[repr(u32)]
 #[binrw]
 #[br(repr = u32)]
@@ -246,7 +246,7 @@ impl TryFrom<u32> for D3DBlend {
 }
 
 #[repr(u32)]
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Serialize)]
 #[binrw]
 #[br(repr = u32)]
 #[bw(repr = u32)]
@@ -276,7 +276,7 @@ pub enum D3DPrimitiveType {
 
  */
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[binrw]
 pub struct D3DVertexElement9 {
     pub stream: u16,
@@ -286,4 +286,57 @@ pub struct D3DVertexElement9 {
     pub method: u8,
     pub usage: u8,
     pub usage_index: u8,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn d3d_enums_serialize_as_string_variants() {
+        assert_eq!(
+            serde_json::to_string(&D3DFormat::DXT1).unwrap(),
+            "\"DXT1\""
+        );
+        assert_eq!(
+            serde_json::to_string(&D3DPool::Managed).unwrap(),
+            "\"Managed\""
+        );
+        assert_eq!(
+            serde_json::to_string(&D3DRenderStateType::AlphaTestEnable).unwrap(),
+            "\"AlphaTestEnable\""
+        );
+        assert_eq!(
+            serde_json::to_string(&D3DCmpFunc::Greater).unwrap(),
+            "\"Greater\""
+        );
+        assert_eq!(
+            serde_json::to_string(&D3DPrimitiveType::TriangleList).unwrap(),
+            "\"TriangleList\""
+        );
+    }
+
+    #[test]
+    fn d3d_blend_serializes_as_u32() {
+        // D3DBlend keeps u32 serialization for frontend compatibility
+        assert_eq!(serde_json::to_string(&D3DBlend::SrcAlpha).unwrap(), "5");
+        assert_eq!(serde_json::to_string(&D3DBlend::One).unwrap(), "2");
+    }
+
+    #[test]
+    fn d3d_vertex_element_serializes() {
+        let elem = D3DVertexElement9 {
+            stream: 0,
+            offset: 12,
+            _type: 2,
+            method: 0,
+            usage: 3,
+            usage_index: 0,
+        };
+        let json: serde_json::Value = serde_json::to_value(&elem).unwrap();
+        assert_eq!(json["stream"], 0);
+        assert_eq!(json["offset"], 12);
+        assert_eq!(json["_type"], 2);
+        assert_eq!(json["usage"], 3);
+    }
 }

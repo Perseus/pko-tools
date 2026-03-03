@@ -1,8 +1,9 @@
 use binrw::binrw;
 use cgmath::{InnerSpace, Matrix3, Matrix4, Quaternion, Vector2, Vector3};
+use serde::Serialize;
 
 #[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 #[br(little)]
 pub struct LwVector3(
     #[br(map = |raw: [f32; 3]| Vector3::new(raw[0], raw[1], raw[2]))]
@@ -55,7 +56,7 @@ impl LwVector3 {
 }
 
 #[binrw]
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Serialize)]
 #[br(little)]
 pub struct LwVector2(
     #[br(map = |raw: [f32; 2]| Vector2::new(raw[0], raw[1]))]
@@ -70,7 +71,7 @@ impl Default for LwVector2 {
 }
 
 #[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 #[br(little)]
 pub struct LwQuaternion(
     #[br(map = |raw: [f32; 4]| Quaternion::new(raw[3], raw[0], raw[1], raw[2])) ]
@@ -198,7 +199,7 @@ pub fn matrix4_to_quaternion(mat: Matrix4<f32>) -> Quaternion<f32> {
 }
 
 #[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 #[br(little)]
 pub struct LwMatrix44(
     #[br(map = |raw: [f32; 16]| Matrix4::new(
@@ -298,7 +299,7 @@ impl LwMatrix44 {
 }
 
 #[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 #[br(little)]
 pub struct LwMatrix43(
     #[br(map = |raw: [f32; 12]| Matrix4::new(
@@ -349,25 +350,25 @@ impl LwMatrix43 {
 }
 
 #[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 #[br(little)]
 pub struct LwBox {
-    c: LwVector3,
-    r: LwVector3,
+    pub(crate) c: LwVector3,
+    pub(crate) r: LwVector3,
 }
 
 #[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 #[br(little)]
 pub struct LwPlane {
-    a: f32,
-    b: f32,
-    c: f32,
-    d: f32,
+    pub(crate) a: f32,
+    pub(crate) b: f32,
+    pub(crate) c: f32,
+    pub(crate) d: f32,
 }
 
 #[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 #[br(little)]
 pub struct LwSphere {
     pub c: LwVector3,
@@ -474,5 +475,84 @@ mod tests {
         // Should be ~45 degrees (cos(22.5deg) ≈ 0.924 for w)
         assert!(result.0.s > 0.9);
         assert!(result.0.v.x > 0.3);
+    }
+
+    #[test]
+    fn lwvector3_serializes_as_array() {
+        let v = LwVector3(Vector3::new(1.0, 2.5, -3.0));
+        let json: serde_json::Value = serde_json::to_value(&v).unwrap();
+        // Newtype over Vector3 serializes as [x, y, z] via cgmath's serde
+        assert!(json.is_array() || json.is_object());
+        let s = serde_json::to_string(&v).unwrap();
+        assert!(s.contains("1.0") || s.contains("1"));
+        assert!(s.contains("2.5"));
+        assert!(s.contains("-3.0") || s.contains("-3"));
+    }
+
+    #[test]
+    fn lwvector2_serializes() {
+        let v = LwVector2(Vector2::new(0.5, 0.75));
+        let s = serde_json::to_string(&v).unwrap();
+        assert!(s.contains("0.5"));
+        assert!(s.contains("0.75"));
+    }
+
+    #[test]
+    fn lwquaternion_serializes() {
+        let q = LwQuaternion(Quaternion::new(1.0, 0.0, 0.0, 0.0));
+        let s = serde_json::to_string(&q).unwrap();
+        assert!(s.contains("1.0") || s.contains("1"));
+    }
+
+    #[test]
+    fn lwmatrix44_serializes() {
+        let m = LwMatrix44(Matrix4::from_scale(2.0));
+        let json = serde_json::to_value(&m).unwrap();
+        // Should serialize without panicking
+        assert!(!serde_json::to_string(&json).unwrap().is_empty());
+    }
+
+    #[test]
+    fn lwmatrix43_serializes() {
+        let m = LwMatrix43(Matrix4::from_scale(1.0));
+        let json = serde_json::to_value(&m).unwrap();
+        assert!(!serde_json::to_string(&json).unwrap().is_empty());
+    }
+
+    #[test]
+    fn lwsphere_serializes_with_named_fields() {
+        let s = LwSphere {
+            c: LwVector3(Vector3::new(0.0, 0.0, 0.0)),
+            r: 5.0,
+        };
+        let json: serde_json::Value = serde_json::to_value(&s).unwrap();
+        assert!(json.get("c").is_some());
+        assert_eq!(json["r"], 5.0);
+    }
+
+    #[test]
+    fn lwbox_serializes_with_named_fields() {
+        let b = LwBox {
+            c: LwVector3(Vector3::new(1.0, 2.0, 3.0)),
+            r: LwVector3(Vector3::new(4.0, 5.0, 6.0)),
+        };
+        let json: serde_json::Value = serde_json::to_value(&b).unwrap();
+        assert!(json.get("c").is_some());
+        assert!(json.get("r").is_some());
+    }
+
+    #[test]
+    fn lwplane_serializes_with_named_fields() {
+        let p = LwPlane {
+            a: 0.0,
+            b: 1.0,
+            c: 0.0,
+            d: 0.0,
+        };
+        let json: serde_json::Value = serde_json::to_value(&p).unwrap();
+        assert_eq!(json["a"], 0.0);
+        assert_eq!(json["b"], 1.0);
+        assert_eq!(json["c"], 0.0);
+        assert_eq!(json["d"], 0.0);
     }
 }

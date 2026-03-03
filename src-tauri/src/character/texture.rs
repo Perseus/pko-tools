@@ -24,6 +24,15 @@ use super::model::{
 type RenderStateSetMaterial2 = RenderStateSetTemplate<2, 8>;
 type TextureStageStateTexture2 = RenderStateSetTemplate<2, 8>;
 
+fn serialize_fixed_cstr<const N: usize, S: serde::Serializer>(
+    buf: &[u8; N],
+    ser: S,
+) -> Result<S::Ok, S::Error> {
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(N);
+    let s = String::from_utf8_lossy(&buf[..end]);
+    ser.serialize_str(&s)
+}
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(into = "u32", try_from = "u32")]
 #[binrw]
@@ -70,7 +79,7 @@ impl TryFrom<u32> for MaterialTextureInfoTransparencyType {
 }
 
 #[repr(u32)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize)]
 #[binrw]
 #[br(repr = u32)]
 #[bw(repr = u32)]
@@ -107,7 +116,7 @@ impl ColorValue4F {
 }
 
 #[repr(u32)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize)]
 #[binrw]
 #[br(repr = u32)]
 #[bw(repr = u32)]
@@ -120,7 +129,7 @@ pub enum TextureType {
     InvalidMax = 0xffffffff,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 #[binrw]
 pub struct CharMaterial {
     // diffuse
@@ -187,7 +196,7 @@ impl RenderStateAtom {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize)]
 #[binrw]
 pub struct LwColorValue4b {
     pub b: u8,
@@ -211,7 +220,7 @@ impl LwColorValue4b {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 #[binrw]
 pub struct TextureInfo {
     // texture stage? there seem to be multiple stages in lwIUtil.cpp, FN: lwPrimitiveTexLitA
@@ -250,8 +259,10 @@ pub struct TextureInfo {
     pub colorkey_type: ColorKeyType,
     pub colorkey: LwColorValue4b,
 
+    #[serde(serialize_with = "serialize_fixed_cstr::<64, _>")]
     pub file_name: [u8; 64],
 
+    #[serde(skip)]
     pub data: u32,
 
     pub tss_set: [RenderStateAtom; 8],
@@ -317,7 +328,7 @@ pub struct TextureInfo0001 {
     tss_set: TextureStageStateTexture2,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub struct CharMaterialTextureInfo {
     pub opacity: f32,
     pub transp_type: MaterialTextureInfoTransparencyType,

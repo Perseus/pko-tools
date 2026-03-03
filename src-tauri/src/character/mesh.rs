@@ -29,6 +29,7 @@ use ::gltf::{
 use base64::{prelude::BASE64_STANDARD, Engine};
 use binrw::{binrw, BinRead, BinWrite};
 use image::ImageReader;
+use serde::Serialize;
 use serde_json::json;
 
 use super::{
@@ -76,14 +77,14 @@ pub const D3DFVF_LASTBETA_UBYTE4: u32 = 0x1000;
 
 pub const D3DFVF_RESERVED2: u32 = 0xE000;
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize)]
 #[binrw]
 pub struct CharacterMeshBlendInfo {
     pub indexd: u32,
     pub weight: [f32; 4],
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 #[binrw]
 pub struct CharacterMeshSubsetInfo {
     pub primitive_num: u32,
@@ -92,7 +93,7 @@ pub struct CharacterMeshSubsetInfo {
     pub min_index: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 #[binrw]
 pub struct CharacterInfoMeshHeader {
     // the type of vertex data available (positions, normals, texture coordinates etc.)
@@ -140,7 +141,7 @@ impl Default for CharacterInfoMeshHeader {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CharacterMeshInfo {
     pub header: CharacterInfoMeshHeader,
 

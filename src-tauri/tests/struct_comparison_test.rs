@@ -1,8 +1,8 @@
 // Test to compare LAB struct fields directly to identify what's different
 
-use binrw::BinReaderExt;
 use cgmath::InnerSpace;
 use pko_tools_lib::animation::character::LwBoneFile;
+use pko_tools_lib::animation::lab_loader::load_lab;
 use std::fs;
 
 #[path = "common/mod.rs"]
@@ -17,10 +17,7 @@ fn test_struct_fields_after_roundtrip() {
 
     // Load original LAB
     let lab_path = test_dir.join("0725.lab");
-    let mut original_lab_file = fs::File::open(&lab_path).expect("Failed to open original LAB");
-    let original_lab: LwBoneFile = original_lab_file
-        .read_le()
-        .expect("Failed to parse original LAB");
+    let original_lab = load_lab(&lab_path).expect("Failed to parse original LAB");
 
     // Load glTF and import back
     let gltf_path = test_dir.join("789.gltf");

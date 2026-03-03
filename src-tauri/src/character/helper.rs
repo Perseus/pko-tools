@@ -1,6 +1,16 @@
 use binrw::{binrw, BinRead};
+use serde::Serialize;
 
 use crate::math::{LwBox, LwMatrix44, LwPlane, LwSphere, LwVector3};
+
+fn serialize_fixed_cstr<const N: usize, S: serde::Serializer>(
+    buf: &[u8; N],
+    ser: S,
+) -> Result<S::Ok, S::Error> {
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(N);
+    let s = String::from_utf8_lossy(&buf[..end]);
+    ser.serialize_str(&s)
+}
 
 pub const HELPER_TYPE_DUMMY: u32 = 0x0001;
 pub const HELPER_TYPE_BOX: u32 = 0x0002;
@@ -8,7 +18,7 @@ pub const HELPER_TYPE_MESH: u32 = 0x0004;
 pub const HELPER_TYPE_BBOX: u32 = 0x0010;
 pub const HELPER_TYPE_BSPHERE: u32 = 0x0020;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 #[binrw]
 pub struct HelperDummyInfo {
     pub id: u32,
@@ -19,7 +29,7 @@ pub struct HelperDummyInfo {
     pub parent_id: u32,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 #[binrw]
 pub struct HelperBoxInfo {
     pub id: u32,
@@ -27,10 +37,11 @@ pub struct HelperBoxInfo {
     pub state: u32,
     pub _box: LwBox,
     pub mat: LwMatrix44,
+    #[serde(serialize_with = "serialize_fixed_cstr::<32, _>")]
     pub name: [u8; 32],
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 #[binrw]
 pub struct HelperMeshFaceInfo {
     pub vertex: [u32; 3],
@@ -40,13 +51,14 @@ pub struct HelperMeshFaceInfo {
     pub center: LwVector3,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 #[binrw]
 pub struct HelperMeshInfo {
     pub id: u32,
     pub _type: u32,
     pub sub_type: u32,
 
+    #[serde(serialize_with = "serialize_fixed_cstr::<32, _>")]
     pub name: [u8; 32],
     pub state: u32,
     pub mat: LwMatrix44,
@@ -62,7 +74,7 @@ pub struct HelperMeshInfo {
     pub face_seq: Vec<HelperMeshFaceInfo>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 #[binrw]
 pub struct BoundingBoxInfo {
     pub id: u32,
@@ -70,7 +82,7 @@ pub struct BoundingBoxInfo {
     pub mat: LwMatrix44,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 #[binrw]
 pub struct BoundingSphereInfo {
     pub id: u32,
@@ -79,7 +91,7 @@ pub struct BoundingSphereInfo {
 }
 
 #[binrw]
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct HelperData {
     pub _type: u32,
 
