@@ -437,9 +437,12 @@ export function useRegisterActionRuntime(
   actionId: string,
   runtime: ActionRuntimeHandler,
 ): void {
-  const { registerRuntime } = useActionKernel();
+  const kernel = useOptionalActionKernel();
 
   useEffect(() => {
-    return registerRuntime(actionId, runtime);
-  }, [actionId, registerRuntime, runtime]);
+    if (!kernel) {
+      return;
+    }
+    return kernel.registerRuntime(actionId, runtime);
+  }, [actionId, kernel, runtime]);
 }
