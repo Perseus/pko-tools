@@ -18,6 +18,7 @@ import * as THREE from "three";
 import { CanvasErrorBoundary } from "@/components/CanvasErrorBoundary";
 import { playbackClockStore } from "@/features/effect/playbackClock";
 import { ContextualActionMenu, actionIds } from "@/features/actions";
+import { PerfFrameProbe, PerfOverlay } from "@/features/perf";
 
 /** Default path velocity when no explicit velocity is provided in the .csf file. */
 const DEFAULT_PATH_VELOCITY = 2.0;
@@ -116,8 +117,10 @@ export default function EffectViewport() {
           <EffectPlaybackDriver />
           <gridHelper args={[40, 40, "#2f3239", "#1b1d22"]} />
           <OrbitControls enablePan enableZoom />
+          <PerfFrameProbe surface="effects" />
         </Canvas>
       </CanvasErrorBoundary>
+      <PerfOverlay surface="effects" className="bottom-8 right-3" />
 
       {/* Gizmo mode toolbar */}
       {effectData && (

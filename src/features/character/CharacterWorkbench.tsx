@@ -11,6 +11,7 @@ import { CharacterMetadataPanel } from './CharacterMetadataPanel';
 import { extractMeshes, MeshHighlights, getUniqueMeshIndices } from './MeshHighlights';
 import { useGltfResource } from "@/hooks/use-gltf-resource";
 import { actionIds, ContextualActionMenu } from "@/features/actions";
+import { PerfFrameProbe, PerfOverlay } from "@/features/perf";
 
 const CHARACTER_CONTEXT_ACTIONS = [
   actionIds.characterExportGltf,
@@ -274,8 +275,10 @@ export default function CharacterWorkbench() {
         </Suspense>
         <OrbitControls />
         <gridHelper args={[60, 60, 60]} position-y=".01" />
+        <PerfFrameProbe surface="characters" />
         <CameraControls />
       </Canvas>
+      <PerfOverlay surface="characters" className="bottom-8 right-3" />
     </ContextualActionMenu>
   </div>;
 }

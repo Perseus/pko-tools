@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { exportMapForUnity } from "@/commands/map";
 import { toast } from "@/hooks/use-toast";
 import { actionIds, ContextualActionMenu, useRegisterActionRuntime } from "@/features/actions";
+import { PerfFrameProbe, PerfOverlay } from "@/features/perf";
 
 const MAP_CONTEXT_ACTIONS = [
   actionIds.mapToggleObjectMarkers,
@@ -242,7 +243,9 @@ export default function MapWorkbench() {
         <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
           <GizmoViewport />
         </GizmoHelper>
+        <PerfFrameProbe surface="maps" />
       </Canvas>
+      <PerfOverlay surface="maps" className="right-3 top-3" />
     </ContextualActionMenu>
   );
 }

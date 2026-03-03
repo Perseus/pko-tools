@@ -6,6 +6,7 @@ import { buildingGltfJsonAtom, buildingLoadingAtom, selectedBuildingAtom } from 
 import BuildingsModelViewer from "./BuildingsModelViewer";
 import { Loader2 } from "lucide-react";
 import { actionIds, ContextualActionMenu } from "@/features/actions";
+import { PerfFrameProbe, PerfOverlay } from "@/features/perf";
 
 const BUILDING_CONTEXT_ACTIONS = [actionIds.buildingExportGltf];
 
@@ -77,7 +78,9 @@ export default function BuildingsWorkbench() {
         </GizmoHelper>
 
         <gridHelper args={[50, 50, "#888888", "#444444"]} />
+        <PerfFrameProbe surface="buildings" />
       </Canvas>
+      <PerfOverlay surface="buildings" className="right-3 top-3" />
     </ContextualActionMenu>
   );
 }
