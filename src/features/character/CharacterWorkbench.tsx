@@ -13,6 +13,7 @@ import { useGltfResource } from "@/hooks/use-gltf-resource";
 import { actionIds } from "@/features/actions/actionIds";
 import { ContextualActionMenu } from "@/features/actions/ContextualActionMenu";
 import { PerfFrameProbe, PerfOverlay } from "@/features/perf";
+import { CanvasErrorBoundary } from "@/components/CanvasErrorBoundary";
 
 const CHARACTER_CONTEXT_ACTIONS = [
   actionIds.characterExportGltf,
@@ -262,23 +263,25 @@ export default function CharacterWorkbench() {
       requireShiftKey
       className="h-full w-full"
     >
-      <Canvas style={{ height: '100%', width: '100%' }} shadows camera={{ position: [10, 12, 12], fov: 25 }}>
-        <ambientLight intensity={1} />
-        <directionalLight position={[5, 5, 5]} castShadow />
-        <Environment background>
-          <mesh scale={100}>
-            <sphereGeometry args={[1, 16, 16]} />
-            <meshBasicMaterial color="#393939" side={THREE.BackSide} />
-          </mesh>
-        </Environment>
-        <Suspense fallback={<>Loading...</>}>
-          <Character />
-        </Suspense>
-        <OrbitControls />
-        <gridHelper args={[60, 60, 60]} position-y=".01" />
-        <PerfFrameProbe surface="characters" />
-        <CameraControls />
-      </Canvas>
+      <CanvasErrorBoundary className="absolute inset-0 flex items-center justify-center">
+        <Canvas style={{ height: '100%', width: '100%' }} shadows camera={{ position: [10, 12, 12], fov: 25 }}>
+          <ambientLight intensity={1} />
+          <directionalLight position={[5, 5, 5]} castShadow />
+          <Environment background>
+            <mesh scale={100}>
+              <sphereGeometry args={[1, 16, 16]} />
+              <meshBasicMaterial color="#393939" side={THREE.BackSide} />
+            </mesh>
+          </Environment>
+          <Suspense fallback={<>Loading...</>}>
+            <Character />
+          </Suspense>
+          <OrbitControls />
+          <gridHelper args={[60, 60, 60]} position-y=".01" />
+          <PerfFrameProbe surface="characters" />
+          <CameraControls />
+        </Canvas>
+      </CanvasErrorBoundary>
       <PerfOverlay surface="characters" className="bottom-8 right-3" />
     </ContextualActionMenu>
   </div>;
