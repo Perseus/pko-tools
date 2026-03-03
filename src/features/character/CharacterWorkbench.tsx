@@ -17,9 +17,22 @@ const CHARACTER_CONTEXT_ACTIONS = [
   actionIds.characterImportGltf,
 ];
 
+function clearSceneHelpers(scene: THREE.Object3D) {
+  scene.traverse((obj: THREE.Object3D) => {
+    const helpers = obj.children.filter((c) => c.userData?.isHelper);
+    helpers.forEach((h) => obj.remove(h));
+  });
+}
+
+function toClipTime(frameIndex: number, totalKeyframes: number, duration: number): number {
+  const denominator = Math.max(totalKeyframes - 1, 1);
+  return (frameIndex / denominator) * duration;
+}
+
 function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
   const { scene, animations } = useGLTF(gltfDataURI);
-  const { actions, mixer } = useAnimations(animations, scene);
+  const { mixer } = useAnimations(animations, scene);
+  const primaryClip = animations[0] ?? null;
   const setDummyEditMode = useSetAtom(dummyEditModeAtom);
   const animationDuration = animations?.[0]?.duration || 1;
   const fps = 30;
@@ -56,7 +69,7 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
       label: 'Keyframe',
       onChange: v => {
         setCurrentKeyframe(v);
-        const newTime = (v / (totalKeyframes - 1)) * animationDuration;
+        const newTime = toClipTime(v, totalKeyframes, animationDuration);
         mixer.setTime(newTime);
 
         timeAccumulator.current = 0;
@@ -141,48 +154,55 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
             keyframe: next
           });
 
-          const newTime = (next / (totalKeyframes - 1)) * animationDuration;
+          const newTime = toClipTime(next, totalKeyframes, animationDuration);
           mixer.setTime(newTime);
 
           return next;
         })
       }
     } else {
-      const newTime = (currentKeyframe / (totalKeyframes - 1)) * animationDuration;
+      const newTime = toClipTime(currentKeyframe, totalKeyframes, animationDuration);
       mixer.setTime(newTime);
     }
   });
 
 
   useEffect(() => {
-    if (animations.length > 0) {
-      const action = actions[animations[0].name];
-      if (action) {
-        action.reset().play();
-      }
+    if (!primaryClip) {
+      return;
     }
+    const action = mixer.clipAction(primaryClip, scene);
+    action.reset().play();
 
     return () => {
-      // Remove debug helper meshes from the scene tree before uncaching,
-      // otherwise Three.js binding paths don't match and uncacheRoot crashes.
-      scene.traverse((obj: THREE.Object3D) => {
-        const helpers = obj.children.filter(c => c.userData?.isHelper);
-        helpers.forEach(h => obj.remove(h));
-      });
+      action.stop();
+      // Remove debug helper meshes from the scene tree before uncaching.
+      clearSceneHelpers(scene);
 
       try {
         mixer.stopAllAction();
-        animations.forEach(clip => mixer.uncacheClip(clip));
+      } catch {
+        // ignore teardown race
+      }
+      try {
+        mixer.uncacheClip(primaryClip);
+      } catch {
+        // ignore teardown race
+      }
+      try {
         mixer.uncacheRoot(scene);
       } catch {
-        // Non-fatal: scene is being discarded, binding errors are harmless
+        // Non-fatal: model switches can race with internal mixer caches
       }
+      timeAccumulator.current = 0;
+      setPlaying(false);
+      setCurrentKeyframe(0);
       setAnimationControls({
         play: false,
         keyframe: 0
       });
     }
-  }, [animations, actions, scene, mixer]);
+  }, [mixer, primaryClip, scene, setAnimationControls]);
 
   return <>
     <group rotation={[-Math.PI / 2, 0, 0]}>
@@ -225,7 +245,7 @@ function Character() {
   }
 
   return <>
-    <CharacterModel gltfDataURI={gltfDataURI} />
+    <CharacterModel key={gltfDataURI} gltfDataURI={gltfDataURI} />
   </>;
 }
 
