@@ -1,4 +1,4 @@
-import { saveEffect, saveParticles, loadParticles } from "@/commands/effect";
+import { saveEffect, saveParticles, loadParticles, loadParFile } from "@/commands/effect";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -15,6 +15,7 @@ import {
   effectDirtyAtom,
   effectOriginalAtom,
   selectedEffectAtom,
+  traceRecorderTickAtom,
 } from "@/store/effect";
 import { currentProjectAtom } from "@/store/project";
 import { useAtom, useAtomValue } from "jotai";
@@ -24,7 +25,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import { Redo2, Save, Undo2, Video } from "lucide-react";
+import { Circle, Redo2, Save, Square, Undo2, Video } from "lucide-react";
 import React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import EffectViewport from "@/features/effect/EffectViewport";
@@ -43,7 +44,10 @@ import TextureBrowser from "@/features/effect/TextureBrowser";
 import ExportDialog from "@/features/effect/ExportDialog";
 import { useEffectHistory } from "@/features/effect/useEffectHistory";
 import { particleDataAtom, particleOriginalAtom } from "@/store/particle";
+import { parStripDataAtom, parModelDataAtom } from "@/store/strip";
 import type { ParticleController } from "@/types/particle";
+import { adaptParFile, adaptStrips, deriveParName, type RustParFile } from "@/features/effect/parAdapter";
+import { useTraceRecorder } from "@/features/effect/useTraceRecorder";
 import { actionIds, useRegisterActionRuntime } from "@/features/actions";
 
 export default function EffectWorkbench() {
@@ -60,6 +64,11 @@ export default function EffectWorkbench() {
   const { undo, redo, canUndo, canRedo } = useEffectHistory();
   const [particleData, setParticleData] = useAtom(particleDataAtom);
   const [particleOriginal, setParticleOriginal] = useAtom(particleOriginalAtom);
+  const [, setParStrips] = useAtom(parStripDataAtom);
+  const [, setParModels] = useAtom(parModelDataAtom);
+  const [, setTraceRecorderTick] = useAtom(traceRecorderTickAtom);
+  const traceRecorder = useTraceRecorder();
+  const [isTraceRecording, setIsTraceRecording] = useState(false);
 
   const normalizedSelectedName = useMemo(() => {
     if (!selectedEffect) {
@@ -67,6 +76,45 @@ export default function EffectWorkbench() {
     }
     return selectedEffect.replace(/\.eff$/i, "");
   }, [selectedEffect]);
+
+  const handleToggleTrace = useCallback(() => {
+    if (isTraceRecording) {
+      // Stop recording
+      const session = traceRecorder.stopRecording();
+      setTraceRecorderTick(null);
+      setIsTraceRecording(false);
+      if (session && session.frames.length > 0) {
+        // Download as JSON
+        const blob = new Blob([JSON.stringify(session, null, 2)], {
+          type: "application/json",
+        });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = `trace-${normalizedSelectedName || "effect"}-${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast({
+          title: "Trace recorded",
+          description: `${session.frames.length} frames captured`,
+        });
+      } else {
+        toast({
+          title: "No trace data",
+          description: "No frames were captured. Was playback running?",
+        });
+      }
+    } else {
+      // Start recording
+      traceRecorder.startRecording();
+      setTraceRecorderTick(() => traceRecorder.tick);
+      setIsTraceRecording(true);
+      toast({
+        title: "Recording trace",
+        description: "Play the effect to capture frames. Click stop to finish.",
+      });
+    }
+  }, [isTraceRecording, traceRecorder, setTraceRecorderTick, normalizedSelectedName, toast]);
 
   const handleSave = useCallback(async () => {
     if (!effectData || !currentProject || !selectedEffect) {
@@ -211,26 +259,58 @@ export default function EffectWorkbench() {
   useRegisterActionRuntime(actionIds.effectUndo, undoActionRuntime);
   useRegisterActionRuntime(actionIds.effectRedo, redoActionRuntime);
 
-  // Load particles sidecar when effect changes
+  // Load particle data when effect changes.
+  // Try native .par binary first, fall back to JSON sidecar.
   useEffect(() => {
     if (!selectedEffect || !currentProject) {
       return;
     }
 
     let cancelled = false;
-    loadParticles(currentProject.id, selectedEffect).then((result) => {
-      if (cancelled) return;
-      if (result) {
-        const data = result as ParticleController;
-        setParticleData(data);
-        setParticleOriginal(structuredClone(data));
+    const parName = deriveParName(selectedEffect);
+
+    async function loadData() {
+      // Try native .par file first
+      try {
+        const raw = await loadParFile(currentProject!.id, parName);
+        if (cancelled) return;
+        if (raw) {
+          const parFile = raw as RustParFile;
+          const data = adaptParFile(parFile);
+          setParticleData(data);
+          setParticleOriginal(structuredClone(data));
+          // Also populate strip and model atoms from .par
+          setParStrips(parFile.strips.length > 0 ? adaptStrips(parFile.strips) : null);
+          setParModels(parFile.models.length > 0 ? parFile.models : null);
+          return; // Success — skip JSON fallback
+        }
+      } catch {
+        // .par file doesn't exist or failed to parse — try JSON sidecar
       }
-    }).catch(() => {
-      // Silently ignore — particles file may not exist
-    });
+
+      if (cancelled) return;
+
+      // Fallback: JSON sidecar
+      try {
+        const result = await loadParticles(currentProject!.id, selectedEffect!);
+        if (cancelled) return;
+        if (result) {
+          const data = result as ParticleController;
+          setParticleData(data);
+          setParticleOriginal(structuredClone(data));
+        }
+        // Clear par-specific atoms when using JSON fallback
+        setParStrips(null);
+        setParModels(null);
+      } catch {
+        // Neither source exists — leave particleDataAtom as-is
+      }
+    }
+
+    void loadData();
 
     return () => { cancelled = true; };
-  }, [selectedEffect, currentProject, setParticleData, setParticleOriginal]);
+  }, [selectedEffect, currentProject, setParticleData, setParticleOriginal, setParStrips, setParModels]);
 
   useEffect(() => {
     if (isSaveAsOpen) {
@@ -298,6 +378,19 @@ export default function EffectWorkbench() {
           >
             <Save />
             {isSaving ? "Saving" : isDirty ? "Save Changes" : "Save"}
+          </Button>
+          <Button
+            size="sm"
+            variant={isTraceRecording ? "destructive" : "outline"}
+            disabled={!effectData || !particleData}
+            onClick={handleToggleTrace}
+            title={isTraceRecording ? "Stop trace recording" : "Record particle trace for validation"}
+          >
+            {isTraceRecording ? (
+              <Square className="h-4 w-4" />
+            ) : (
+              <Circle className="h-4 w-4" />
+            )}
           </Button>
           <Button
             size="sm"

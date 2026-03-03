@@ -1,30 +1,35 @@
 # Session Context
 
 ## Plan
-- **File:** `~/.claude/plans/harmonic-napping-reef.md`
-- **Started:** 2026-03-02T07:49Z
-- **Completed:** 2026-03-02T09:00Z
-- **Linear Parent:** [PKO-136](https://linear.app/pko-new/issue/PKO-136) — Kaitai LMO Adapter: Replace Hand-Written Parser
+- **File:** (inline plan — Fix Effect Geometry/State Parity, TDD)
+- **Branch:** feat/effect-geom-parity-phase-5
+- **Started:** 2026-03-03
+- **Completed:** 2026-03-03
 
 ## Progress
-| Phase | Branch | Linear | Status | Commit |
-|-------|--------|--------|--------|--------|
-| Phase 0: Fix compile blockers | feat/kaitai-lmo-adapter-phase-a | PKO-137 | done | bed3fef |
-| Phase 1: Shared utilities | feat/kaitai-lmo-adapter-phase-b | PKO-138 | done | 7286ca3 |
-| Phase 2: kaitai_to_lmo adapter | feat/kaitai-lmo-adapter-phase-c | PKO-139 | done | c690f63 |
-| Phase 3: No-animation path | feat/kaitai-lmo-adapter-phase-d | PKO-140 | done | 2dcc25d |
-| Phase 4: Exhaustive testing | feat/kaitai-lmo-adapter-phase-e | PKO-141 | done | c94b949 |
+| Phase | Branch | Status | Commit |
+|-------|--------|--------|--------|
+| Phase 1: Write Failing Tests | feat/effect-geom-parity-phase-1 | done | 2ce5d05 |
+| Phase 2: Fix Geometry (Bugs 2,3,5,6) | feat/effect-geom-parity-phase-2 | done | ba5bf9d |
+| Phase 3: Fix Zero-Scale (Bug 1) | feat/effect-geom-parity-phase-3 | done | f77d6e9 |
+| Phase 4: Fix Technique Address (Bug 4) | feat/effect-geom-parity-phase-4 | done | fed2118 |
+| Phase 5: Corpus Sweep + Verification | feat/effect-geom-parity-phase-5 | done | (this commit) |
 
 ## Decisions
-1. **Kaitai runtime**: Used `kaitai-io/kaitai_struct_rust_runtime` git dep (rev 9959613) instead of `kaitai = "0.1.2"` crate (requires nightly Rust).
-2. **Generated code fixes**: Applied 4 categories of post-generation patches to `pko_lmo.rs` (deref usize, type mismatches, literal overflow, arithmetic overflow).
-3. **BytesReader clone bug**: `_io.pos()` returns stale position on cloned reader. Worked around in adapter by re-reading indices from raw mesh bytes for header_kind=0 files with legacy pre-index pair.
-4. **load_lmo_no_animation**: Pinned to native backend for perf-critical batch path.
+1. **Kept `triangleZ` in GeometryConfig type union** — dead variant (nothing maps to it anymore), but removing it is unnecessary churn. Can clean up later.
+2. **createCylinderGeometry wraps THREE.CylinderGeometry** — applies rotateX(-π/2) + translateZ(h/2) to convert Y-axis to Z-axis with base at Z=0. This is simpler than building vertices from scratch and ensures correct normals/UVs from Three.js.
+3. **PivotControls scale uses Math.max(size[0], 0.01)** — prevents PivotControls from collapsing when scale is exactly 0 (the gizmo needs a minimum size to remain interactive).
 
 ## Known Issues
-- BytesReader clone bug in kaitai_struct_rust_runtime makes `_io.pos` unreliable in computed instances. Filed workaround in adapter, upstream fix would need shared ReaderState.
-- Generated `pko_lmo.rs` requires manual post-generation patches. Documented in Phase 0 commit.
+- Pre-existing TypeScript type errors in pkoStateEmulation.ts and other files (unrelated to this PR).
+- HitSubEffect still doesn't pass frameIndex to resolveGeometry — per-frame cylinder params are not used for hit effects. This is a minor limitation.
+
+## Corpus Sweep Results (1,152 .eff files, 2,752 sub-effects)
+- Geometry: empty=1310, Cylinder=1024, .lgo models=~350, Rect=43, RectZ=19, Triangle=5, RectPlane=4, Cone=3, TrianglePlane=2, Sphere=1
+- All 1,152 files use technique 0 → WRAP address mode fix is critical
+- 62 zero-scale frames in corpus → || 1 fallback was affecting real effects
+- Feature flags: billboard=596, rotaBoard=2250, rotaLoop=1044, useParam=77, alpha=2447
 
 ## Test Results
-- **1,177/1,177** .lmo files pass exhaustive parity test (0 both-failed)
-- **376** total tests pass (321 lib + 55 integration), 0 failures
+- **354/354** TypeScript tests pass (0 failures)
+- **311/311** Rust lib tests pass (9 ignored)

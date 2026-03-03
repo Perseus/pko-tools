@@ -90,9 +90,17 @@ describe("getPkoTechniqueState", () => {
     expect(state.addressV).toBe(D3DTADDRESS_WRAP);
   });
 
-  it("techniques 2 and 3 are defaults", () => {
-    expect(getPkoTechniqueState(2)).toEqual(DEFAULT_PKO_TECHNIQUE);
-    expect(getPkoTechniqueState(3)).toEqual(DEFAULT_PKO_TECHNIQUE);
+  it("techniques 2 and 3 use CLAMP addressing", () => {
+    const state2 = getPkoTechniqueState(2);
+    expect(state2.addressU).toBe(D3DTADDRESS_CLAMP);
+    expect(state2.addressV).toBe(D3DTADDRESS_CLAMP);
+    // Other fields match defaults
+    expect(state2.zEnable).toBe(true);
+    expect(state2.alphaBlendEnable).toBe(true);
+
+    const state3 = getPkoTechniqueState(3);
+    expect(state3.addressU).toBe(D3DTADDRESS_CLAMP);
+    expect(state3.addressV).toBe(D3DTADDRESS_CLAMP);
   });
 
   it("technique 4: alpha test with NOTEQUAL", () => {
@@ -179,6 +187,36 @@ describe("applyPkoRenderState", () => {
     expect(mat.depthWrite).toBe(false);
     expect(mat.side).toBe(THREE.BackSide);
   });
+});
+
+describe("Technique Address Mode Parity — eff.fx truth table", () => {
+  // From eff.fx shader source:
+  // Tech 0: WRAP, WRAP
+  // Tech 1: WRAP, WRAP
+  // Tech 2: CLAMP, CLAMP
+  // Tech 3: CLAMP, CLAMP
+  // Tech 4: WRAP, WRAP
+  // Tech 5: CLAMP, CLAMP
+  // Tech 6: WRAP, WRAP
+
+  const addressTable: [number, number, number][] = [
+    // [technique, expectedAddressU, expectedAddressV]
+    [0, D3DTADDRESS_WRAP, D3DTADDRESS_WRAP],
+    [1, D3DTADDRESS_WRAP, D3DTADDRESS_WRAP],
+    [2, D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP],
+    [3, D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP],
+    [4, D3DTADDRESS_WRAP, D3DTADDRESS_WRAP],
+    [5, D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP],
+    [6, D3DTADDRESS_WRAP, D3DTADDRESS_WRAP],
+  ];
+
+  for (const [tech, expectedU, expectedV] of addressTable) {
+    it(`technique ${tech}: addressU=${expectedU === D3DTADDRESS_WRAP ? "WRAP" : "CLAMP"}, addressV=${expectedV === D3DTADDRESS_WRAP ? "WRAP" : "CLAMP"}`, () => {
+      const state = getPkoTechniqueState(tech);
+      expect(state.addressU).toBe(expectedU);
+      expect(state.addressV).toBe(expectedV);
+    });
+  }
 });
 
 describe("applyTextureSampling", () => {

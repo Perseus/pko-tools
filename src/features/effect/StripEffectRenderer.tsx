@@ -1,5 +1,5 @@
 /// <reference types="@react-three/fiber" />
-import { stripEffectDataAtom } from "@/store/strip";
+import { stripEffectDataAtom, parStripDataAtom, type StripEffectData } from "@/store/strip";
 import { currentProjectAtom } from "@/store/project";
 import { useAtomValue } from "jotai";
 import React from "react";
@@ -216,12 +216,13 @@ void main() {
 }
 `;
 
-export default function StripEffectRenderer() {
-  const stripData = useAtomValue(stripEffectDataAtom);
+/** Render a single strip ribbon. Extracted so multiple strips can be rendered. */
+function StripRibbon({ stripData }: { stripData: StripEffectData }) {
   const currentProject = useAtomValue(currentProjectAtom);
   const meshRef = useRef<THREE.Mesh>(null);
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
   const textureRef = useRef<THREE.Texture | null>(null);
+
 
   // Load strip texture
   useEffect(() => {
@@ -360,9 +361,31 @@ export default function StripEffectRenderer() {
     geo.setIndex(new THREE.BufferAttribute(indices, 1));
   });
 
-  if (!stripData || !material) {
+  if (!material) {
     return null;
   }
 
   return <mesh ref={meshRef} material={material} />;
+}
+
+export default function StripEffectRenderer() {
+  const editorStrip = useAtomValue(stripEffectDataAtom);
+  const parStrips = useAtomValue(parStripDataAtom);
+
+  // Par strips take priority when available; fall back to editor strip
+  if (parStrips && parStrips.length > 0) {
+    return (
+      <>
+        {parStrips.map((strip, i) => (
+          <StripRibbon key={`par-${i}`} stripData={strip} />
+        ))}
+      </>
+    );
+  }
+
+  if (editorStrip) {
+    return <StripRibbon stripData={editorStrip} />;
+  }
+
+  return null;
 }

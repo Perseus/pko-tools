@@ -6,10 +6,11 @@ import {
   getPkoTechniqueState,
   snapshotMaterialState,
   D3DBLEND_SRCALPHA,
+  D3DBLEND_INVSRCALPHA,
   D3DBLEND_ONE,
 } from "@/features/effect/pkoStateEmulation";
 import { resolveBlendFactors } from "@/features/effect/rendering";
-import { createSubEffectFixture } from "./fixtures";
+import { createSubEffectFixture, createEffectFixture } from "./fixtures";
 
 describe("state snapshot: technique states", () => {
   it("technique 0: default alpha blend, no depth write", () => {

@@ -64,3 +64,12 @@ export const boundBoneMatrixAtom = atom<Float32Array | null>(null);
 
 /** When true, render all sub-effects even when playback is stopped (composite preview). */
 export const compositePreviewAtom = atom(false);
+
+/**
+ * Holds the trace recorder's tick function ref so SingleSystemRenderer
+ * can call it during playback without prop drilling.
+ * Set by EffectWorkbench when recording is active, null otherwise.
+ */
+export const traceRecorderTickAtom = atom<
+  ((pool: import("@/features/effect/particle/particlePool").ParticlePool, currentTime: number) => void) | null
+>(null);

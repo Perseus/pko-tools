@@ -21,9 +21,11 @@ import * as THREE from "three";
 import {
   createEffectTexture,
   createRectGeometry,
+  createRectPlaneGeometry,
   createRectZGeometry,
   createTriangleGeometry,
-  createTriangleZGeometry,
+  createTrianglePlaneGeometry,
+  createCylinderGeometry,
   resolveBlendFactors,
   resolveFrameData,
   resolveGeometry,
@@ -129,16 +131,23 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
     [subEffect, selectedFrameIndex]
   );
 
-  // Build PKO-correct BufferGeometry for rect/rectZ/triangle/triangleZ types
+  // Build PKO-correct BufferGeometry for builtin geometry types
   const builtinGeometry = useMemo(() => {
     switch (geometry.type) {
       case "rect": return createRectGeometry();
+      case "rectPlane": return createRectPlaneGeometry();
       case "rectZ": return createRectZGeometry();
       case "triangle": return createTriangleGeometry();
-      case "triangleZ": return createTriangleZGeometry();
+      case "trianglePlane": return createTrianglePlaneGeometry();
+      case "cylinder": return createCylinderGeometry(
+        geometry.topRadius ?? 0.5,
+        geometry.botRadius ?? 0.5,
+        geometry.height ?? 1.0,
+        geometry.segments ?? 16,
+      );
       default: return null;
     }
-  }, [geometry.type]);
+  }, [geometry.type, geometry.topRadius, geometry.botRadius, geometry.height, geometry.segments]);
 
   const modelGeometry = useEffectModel(
     geometry.type === "model" ? geometry.modelName : undefined,
@@ -165,8 +174,8 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
   // Smooth interpolation between keyframes during playback
   const interpolated = useMemo(() => {
     if (!subEffect || !playback.isPlaying) return null;
-    return interpolateFrame(subEffect, playbackTime, playback.isLooping);
-  }, [subEffect, playback.isPlaying, playbackTime, playback.isLooping]);
+    return interpolateFrame(subEffect, playbackTime, true);
+  }, [subEffect, playback.isPlaying, playbackTime]);
 
   const textureName = useMemo(() => {
     if (!subEffect) {
@@ -392,7 +401,7 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
 
     // UV animation for effectType 2 (EFFECT_MODELUV) — interpolated UV coords
     if (subEffect && playback.isPlaying && subEffect.effectType === 2 && subEffect.coordList.length > 0) {
-      const uvResult = interpolateUVCoords(subEffect, playbackTime, playback.isLooping);
+      const uvResult = interpolateUVCoords(subEffect, playbackTime, true);
       if (uvResult && meshRef.current.geometry) {
         const uvAttr = meshRef.current.geometry.getAttribute("uv");
         if (uvAttr && uvAttr.count === uvResult.uvs.length) {
@@ -406,7 +415,7 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
 
     // UV animation for effectType 3 (EFFECT_MODELTEXTURE) — snapped UV sets
     if (subEffect && playback.isPlaying && subEffect.effectType === 3 && subEffect.texList.length > 0) {
-      const texIdx = getTexListFrameIndex(subEffect, playbackTime, playback.isLooping);
+      const texIdx = getTexListFrameIndex(subEffect, playbackTime, true);
       if (texIdx !== null && subEffect.texList[texIdx] && meshRef.current.geometry) {
         const uvAttr = meshRef.current.geometry.getAttribute("uv");
         const texUVs = subEffect.texList[texIdx];
@@ -514,6 +523,17 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
     return null;
   }
 
+  // Per-sub-effect duration cutoff: hide when elapsed time exceeds layer length.
+  // Only applies during playback in non-looping mode.
+  if (
+    playback.isPlaying &&
+    !playback.isLooping &&
+    subEffect.length > 0 &&
+    playback.currentTime > subEffect.length
+  ) {
+    return null;
+  }
+
   const materialColor = new THREE.Color(color[0], color[1], color[2]);
   const opacity = Math.min(Math.max(color[3], 0), 1);
   const previewOpacity = Math.max(opacity, EDITOR_MIN_OPACITY);
@@ -541,20 +561,10 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
       ref={meshRef}
       position={position}
       rotation={new THREE.Euler(angle[0], angle[1], angle[2], "YXZ")}
-      scale={[size[0] || 1, size[1] || 1, size[2] || 1]}
+      scale={size}
     >
       {builtinGeometry && <primitive object={builtinGeometry} attach="geometry" />}
       {geometry.type === "plane" && !builtinGeometry && <planeGeometry args={[1, 1]} />}
-      {geometry.type === "cylinder" && (
-        <cylinderGeometry
-          args={[
-            geometry.topRadius ?? 0.5,
-            geometry.botRadius ?? 0.5,
-            geometry.height ?? 1.0,
-            geometry.segments ?? 16,
-          ]}
-        />
-      )}
       {geometry.type === "sphere" && <sphereGeometry args={[0.7, 24, 24]} />}
       {geometry.type === "model" && modelGeometry && (
         <primitive object={modelGeometry} attach="geometry" />
@@ -588,7 +598,7 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
           <PivotControls
             offset={position}
             rotation={[angle[0], angle[1], angle[2]]}
-            scale={size[0] || 1}
+            scale={Math.max(size[0], 0.01)}
             visible={showGizmo}
             onDrag={handleGizmoDrag}
             onDragEnd={handleGizmoDragEnd}

@@ -2,6 +2,16 @@ import type { ParticleSystem } from "@/types/particle";
 import { PARTICLE_TYPE } from "@/types/particle";
 import type { Vec3, Vec4 } from "@/types/effect";
 
+/** Extended ParticleSystem with optional path data (from .par files). */
+interface ParticleSystemWithPath extends ParticleSystem {
+  path?: {
+    velocity: number;
+    points: Vec3[];
+    directions: Vec3[];
+    distances: number[];
+  } | null;
+}
+
 export const MAX_PARTICLES = 100;
 
 /** Per-particle runtime state stored in typed arrays. */
@@ -271,7 +281,7 @@ function stepSnow(pool: ParticlePool, i: number, _sys: ParticleSystem, _delta: n
   pool.positions[i3] += Math.sin(pool.ages[i] * 3 + seed * 10) * 0.01;
 }
 
-function stepWind(pool: ParticlePool, i: number, sys: ParticleSystem, _delta: number, _t: number) {
+function stepWind(pool: ParticlePool, i: number, sys: ParticleSystem, _delta: number, t: number) {
   // WIND: accumulates angle.z rotation, swirling tornado motion around spawn pos
   const i3 = i * 3;
   const age = pool.ages[i];
@@ -322,6 +332,50 @@ const STEP_FN: Record<number, StepFn> = {
   [PARTICLE_TYPE.LINE_SINGLE]: stepDefault,
   [PARTICLE_TYPE.LINE_ROUND]: stepDefault,
 };
+
+// ─── Path following ──────────────────────────────────────────────────────
+
+/** Interpolate position along a polyline path.
+ *  progress is 0..1 along the total path length. */
+function interpolatePath(
+  points: Vec3[],
+  progress: number,
+): Vec3 {
+  if (points.length < 2) return points[0] ?? [0, 0, 0];
+
+  // Compute segment lengths
+  let totalLen = 0;
+  const segLens: number[] = [];
+  for (let i = 0; i < points.length - 1; i++) {
+    const [ax, ay, az] = points[i];
+    const [bx, by, bz] = points[i + 1];
+    const len = Math.sqrt((bx - ax) ** 2 + (by - ay) ** 2 + (bz - az) ** 2);
+    segLens.push(len);
+    totalLen += len;
+  }
+
+  if (totalLen <= 0) return points[0];
+
+  const t = Math.max(0, Math.min(1, progress));
+  const dist = t * totalLen;
+
+  let accum = 0;
+  for (let i = 0; i < segLens.length; i++) {
+    if (dist <= accum + segLens[i]) {
+      const segT = segLens[i] > 0 ? (dist - accum) / segLens[i] : 0;
+      const [ax, ay, az] = points[i];
+      const [bx, by, bz] = points[i + 1];
+      return [
+        ax + (bx - ax) * segT,
+        ay + (by - ay) * segT,
+        az + (bz - az) * segT,
+      ];
+    }
+    accum += segLens[i];
+  }
+
+  return points[points.length - 1];
+}
 
 // ─── Public API ──────────────────────────────────────────────────────────
 
@@ -415,6 +469,19 @@ export function stepParticles(
       pool.positions[i3] += pool.velocities[i3] * delta;
       pool.positions[i3 + 1] += pool.velocities[i3 + 1] * delta;
       pool.positions[i3 + 2] += pool.velocities[i3 + 2] * delta;
+    }
+
+    // Path-following: override position when usePath is set
+    if (sys.usePath && (sys as ParticleSystemWithPath).path) {
+      const path = (sys as ParticleSystemWithPath).path!;
+      if (path.points.length >= 2) {
+        const progress = t; // age/life normalized to 0..1
+        const pathPos = interpolatePath(path.points, progress);
+        // Path position + spawn offset
+        pool.positions[i3] = pathPos[0] + pool.spawnPositions[i3];
+        pool.positions[i3 + 1] = pathPos[1] + pool.spawnPositions[i3 + 1];
+        pool.positions[i3 + 2] = pathPos[2] + pool.spawnPositions[i3 + 2];
+      }
     }
 
     // Interpolate frame animation
