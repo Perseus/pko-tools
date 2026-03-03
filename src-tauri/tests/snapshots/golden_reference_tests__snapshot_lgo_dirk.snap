@@ -1,0 +1,367 @@
+---
+source: tests/golden_reference_tests.rs
+expression: model
+---
+version: 0
+header:
+  id: 0
+  parent_id: 4294967295
+  _type: 0
+  mat_local:
+    x:
+      x: -0.00000004371139
+      y: 1
+      z: 0
+      w: 0
+    y:
+      x: 0.00000004371139
+      y: 0.0000000000000019106855
+      z: -1
+      w: 0
+    z:
+      x: -1
+      y: -0.00000004371139
+      z: -0.00000004371139
+      w: 0
+    w:
+      x: 0
+      y: 0.0000000031141716
+      z: 0
+      w: 1
+  rcci:
+    ctrl_id: 1
+    decl_id: 5
+    vs_id: 4294967295
+    ps_id: 4294967295
+  state_ctrl:
+    _state_seq:
+      - 1
+      - 1
+      - 255
+      - 255
+      - 0
+      - 88
+      - 229
+      - 119
+  mtl_size: 1036
+  mesh_size: 324
+  helper_size: 104
+  anim_size: 0
+old_version: 0
+material_num: 1
+material_seq:
+  - opacity: 0
+    transp_type: 0
+    material:
+      dif:
+        r: 1
+        g: 1
+        b: 1
+        a: 1
+      amb:
+        r: 1
+        g: 1
+        b: 1
+        a: 1
+      spe:
+        r: 1
+        g: 1
+        b: 1
+        a: 1
+      emi:
+        r: 0
+        g: 0
+        b: 0
+        a: 0
+      power: 0
+    rs_set:
+      - state: 4294967295
+        value0: 0
+        value1: 0
+      - state: 4294967295
+        value0: 0
+        value1: 0
+      - state: 4294967295
+        value0: 0
+        value1: 0
+      - state: 4294967295
+        value0: 0
+        value1: 0
+      - state: 4294967295
+        value0: 0
+        value1: 0
+      - state: 4294967295
+        value0: 0
+        value1: 0
+      - state: 4294967295
+        value0: 0
+        value1: 0
+      - state: 4294967295
+        value0: 0
+        value1: 0
+    tex_seq:
+      - stage: 0
+        level: 4294967295
+        usage: 0
+        d3d_format: A1R5G5B5
+        d3d_pool: Managed
+        byte_alignment_flag: 0
+        _type: File
+        width: 0
+        height: 0
+        colorkey_type: None
+        colorkey:
+          b: 0
+          g: 0
+          r: 0
+          a: 0
+        file_name: 1.BMP
+        tss_set:
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+      - stage: 4294967295
+        level: 0
+        usage: 0
+        d3d_format: Unknown
+        d3d_pool: ForceDword
+        byte_alignment_flag: 0
+        _type: InvalidMax
+        width: 0
+        height: 0
+        colorkey_type: None
+        colorkey:
+          b: 0
+          g: 0
+          r: 0
+          a: 0
+        file_name: ""
+        tss_set:
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+      - stage: 4294967295
+        level: 0
+        usage: 0
+        d3d_format: Unknown
+        d3d_pool: ForceDword
+        byte_alignment_flag: 0
+        _type: InvalidMax
+        width: 0
+        height: 0
+        colorkey_type: None
+        colorkey:
+          b: 0
+          g: 0
+          r: 0
+          a: 0
+        file_name: ""
+        tss_set:
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+      - stage: 4294967295
+        level: 0
+        usage: 0
+        d3d_format: Unknown
+        d3d_pool: ForceDword
+        byte_alignment_flag: 0
+        _type: InvalidMax
+        width: 0
+        height: 0
+        colorkey_type: None
+        colorkey:
+          b: 0
+          g: 0
+          r: 0
+          a: 0
+        file_name: ""
+        tss_set:
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+          - state: 4294967295
+            value0: 0
+            value1: 0
+mesh_info:
+  header:
+    fvf: 274
+    pt_type: TriangleList
+    vertex_num: 4
+    index_num: 6
+    subset_num: 1
+    bone_index_num: 0
+    bone_infl_factor: 0
+    vertex_element_num: 0
+    rs_set:
+      - state: 4294967295
+        value0: 0
+        value1: 0
+      - state: 4294967295
+        value0: 0
+        value1: 0
+      - state: 4294967295
+        value0: 0
+        value1: 0
+      - state: 4294967295
+        value0: 0
+        value1: 0
+      - state: 4294967295
+        value0: 0
+        value1: 0
+      - state: 4294967295
+        value0: 0
+        value1: 0
+      - state: 4294967295
+        value0: 0
+        value1: 0
+      - state: 4294967295
+        value0: 0
+        value1: 0
+  vertex_seq:
+    - x: -0.6
+      y: -0.6
+      z: 0
+    - x: -0.6
+      y: 0.6
+      z: 0
+    - x: 0.6
+      y: -0.6
+      z: 0
+    - x: 0.6
+      y: 0.6
+      z: 0
+  normal_seq:
+    - x: 0
+      y: -0
+      z: 1
+    - x: 0
+      y: -0
+      z: 1
+    - x: 0
+      y: -0
+      z: 1
+    - x: 0
+      y: -0
+      z: 1
+  texcoord_seq:
+    - - x: 0.00049975514
+        y: 0.0004994869
+      - x: 0.0004995167
+        y: 0.9995003
+      - x: 0.9995005
+        y: 0.00049972534
+      - x: 0.9995003
+        y: 0.9995005
+    - []
+    - []
+    - []
+  vercol_seq: []
+  index_seq:
+    - 0
+    - 2
+    - 1
+    - 3
+    - 1
+    - 2
+  bone_index_seq: []
+  blend_seq: []
+  subset_seq:
+    - primitive_num: 2
+      start_index: 0
+      vertex_num: 4
+      min_index: 0
+  vertex_element_seq: []
+helper_data:
+  _type: 0
+  dummy_num: 0
+  dummy_seq: []
+  box_num: 0
+  box_seq: []
+  mesh_num: 0
+  mesh_seq: []
+  bbox_num: 0
+  bbox_seq: []
+  bsphere_num: 0
+  bsphere_seq: []

@@ -1,0 +1,88 @@
+---
+source: tests/golden_reference_tests.rs
+expression: eff
+---
+version: 2
+idxTech: 0
+usePath: false
+pathName: ""
+useSound: false
+soundName: ""
+rotating: false
+rotaVec:
+  - 0
+  - 0
+  - 0
+rotaVel: 1
+effNum: 1
+subEffects:
+  - effectName: lighty.eff
+    effectType: 4
+    srcBlend: 5
+    destBlend: 7
+    length: 5
+    frameCount: 1
+    frameTimes:
+      - 5
+    frameSizes:
+      - - 1
+        - 1
+        - 1
+    frameAngles:
+      - - 0
+        - 0
+        - 0
+    framePositions:
+      - - 0
+        - 0
+        - 0
+    frameColors:
+      - - 1
+        - 1
+        - 1
+        - 0.5921569
+    verCount: 4
+    coordCount: 1
+    coordFrameTime: 3
+    coordList:
+      - - - 0
+          - 1
+        - - 0
+          - 0
+        - - 1
+          - 0
+        - - 1
+          - 1
+    texCount: 1
+    texFrameTime: 0.1
+    texName: 2.tga
+    texList:
+      - - - 0
+          - 1
+        - - 0
+          - 0
+        - - 1
+          - 0
+        - - 1
+          - 1
+    modelName: RectPlane
+    billboard: true
+    vsIndex: 1
+    segments: 6383476
+    height: 0
+    topRadius: 0
+    botRadius: 0.000000000000000000000000000000000000000000021
+    frameTexCount: 0
+    frameTexTime: 0
+    frameTexNames: []
+    frameTexTime2: 0
+    useParam: 0
+    perFrameCylinder: []
+    rotaLoop: false
+    rotaLoopVec:
+      - 0
+      - 0
+      - 0
+      - 0
+    alpha: false
+    rotaBoard: false

@@ -1,0 +1,277 @@
+---
+source: tests/golden_reference_tests.rs
+expression: bones
+---
+version: 4101
+old_version: 0
+header:
+  bone_num: 1
+  frame_num: 12
+  dummy_num: 6
+  key_type: 3
+base_seq:
+  - name: Dummy01
+    id: 0
+    parent_id: 4294967295
+    original_node_index: 0
+invmat_seq:
+  - x:
+      x: 1
+      y: -0
+      z: 0
+      w: 0
+    y:
+      x: -0
+      y: 1
+      z: -0
+      w: 0
+    z:
+      x: 0
+      y: -0
+      z: 1
+      w: 0
+    w:
+      x: -0
+      y: 0
+      z: -0.72294915
+      w: 1
+dummy_seq:
+  - id: 0
+    parent_bone_id: 0
+    mat:
+      x:
+        x: 1
+        y: -0
+        z: 0
+        w: 0
+      y:
+        x: -0
+        y: 1
+        z: -0
+        w: 0
+      z:
+        x: 0
+        y: -0
+        z: 1
+        w: 0
+      w:
+        x: 0
+        y: -0
+        z: 0
+        w: 1
+  - id: 1
+    parent_bone_id: 0
+    mat:
+      x:
+        x: 1
+        y: -0
+        z: 0
+        w: 0
+      y:
+        x: -0
+        y: 1
+        z: -0
+        w: 0
+      z:
+        x: 0
+        y: -0
+        z: 1
+        w: 0
+      w:
+        x: 0
+        y: -0
+        z: 1.8611968
+        w: 1
+  - id: 2
+    parent_bone_id: 0
+    mat:
+      x:
+        x: 1
+        y: -0
+        z: 0
+        w: 0
+      y:
+        x: -0
+        y: 1
+        z: -0
+        w: 0
+      z:
+        x: 0
+        y: -0
+        z: 1
+        w: 0
+      w:
+        x: 0
+        y: -0
+        z: 0.9062786
+        w: 1
+  - id: 3
+    parent_bone_id: 0
+    mat:
+      x:
+        x: 1
+        y: -0
+        z: 0
+        w: 0
+      y:
+        x: -0
+        y: 1
+        z: -0
+        w: 0
+      z:
+        x: 0
+        y: -0
+        z: 1
+        w: 0
+      w:
+        x: 0.77038634
+        y: 0.77308893
+        z: 0.9062786
+        w: 1
+  - id: 6
+    parent_bone_id: 0
+    mat:
+      x:
+        x: 1
+        y: -0
+        z: 0
+        w: 0
+      y:
+        x: -0
+        y: 1
+        z: -0
+        w: 0
+      z:
+        x: 0
+        y: -0
+        z: 1
+        w: 0
+      w:
+        x: 1.8260407
+        y: -0.3434682
+        z: 0
+        w: 1
+  - id: 9
+    parent_bone_id: 0
+    mat:
+      x:
+        x: 1
+        y: -0
+        z: 0
+        w: 0
+      y:
+        x: -0
+        y: 1
+        z: -0
+        w: 0
+      z:
+        x: 0
+        y: -0
+        z: 1
+        w: 0
+      w:
+        x: -1.7530956
+        y: 2.2986424
+        z: 0
+        w: 1
+key_seq:
+  - mat43_seq: ~
+    mat44_seq: ~
+    pos_seq:
+      - x: 0
+        y: -0
+        z: 0.72294915
+      - x: 0
+        y: -0
+        z: 0.72294915
+      - x: 0
+        y: -0
+        z: 0.72294915
+      - x: 0
+        y: -0
+        z: 0.72294915
+      - x: 0
+        y: -0
+        z: 0.72294915
+      - x: 0
+        y: -0
+        z: 0.72294915
+      - x: 0
+        y: -0
+        z: 0.72294915
+      - x: 0
+        y: -0
+        z: 0.72294915
+      - x: 0
+        y: -0
+        z: 0.72294915
+      - x: 0
+        y: -0
+        z: 0.72294915
+      - x: 0
+        y: -0
+        z: 0.72294915
+      - x: 0
+        y: -0
+        z: 0.72294915
+    quat_seq:
+      - v:
+          x: 0
+          y: 0
+          z: 0
+        s: 1
+      - v:
+          x: 0
+          y: 0
+          z: 0
+        s: 1
+      - v:
+          x: 0
+          y: 0
+          z: 0
+        s: 1
+      - v:
+          x: 0
+          y: 0
+          z: 0
+        s: 1
+      - v:
+          x: 0
+          y: 0
+          z: 0
+        s: 1
+      - v:
+          x: 0
+          y: 0
+          z: 0
+        s: 1
+      - v:
+          x: 0
+          y: 0
+          z: 0
+        s: 1
+      - v:
+          x: 0
+          y: 0
+          z: 0
+        s: 1
+      - v:
+          x: 0
+          y: 0
+          z: 0
+        s: 1
+      - v:
+          x: 0
+          y: 0
+          z: 0
+        s: 1
+      - v:
+          x: 0
+          y: 0
+          z: 0
+        s: 1
+      - v:
+          x: 0
+          y: 0
+          z: 0
+        s: 1
