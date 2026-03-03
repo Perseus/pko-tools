@@ -13,7 +13,7 @@ The `pko_inspect` CLI binary parses PKO binary files through Kaitai-backed adapt
 
 ```bash
 cd src-tauri
-PKO_KAITAI_BUILD=0 cargo run --bin pko_inspect -- <path-to-file>
+cargo run --bin pko_inspect -- <path-to-file>
 ```
 
 Or if already built:
@@ -36,7 +36,7 @@ Or if already built:
 ## Notes
 
 - NaN/Inf float values are replaced with `null` in the JSON output
-- Set `PKO_KAITAI_BUILD=0` to avoid regenerating Kaitai code on build
+- Kaitai code regeneration is disabled by default (`.cargo/config.toml`)
 - The binary lives at `src-tauri/src/bin/pko_inspect.rs`
 - All domain types derive `serde::Serialize`
 
