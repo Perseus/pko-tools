@@ -35,6 +35,28 @@ type ActionKernelApi = {
 };
 
 const ActionKernelContext = createContext<ActionKernelApi | null>(null);
+const RECENT_ACTIONS_STORAGE_KEY = "pko-tools/recent-actions/v1";
+const MAX_RECENT_ACTIONS = 24;
+
+function loadRecentActions(): string[] {
+  if (typeof window === "undefined") {
+    return [];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(RECENT_ACTIONS_STORAGE_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter((entry): entry is string => typeof entry === "string");
+  } catch {
+    return [];
+  }
+}
 
 function hasOpenDialog(): boolean {
   if (typeof document === "undefined") {
@@ -343,6 +365,7 @@ export function ActionKernelProvider({
   const [, setGizmoMode] = useAtom(gizmoModeAtom);
   const [, setCompositePreview] = useAtom(compositePreviewAtom);
   const [isPaletteOpen, setPaletteOpen] = useState(false);
+  const [recentActionIds, setRecentActionIds] = useState<string[]>(() => loadRecentActions());
   const runtimeHandlersRef = useRef<Map<string, ActionRuntimeHandler>>(new Map());
 
   const surface = useMemo(() => resolveSurface(location.pathname), [location.pathname]);
@@ -430,11 +453,19 @@ export function ActionKernelProvider({
       const runtime = runtimeHandlersRef.current.get(actionId);
       if (runtime?.run) {
         await runtime.run();
+        setRecentActionIds((previous) => {
+          const next = [actionId, ...previous.filter((id) => id !== actionId)];
+          return next.slice(0, MAX_RECENT_ACTIONS);
+        });
         return true;
       }
 
       if (action.run) {
         await action.run({ ...actionContext, source });
+        setRecentActionIds((previous) => {
+          const next = [actionId, ...previous.filter((id) => id !== actionId)];
+          return next.slice(0, MAX_RECENT_ACTIONS);
+        });
         return true;
       }
 
@@ -458,20 +489,61 @@ export function ActionKernelProvider({
 
   const getActionsForCurrentContext = useCallback((): ResolvedAction[] => {
     const actionContext = createEventContext(document.activeElement);
+    const recentIndex = new Map(
+      recentActionIds.map((actionId, index) => [actionId, index]),
+    );
 
-    return registry.resolveVisibleActions(actionContext).map((action) => {
-      const descriptorState = resolveActionEnabled(action, actionContext);
-      const runtime = runtimeHandlersRef.current.get(action.id);
-      const runtimeEnabled = runtime?.isEnabled ? runtime.isEnabled() : true;
-      const runtimeReason = runtime?.disabledReason ? runtime.disabledReason() : undefined;
+    return registry
+      .resolveVisibleActions(actionContext)
+      .map((action) => {
+        const descriptorState = resolveActionEnabled(action, actionContext);
+        const runtime = runtimeHandlersRef.current.get(action.id);
+        const runtimeEnabled = runtime?.isEnabled ? runtime.isEnabled() : true;
+        const runtimeReason = runtime?.disabledReason ? runtime.disabledReason() : undefined;
 
-      return {
-        ...action,
-        enabled: descriptorState.enabled && runtimeEnabled,
-        disabledReason: runtimeReason ?? descriptorState.reason,
-      };
-    });
-  }, [createEventContext, registry]);
+        return {
+          ...action,
+          enabled: descriptorState.enabled && runtimeEnabled,
+          disabledReason: runtimeReason ?? descriptorState.reason,
+        };
+      })
+      .sort((a, b) => {
+        const aEnabledWeight = a.enabled ? 1 : 0;
+        const bEnabledWeight = b.enabled ? 1 : 0;
+        if (aEnabledWeight !== bEnabledWeight) {
+          return bEnabledWeight - aEnabledWeight;
+        }
+
+        const aRecentOrder = recentIndex.get(a.id) ?? Number.POSITIVE_INFINITY;
+        const bRecentOrder = recentIndex.get(b.id) ?? Number.POSITIVE_INFINITY;
+        if (aRecentOrder !== bRecentOrder) {
+          return aRecentOrder - bRecentOrder;
+        }
+
+        const aPriority = a.priority ?? 0;
+        const bPriority = b.priority ?? 0;
+        if (aPriority !== bPriority) {
+          return bPriority - aPriority;
+        }
+
+        return a.title.localeCompare(b.title);
+      });
+  }, [createEventContext, recentActionIds, registry]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    try {
+      window.localStorage.setItem(
+        RECENT_ACTIONS_STORAGE_KEY,
+        JSON.stringify(recentActionIds),
+      );
+    } catch {
+      // Ignore persistence failures (private mode/quota) and keep in-memory behavior.
+    }
+  }, [recentActionIds]);
 
   useEffect(() => {
     if (!actionKernelEnabled) {
