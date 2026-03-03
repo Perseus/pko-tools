@@ -63,6 +63,8 @@ export default function BuildingsWorkbench() {
             near: 0.01,
             far: 10000,
           }}
+          dpr={[1, 1.5]}
+          gl={{ powerPreference: "high-performance" }}
           style={{
             background: "linear-gradient(180deg, #b0c4de 0%, #dfe6ed 100%)",
           }}

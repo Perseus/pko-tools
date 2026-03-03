@@ -196,6 +196,8 @@ export default function ItemWorkbench() {
                 }}
                 shadows
                 camera={{ position: [3, 4, 4], fov: 35 }}
+                dpr={[1, 1.5]}
+                gl={{ powerPreference: "high-performance" }}
               >
                 <ambientLight intensity={1} />
                 <directionalLight position={[5, 5, 5]} castShadow />

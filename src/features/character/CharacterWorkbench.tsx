@@ -264,7 +264,13 @@ export default function CharacterWorkbench() {
       className="h-full w-full"
     >
       <CanvasErrorBoundary className="absolute inset-0 flex items-center justify-center">
-        <Canvas style={{ height: '100%', width: '100%' }} shadows camera={{ position: [10, 12, 12], fov: 25 }}>
+        <Canvas
+          style={{ height: '100%', width: '100%' }}
+          shadows
+          camera={{ position: [10, 12, 12], fov: 25 }}
+          dpr={[1, 1.5]}
+          gl={{ powerPreference: "high-performance" }}
+        >
           <ambientLight intensity={1} />
           <directionalLight position={[5, 5, 5]} castShadow />
           <Environment background>
