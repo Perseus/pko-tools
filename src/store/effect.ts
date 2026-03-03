@@ -37,7 +37,7 @@ export type EffectBindingMode = "all" | "bones" | "dummies";
 export type EffectBindingState = {
   /** Character ID loaded for binding. */
   characterId: number | null;
-  /** glTF JSON data URI for rendering the character model. */
+  /** glTF resource URL (blob/data URI) for rendering the character model. */
   gltfDataUri: string | null;
   /** Name of the bone/dummy the effect is bound to (null = unbound). */
   boundBoneName: string | null;

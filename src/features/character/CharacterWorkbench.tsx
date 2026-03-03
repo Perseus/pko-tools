@@ -9,30 +9,7 @@ import { extractBoundingSpheres, BoundingSphereIndicators } from './BoundingSphe
 import { SkeletonDebugHelpers } from './SkeletonDebugHelpers';
 import { CharacterMetadataPanel } from './CharacterMetadataPanel';
 import { extractMeshes, MeshHighlights, getUniqueMeshIndices } from './MeshHighlights';
-
-function jsonToDataURI(json: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    try {
-
-      if (!json) {
-        reject(new Error('No JSON provided'));
-        return;
-      }
-      const blob = new Blob([json], { type: 'application/json' });
-      const reader = new FileReader();
-      reader.onload = () => {
-        resolve(reader.result as string);
-      };
-      reader.onerror = (error) => {
-        reject(error);
-      };
-      reader.readAsDataURL(blob);
-    } catch (error) {
-      console.error('error from jsonToDataURI', error);
-      reject(error);
-    }
-  });
-}
+import { useGltfResource } from "@/hooks/use-gltf-resource";
 
 function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
   const { scene, animations } = useGLTF(gltfDataURI);
@@ -227,31 +204,15 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
 
 function Character() {
   const characterGltfJson = useAtomValue(characterGltfJsonAtom);
-  const [gltfDataURI, setGltfDataURI] = useState<string | null>(null);
-  const prevUriRef = useRef<string | null>(null);
+  const gltfDataURI = useGltfResource(characterGltfJson);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!characterGltfJson) {
-        return;
+    return () => {
+      if (gltfDataURI) {
+        useGLTF.clear(gltfDataURI);
       }
-
-      // Clear the drei GLTF cache for the previous URI so stale scene
-      // objects (with debug helpers still attached) aren't reused.
-      if (prevUriRef.current) {
-        useGLTF.clear(prevUriRef.current);
-      }
-
-      setGltfDataURI(null);
-      const uri = await jsonToDataURI(characterGltfJson || '');
-      if (!cancelled) {
-        prevUriRef.current = uri;
-        setGltfDataURI(uri);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [characterGltfJson]);
+    };
+  }, [gltfDataURI]);
 
   if (!gltfDataURI) {
     return null;

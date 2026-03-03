@@ -1,25 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { MapViewConfig } from "@/types/map";
-
-function jsonToDataURI(json: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    try {
-      if (!json) {
-        reject(new Error("No JSON provided"));
-        return;
-      }
-      const blob = new Blob([json], { type: "application/json" });
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = (error) => reject(error);
-      reader.readAsDataURL(blob);
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
+import { useGltfResource } from "@/hooks/use-gltf-resource";
 
 function TerrainModel({
   gltfDataURI,
@@ -160,17 +143,15 @@ export default function MapTerrainViewer({
   gltfJson: string;
   viewConfig: MapViewConfig;
 }) {
-  const [dataURI, setDataURI] = useState<string | null>(null);
+  const dataURI = useGltfResource(gltfJson);
 
   useEffect(() => {
-    let cancelled = false;
-    jsonToDataURI(gltfJson).then((uri) => {
-      if (!cancelled) setDataURI(uri);
-    });
     return () => {
-      cancelled = true;
+      if (dataURI) {
+        useGLTF.clear(dataURI);
+      }
     };
-  }, [gltfJson]);
+  }, [dataURI]);
 
   if (!dataURI) return null;
 
