@@ -271,7 +271,7 @@ function stepSnow(pool: ParticlePool, i: number, _sys: ParticleSystem, _delta: n
   pool.positions[i3] += Math.sin(pool.ages[i] * 3 + seed * 10) * 0.01;
 }
 
-function stepWind(pool: ParticlePool, i: number, sys: ParticleSystem, _delta: number, t: number) {
+function stepWind(pool: ParticlePool, i: number, sys: ParticleSystem, _delta: number, _t: number) {
   // WIND: accumulates angle.z rotation, swirling tornado motion around spawn pos
   const i3 = i * 3;
   const age = pool.ages[i];
