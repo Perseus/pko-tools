@@ -1,0 +1,79 @@
+---
+source: tests/golden_reference_tests.rs
+expression: par
+---
+version: 7
+name: "00000001"
+length: 0
+systems:
+  - type: 1
+    name: tmep
+    particleCount: 4
+    textureName: 1.tga
+    modelName: 30light.eff
+    range:
+      - 5
+      - 5
+      - 0
+    frameCount: 3
+    frameSizes:
+      - 1
+      - 1
+      - 1
+    frameAngles:
+      - - 0
+        - 0
+        - 0
+      - - 0
+        - 0
+        - 0
+      - - 0
+        - 0
+        - 0
+    frameColors:
+      - - 1
+        - 1
+        - 1
+        - 0.078431375
+      - - 1
+        - 1
+        - 1
+        - 0.19607845
+      - - 1
+        - 1
+        - 1
+        - 0
+    billboard: false
+    srcBlend: 5
+    destBlend: 6
+    minFilter: 1
+    magFilter: 1
+    life: 10
+    velocity: 0.1
+    direction:
+      - 0
+      - 0
+      - 0.1
+    acceleration:
+      - 0
+      - 0
+      - 0
+    step: 1
+    modelRangeFlag: false
+    modelRangeName: ��
+    offset:
+      - 0
+      - 0
+      - 0
+    delayTime: 0
+    playTime: 0
+    usePath: false
+    path: ~
+    shade: false
+    hitEffect: ""
+    pointRanges: []
+    randomMode: 0
+    modelDir: false
+    mediaY: false
+strips: []
+models: []

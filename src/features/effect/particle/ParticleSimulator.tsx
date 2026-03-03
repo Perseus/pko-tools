@@ -2,10 +2,12 @@
 import { PARTICLE_TYPE } from "@/types/particle";
 import { effectPlaybackAtom } from "@/store/effect";
 import { particleDataAtom, selectedParticleSystemIndexAtom } from "@/store/particle";
+import { currentProjectAtom } from "@/store/project";
 import { useAtomValue } from "jotai";
 import React from "react";
-import { useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
+import { invoke } from "@tauri-apps/api/core";
 import * as THREE from "three";
 import {
   MAX_PARTICLES,
@@ -14,17 +16,31 @@ import {
   tickPool,
   type ParticlePool,
 } from "@/features/effect/particle/particlePool";
+import {
+  createEffectTexture,
+  resolveBlendFactors,
+  resolveTextureCandidates,
+} from "@/features/effect/rendering";
 
-// Billboard particle shaders
+type DecodedTexture = {
+  width: number;
+  height: number;
+  data: string; // base64-encoded RGBA pixels
+};
+
+// Billboard particle shaders — with texture + rotation support
 const vertexShader = /* glsl */ `
 attribute float aSize;
 attribute float aAlpha;
+attribute vec3 aRotation;
 varying float vAlpha;
 varying vec3 vColor;
+varying float vRotation;
 
 void main() {
   vColor = color;
   vAlpha = aAlpha;
+  vRotation = aRotation.z; // Roll rotation for billboard sprites
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
   gl_PointSize = aSize * (200.0 / -mvPosition.z);
   gl_PointSize = max(gl_PointSize, 1.0);
@@ -33,15 +49,30 @@ void main() {
 `;
 
 const fragmentShader = /* glsl */ `
+uniform sampler2D uTexture;
+uniform bool uHasTexture;
 varying float vAlpha;
 varying vec3 vColor;
+varying float vRotation;
 
 void main() {
-  // Soft circle falloff
-  float dist = length(gl_PointCoord - vec2(0.5));
-  if (dist > 0.5) discard;
-  float alpha = vAlpha * smoothstep(0.5, 0.2, dist);
-  gl_FragColor = vec4(vColor, alpha);
+  // Rotate gl_PointCoord around center by roll angle
+  vec2 uv = gl_PointCoord - vec2(0.5);
+  float s = sin(vRotation);
+  float c = cos(vRotation);
+  uv = vec2(uv.x * c - uv.y * s, uv.x * s + uv.y * c) + vec2(0.5);
+
+  if (uHasTexture) {
+    // D3D8 COLOROP=MODULATE(TEXTURE, DIFFUSE), ALPHAOP=MODULATE(TEXTURE, DIFFUSE)
+    vec4 texColor = texture2D(uTexture, uv);
+    gl_FragColor = vec4(vColor * texColor.rgb, vAlpha * texColor.a);
+  } else {
+    // Soft circle fallback when no texture is loaded
+    float dist = length(uv - vec2(0.5));
+    if (dist > 0.5) discard;
+    float alpha = vAlpha * smoothstep(0.5, 0.2, dist);
+    gl_FragColor = vec4(vColor, alpha);
+  }
 }
 `;
 
@@ -77,28 +108,121 @@ export default function ParticleSimulator() {
   if (!system) return null;
 
   if (isModelType) {
-    return <ModelParticles pool={poolRef} />;
+    return <ModelParticles pool={poolRef} system={system} />;
   }
 
-  return <BillboardParticles pool={poolRef} />;
+  return <BillboardParticles pool={poolRef} system={system} />;
 }
 
 /** Billboard particles rendered with THREE.Points + ShaderMaterial. */
-function BillboardParticles({ pool: poolRef }: { pool: React.RefObject<ParticlePool> }) {
+function BillboardParticles({
+  pool: poolRef,
+  system,
+}: {
+  pool: React.RefObject<ParticlePool>;
+  system: { textureName: string; srcBlend: number; destBlend: number };
+}) {
   const pointsRef = useRef<THREE.Points>(null);
+  const currentProject = useAtomValue(currentProjectAtom);
+  const [texture, setTexture] = useState<THREE.Texture | null>(null);
+  const textureRef = useRef<THREE.Texture | null>(null);
 
-  const material = useMemo(
-    () =>
-      new THREE.ShaderMaterial({
-        vertexShader,
-        fragmentShader,
-        vertexColors: true,
-        transparent: true,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      }),
-    [],
-  );
+  // Load particle texture from system data
+  useEffect(() => {
+    const texName = system.textureName?.trim();
+    if (!texName || !currentProject) {
+      setTexture(null);
+      return;
+    }
+
+    const isTauriRuntime =
+      typeof window !== "undefined" &&
+      ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
+    if (!isTauriRuntime) {
+      setTexture(null);
+      return;
+    }
+
+    const candidates = resolveTextureCandidates(texName, currentProject.projectDirectory);
+    let isActive = true;
+
+    const tryLoad = async (index: number) => {
+      if (index >= candidates.length) {
+        setTexture(null);
+        return;
+      }
+      try {
+        const decoded = await invoke<DecodedTexture>("decode_texture", {
+          path: candidates[index],
+        });
+        if (!isActive) return;
+
+        const binary = Uint8Array.from(atob(decoded.data), (char) =>
+          char.charCodeAt(0),
+        );
+        const loaded = createEffectTexture(binary, decoded.width, decoded.height);
+
+        textureRef.current?.dispose();
+        textureRef.current = loaded;
+        setTexture(loaded);
+      } catch {
+        void tryLoad(index + 1);
+      }
+    };
+
+    void tryLoad(0);
+
+    return () => {
+      isActive = false;
+      textureRef.current?.dispose();
+    };
+  }, [system.textureName, currentProject]);
+
+  // Resolve blend mode from per-system srcBlend/destBlend
+  const blendState = useMemo(() => {
+    const src = system.srcBlend;
+    const dst = system.destBlend;
+    // If both are 0, fall back to additive
+    if (!src && !dst) {
+      return {
+        blending: THREE.AdditiveBlending as THREE.Blending,
+        blendSrc: undefined as THREE.BlendingSrcFactor | undefined,
+        blendDst: undefined as THREE.BlendingDstFactor | undefined,
+      };
+    }
+    const { blendSrc, blendDst } = resolveBlendFactors(src, dst);
+    return {
+      blending: THREE.CustomBlending as THREE.Blending,
+      blendSrc,
+      blendDst,
+    };
+  }, [system.srcBlend, system.destBlend]);
+
+  const material = useMemo(() => {
+    const mat = new THREE.ShaderMaterial({
+      vertexShader,
+      fragmentShader,
+      vertexColors: true,
+      transparent: true,
+      depthWrite: false,
+      blending: blendState.blending,
+      uniforms: {
+        uTexture: { value: null },
+        uHasTexture: { value: false },
+      },
+    });
+    if (blendState.blending === THREE.CustomBlending) {
+      mat.blendSrc = blendState.blendSrc!;
+      mat.blendDst = blendState.blendDst!;
+    }
+    return mat;
+  }, [blendState]);
+
+  // Update texture uniform when texture changes
+  useEffect(() => {
+    material.uniforms.uTexture.value = texture;
+    material.uniforms.uHasTexture.value = texture !== null;
+  }, [texture, material]);
 
   const geometry = useMemo(() => {
     const geo = new THREE.BufferGeometry();
@@ -106,11 +230,13 @@ function BillboardParticles({ pool: poolRef }: { pool: React.RefObject<ParticleP
     const col = new Float32Array(MAX_PARTICLES * 3);
     const sizes = new Float32Array(MAX_PARTICLES);
     const alphas = new Float32Array(MAX_PARTICLES);
+    const rotations = new Float32Array(MAX_PARTICLES * 3);
 
     geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
     geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
     geo.setAttribute("aSize", new THREE.BufferAttribute(sizes, 1));
     geo.setAttribute("aAlpha", new THREE.BufferAttribute(alphas, 1));
+    geo.setAttribute("aRotation", new THREE.BufferAttribute(rotations, 3));
 
     return geo;
   }, []);
@@ -123,35 +249,61 @@ function BillboardParticles({ pool: poolRef }: { pool: React.RefObject<ParticleP
     const colAttr = geometry.getAttribute("color") as THREE.BufferAttribute;
     const sizeAttr = geometry.getAttribute("aSize") as THREE.BufferAttribute;
     const alphaAttr = geometry.getAttribute("aAlpha") as THREE.BufferAttribute;
+    const rotAttr = geometry.getAttribute("aRotation") as THREE.BufferAttribute;
 
     (posAttr.array as Float32Array).set(pool.positions);
     (colAttr.array as Float32Array).set(pool.colors);
     (sizeAttr.array as Float32Array).set(pool.sizes);
     (alphaAttr.array as Float32Array).set(pool.alphas);
+    (rotAttr.array as Float32Array).set(pool.rotations);
 
     posAttr.needsUpdate = true;
     colAttr.needsUpdate = true;
     sizeAttr.needsUpdate = true;
     alphaAttr.needsUpdate = true;
+    rotAttr.needsUpdate = true;
   });
 
   return <points ref={pointsRef} geometry={geometry} material={material} />;
 }
 
 /** Model-type particles rendered with THREE.InstancedMesh. */
-function ModelParticles({ pool: poolRef }: { pool: React.RefObject<ParticlePool> }) {
+function ModelParticles({
+  pool: poolRef,
+  system,
+}: {
+  pool: React.RefObject<ParticlePool>;
+  system: { srcBlend: number; destBlend: number };
+}) {
   const meshRef = useRef<THREE.InstancedMesh>(null);
 
+  const blendState = useMemo(() => {
+    const src = system.srcBlend;
+    const dst = system.destBlend;
+    if (!src && !dst) {
+      return { blending: THREE.AdditiveBlending as THREE.Blending };
+    }
+    const { blendSrc, blendDst } = resolveBlendFactors(src, dst);
+    return {
+      blending: THREE.CustomBlending as THREE.Blending,
+      blendSrc,
+      blendDst,
+    };
+  }, [system.srcBlend, system.destBlend]);
+
   const baseGeometry = useMemo(() => new THREE.SphereGeometry(0.5, 8, 8), []);
-  const baseMaterial = useMemo(
-    () =>
-      new THREE.MeshBasicMaterial({
-        transparent: true,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      }),
-    [],
-  );
+  const baseMaterial = useMemo(() => {
+    const mat = new THREE.MeshBasicMaterial({
+      transparent: true,
+      depthWrite: false,
+      blending: blendState.blending,
+    });
+    if (blendState.blending === THREE.CustomBlending && "blendSrc" in blendState) {
+      mat.blendSrc = blendState.blendSrc!;
+      mat.blendDst = blendState.blendDst!;
+    }
+    return mat;
+  }, [blendState]);
 
   useFrame(() => {
     const pool = poolRef.current;

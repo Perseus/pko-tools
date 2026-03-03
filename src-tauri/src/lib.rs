@@ -99,6 +99,8 @@ pub fn run() {
             effect::commands::list_texture_files,
             effect::commands::load_path_file,
             effect::commands::load_effect_model,
+            effect::commands::load_par_file,
+            effect::commands::list_par_files,
             item::commands::get_item_list,
             item::commands::load_item_model,
             item::commands::get_item_lit_info,

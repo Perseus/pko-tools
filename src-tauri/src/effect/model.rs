@@ -266,6 +266,285 @@ fn write_vec4<W: Write>(writer: &mut W, value: [f32; 4]) -> Result<()> {
     write_f32(writer, value[3])
 }
 
+// ── .par domain types ────────────────────────────────────────────────────────
+
+/// Parsed .par particle controller file.
+/// Matches the frontend `ParticleController` TypeScript interface.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParFile {
+    pub version: u32,
+    pub name: String,
+    pub length: f32,
+    pub systems: Vec<ParSystem>,
+    pub strips: Vec<ParStrip>,
+    pub models: Vec<ParChaModel>,
+}
+
+/// A single particle emitter system within a .par file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParSystem {
+    pub r#type: i32,
+    pub name: String,
+    pub particle_count: i32,
+    pub texture_name: String,
+    pub model_name: String,
+    pub range: [f32; 3],
+    pub frame_count: u16,
+    pub frame_sizes: Vec<f32>,
+    pub frame_angles: Vec<[f32; 3]>,
+    pub frame_colors: Vec<[f32; 4]>,
+    pub billboard: bool,
+    pub src_blend: i32,
+    pub dest_blend: i32,
+    pub min_filter: i32,
+    pub mag_filter: i32,
+    pub life: f32,
+    pub velocity: f32,
+    pub direction: [f32; 3],
+    pub acceleration: [f32; 3],
+    pub step: f32,
+    // v4+
+    pub model_range_flag: bool,
+    pub model_range_name: String,
+    // v5+
+    pub offset: [f32; 3],
+    // v6+
+    pub delay_time: f32,
+    pub play_time: f32,
+    // v9+
+    pub use_path: bool,
+    pub path: Option<ParEffPath>,
+    // v10+
+    pub shade: bool,
+    // v11+
+    pub hit_effect: String,
+    // v12+ (only when model_range_flag)
+    pub point_ranges: Vec<[f32; 3]>,
+    // v13+
+    pub random_mode: i32,
+    // v14+
+    pub model_dir: bool,
+    // v15+
+    pub media_y: bool,
+}
+
+/// Spline path for path-following particles.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParEffPath {
+    pub velocity: f32,
+    pub points: Vec<[f32; 3]>,
+    pub directions: Vec<[f32; 3]>,
+    pub distances: Vec<f32>,
+}
+
+/// Strip/ribbon trail definition.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParStrip {
+    pub max_len: i32,
+    pub dummy: [i32; 2],
+    pub color: [f32; 4],
+    pub life: f32,
+    pub step: f32,
+    pub texture_name: String,
+    pub src_blend: i32,
+    pub dest_blend: i32,
+}
+
+/// Character model emitter.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParChaModel {
+    pub id: i32,
+    pub velocity: f32,
+    pub play_type: i32,
+    pub cur_pose: i32,
+    pub src_blend: i32,
+    pub dest_blend: i32,
+    pub color: [f32; 4],
+}
+
+impl ParFile {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        super::par_loader::load_par(bytes)
+    }
+
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        let mut buffer = Vec::new();
+        self.write_to(&mut buffer)?;
+        Ok(buffer)
+    }
+
+    pub fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
+        write_u32(writer, self.version)?;
+        write_fixed_string(writer, &self.name)?;
+        write_i32(writer, self.systems.len() as i32)?;
+
+        if self.version >= 3 {
+            write_f32(writer, self.length)?;
+        }
+
+        for sys in &self.systems {
+            sys.write_to(writer, self.version)?;
+        }
+
+        if self.version >= 7 {
+            write_i32(writer, self.strips.len() as i32)?;
+            for strip in &self.strips {
+                strip.write_to(writer)?;
+            }
+        }
+
+        if self.version >= 8 {
+            write_i32(writer, self.models.len() as i32)?;
+            for model in &self.models {
+                model.write_to(writer)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl ParSystem {
+    fn write_to<W: Write>(&self, writer: &mut W, version: u32) -> Result<()> {
+        write_i32(writer, self.r#type)?;
+        write_fixed_string(writer, &self.name)?;
+        write_i32(writer, self.particle_count)?;
+        write_fixed_string(writer, &self.texture_name)?;
+        write_fixed_string(writer, &self.model_name)?;
+        write_f32(writer, self.range[0])?;
+        write_f32(writer, self.range[1])?;
+        write_f32(writer, self.range[2])?;
+        write_u16(writer, self.frame_count)?;
+
+        for size in &self.frame_sizes {
+            write_f32(writer, *size)?;
+        }
+        for angle in &self.frame_angles {
+            write_vec3(writer, *angle)?;
+        }
+        for color in &self.frame_colors {
+            write_vec4(writer, *color)?;
+        }
+
+        write_u8(writer, if self.billboard { 1 } else { 0 })?;
+        write_i32(writer, self.src_blend)?;
+        write_i32(writer, self.dest_blend)?;
+        write_i32(writer, self.min_filter)?;
+        write_i32(writer, self.mag_filter)?;
+        write_f32(writer, self.life)?;
+        write_f32(writer, self.velocity)?;
+        write_vec3(writer, self.direction)?;
+        write_vec3(writer, self.acceleration)?;
+        write_f32(writer, self.step)?;
+
+        if version > 3 {
+            write_u8(writer, if self.model_range_flag { 1 } else { 0 })?;
+            write_fixed_string(writer, &self.model_range_name)?;
+        }
+        if version > 4 {
+            write_vec3(writer, self.offset)?;
+        }
+        if version > 5 {
+            write_f32(writer, self.delay_time)?;
+            write_f32(writer, self.play_time)?;
+        }
+        if version > 8 {
+            write_u8(writer, if self.use_path { 1 } else { 0 })?;
+            if self.use_path {
+                if let Some(ref path) = self.path {
+                    path.write_to(writer)?;
+                }
+            }
+        }
+        if version > 9 {
+            write_u8(writer, if self.shade { 1 } else { 0 })?;
+        }
+        if version > 10 {
+            write_fixed_string(writer, &self.hit_effect)?;
+        }
+        if version > 11 && self.model_range_flag {
+            write_u16(writer, self.point_ranges.len() as u16)?;
+            for pr in &self.point_ranges {
+                write_vec3(writer, *pr)?;
+            }
+        }
+        if version > 12 {
+            write_i32(writer, self.random_mode)?;
+        }
+        if version > 13 {
+            write_u8(writer, if self.model_dir { 1 } else { 0 })?;
+        }
+        if version > 14 {
+            write_u8(writer, if self.media_y { 1 } else { 0 })?;
+        }
+
+        Ok(())
+    }
+}
+
+impl ParEffPath {
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
+        let frame_count = self.points.len() as i32;
+        write_i32(writer, frame_count)?;
+        write_f32(writer, self.velocity)?;
+
+        for p in &self.points {
+            write_vec3(writer, *p)?;
+        }
+
+        let segment_count = if frame_count > 0 {
+            (frame_count - 1) as usize
+        } else {
+            0
+        };
+
+        for i in 0..segment_count {
+            write_vec3(writer, self.directions[i])?;
+        }
+        for i in 0..segment_count {
+            // eff_path_dist_slot: value + 2 padding floats
+            write_f32(writer, self.distances[i])?;
+            write_f32(writer, 0.0)?;
+            write_f32(writer, 0.0)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl ParStrip {
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
+        write_i32(writer, self.max_len)?;
+        write_i32(writer, self.dummy[0])?;
+        write_i32(writer, self.dummy[1])?;
+        write_vec4(writer, self.color)?;
+        write_f32(writer, self.life)?;
+        write_f32(writer, self.step)?;
+        write_fixed_string(writer, &self.texture_name)?;
+        write_i32(writer, self.src_blend)?;
+        write_i32(writer, self.dest_blend)?;
+        Ok(())
+    }
+}
+
+impl ParChaModel {
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
+        write_i32(writer, self.id)?;
+        write_f32(writer, self.velocity)?;
+        write_i32(writer, self.play_type)?;
+        write_i32(writer, self.cur_pose)?;
+        write_i32(writer, self.src_blend)?;
+        write_i32(writer, self.dest_blend)?;
+        write_vec4(writer, self.color)?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

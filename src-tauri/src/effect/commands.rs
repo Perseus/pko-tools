@@ -7,7 +7,7 @@ use serde::Serialize;
 use crate::character::{model::CharacterGeometricModel, GLTFFieldsToAggregate};
 use crate::projects::project::Project;
 
-use super::{model::EffFile, scan_effects_directory};
+use super::{model::EffFile, model::ParFile, scan_effects_directory, scan_par_files};
 
 #[tauri::command]
 pub async fn list_effects(project_id: String) -> Result<Vec<String>, String> {
@@ -61,6 +61,35 @@ pub async fn save_effect(
     })?;
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn load_par_file(
+    project_id: String,
+    par_name: String,
+) -> Result<ParFile, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+    let par_path = par_file_path(project.project_directory.as_ref(), &par_name);
+
+    let bytes = std::fs::read(&par_path).map_err(|e| {
+        format!(
+            "Failed to read par file {}: {}",
+            par_path.display(),
+            e
+        )
+    })?;
+    ParFile::from_bytes(&bytes).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn list_par_files(project_id: String) -> Result<Vec<String>, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+
+    scan_par_files(project.project_directory.as_ref()).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -539,6 +568,16 @@ fn particles_file_path(project_dir: &std::path::Path, effect_name: &str) -> std:
     project_dir
         .join("effect")
         .join(format!("{}.particles.json", base))
+}
+
+fn par_file_path(project_dir: &std::path::Path, par_name: &str) -> std::path::PathBuf {
+    let file_name = if par_name.ends_with(".par") {
+        par_name.to_string()
+    } else {
+        format!("{}.par", par_name)
+    };
+
+    project_dir.join("effect").join(file_name)
 }
 
 fn effect_file_path(project_dir: &std::path::Path, effect_name: &str) -> std::path::PathBuf {
