@@ -29,7 +29,8 @@ import {
   getItemCategoryAvailability,
 } from "@/commands/item";
 import { WorkbenchDummy } from "@/types/item";
-import { actionIds, ContextualActionMenu } from "@/features/actions";
+import { actionIds } from "@/features/actions/actionIds";
+import { ContextualActionMenu } from "@/features/actions/ContextualActionMenu";
 import { PerfFrameProbe, PerfOverlay } from "@/features/perf";
 
 const ITEM_CONTEXT_ACTIONS = [

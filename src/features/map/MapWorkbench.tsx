@@ -9,7 +9,9 @@ import { Loader2, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { exportMapForUnity } from "@/commands/map";
 import { toast } from "@/hooks/use-toast";
-import { actionIds, ContextualActionMenu, useRegisterActionRuntime } from "@/features/actions";
+import { actionIds } from "@/features/actions/actionIds";
+import { ContextualActionMenu } from "@/features/actions/ContextualActionMenu";
+import { useRegisterActionRuntime } from "@/features/actions/ActionKernelProvider";
 import { PerfFrameProbe, PerfOverlay } from "@/features/perf";
 
 const MAP_CONTEXT_ACTIONS = [

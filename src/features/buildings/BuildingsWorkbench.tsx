@@ -5,7 +5,8 @@ import { Suspense } from "react";
 import { buildingGltfJsonAtom, buildingLoadingAtom, selectedBuildingAtom } from "@/store/buildings";
 import BuildingsModelViewer from "./BuildingsModelViewer";
 import { Loader2 } from "lucide-react";
-import { actionIds, ContextualActionMenu } from "@/features/actions";
+import { actionIds } from "@/features/actions/actionIds";
+import { ContextualActionMenu } from "@/features/actions/ContextualActionMenu";
 import { PerfFrameProbe, PerfOverlay } from "@/features/perf";
 
 const BUILDING_CONTEXT_ACTIONS = [actionIds.buildingExportGltf];

@@ -10,7 +10,8 @@ import { SkeletonDebugHelpers } from './SkeletonDebugHelpers';
 import { CharacterMetadataPanel } from './CharacterMetadataPanel';
 import { extractMeshes, MeshHighlights, getUniqueMeshIndices } from './MeshHighlights';
 import { useGltfResource } from "@/hooks/use-gltf-resource";
-import { actionIds, ContextualActionMenu } from "@/features/actions";
+import { actionIds } from "@/features/actions/actionIds";
+import { ContextualActionMenu } from "@/features/actions/ContextualActionMenu";
 import { PerfFrameProbe, PerfOverlay } from "@/features/perf";
 
 const CHARACTER_CONTEXT_ACTIONS = [
