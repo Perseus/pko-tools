@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { MapViewConfig } from "@/types/map";
@@ -75,17 +75,81 @@ function TerrainModel({
 
       {/* Object markers */}
       {viewConfig.showObjectMarkers &&
-        objectMarkers.map((marker, i) => (
-          <mesh key={`marker-${i}`} position={marker.position}>
-            <sphereGeometry args={[0.5, 8, 6]} />
-            <meshBasicMaterial
-              color={marker.type === 0 ? "#22c55e" : "#f97316"}
-              transparent
-              opacity={0.7}
-            />
-          </mesh>
-        ))}
+        <ObjectMarkerInstances markers={objectMarkers} />}
     </group>
+  );
+}
+
+const _markerMatrix = new THREE.Matrix4();
+
+function ObjectMarkerInstances({
+  markers,
+}: {
+  markers: { position: THREE.Vector3; type: number; id: number }[];
+}) {
+  const terrainMarkers = useMemo(
+    () => markers.filter((marker) => marker.type === 0),
+    [markers],
+  );
+  const objectMarkers = useMemo(
+    () => markers.filter((marker) => marker.type !== 0),
+    [markers],
+  );
+
+  const terrainRef = useRef<THREE.InstancedMesh>(null);
+  const objectRef = useRef<THREE.InstancedMesh>(null);
+
+  useEffect(() => {
+    const mesh = terrainRef.current;
+    if (!mesh) return;
+
+    terrainMarkers.forEach((marker, index) => {
+      _markerMatrix.makeTranslation(
+        marker.position.x,
+        marker.position.y,
+        marker.position.z,
+      );
+      mesh.setMatrixAt(index, _markerMatrix);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+  }, [terrainMarkers]);
+
+  useEffect(() => {
+    const mesh = objectRef.current;
+    if (!mesh) return;
+
+    objectMarkers.forEach((marker, index) => {
+      _markerMatrix.makeTranslation(
+        marker.position.x,
+        marker.position.y,
+        marker.position.z,
+      );
+      mesh.setMatrixAt(index, _markerMatrix);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+  }, [objectMarkers]);
+
+  return (
+    <>
+      {terrainMarkers.length > 0 && (
+        <instancedMesh
+          ref={terrainRef}
+          args={[undefined, undefined, terrainMarkers.length]}
+        >
+          <sphereGeometry args={[0.5, 8, 6]} />
+          <meshBasicMaterial color="#22c55e" transparent opacity={0.7} />
+        </instancedMesh>
+      )}
+      {objectMarkers.length > 0 && (
+        <instancedMesh
+          ref={objectRef}
+          args={[undefined, undefined, objectMarkers.length]}
+        >
+          <sphereGeometry args={[0.5, 8, 6]} />
+          <meshBasicMaterial color="#f97316" transparent opacity={0.7} />
+        </instancedMesh>
+      )}
+    </>
   );
 }
 
