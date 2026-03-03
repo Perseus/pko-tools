@@ -218,6 +218,8 @@ export default function MapWorkbench() {
             near: 0.1,
             far: 50000,
           }}
+          dpr={[1, 1.5]}
+          gl={{ powerPreference: "high-performance" }}
           style={{ background: "linear-gradient(180deg, #b0c4de 0%, #dfe6ed 100%)" }}
         >
           <ambientLight intensity={0.6} />

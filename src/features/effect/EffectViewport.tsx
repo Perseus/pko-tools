@@ -93,7 +93,11 @@ export default function EffectViewport() {
       className="relative h-full w-full overflow-hidden rounded-xl border border-border bg-muted/40"
     >
       <CanvasErrorBoundary className="absolute inset-0">
-        <Canvas camera={{ position: [6, 6, 6], fov: 35 }} gl={{ preserveDrawingBuffer: false }}>
+        <Canvas
+          camera={{ position: [6, 6, 6], fov: 35 }}
+          dpr={[1, 1.5]}
+          gl={{ preserveDrawingBuffer: false, powerPreference: "high-performance" }}
+        >
           <color attach="background" args={["#1e1e2e"]} />
           <ambientLight intensity={0.8} />
           <directionalLight position={[6, 8, 4]} intensity={1.2} />
