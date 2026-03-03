@@ -48,6 +48,7 @@ import { parStripDataAtom, parModelDataAtom } from "@/store/strip";
 import type { ParticleController } from "@/types/particle";
 import { adaptParFile, adaptStrips, deriveParName, type RustParFile } from "@/features/effect/parAdapter";
 import { useTraceRecorder } from "@/features/effect/useTraceRecorder";
+import { actionIds, useRegisterActionRuntime } from "@/features/actions";
 
 export default function EffectWorkbench() {
   const [effectData, setEffectData] = useAtom(effectDataAtom);
@@ -208,11 +209,9 @@ export default function EffectWorkbench() {
     toast,
   ]);
 
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      const mod = event.metaKey || event.ctrlKey;
-      if (mod && event.key.toLowerCase() === "s") {
-        event.preventDefault();
+  const saveActionRuntime = useMemo(
+    () => ({
+      run: () => {
         if (!isDirty) {
           toast({
             title: "No changes to save",
@@ -221,22 +220,44 @@ export default function EffectWorkbench() {
           return;
         }
         if (!isSaving) {
-          handleSave();
+          void handleSave();
         }
-      }
-      if (mod && event.key.toLowerCase() === "z" && !event.shiftKey) {
-        event.preventDefault();
+      },
+      isEnabled: () => Boolean(effectData && selectedEffect && currentProject && !isSaving),
+      disabledReason: () => {
+        if (!effectData) return "No effect loaded";
+        if (!selectedEffect) return "No effect selected";
+        if (!currentProject) return "No project selected";
+        if (isSaving) return "Save already in progress";
+        return undefined;
+      },
+    }),
+    [currentProject, effectData, handleSave, isDirty, isSaving, selectedEffect, toast],
+  );
+  const undoActionRuntime = useMemo(
+    () => ({
+      run: () => {
         undo();
-      }
-      if (mod && event.key.toLowerCase() === "z" && event.shiftKey) {
-        event.preventDefault();
+      },
+      isEnabled: () => canUndo,
+      disabledReason: () => (canUndo ? undefined : "Nothing to undo"),
+    }),
+    [canUndo, undo],
+  );
+  const redoActionRuntime = useMemo(
+    () => ({
+      run: () => {
         redo();
-      }
-    }
+      },
+      isEnabled: () => canRedo,
+      disabledReason: () => (canRedo ? undefined : "Nothing to redo"),
+    }),
+    [canRedo, redo],
+  );
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [handleSave, isDirty, isSaving, selectedEffect, toast, undo, redo]);
+  useRegisterActionRuntime(actionIds.effectSave, saveActionRuntime);
+  useRegisterActionRuntime(actionIds.effectUndo, undoActionRuntime);
+  useRegisterActionRuntime(actionIds.effectRedo, redoActionRuntime);
 
   // Load particle data when effect changes.
   // Try native .par binary first, fall back to JSON sidecar.

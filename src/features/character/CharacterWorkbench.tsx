@@ -9,34 +9,33 @@ import { extractBoundingSpheres, BoundingSphereIndicators } from './BoundingSphe
 import { SkeletonDebugHelpers } from './SkeletonDebugHelpers';
 import { CharacterMetadataPanel } from './CharacterMetadataPanel';
 import { extractMeshes, MeshHighlights, getUniqueMeshIndices } from './MeshHighlights';
+import { useGltfResource } from "@/hooks/use-gltf-resource";
+import { actionIds } from "@/features/actions/actionIds";
+import { ContextualActionMenu } from "@/features/actions/ContextualActionMenu";
+import { PerfFrameProbe, PerfOverlay } from "@/features/perf";
+import { CanvasErrorBoundary } from "@/components/CanvasErrorBoundary";
 
-function jsonToDataURI(json: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    try {
+const CHARACTER_CONTEXT_ACTIONS = [
+  actionIds.characterExportGltf,
+  actionIds.characterImportGltf,
+];
 
-      if (!json) {
-        reject(new Error('No JSON provided'));
-        return;
-      }
-      const blob = new Blob([json], { type: 'application/json' });
-      const reader = new FileReader();
-      reader.onload = () => {
-        resolve(reader.result as string);
-      };
-      reader.onerror = (error) => {
-        reject(error);
-      };
-      reader.readAsDataURL(blob);
-    } catch (error) {
-      console.error('error from jsonToDataURI', error);
-      reject(error);
-    }
+function clearSceneHelpers(scene: THREE.Object3D) {
+  scene.traverse((obj: THREE.Object3D) => {
+    const helpers = obj.children.filter((c) => c.userData?.isHelper);
+    helpers.forEach((h) => obj.remove(h));
   });
+}
+
+function toClipTime(frameIndex: number, totalKeyframes: number, duration: number): number {
+  const denominator = Math.max(totalKeyframes - 1, 1);
+  return (frameIndex / denominator) * duration;
 }
 
 function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
   const { scene, animations } = useGLTF(gltfDataURI);
-  const { actions, mixer } = useAnimations(animations, scene);
+  const { mixer } = useAnimations(animations, scene);
+  const primaryClip = animations[0] ?? null;
   const setDummyEditMode = useSetAtom(dummyEditModeAtom);
   const animationDuration = animations?.[0]?.duration || 1;
   const fps = 30;
@@ -73,7 +72,7 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
       label: 'Keyframe',
       onChange: v => {
         setCurrentKeyframe(v);
-        const newTime = (v / (totalKeyframes - 1)) * animationDuration;
+        const newTime = toClipTime(v, totalKeyframes, animationDuration);
         mixer.setTime(newTime);
 
         timeAccumulator.current = 0;
@@ -158,48 +157,55 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
             keyframe: next
           });
 
-          const newTime = (next / (totalKeyframes - 1)) * animationDuration;
+          const newTime = toClipTime(next, totalKeyframes, animationDuration);
           mixer.setTime(newTime);
 
           return next;
         })
       }
     } else {
-      const newTime = (currentKeyframe / (totalKeyframes - 1)) * animationDuration;
+      const newTime = toClipTime(currentKeyframe, totalKeyframes, animationDuration);
       mixer.setTime(newTime);
     }
   });
 
 
   useEffect(() => {
-    if (animations.length > 0) {
-      const action = actions[animations[0].name];
-      if (action) {
-        action.reset().play();
-      }
+    if (!primaryClip) {
+      return;
     }
+    const action = mixer.clipAction(primaryClip, scene);
+    action.reset().play();
 
     return () => {
-      // Remove debug helper meshes from the scene tree before uncaching,
-      // otherwise Three.js binding paths don't match and uncacheRoot crashes.
-      scene.traverse((obj: THREE.Object3D) => {
-        const helpers = obj.children.filter(c => c.userData?.isHelper);
-        helpers.forEach(h => obj.remove(h));
-      });
+      action.stop();
+      // Remove debug helper meshes from the scene tree before uncaching.
+      clearSceneHelpers(scene);
 
       try {
         mixer.stopAllAction();
-        animations.forEach(clip => mixer.uncacheClip(clip));
+      } catch {
+        // ignore teardown race
+      }
+      try {
+        mixer.uncacheClip(primaryClip);
+      } catch {
+        // ignore teardown race
+      }
+      try {
         mixer.uncacheRoot(scene);
       } catch {
-        // Non-fatal: scene is being discarded, binding errors are harmless
+        // Non-fatal: model switches can race with internal mixer caches
       }
+      timeAccumulator.current = 0;
+      setPlaying(false);
+      setCurrentKeyframe(0);
       setAnimationControls({
         play: false,
         keyframe: 0
       });
     }
-  }, [animations, actions, scene, mixer]);
+  }, [mixer, primaryClip, scene, setAnimationControls]);
 
   return <>
     <group rotation={[-Math.PI / 2, 0, 0]}>
@@ -227,38 +233,22 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
 
 function Character() {
   const characterGltfJson = useAtomValue(characterGltfJsonAtom);
-  const [gltfDataURI, setGltfDataURI] = useState<string | null>(null);
-  const prevUriRef = useRef<string | null>(null);
+  const gltfDataURI = useGltfResource(characterGltfJson);
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      if (!characterGltfJson) {
-        return;
+    return () => {
+      if (gltfDataURI) {
+        useGLTF.clear(gltfDataURI);
       }
-
-      // Clear the drei GLTF cache for the previous URI so stale scene
-      // objects (with debug helpers still attached) aren't reused.
-      if (prevUriRef.current) {
-        useGLTF.clear(prevUriRef.current);
-      }
-
-      setGltfDataURI(null);
-      const uri = await jsonToDataURI(characterGltfJson || '');
-      if (!cancelled) {
-        prevUriRef.current = uri;
-        setGltfDataURI(uri);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [characterGltfJson]);
+    };
+  }, [gltfDataURI]);
 
   if (!gltfDataURI) {
     return null;
   }
 
   return <>
-    <CharacterModel gltfDataURI={gltfDataURI} />
+    <CharacterModel key={gltfDataURI} gltfDataURI={gltfDataURI} />
   </>;
 }
 
@@ -268,21 +258,37 @@ export default function CharacterWorkbench() {
   return <div className="h-full w-full relative">
     <Leva collapsed={false} />
     <CharacterMetadataPanel metadata={characterMetadata} />
-    <Canvas style={{ height: '100%', width: '100%' }} shadows camera={{ position: [10, 12, 12], fov: 25 }}>
-      <ambientLight intensity={1} />
-      <directionalLight position={[5, 5, 5]} castShadow />
-      <Environment background>
-        <mesh scale={100}>
-          <sphereGeometry args={[1, 16, 16]} />
-          <meshBasicMaterial color="#393939" side={THREE.BackSide} />
-        </mesh>
-      </Environment>
-      <Suspense fallback={<>Loading...</>}>
-        <Character />
-      </Suspense>
-      <OrbitControls />
-      <gridHelper args={[60, 60, 60]} position-y=".01" />
-      <CameraControls />
-    </Canvas>
+    <ContextualActionMenu
+      actionIds={CHARACTER_CONTEXT_ACTIONS}
+      requireShiftKey
+      className="h-full w-full"
+    >
+      <CanvasErrorBoundary className="absolute inset-0 flex items-center justify-center">
+        <Canvas
+          style={{ height: '100%', width: '100%' }}
+          shadows
+          camera={{ position: [10, 12, 12], fov: 25 }}
+          dpr={[1, 1.5]}
+          gl={{ powerPreference: "high-performance" }}
+        >
+          <ambientLight intensity={1} />
+          <directionalLight position={[5, 5, 5]} castShadow />
+          <Environment background>
+            <mesh scale={100}>
+              <sphereGeometry args={[1, 16, 16]} />
+              <meshBasicMaterial color="#393939" side={THREE.BackSide} />
+            </mesh>
+          </Environment>
+          <Suspense fallback={<>Loading...</>}>
+            <Character />
+          </Suspense>
+          <OrbitControls />
+          <gridHelper args={[60, 60, 60]} position-y=".01" />
+          <PerfFrameProbe surface="characters" />
+          <CameraControls />
+        </Canvas>
+      </CanvasErrorBoundary>
+      <PerfOverlay surface="characters" className="bottom-8 right-3" />
+    </ContextualActionMenu>
   </div>;
 }

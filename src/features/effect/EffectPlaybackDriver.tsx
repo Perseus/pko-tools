@@ -5,7 +5,8 @@ import {
 import { particleDataAtom } from "@/store/particle";
 import { useFrame } from "@react-three/fiber";
 import { useAtom } from "jotai";
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
+import { playbackClockStore } from "@/features/effect/playbackClock";
 
 const DEFAULT_FRAME_DURATION = 1 / 30;
 
@@ -48,27 +49,34 @@ export default function EffectPlaybackDriver() {
     return maxDuration;
   }, [effectData, particleData]);
 
+  useEffect(() => {
+    playbackClockStore.set(playback.currentTime);
+  }, [playback.currentTime]);
+
   useFrame((_state, delta) => {
     if (!playback.isPlaying || totalDuration === 0) {
       return;
     }
 
     const scaledDelta = delta * playback.speed;
-    let nextTime = playback.currentTime + scaledDelta;
+    let nextTime = playbackClockStore.get() + scaledDelta;
 
     if (nextTime >= totalDuration) {
       if (playback.isLooping) {
         nextTime = nextTime % totalDuration;
       } else {
         nextTime = totalDuration;
+        if (playback.isPlaying) {
+          setPlayback((prev) => ({
+            ...prev,
+            isPlaying: false,
+            currentTime: nextTime,
+          }));
+        }
       }
     }
 
-    setPlayback((prev) => ({
-      ...prev,
-      currentTime: nextTime,
-      isPlaying: prev.isPlaying && (prev.isLooping || nextTime < totalDuration),
-    }));
+    playbackClockStore.set(nextTime);
   });
 
   return null;

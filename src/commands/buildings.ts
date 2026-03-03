@@ -1,5 +1,5 @@
+import { invokeTimed as invoke } from "@/commands/invokeTimed";
 import { BuildingEntry } from "@/types/buildings";
-import { invoke } from "@tauri-apps/api/core";
 
 export const getBuildingList = async (
   projectId: string

@@ -1,7 +1,7 @@
 import { Canvas } from "@react-three/fiber";
 import { OrbitControls, GizmoHelper, GizmoViewport } from "@react-three/drei";
 import { useAtomValue, useAtom } from "jotai";
-import { Suspense, useState } from "react";
+import { Suspense, useMemo, useState } from "react";
 import { mapGltfJsonAtom, mapLoadingAtom, mapMetadataAtom, mapViewConfigAtom, selectedMapAtom } from "@/store/map";
 import { currentProjectAtom } from "@/store/project";
 import MapTerrainViewer from "./MapTerrainViewer";
@@ -9,6 +9,18 @@ import { Loader2, Download } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { exportMapForUnity } from "@/commands/map";
 import { toast } from "@/hooks/use-toast";
+import { actionIds } from "@/features/actions/actionIds";
+import { ContextualActionMenu } from "@/features/actions/ContextualActionMenu";
+import { useRegisterActionRuntime } from "@/features/actions/ActionKernelProvider";
+import { PerfFrameProbe, PerfOverlay } from "@/features/perf";
+import { CanvasErrorBoundary } from "@/components/CanvasErrorBoundary";
+
+const MAP_CONTEXT_ACTIONS = [
+  actionIds.mapToggleObjectMarkers,
+  actionIds.mapToggleWireframe,
+  actionIds.mapExportGltf,
+  actionIds.mapExportUnity,
+];
 
 function MapViewToolbar() {
   const [viewConfig, setViewConfig] = useAtom(mapViewConfigAtom);
@@ -35,6 +47,52 @@ function MapViewToolbar() {
       setExporting(false);
     }
   };
+
+  const mapToggleObjectsActionRuntime = useMemo(
+    () => ({
+      run: () => {
+        setViewConfig((prev) => ({
+          ...prev,
+          showObjectMarkers: !prev.showObjectMarkers,
+        }));
+      },
+      isEnabled: () => true,
+    }),
+    [setViewConfig],
+  );
+  const mapToggleWireframeActionRuntime = useMemo(
+    () => ({
+      run: () => {
+        setViewConfig((prev) => ({
+          ...prev,
+          showWireframe: !prev.showWireframe,
+        }));
+      },
+      isEnabled: () => true,
+    }),
+    [setViewConfig],
+  );
+  const mapExportUnityActionRuntime = useMemo(
+    () => ({
+      run: () => {
+        if (!exporting) {
+          void handleExportForUnity();
+        }
+      },
+      isEnabled: () => Boolean(currentProject && selectedMap && !exporting),
+      disabledReason: () => {
+        if (!currentProject) return "No project selected";
+        if (!selectedMap) return "No map selected";
+        if (exporting) return "Export already in progress";
+        return undefined;
+      },
+    }),
+    [currentProject, exporting, selectedMap],
+  );
+
+  useRegisterActionRuntime(actionIds.mapToggleObjectMarkers, mapToggleObjectsActionRuntime);
+  useRegisterActionRuntime(actionIds.mapToggleWireframe, mapToggleWireframeActionRuntime);
+  useRegisterActionRuntime(actionIds.mapExportUnity, mapExportUnityActionRuntime);
 
   return (
     <div className="absolute top-2 left-2 z-10 flex gap-1">
@@ -145,46 +203,56 @@ export default function MapWorkbench() {
   }
 
   return (
-    <div className="relative h-full w-full">
+    <ContextualActionMenu
+      actionIds={MAP_CONTEXT_ACTIONS}
+      requireShiftKey
+      className="relative h-full w-full"
+    >
       <MapViewToolbar />
       <MapMetadataPanel />
-      <Canvas
-        camera={{
-          position: cameraPos,
-          fov: 45,
-          near: 0.1,
-          far: 50000,
-        }}
-        style={{ background: "linear-gradient(180deg, #b0c4de 0%, #dfe6ed 100%)" }}
-      >
-        <ambientLight intensity={0.6} />
-        <directionalLight position={[500, 1000, 500]} intensity={0.8} />
+      <CanvasErrorBoundary className="absolute inset-0 flex items-center justify-center">
+        <Canvas
+          camera={{
+            position: cameraPos,
+            fov: 45,
+            near: 0.1,
+            far: 50000,
+          }}
+          dpr={[1, 1.5]}
+          gl={{ powerPreference: "high-performance" }}
+          style={{ background: "linear-gradient(180deg, #b0c4de 0%, #dfe6ed 100%)" }}
+        >
+          <ambientLight intensity={0.6} />
+          <directionalLight position={[500, 1000, 500]} intensity={0.8} />
 
-        <Suspense fallback={null}>
-          {gltfJson && (
-            <MapTerrainViewer gltfJson={gltfJson} viewConfig={viewConfig} />
-          )}
-        </Suspense>
+          <Suspense fallback={null}>
+            {gltfJson && (
+              <MapTerrainViewer gltfJson={gltfJson} viewConfig={viewConfig} />
+            )}
+          </Suspense>
 
-        <OrbitControls
-          makeDefault
-          maxDistance={15000}
-          minDistance={1}
-          target={
-            metadata
-              ? [
-                  (metadata.width * mapScale) / 2,
-                  0,
-                  (metadata.height * mapScale) / 2,
-                ]
-              : [0, 0, 0]
-          }
-        />
+          <OrbitControls
+            makeDefault
+            maxDistance={15000}
+            minDistance={1}
+            target={
+              metadata
+                ? [
+                    (metadata.width * mapScale) / 2,
+                    0,
+                    (metadata.height * mapScale) / 2,
+                  ]
+                : [0, 0, 0]
+            }
+          />
 
-        <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
-          <GizmoViewport />
-        </GizmoHelper>
-      </Canvas>
-    </div>
+          <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
+            <GizmoViewport />
+          </GizmoHelper>
+          <PerfFrameProbe surface="maps" />
+        </Canvas>
+      </CanvasErrorBoundary>
+      <PerfOverlay surface="maps" className="right-3 top-3" />
+    </ContextualActionMenu>
   );
 }

@@ -19,7 +19,7 @@ import {
 import { useAtom } from "jotai";
 import { currentProjectAtom, projectListAtom } from "@/store/project";
 import { NavLink, useLocation } from "react-router";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeTimed as invoke } from "@/commands/invokeTimed";
 import { Project } from "@/types/project";
 
 export default function SideNav() {

@@ -5,7 +5,7 @@ import { useAtomValue } from "jotai";
 import React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeTimed as invoke } from "@/commands/invokeTimed";
 import * as THREE from "three";
 import {
   createEffectTexture,
@@ -222,6 +222,7 @@ function StripRibbon({ stripData }: { stripData: StripEffectData }) {
   const meshRef = useRef<THREE.Mesh>(null);
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
   const textureRef = useRef<THREE.Texture | null>(null);
+
 
   // Load strip texture
   useEffect(() => {

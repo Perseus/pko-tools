@@ -1,0 +1,1182 @@
+OpenAI Codex v0.106.0 (research preview)
+--------
+workdir: /Users/anirudh/gamedev/pko-tools
+model: gpt-5.3-codex
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: high
+reasoning summaries: none
+session id: 019cb012-509c-7891-92b8-005d5dc69914
+--------
+user
+Read the file at /Users/anirudh/gamedev/pko-tools/agents/counselors/1772481600-kaitai-first-plan-review-1772480515389/prompt.md and follow the instructions within it.
+deprecated: `collab` is deprecated. Use `[features].multi_agent` instead.
+  Enable it with `--enable multi_agent` or `[features].multi_agent` in config.toml. See https://developers.openai.com/codex/config-basic#feature-flags for details.
+mcp: linear starting
+mcp: unity starting
+mcp: unity ready
+mcp: linear ready
+mcp startup: ready: unity, linear
+
+thinking
+**Starting file read process**
+codex
+I’ll open that `prompt.md` file first, then execute exactly what it asks and report the results.
+exec
+/bin/zsh -lc 'cat /Users/anirudh/gamedev/pko-tools/agents/counselors/1772481600-kaitai-first-plan-review-1772480515389/prompt.md' in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+# Review Request
+
+## Question
+Review this implementation plan for "PKO Developer Tooling — Kaitai First". This plan replaces all native binary parsers with Kaitai Struct schemas + adapters, then builds a CLI inspector, golden reference tests, source reference database, and Claude Code skills on top.
+
+Focus on:
+1. **Completeness**: Missing steps, types, edge cases?
+2. **Ordering & dependencies**: Is the PR graph correct? Should anything move?
+3. **Risk**: What's most likely to go wrong or take longer than expected?
+4. **Kaitai codegen**: The Rust codegen has known bugs (deref, literal overflow, missing structs). Will this scale to 3 new formats?
+5. **Native deletion safety**: For each format, is the deletion scope correct? Any hidden dependencies?
+6. **LMO type extraction (PR 8)**: `scene_model.rs` has 30+ references to `lmo::LmoMaterial` etc. Is the extraction to `lmo_types.rs` safe?
+7. **LGO adapter (PR 9)**: The character LGO parser is entangled across 4 files. Can the Kaitai adapter actually reuse LMO's `convert_geometry_chunk()`?
+8. **Incremental delivery**: Does each PR stand alone with its own tests?
+
+## The Plan
+
+# PKO Developer Tooling — Kaitai First
+
+## Context
+
+thinking
+**Preparing to use counselors skill**
+codex
+I’ve loaded the prompt and I’m now doing a code-aware review against the repo to validate hidden dependencies and sequencing risks, with extra focus on PR 8 and PR 9. I’ll first pull the relevant Rust modules and current Kaitai integration points.
+exec
+/bin/zsh -lc 'cat /Users/anirudh/.codex/skills/counselors/SKILL.md' in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+---
+name: counselors
+description: Run parallel second-opinion reviews with the counselors CLI. Use when the user asks for independent AI reviews, architecture sanity checks, risk analysis from multiple models, or a synthesized consensus and disagreement report across agents.
+---
+
+# Counselors
+
+## Overview
+Use `counselors` to fan out one review prompt to multiple configured AI CLIs in parallel, then synthesize their responses.
+
+## Workflow
+1. Gather context.
+- Parse the user request and scope.
+- Read only relevant files.
+- Capture `git diff HEAD` and `git diff --staged` when code changes matter.
+
+2. Select agents.
+- Run `counselors ls`.
+- Print the full command output for the user.
+- Ask the user which agent IDs to use (or all).
+
+thinking
+**Aligning review approach with prompt instructions**
+codex
+I’m applying the `counselors` review mindset here, but since you already provided a concrete review prompt file, I’m executing it directly by auditing the current code for each proposed PR dependency and deletion target.
+exec
+/bin/zsh -lc 'cd /Users/anirudh/gamedev/pko-tools && rg -n "lmo::Lmo" src-tauri/src/map/scene_model.rs' in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc 'cd /Users/anirudh/gamedev/pko-tools && rg --files src-tauri/src | head -n 120' in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc 'cd /Users/anirudh/gamedev/pko-tools && rg -n "convert_geometry_chunk" src-tauri/src' in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && rg -n \"parse_obj_file|parse_map\\(|BinRead|BinWrite|pko_lgo|lgo_loader|lmo_loader|PKO_KAITAI_BUILD|kaitai\" src-tauri/src src-tauri/Cargo.toml" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+419:    mat: &lmo::LmoMaterial,
+1143:                &lmo::LmoMaterial {
+1277:                &lmo::LmoMaterial {
+1614:                &lmo::LmoMaterial {
+1686:                subsets: vec![lmo::LmoSubset {
+1692:                materials: vec![lmo::LmoMaterial {
+1776:        let mat = lmo::LmoMaterial {
+1804:        let mat = lmo::LmoMaterial {
+1831:        let mat = lmo::LmoMaterial {
+1864:        let mat = lmo::LmoMaterial {
+1897:        let mat = lmo::LmoMaterial {
+2259:            subsets: vec![lmo::LmoSubset {
+2265:            materials: vec![lmo::LmoMaterial {
+2286:        animated_geom.animation = Some(lmo::LmoAnimData {
+2552:            let mat = lmo::LmoMaterial {
+2584:        let mat = lmo::LmoMaterial {
+2613:        let mat = lmo::LmoMaterial {
+2654:        let mat = lmo::LmoMaterial {
+2682:        let mat = lmo::LmoMaterial {
+2709:        let mat = lmo::LmoMaterial {
+ succeeded in 50ms:
+src-tauri/src/d3d/mod.rs
+src-tauri/src/validation/autofix.rs
+src-tauri/src/validation/mod.rs
+src-tauri/src/validation/commands.rs
+src-tauri/src/validation/report.rs
+src-tauri/src/validation/limits.rs
+src-tauri/src/validation/rules.rs
+src-tauri/src/broadcast/mod.rs
+src-tauri/src/texture_pipeline/resizer.rs
+src-tauri/src/texture_pipeline/mod.rs
+src-tauri/src/texture_pipeline/commands.rs
+src-tauri/src/texture_pipeline/material.rs
+src-tauri/src/texture_pipeline/converter.rs
+src-tauri/src/retarget/mod.rs
+src-tauri/src/retarget/dummy.rs
+src-tauri/src/retarget/commands.rs
+src-tauri/src/retarget/skeleton.rs
+src-tauri/src/retarget/mapper.rs
+src-tauri/src/retarget/reducer.rs
+src-tauri/src/main.rs
+ succeeded in 50ms:
+src-tauri/src/map/lmo_loader.rs:104:        match convert_geometry_chunk(&body_opt, version, parse_animations) {
+src-tauri/src/map/lmo_loader.rs:119:fn convert_geometry_chunk(
+ succeeded in 50ms:
+src-tauri/Cargo.toml:55:kaitai = { git = "https://github.com/kaitai-io/kaitai_struct_rust_runtime.git", rev = "9959613" }
+src-tauri/src/d3d/mod.rs:1:use binrw::{binrw, BinRead};
+src-tauri/src/lib.rs:3:#[path = "../gen/kaitai/mod.rs"]
+src-tauri/src/lib.rs:13:pub(crate) mod kaitai_gen;
+src-tauri/src/bin/export_cli.rs:153:        let parsed = match pko_tools_lib::map::scene_obj::parse_obj_file(&data) {
+src-tauri/src/map/scene_obj.rs:113:pub fn parse_obj_file(data: &[u8]) -> Result<ParsedObjFile> {
+src-tauri/src/map/scene_obj.rs:257:        let parsed = parse_obj_file(&data).unwrap();
+src-tauri/src/map/scene_obj.rs:286:        let parsed = parse_obj_file(&data).unwrap();
+src-tauri/src/item/model.rs:6:use binrw::{BinRead, BinWrite};
+src-tauri/src/item/model.rs:170:fn enum_from_u32_or<T: for<'a> BinRead<Args<'a> = ()>>(v: u32, default: T) -> T {
+src-tauri/src/character/animation.rs:1:use binrw::{binrw, BinRead, BinWrite, VecArgs};
+src-tauri/src/character/animation.rs:25:impl BinRead for LwBoneKeyInfo {
+src-tauri/src/character/animation.rs:109:impl BinWrite for LwBoneKeyInfo {
+src-tauri/src/character/animation.rs:131:impl BinRead for AnimDataBone {
+src-tauri/src/animation/character.rs:31:use binrw::{binrw, BinRead, BinResult, BinWrite, VecArgs};
+src-tauri/src/animation/character.rs:158:                let mat43_vec: Vec<LwMatrix43> = BinRead::read_options(
+src-tauri/src/animation/character.rs:170:                let mat44_vec: Vec<LwMatrix44> = BinRead::read_options(
+src-tauri/src/animation/character.rs:184:                    let pos_vec: Vec<LwVector3> = BinRead::read_options(
+src-tauri/src/animation/character.rs:193:                    let quat_vec: Vec<LwQuaternion> = BinRead::read_options(
+src-tauri/src/animation/character.rs:211:                    let mut partial_pos: Vec<LwVector3> = BinRead::read_options(
+
+thinking
+**Scanning code for model references**
+codex
+I found concrete anchors: `scene_model.rs` really has many `lmo::` type references, and `convert_geometry_chunk()` is currently private inside `lmo_loader.rs`, which directly affects PR 8/9 feasibility. Next I’m drilling into the involved files to validate exact coupling and deletion safety.
+exec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '1,260p' src-tauri/src/map/lmo.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '1,280p' src-tauri/src/character/model.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '1,260p' src-tauri/src/map/lmo_loader.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc 'cd /Users/anirudh/gamedev/pko-tools && rg -n "CharacterGeometricModel|Lgo|lgo|GeometryChunk|convert_geometry_chunk|LmoModel|LmoMaterial|LmoSubset|LmoAnimData" src-tauri/src/character src-tauri/src/map src-tauri/src/animation' in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+//! LMO file parser — multi-geometry-object container format for scene buildings/models.
+//!
+//! Binary layout:
+//! ```text
+//! [4 bytes]  version (DWORD, typically 0x1005)
+//! [4 bytes]  obj_num (geometry objects + optional global helper)
+//! [obj_num × 12 bytes]  Header table:
+//!     type(4) — 1=GEOMETRY, 2=HELPER
+//!     addr(4) — absolute file offset
+//!     size(4) — data size
+//!
+//! TYPE 1 (Geometry Object) at each addr:
+//!     [116 bytes]  Header: id(4) + parent_id(4) + type(4) + mat_local(64) +
+//!                  rcci(16) + state_ctrl(8) + mtl_size(4) + mesh_size(4) +
+//!                  helper_size(4) + anim_size(4)
+//!     Materials:   mtl_num(4) + mtl_num × lwMtlTexInfo
+//!     Mesh:        lwMeshInfoHeader + vertices + normals + texcoords + colors + indices + subsets
+//!     Helpers:     (skip)
+//!     Animation:   (skip)
+//! ```
+ succeeded in 51ms:
+use std::{
+    ffi::c_void,
+    fs::File,
+    io::BufWriter,
+    path::{Path, PathBuf},
+    vec,
+};
+
+use crate::{
+    animation::character::{LwBoneFile, LW_INVALID_INDEX, LW_MAX_NAME},
+    character::{helper::BoundingSphereInfo, mesh::CharacterInfoMeshHeader, texture},
+    d3d::{D3DBlend, D3DCmpFunc, D3DFormat, D3DPool, D3DRenderStateType},
+    math::{self, LwMatrix44, LwSphere, LwVector3},
+};
+use ::gltf::{
+    buffer, image,
+    json::{self, scene::UnitQuaternion, Index, Node, Scene},
+    Document,
+};
+use base64::{prelude::BASE64_STANDARD, Engine};
+ succeeded in 51ms:
+use std::path::Path;
+
+use anyhow::{Context, Result, bail};
+
+use super::lmo::{
+    LmoAnimData, LmoGeomObject, LmoMaterial, LmoModel, LmoMtlOpacAnim, LmoOpacityKeyframe,
+    LmoSubset, LmoTexImgAnim, LmoTexUvAnim, MaterialRenderState,
+    D3DRS_ALPHATESTENABLE, D3DRS_SRCBLEND, D3DRS_DESTBLEND, D3DRS_ALPHAREF,
+    D3DRS_CULLMODE, D3DRS_ALPHAFUNC, D3DCMP_GREATER, TRANSP_FILTER, TRANSP_SUBTRACTIVE,
+    decompose_matrix43,
+};
+
+use crate::kaitai_gen::pko_lmo::*;
+use kaitai::*;
+
+const ENV_LMO_PARSER: &str = "PKO_LMO_PARSER";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LmoParserBackend {
+    Native,
+ succeeded in 51ms:
+src-tauri/src/map/lmo.rs:97:pub struct LmoAnimData {
+src-tauri/src/map/lmo.rs:148:    pub subsets: Vec<LmoSubset>,
+src-tauri/src/map/lmo.rs:149:    pub materials: Vec<LmoMaterial>,
+src-tauri/src/map/lmo.rs:150:    pub animation: Option<LmoAnimData>,
+src-tauri/src/map/lmo.rs:158:pub struct LmoSubset {
+src-tauri/src/map/lmo.rs:167:pub struct LmoMaterial {
+src-tauri/src/map/lmo.rs:183:pub struct LmoModel {
+src-tauri/src/map/lmo.rs:332:fn read_material(cursor: &mut Cursor<&[u8]>, mtl_ver: MtlFormatVersion) -> Result<LmoMaterial> {
+src-tauri/src/map/lmo.rs:423:    Ok(LmoMaterial {
+src-tauri/src/map/lmo.rs:461:    Vec<LmoSubset>,
+src-tauri/src/map/lmo.rs:579:            subsets.push(LmoSubset {
+src-tauri/src/map/lmo.rs:602:            subsets.push(LmoSubset {
+src-tauri/src/map/lmo.rs:739:    matrix: Option<LmoAnimData>,
+src-tauri/src/map/lmo.rs:832:            result.matrix = Some(LmoAnimData {
+src-tauri/src/map/lmo.rs:1083:        let parse_result = (|| -> Result<Vec<LmoMaterial>> {
+src-tauri/src/map/lmo.rs:1219:pub fn parse_lmo(data: &[u8]) -> Result<LmoModel> {
+src-tauri/src/map/lmo.rs:1224:fn parse_lmo_opts(data: &[u8], parse_animations: bool) -> Result<LmoModel> {
+src-tauri/src/map/lmo.rs:1260:    Ok(LmoModel {
+src-tauri/src/map/lmo.rs:1267:pub fn load_lmo(path: &Path) -> Result<LmoModel> {
+src-tauri/src/map/lmo.rs:1274:pub fn load_lmo_no_animation(path: &Path) -> Result<LmoModel> {
+
+thinking
+**Mapping dependencies around BinWrite**
+exec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '1,260p' src-tauri/src/map/terrain.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '1,320p' src-tauri/src/effect/model.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '1,260p' src-tauri/src/map/scene_obj.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '1,320p' src-tauri/src/animation/character.rs" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+use std::io::{Cursor, Read as IoRead};
+use std::path::Path;
+
+use anyhow::{anyhow, Context, Result};
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
+use gltf::json as gltf;
+use gltf::{
+    accessor::{ComponentType, GenericComponentType},
+    validation::{Checked, USize64},
+};
+use image::RgbImage;
+use serde_json::value::RawValue;
+
+use super::{MapEntry, MapMetadata};
+use crate::effect::model::EffFile;
+use crate::map::scene_model::LoadedSceneModels;
+use crate::map::scene_obj::{parse_obj_file, ParsedObjFile};
+
+// ============================================================================
+ succeeded in 52ms:
+use std::io::{Cursor, Read as IoRead};
+
+use anyhow::{anyhow, Result};
+
+// ============================================================================
+// .obj scene object file format (version 600)
+// ============================================================================
+
+const OBJ_FILE_VER600: i32 = 600;
+
+/// A scene object placed on the map.
+#[derive(Debug, Clone)]
+pub struct SceneObject {
+    /// Raw sTypeID field.
+    pub raw_type_id: i16,
+    /// Object type: 0 = model, 1 = effect (top 2 bits of sTypeID)
+    pub obj_type: u8,
+    /// Object ID (lower 14 bits of sTypeID)
+    pub obj_id: u16,
+    /// Absolute world X position in world units (centimeters / 100)
+ succeeded in 52ms:
+use std::io::{Read, Write};
+
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+
+use crate::d3d::D3DBlend;
+
+const FIXED_NAME_LEN: usize = 32;
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EffFile {
+    pub version: u32,
+    pub idx_tech: i32,
+    pub use_path: bool,
+    pub path_name: String,
+    pub use_sound: bool,
+    pub sound_name: String,
+    pub rotating: bool,
+    pub rota_vec: [f32; 3],
+ succeeded in 52ms:
+use base64::prelude::*;
+use cgmath::{InnerSpace, Matrix3, Matrix4, Quaternion, SquareMatrix, Vector3};
+use core::f32;
+use gltf::{
+    animation::Property,
+    buffer, image,
+    json::{
+        self,
+        accessor::{ComponentType, GenericComponentType, Type},
+        animation::{Channel, Sampler, Target},
+        scene::UnitQuaternion,
+        validation::{self, Checked, USize64},
+        Accessor, Animation, Buffer, Index, Node, Skin,
+    },
+    Document,
+};
+use ptree::{print_tree, TreeBuilder};
+use serde_json::{json, value::RawValue};
+use std::{collections::HashMap, fs::File, path::PathBuf, sync::Mutex};
+
+
+thinking
+**Scoping serialization and file formats**
+codex
+I’m now validating plan assumptions against current dependency surfaces (`Cargo.toml`, generated Kaitai modules, module exports, and no-animation paths) to see what the PR graph misses.
+exec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '1,260p' src-tauri/Cargo.toml" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '1,220p' src-tauri/src/map/mod.rs && echo '---' && sed -n '1,220p' src-tauri/src/lib.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && ls -la formats && echo '---' && ls -la src-tauri/gen/kaitai" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && rg -n \"load_lmo_no_animation|parse_lmo\\(|super::lmo::|pub mod lmo|use super::lmo|LmoParserBackend\" src-tauri/src" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && rg -n \"derive\\(.*Serialize|serde\" src-tauri/src/math src-tauri/src/d3d src-tauri/src/map/lmo.rs src-tauri/src/character src-tauri/src/animation src-tauri/src/effect/model.rs" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+[package]
+name = "pko-tools"
+version = "0.1.4"
+description = "A Tauri App"
+authors = ["you"]
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "pko_tools_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[profile.dev]
+incremental = true
+
+[profile.release]
+ succeeded in 51ms:
+pub mod area_set;
+pub mod commands;
+pub mod glb;
+pub mod grid_images;
+pub mod lit;
+pub mod lmo;
+pub mod lmo_loader;
+pub mod mapinfo;
+pub mod scene_model;
+pub mod scene_obj;
+pub mod scene_obj_info;
+pub mod shared;
+pub mod terrain;
+pub mod texture;
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MapEntry {
+    pub name: String,
+ succeeded in 51ms:
+total 80
+drwxr-xr-x@  6 anirudh  staff    192 Mar  2 19:13 .
+drwxr-xr-x@ 40 anirudh  staff   1280 Mar  2 19:13 ..
+-rw-r--r--@  1 anirudh  staff    409 Mar  2 19:12 pko_lgo.ksy
+-rw-r--r--@  1 anirudh  staff  27282 Mar  2 19:13 pko_lmo.ksy
+-rw-r--r--@  1 anirudh  staff   2967 Mar  2 19:12 pko_map.ksy
+-rw-r--r--@  1 anirudh  staff   1754 Mar  2 19:12 terrain_info.ksy
+---
+total 528
+drwxr-xr-x@ 8 anirudh  staff     256 Mar  2 19:15 .
+drwxr-xr-x@ 4 anirudh  staff     128 Mar  2 19:12 ..
+-rw-r--r--@ 1 anirudh  staff       1 Mar  2 19:12 .gitkeep
+-rw-r--r--@ 1 anirudh  staff      73 Mar  2 19:13 mod.rs
+-rw-r--r--@ 1 anirudh  staff    2612 Mar  2 19:13 pko_lgo.rs
+-rw-r--r--@ 1 anirudh  staff  215001 Mar  2 19:15 pko_lmo.rs
+-rw-r--r--@ 1 anirudh  staff   27948 Mar  2 19:13 pko_map.rs
+-rw-r--r--@ 1 anirudh  staff   10424 Mar  2 19:13 terrain_info.rs
+ succeeded in 51ms:
+src-tauri/src/map/lmo.rs:1219:pub fn parse_lmo(data: &[u8]) -> Result<LmoModel> {
+src-tauri/src/map/lmo.rs:1269:    parse_lmo(&data)
+src-tauri/src/map/lmo.rs:1274:pub fn load_lmo_no_animation(path: &Path) -> Result<LmoModel> {
+src-tauri/src/map/lmo.rs:1630:        assert!(parse_lmo(&[0, 0, 0]).is_err());
+src-tauri/src/map/lmo.rs:1638:        let model = parse_lmo(&data).unwrap();
+src-tauri/src/map/lmo.rs:1657:        let model = parse_lmo(&data).unwrap();
+src-tauri/src/map/lmo.rs:1666:        let model = parse_lmo(&data).unwrap();
+src-tauri/src/map/lmo.rs:1705:        let model = parse_lmo(&data).unwrap();
+src-tauri/src/map/lmo.rs:1718:        let model = parse_lmo(&data).unwrap();
+src-tauri/src/map/lmo.rs:1736:        let model = parse_lmo(&data).unwrap();
+src-tauri/src/map/lmo.rs:1755:        let model = parse_lmo(&data).unwrap();
+src-tauri/src/map/lmo.rs:1769:        let model = parse_lmo(&data).unwrap();
+src-tauri/src/map/lmo.rs:1784:        let model = parse_lmo(&data).unwrap();
+src-tauri/src/map/lmo.rs:1827:        let model = parse_lmo(&data).unwrap();
+src-tauri/src/map/lmo.rs:1858:        let model = parse_lmo(&data).unwrap();
+src-tauri/src/map/lmo.rs:2142:        let model = parse_lmo(&data).unwrap();
+src-tauri/src/map/lmo.rs:2174:        let model = parse_lmo(&data).unwrap();
+src-tauri/src/map/lmo.rs:2530:        let model = parse_lmo(&data).unwrap();
+src-tauri/src/map/lmo_loader.rs:5:use super::lmo::{
+src-tauri/src/map/lmo_loader.rs:19:pub enum LmoParserBackend {
+ succeeded in 51ms:
+src-tauri/src/d3d/mod.rs:2:use serde::{Deserialize, Serialize};
+src-tauri/src/d3d/mod.rs:196:#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+src-tauri/src/d3d/mod.rs:197:#[serde(into = "u32", try_from = "u32")]
+src-tauri/src/effect/model.rs:4:use serde::{Deserialize, Serialize};
+src-tauri/src/effect/model.rs:10:#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+src-tauri/src/effect/model.rs:11:#[serde(rename_all = "camelCase")]
+src-tauri/src/effect/model.rs:26:#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+src-tauri/src/effect/model.rs:27:#[serde(rename_all = "camelCase")]
+src-tauri/src/effect/model.rs:67:#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+src-tauri/src/effect/model.rs:68:#[serde(rename_all = "camelCase")]
+src-tauri/src/character/model.rs:25:use serde::{Deserialize, Serialize};
+src-tauri/src/character/model.rs:26:use serde_json::{json, value::RawValue};
+src-tauri/src/character/model.rs:98:#[derive(Debug, Serialize, Deserialize, Clone)]
+src-tauri/src/character/model.rs:133:#[derive(Serialize, Deserialize, Clone)]
+src-tauri/src/character/model.rs:248:            let mat_local_json = serde_json::to_string(&mat_local).unwrap_or_default();
+src-tauri/src/character/model.rs:405:                let extras_data = serde_json::from_str::<HelperDataExtras>(extras.get());
+src-tauri/src/character/model.rs:654:            #[serde(default)]
+src-tauri/src/character/model.rs:660:                if let Ok(extras_data) = serde_json::from_str::<HelperDataExtras>(extras.get()) {
+src-tauri/src/character/commands.rs:74:#[derive(serde::Serialize)]
+src-tauri/src/character/mod.rs:19:use serde::{Deserialize, Serialize};
+
+thinking
+**Inspecting serialization for enums and math types**
+exec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '280,520p' src-tauri/src/character/mod.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '1,280p' src-tauri/src/character/mod.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '1,340p' src-tauri/src/d3d/mod.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '1,260p' src-tauri/src/math/mod.rs" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+pub mod animation;
+pub mod commands;
+pub mod helper;
+mod info;
+pub mod mesh;
+pub mod model;
+pub mod texture;
+
+use std::{
+    fs::File,
+    io::BufWriter,
+    path::{Path, PathBuf},
+};
+
+use ::gltf::{buffer, image, json::Index, Buffer, Document, Gltf};
+use binrw::BinWrite;
+use info::get_character;
+use model::CharacterGeometricModel;
+use serde::{Deserialize, Serialize};
+
+ succeeded in 51ms:
+use binrw::{binrw, BinRead};
+use serde::{Deserialize, Serialize};
+
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[binrw]
+#[br(repr = u32)]
+#[bw(repr = u32)]
+pub enum D3DFormat {
+    Unknown = 0,
+
+    R8G8B8 = 20,
+    A8R8G8B8 = 21,
+    X8R8G8B8 = 22,
+    R5G6B5 = 23,
+    X1R5G5B5 = 24,
+    A1R5G5B5 = 25,
+    A4R4G4B4 = 26,
+    R3G3B2 = 27,
+    A8 = 28,
+ succeeded in 51ms:
+use binrw::binrw;
+use cgmath::{InnerSpace, Matrix3, Matrix4, Quaternion, Vector2, Vector3};
+
+#[binrw]
+#[derive(Debug, Clone)]
+#[br(little)]
+pub struct LwVector3(
+    #[br(map = |raw: [f32; 3]| Vector3::new(raw[0], raw[1], raw[2]))]
+    #[bw(map = |v: &Vector3<f32>| [v.x, v.y, v.z])]
+    pub Vector3<f32>,
+);
+
+impl LwVector3 {
+    pub fn to_slice(&self) -> [f32; 3] {
+        let v = &self.0;
+        [v.x, v.y, v.z]
+    }
+
+    /// Linear interpolation between two vectors
+    pub fn lerp(&self, other: &LwVector3, t: f32) -> LwVector3 {
+ succeeded in 51ms:
+
+        // Build scene node indices: root bone, skinned mesh nodes, and all helper nodes
+        let mut scene_nodes = vec![
+            Index::new(0), // Root bone
+        ];
+
+        // Add skinned mesh node indices (one per mesh, created by to_gltf_skin_and_nodes_multi)
+        // These nodes are at indices: (nodes.len() - total_helper_nodes - mesh_count) to (nodes.len() - total_helper_nodes - 1)
+        let skinned_mesh_start_idx =
+            fields_to_aggregate.nodes.len() - total_helper_nodes - mesh_count;
+        for i in 0..mesh_count {
+            scene_nodes.push(Index::new((skinned_mesh_start_idx + i) as u32));
+        }
+
+        // Add helper node indices to scene so they're loaded by glTF parsers
+        let helper_start_index = fields_to_aggregate.nodes.len() - total_helper_nodes;
+        for i in helper_start_index..fields_to_aggregate.nodes.len() {
+            scene_nodes.push(Index::new(i as u32));
+        }
+
+
+thinking
+**Inspecting animation parsing logic**
+exec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '1180,1325p' src-tauri/src/map/lmo.rs" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+                    texuv: Vec::new(),
+                    teximg: Vec::new(),
+                    mtlopac: Vec::new(),
+                }
+            }
+        }
+    } else {
+        ParsedAnimations {
+            matrix: None,
+            texuv: Vec::new(),
+            teximg: Vec::new(),
+            mtlopac: Vec::new(),
+        }
+    };
+
+    Ok(LmoGeomObject {
+        id,
+        parent_id,
+        obj_type,
+        mat_local,
+
+thinking
+**Inspecting format and generated files**
+exec
+/bin/zsh -lc 'cd /Users/anirudh/gamedev/pko-tools && cat formats/pko_lgo.ksy' in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+meta:
+  id: pko_lgo
+  title: PKO LGO Geometry Container
+  endian: le
+  file-extension: lgo
+  imports:
+    - pko_lmo
+doc: |
+  Direct lwGeomObjInfo container used by .lgo resources.
+  The layout is:
+    - u32 version
+    - lwGeomObjInfo payload (same body parser as geometry chunks in pko_lmo)
+
+seq:
+  - id: version
+    type: u4
+  - id: geometry
+    size-eos: true
+    type: pko_lmo::geometry_chunk(version, 0)
+exec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '1,260p' src-tauri/gen/kaitai/pko_lgo.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc 'cd /Users/anirudh/gamedev/pko-tools && cat src-tauri/gen/kaitai/mod.rs' in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '1,260p' formats/pko_map.ksy && echo '---' && sed -n '1,260p' src-tauri/gen/kaitai/pko_map.rs" in /Users/anirudh/gamedev/pko-tools succeeded in 50ms:
+// This is a generated file! Please edit source .ksy file and use kaitai-struct-compiler to rebuild
+
+#![allow(unused_imports)]
+#![allow(non_snake_case)]
+#![allow(non_camel_case_types)]
+#![allow(irrefutable_let_patterns)]
+#![allow(unused_comparisons)]
+
+extern crate kaitai;
+use kaitai::*;
+use std::convert::{TryFrom, TryInto};
+use std::cell::{Ref, Cell, RefCell};
+use std::rc::{Rc, Weak};
+use super::pko_lmo::PkoLmo_GeometryChunk;
+
+/**
+ * Direct lwGeomObjInfo container used by .lgo resources.
+ * The layout is:
+ *   - u32 version
+ *   - lwGeomObjInfo payload (same body parser as geometry chunks in pko_lmo)
+ succeeded in 52ms:
+pub mod pko_lgo;
+pub mod pko_lmo;
+pub mod pko_map;
+pub mod terrain_info;
+ succeeded in 52ms:
+meta:
+  id: pko_map
+  title: PKO terrain map
+  endian: le
+  file-extension: map
+doc: |
+  Derived from MPMapData.cpp and MPMapDef.h.
+  Layout:
+  1) MPMapFileHeader
+  2) Section offset table (u4 * sectionCount)
+  3) Section tile blobs referenced by offsets
+
+seq:
+  - id: header
+    type: map_header
+  - id: section_index
+    type: section_ptr((header.n_section_width * header.n_section_height), header.n_map_flag)
+    repeat: expr
+    repeat-expr: (header.n_width / header.n_section_width) * (header.n_height / header.n_section_height)
+
+
+thinking
+**Inspecting generated code for bugs**
+exec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && rg -n \"\\*_io\\.size\\(|4294967295 as i32|CastError|read_bytes\\(\\(\\*_io\\.size\\(\\)\\)\" src-tauri/gen/kaitai/pko_lmo.rs src-tauri/gen/kaitai/pko_map.rs src-tauri/gen/kaitai/pko_lgo.rs" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+src-tauri/gen/kaitai/pko_map.rs:54:            let f = |t : &mut PkoMap_SectionPtr| Ok(t.set_params((((*self_rc.header().n_section_width() as i32) * (*self_rc.header().n_section_height() as i32))).try_into().map_err(|_| KError::CastError)?, (*self_rc.header().n_map_flag()).try_into().map_err(|_| KError::CastError)?));
+src-tauri/gen/kaitai/pko_map.rs:363:                    let f = |t : &mut PkoMap_SectionOld| Ok(t.set_params((*self.tile_count()).try_into().map_err(|_| KError::CastError)?));
+src-tauri/gen/kaitai/pko_map.rs:368:                    let f = |t : &mut PkoMap_SectionNew| Ok(t.set_params((*self.tile_count()).try_into().map_err(|_| KError::CastError)?));
+src-tauri/gen/kaitai/pko_lgo.rs:54:        let f = |t : &mut PkoLmo_GeometryChunk| Ok(t.set_params((*self_rc.version()).try_into().map_err(|_| KError::CastError)?, (0).try_into().map_err(|_| KError::CastError)?));
+src-tauri/gen/kaitai/pko_lmo.rs:73:                let f = |t : &mut PkoLmo_ModelNodeInfo| Ok(t.set_params((*self_rc.tree_version()?).try_into().map_err(|_| KError::CastError)?));
+src-tauri/gen/kaitai/pko_lmo.rs:316:            let f = |t : &mut PkoLmo_BoneKeyInfo| Ok(t.set_params((*self_rc.header().key_type()).try_into().map_err(|_| KError::CastError)?, (*self_rc.header().frame_num()).try_into().map_err(|_| KError::CastError)?, (*self_rc.version()).try_into().map_err(|_| KError::CastError)?, (*self_rc.base_seq()[_i as usize].parent_id()).try_into().map_err(|_| KError::CastError)?));
+src-tauri/gen/kaitai/pko_lmo.rs:654:            let f = |t : &mut PkoLmo_AnimDataTeximg| Ok(t.set_params((*self_rc.version()).try_into().map_err(|_| KError::CastError)?));
+src-tauri/gen/kaitai/pko_lmo.rs:878:            let f = |t : &mut PkoLmo_AnimDataBone| Ok(t.set_params((*self_rc.file_version()).try_into().map_err(|_| KError::CastError)?));
+src-tauri/gen/kaitai/pko_lmo.rs:893:                let f = |t : &mut PkoLmo_AnimDataMtlopacSlot| Ok(t.set_params((self_rc.data_mtlopac_size()[_i as usize]).try_into().map_err(|_| KError::CastError)?));
+src-tauri/gen/kaitai/pko_lmo.rs:901:            let f = |t : &mut PkoLmo_AnimDataTexuvSlot| Ok(t.set_params((self_rc.data_texuv_size()[_i as usize]).try_into().map_err(|_| KError::CastError)?));
+src-tauri/gen/kaitai/pko_lmo.rs:908:            let f = |t : &mut PkoLmo_AnimDataTeximgSlot| Ok(t.set_params((self_rc.data_teximg_size()[_i as usize]).try_into().map_err(|_| KError::CastError)?, (*self_rc.file_version()).try_into().map_err(|_| KError::CastError)?));
+src-tauri/gen/kaitai/pko_lmo.rs:2265:        let f = |t : &mut PkoLmo_GeomObjInfoHeader| Ok(t.set_params((*self_rc.file_version()).try_into().map_err(|_| KError::CastError)?, (*self_rc.chunk_payload_size()?).try_into().map_err(|_| KError::CastError)?, (*self_rc.header_offset()?).try_into().map_err(|_| KError::CastError)?));
+src-tauri/gen/kaitai/pko_lmo.rs:2272:            let f = |t : &mut PkoLmo_MaterialSection| Ok(t.set_params((*self_rc.file_version()).try_into().map_err(|_| KError::CastError)?));
+src-tauri/gen/kaitai/pko_lmo.rs:2280:            let f = |t : &mut PkoLmo_MeshSection| Ok(t.set_params((*self_rc.file_version()).try_into().map_err(|_| KError::CastError)?));
+src-tauri/gen/kaitai/pko_lmo.rs:2288:            let f = |t : &mut PkoLmo_HelperSection| Ok(t.set_params((*self_rc.file_version()).try_into().map_err(|_| KError::CastError)?));
+src-tauri/gen/kaitai/pko_lmo.rs:2296:            let f = |t : &mut PkoLmo_AnimSection| Ok(t.set_params((*self_rc.file_version()).try_into().map_err(|_| KError::CastError)?));
+src-tauri/gen/kaitai/pko_lmo.rs:2986:                let f = |t : &mut PkoLmo_HelperDummyEntry| Ok(t.set_params((*self_rc.effective_version()?).try_into().map_err(|_| KError::CastError)?));
+src-tauri/gen/kaitai/pko_lmo.rs:3311:            let f = |t : &mut PkoLmo_MtlEntry| Ok(t.set_params((*self_rc.format_hint()?).try_into().map_err(|_| KError::CastError)?));
+src-tauri/gen/kaitai/pko_lmo.rs:4139:            let f = |t : &mut PkoLmo_TexcoordChannel| Ok(t.set_params((*self_rc.vertex_num()?).try_into().map_err(|_| KError::CastError)?));
+src-tauri/gen/kaitai/pko_lmo.rs:4625:            let f = |t : &mut PkoLmo_GeometryChunk| Ok(t.set_params((*self_rc.file_version()).try_into().map_err(|_| KError::CastError)?, (0).try_into().map_err(|_| KError::CastError)?));
+
+thinking
+**Inspecting build scripts for patch**
+exec
+/bin/zsh -lc 'cd /Users/anirudh/gamedev/pko-tools && cat package.json' in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc 'cd /Users/anirudh/gamedev/pko-tools && rg -n "kaitai:sync|PKO_KAITAI_BUILD|ksy|kaitai" package.json pnpm-lock.yaml scripts src-tauri/build.rs' in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && ls -la scripts && echo '---' && rg --files scripts" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && ls -la src-tauri && echo '---' && sed -n '1,260p' src-tauri/build.rs" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+{
+  "name": "pko-tools",
+  "private": true,
+  "version": "0.1.4",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "tauri": "tauri",
+    "kaitai:sync": "node scripts/sync-kaitai-formats.mjs"
+  },
+  "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.4",
+    "@radix-ui/react-dropdown-menu": "^2.1.4",
+    "@radix-ui/react-label": "^2.1.1",
+    "@radix-ui/react-progress": "^1.1.1",
+    "@radix-ui/react-scroll-area": "^1.2.2",
+ succeeded in 50ms:
+package.json:13:    "kaitai:sync": "node scripts/sync-kaitai-formats.mjs"
+src-tauri/build.rs:9:    println!("cargo:rerun-if-env-changed=PKO_KAITAI_BUILD");
+src-tauri/build.rs:12:    if let Err(err) = build_kaitai_rust_scaffold() {
+src-tauri/build.rs:19:fn build_kaitai_rust_scaffold() -> Result<(), String> {
+src-tauri/build.rs:20:    let enable = env::var("PKO_KAITAI_BUILD")
+src-tauri/build.rs:28:    let out_dir = PathBuf::from("gen/kaitai");
+src-tauri/build.rs:34:    let specs = collect_ksy_files(&formats_dir)?;
+src-tauri/build.rs:63:Install kaitai-struct-compiler or set PKO_KAITAI_BUILD=0 once files are checked in."
+src-tauri/build.rs:91:fn collect_ksy_files(root: &Path) -> Result<Vec<PathBuf>, String> {
+src-tauri/build.rs:106:            if path.extension() == Some(OsStr::new("ksy")) {
+scripts/sync-kaitai-formats.mjs:15:  console.error(`[kaitai] Source formats directory not found: ${sourceDir}`);
+scripts/sync-kaitai-formats.mjs:22:  .filter((name) => extname(name) === ".ksy")
+scripts/sync-kaitai-formats.mjs:26:  console.error(`[kaitai] No .ksy files found in source: ${sourceDir}`);
+scripts/sync-kaitai-formats.mjs:32:  console.log(`[kaitai] synced ${name}`);
+scripts/sync-kaitai-formats.mjs:37:  if (extname(name) !== ".ksy") {
+scripts/sync-kaitai-formats.mjs:42:    console.log(`[kaitai] removed stale ${name}`);
+scripts/sync-kaitai-formats.mjs:46:console.log(`[kaitai] sync complete from ${sourceDir} -> ${targetDir}`);
+ succeeded in 52ms:
+total 8
+drwxr-xr-x@  3 anirudh  staff    96 Mar  2 19:12 .
+drwxr-xr-x@ 40 anirudh  staff  1280 Mar  2 19:13 ..
+-rw-r--r--@  1 anirudh  staff  1369 Mar  2 19:12 sync-kaitai-formats.mjs
+---
+scripts/sync-kaitai-formats.mjs
+ succeeded in 50ms:
+total 424
+drwxr-xr-x@ 21 anirudh  staff     672 Mar  2 19:13 .
+drwxr-xr-x@ 40 anirudh  staff    1280 Mar  2 19:13 ..
+-rw-r--r--@  1 anirudh  staff    8196 Feb 10 19:22 .DS_Store
+drwxr-xr-x@  3 anirudh  staff      96 Jan 23 07:12 .cargo
+-rw-r--r--@  1 anirudh  staff     166 Jan  5 06:14 .gitignore
+-rw-r--r--   1 anirudh  staff      43 Jan  6 06:30 .taurignore
+-rw-r--r--@  1 anirudh  staff  178949 Mar  2 19:13 Cargo.lock
+-rw-r--r--@  1 anirudh  staff    1785 Mar  2 19:13 Cargo.toml
+-rw-r--r--@  1 anirudh  staff    4226 Mar  2 19:12 build.rs
+drwxr-xr-x@  3 anirudh  staff      96 Jan  5 06:14 capabilities
+drwxr-xr-x   3 anirudh  staff      96 Feb 26 15:05 examples
+drwxr-xr-x@  4 anirudh  staff     128 Jan 20 18:18 exports
+drwxr-xr-x@  4 anirudh  staff     128 Mar  2 19:12 gen
+drwxr-xr-x@ 18 anirudh  staff     576 Jan  5 06:14 icons
+drwxr-xr-x@  4 anirudh  staff     128 Feb 12 17:35 imports
+drwxr-xr-x@ 22 anirudh  staff     704 Mar  2 19:13 src
+drwxr-xr-x@  5 anirudh  staff     160 Feb  5 21:56 state
+drwxr-xr-x@ 10 anirudh  staff     320 Feb 26 16:52 target
+-rw-r--r--   1 anirudh  staff     963 Feb 12 14:33 tauri.conf.json
+
+thinking
+**Inspecting sync script source paths**
+exec
+/bin/zsh -lc 'cd /Users/anirudh/gamedev/pko-tools && cat scripts/sync-kaitai-formats.mjs' in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { dirname, extname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const root = resolve(__dirname, "..");
+
+const sourceDir = process.env.PKO_KSY_SOURCE
+  ? resolve(root, process.env.PKO_KSY_SOURCE)
+  : resolve(root, "..", "pko-map-lab", "formats");
+const targetDir = resolve(root, "formats");
+
+if (!existsSync(sourceDir)) {
+  console.error(`[kaitai] Source formats directory not found: ${sourceDir}`);
+  process.exit(1);
+}
+
+mkdirSync(targetDir, { recursive: true });
+
+
+thinking
+**Mapping existing test coverage**
+exec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && find src-tauri/test_artifacts -maxdepth 2 -type f | sed -n '1,200p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && find src-tauri/tests -maxdepth 3 -type f | sed -n '1,240p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && rg -n \"\\.lmo|\\.lgo|\\.map|\\.obj|\\.eff|\\.lab|insta|snapshot|golden\" src-tauri/src src-tauri/tests" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+src-tauri/test_artifacts/01000005(0).eff
+src-tauri/test_artifacts/01000019.eff
+src-tauri/test_artifacts/10100016.eff
+src-tauri/test_artifacts/.DS_Store
+src-tauri/test_artifacts/0909000000.lgo
+src-tauri/test_artifacts/test.gltf
+src-tauri/test_artifacts/decompiler/.DS_Store
+src-tauri/test_artifacts/decompiler/CharacterInfo_expected.txt
+src-tauri/test_artifacts/decompiler/CharacterInfo_output.txt
+src-tauri/test_artifacts/decompiler/README.md
+src-tauri/test_artifacts/decompiler/Characterinfo.bin
+src-tauri/test_artifacts/0725000000.lgo
+src-tauri/test_artifacts/0730.lab
+src-tauri/test_artifacts/0725.lab
+src-tauri/test_artifacts/0730000000.lgo
+ succeeded in 52ms:
+src-tauri/tests/normalized_roundtrip_test.rs
+src-tauri/tests/byte_equality_test.rs
+src-tauri/tests/roundtrip_test.rs
+src-tauri/tests/struct_comparison_test.rs
+src-tauri/tests/index_space_tests.rs
+src-tauri/tests/effect_parser_test.rs
+src-tauri/tests/hierarchy_tests.rs
+src-tauri/tests/effect_roundtrip_test.rs
+src-tauri/tests/skinning_tests.rs
+src-tauri/tests/common/mod.rs
+src-tauri/tests/model_088_roundtrip_test.rs
+src-tauri/tests/fixtures/known_good/0000031004.lgo
+src-tauri/tests/fixtures/known_good/0000021001.lgo
+src-tauri/tests/fixtures/known_good/0088.lab
+src-tauri/tests/fixtures/known_good/0000021002.lgo
+src-tauri/tests/fixtures/known_good/0000021003.lgo
+src-tauri/tests/fixtures/known_good/0000031002.lgo
+src-tauri/tests/fixtures/known_good/789.gltf
+src-tauri/tests/fixtures/known_good/0088000000.lgo
+src-tauri/tests/fixtures/known_good/4.gltf
+ succeeded in 52ms:
+Total output lines: 763
+
+src-tauri/tests/effect_invariant_test.rs:7:    let path = common::load_known_good_eff("01000005(0).eff");
+src-tauri/tests/effect_invariant_test.rs:20:                sub.effect_name,
+src-tauri/tests/model_725_black_dragon_test.rs:2:// This model has TWO mesh parts (0725000000.lgo and 0725000001.lgo)
+src-tauri/tests/model_725_black_dragon_test.rs:148:        let lgo_filename = format!("{:0>10}.lgo", model_id);
+src-tauri/tests/model_725_black_dragon_test.rs:164:    let lab_path = test_dir.join("0725.lab");
+src-tauri/tests/model_725_black_dragon_test.rs:165:    let mut lab_file = fs::File::open(&lab_path).expect("Failed to open 0725.lab");
+src-tauri/tests/model_725_black_dragon_test.rs:166:    let lab: LwBoneFile = lab_file.read_le().expect("Failed to parse 0725.lab");
+src-tauri/tests/model_725_black_dragon_test.rs:174:    let lgo_part0_path = test_dir.join("0725000000.lgo");
+src-tauri/tests/model_725_black_dragon_test.rs:176:        fs::File::open(&lgo_part0_path).expect("Failed to open 0725000000.lgo");
+src-tauri/tests/model_725_black_dragon_test.rs:179:        .expect("Failed to parse 0725000000.lgo");
+src-tauri/tests/model_725_black_dragon_test.rs:183:            "  ✓ Part 0 (0725000000.lgo): {} vertices, {} indices",
+src-tauri/tests/model_725_black_dragon_test.rs:190:    let lgo_part1_path = test_dir.join("0725000001.lgo");
+src-tauri/tests/model_725_black_dragon_test.rs:192:        fs::File::open(&lgo_part1_path).expect("Failed to open 0725000001.lgo");
+src-tauri/tests/model_725_black_dragon_test.rs:195:        .expect("Failed to parse 0725000001.lgo");
+src-tauri/tests/model_725_black_dragon_test.rs:199:            "  ✓ Part 1 (0725000001.lgo): {} vertices, {} indices",
+src-tauri/tests/model_725_black_dragon_test.rs:229:    let lab_path = test_dir.join("0725.lab");
+src-tauri/tests/model_725_black_dragon_test.rs:230:    let mut lab_file = fs::File::open(&lab_path).expect("Failed to open 0725.lab");
+src-tauri/tests/model_725_black_dragon_test.rs:231:    let lab: LwBoneFile = lab_file.read_le().expect("Failed to parse 0725.lab");
+
+thinking
+**Inspecting test skips for parsing issues**
+exec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '1,180p' src-tauri/tests/roundtrip_test.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '320,430p' src-tauri/tests/model_088_roundtrip_test.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '560,670p' src-tauri/tests/model_725_black_dragon_test.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc 'cd /Users/anirudh/gamedev/pko-tools && rg -n "Skipping LGO|parsing issues|TODO|FIXME|ignore|kaitai" src-tauri/tests src-tauri/src/character src-tauri/src/map/lmo_loader.rs src-tauri/src/animation/character.rs' in /Users/anirudh/gamedev/pko-tools succeeded in 50ms:
+        .dummy_seq
+        .iter()
+        .zip(new_lab.dummy_seq.iter())
+        .enumerate()
+    {
+        assert_eq!(orig_dummy.id, new_dummy.id, "Dummy {} id mismatch", i);
+        assert_eq!(
+            orig_dummy.parent_bone_id, new_dummy.parent_bone_id,
+            "Dummy {} parent_bone_id mismatch",
+            i
+        );
+    }
+    println!("  ✓ All {} dummies match", original_lab.dummy_seq.len());
+
+    println!("\n✅ BLACK DRAGON LAB ROUND-TRIP TEST PASSED!");
+}
+
+/// Full round-trip test for Black Dragon LGO Part 0
+#[test]
+#[ignore = "fails in current environment when importing glTF"]
+ succeeded in 52ms:
+// Round-trip test: LAB/LGO → glTF → LAB/LGO
+// This test verifies that converting files back and forth produces identical results
+
+use binrw::{BinReaderExt, BinWrite};
+use pko_tools_lib::animation::character::LwBoneFile;
+use pko_tools_lib::character::model::CharacterGeometricModel;
+use std::fs;
+use std::io::BufWriter;
+
+#[path = "common/mod.rs"]
+mod common;
+
+/// Test round-trip conversion for character 789 (files prefixed with 0725)
+/// 1. Load 0725.lab and 0725000000.lgo (original files)
+/// 2. Export to glTF
+/// 3. Import glTF back to LAB/LGO (new files)
+/// 4. Compare original vs new byte-by-byte
+#[test]
+#[ignore = "byte-level equality is unstable due to float drift"]
+fn roundtrip_character_789() {
+ succeeded in 52ms:
+                    i, f, min_diff,
+                    orig_q.0.s, orig_q.0.v.x, orig_q.0.v.y, orig_q.0.v.z,
+                    new_q.0.s, new_q.0.v.x, new_q.0.v.y, new_q.0.v.z);
+            }
+        }
+    }
+    println!(
+        "  ✓ All {} animation keyframe sequences match",
+        original_lab.key_seq.len()
+    );
+
+    println!("\n✅ ROUND-TRIP TEST PASSED!");
+    println!("  LAB file is semantically identical after round-trip conversion.");
+    println!("  (Note: Padding bytes in name buffers may differ, which is expected)");
+}
+
+/// Test round-trip conversion for model 088 LGO file  
+/// This test creates the full glTF with both LAB and LGO, then imports back
+/// 1. Load 0088.lab and 0088000000.lgo (original files)
+/// 2. Export to glTF (combined)
+ succeeded in 51ms:
+src-tauri/src/map/lmo_loader.rs:13:use crate::kaitai_gen::pko_lmo::*;
+src-tauri/src/map/lmo_loader.rs:14:use kaitai::*;
+src-tauri/src/map/lmo_loader.rs:26:        Some(v) if v == "kaitai" || v == "ksy" => LmoParserBackend::Kaitai,
+src-tauri/src/map/lmo_loader.rs:39:        LmoParserBackend::Kaitai => load_lmo_kaitai(path, true),
+src-tauri/src/map/lmo_loader.rs:50:fn load_lmo_kaitai(path: &Path, parse_animations: bool) -> Result<LmoModel> {
+src-tauri/src/map/lmo_loader.rs:53:    kaitai_to_lmo(&data, parse_animations)
+src-tauri/src/map/lmo_loader.rs:69:pub(crate) fn kaitai_to_lmo(data: &[u8], parse_animations: bool) -> Result<LmoModel> {
+src-tauri/src/map/lmo_loader.rs:181:                            // Check if kaitai's indices look wrong (first value >= vertex count)
+src-tauri/src/map/lmo_loader.rs:834:    fn backend_accepts_kaitai_markers() {
+src-tauri/src/map/lmo_loader.rs:836:            parse_lmo_backend(Some("kaitai")),
+src-tauri/src/map/lmo_loader.rs:843:    fn backend_ignores_unknown_values() {
+src-tauri/src/map/lmo_loader.rs:848:    /// TDD: Verify kaitai adapter produces identical output to native parser
+src-tauri/src/map/lmo_loader.rs:851:    fn kaitai_matches_native_on_single_file() {
+src-tauri/src/map/lmo_loader.rs:873:                eprintln!("Skipping kaitai parity test: no .lmo files found");
+src-tauri/src/map/lmo_loader.rs:882:        // Parse with kaitai
+src-tauri/src/map/lmo_loader.rs:883:        let kaitai = kaitai_to_lmo(&data, true);
+src-tauri/src/map/lmo_loader.rs:885:        match (native, kaitai) {
+src-tauri/src/map/lmo_loader.rs:894:                panic!("Native failed ({}) but kaitai succeeded on {}", e, path.display());
+src-tauri/src/map/lmo_loader.rs:1033:                    return Err(format!("{}.materials[{}] differs:\n  native:  {:?}\n  kaitai:  {:?}", ctx, j, nm, km));
+src-tauri/src/map/lmo_loader.rs:1061:                (Some(_), None) => return Err(format!("{}.animation: native has Some, kaitai has None", ctx)),
+
+thinking
+**Planning file and object parsing inspection**
+exec
+/bin/zsh -lc 'cd /Users/anirudh/gamedev/pko-tools && rg -n "impl LwBoneFile|from_file|write_options|BinWrite for LwBoneFile|impl BinWrite for LwBoneFile|key_type|pos_num" src-tauri/src/animation/character.rs src-tauri/src/character/model.rs' in /Users/anirudh/gamedev/pko-tools succeeded in 53ms:
+src-tauri/src/character/model.rs:327:    pub fn from_file(file_path: PathBuf) -> anyhow::Result<Self> {
+src-tauri/src/animation/character.rs:44:// Example key_type constants
+src-tauri/src/animation/character.rs:84:    pub key_type: u32,
+src-tauri/src/animation/character.rs:147:        let (frame_num, key_type, version, parent_id) = args;
+src-tauri/src/animation/character.rs:156:        match key_type {
+src-tauri/src/animation/character.rs:205:                    let pos_num = if parent_id == LW_INVALID_INDEX {
+src-tauri/src/animation/character.rs:215:                            count: pos_num as usize,
+src-tauri/src/animation/character.rs:220:                    if pos_num == 1 && !partial_pos.is_empty() {
+src-tauri/src/animation/character.rs:242:                    message: format!("Unknown key type: {}", key_type),
+src-tauri/src/animation/character.rs:282:                key_type: 0,
+src-tauri/src/animation/character.rs:381:                    this.header.key_type,
+src-tauri/src/animation/character.rs:396:impl BinWrite for LwBoneFile {
+src-tauri/src/animation/character.rs:399:    fn write_options<W: std::io::Write + Seek>(
+src-tauri/src/animation/character.rs:405:        u32::write_options(&self.version, writer, endian, ())?;
+src-tauri/src/animation/character.rs:406:        self.header.write_options(writer, endian, ())?;
+src-tauri/src/animation/character.rs:407:        Vec::write_options(&self.base_seq, writer, endian, ())?;
+src-tauri/src/animation/character.rs:408:        Vec::write_options(&self.invmat_seq, writer, endian, ())?;
+src-tauri/src/animation/character.rs:409:        Vec::write_options(&self.dummy_seq, writer, endian, ())?;
+src-tauri/src/animation/character.rs:412:            key_seq.write_options(writer, endian, ())?;
+src-tauri/src/animation/character.rs:418:impl LwBoneFile {
+
+thinking
+**Inspecting deletion viability**
+exec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '350,520p' src-tauri/src/animation/character.rs && sed -n '1230,1315p' src-tauri/src/animation/character.rs" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+        let _ = crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate(
+            "Loading animations".to_string(),
+            "Reading dummy information".to_string(),
+            current_step,
+            total_parsing_steps,
+        ));
+
+        this.dummy_seq = Vec::read_options(
+            reader,
+            opts,
+            binrw::VecArgs {
+                count: this.header.dummy_num as usize,
+                inner: (),
+            },
+        )?;
+
+        current_step += 1;
+        let _ = crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate(
+            "Loading animations".to_string(),
+            "Reading animation keyframe data".to_string(),
+
+thinking
+**Inspecting character model parsing**
+exec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '300,540p' src-tauri/src/character/model.rs && sed -n '540,780p' src-tauri/src/character/model.rs" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+                weights: None,
+                extras: Some(
+                    RawValue::from_string(
+                        format!(
+                            r#"{{"radius":{},"center":[{},{},{}],"type":"bounding_sphere","id":{},"mesh_index":{}}}"#,
+                            bsphere.sphere.r,
+                            center[0],
+                            center[1],
+                            center[2],
+                            bsphere.id,
+                            mesh_index
+                        )
+                    ).unwrap()
+                ),
+            };
+
+            nodes.push(node);
+        }
+
+        nodes
+
+thinking
+**Checking serialization derives**
+codex
+I confirmed the current LGO/LAB paths are still heavily BinRead/BinWrite-centric, with known ignored/failing round-trip tests. I’m now checking the exact type definitions in `character/{mesh,texture,helper}` to verify how much serialization/extraction work PR 9 actually implies.
+exec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '1,320p' src-tauri/src/character/helper.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '1,420p' src-tauri/src/character/mesh.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '1,420p' src-tauri/src/character/texture.rs" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc 'cd /Users/anirudh/gamedev/pko-tools && rg -n "''^'"\\s*#\\[derive|pub struct|pub enum\" src-tauri/src/character/helper.rs src-tauri/src/character/mesh.rs src-tauri/src/character/texture.rs | sed -n '1,260p'" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+use binrw::{binrw, BinRead};
+
+use crate::math::{LwBox, LwMatrix44, LwPlane, LwSphere, LwVector3};
+
+pub const HELPER_TYPE_DUMMY: u32 = 0x0001;
+pub const HELPER_TYPE_BOX: u32 = 0x0002;
+pub const HELPER_TYPE_MESH: u32 = 0x0004;
+pub const HELPER_TYPE_BBOX: u32 = 0x0010;
+pub const HELPER_TYPE_BSPHERE: u32 = 0x0020;
+
+#[derive(Debug)]
+#[binrw]
+pub struct HelperDummyInfo {
+    pub id: u32,
+    pub mat: LwMatrix44,
+    pub mat_local: LwMatrix44,
+    // 0: default, 1: bone parent, 2: bone dummy parent
+    pub parent_type: u32,
+    pub parent_id: u32,
+}
+ succeeded in 51ms:
+use std::io::{Cursor, Seek};
+
+use ::image::{ImageFormat, ImageReader};
+use base64::{prelude::BASE64_STANDARD, Engine};
+use binrw::{binrw, BinRead, BinWrite, Error};
+use gltf::{buffer, Document, Texture};
+use image::Rgb;
+
+use serde::{Deserialize, Serialize};
+
+use crate::texture_pipeline::converter::{self, TextureConvertOptions};
+
+use crate::{
+    animation::character::{LW_INVALID_INDEX, LW_MAX_NAME},
+    d3d::{D3DBlend, D3DCmpFunc, D3DFormat, D3DPool, D3DRenderStateType},
+};
+
+use super::model::{
+    RenderStateSetTemplate, D3DRS_ALPHAFUNC, D3DRS_ALPHAREF, EXP_OBJ_VERSION_1_0_0_0,
+    LW_MAX_TEXTURESTAGE_NUM, LW_MTL_RS_NUM, MTLTEX_VERSION0000, MTLTEX_VERSION0001,
+ succeeded in 51ms:
+use core::f32;
+use std::{
+    collections::{BTreeMap, HashMap},
+    fs::File,
+    io::Seek,
+    path::Path,
+};
+
+use crate::{
+    animation::character::LW_INVALID_INDEX,
+    character::Character,
+    d3d::{D3DPrimitiveType, D3DVertexElement9},
+    math::{self, LwVector2, LwVector3},
+};
+use ::gltf::{
+    buffer,
+    json::{
+        accessor::{ComponentType, GenericComponentType},
+        image::MimeType,
+        material::{EmissiveFactor, PbrBaseColorFactor, PbrMetallicRoughness, StrengthFactor},
+ succeeded in 51ms:
+src-tauri/src/character/texture.rs:27:#[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+src-tauri/src/character/texture.rs:32:pub enum MaterialTextureInfoTransparencyType {
+src-tauri/src/character/texture.rs:73:#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+src-tauri/src/character/texture.rs:77:pub enum ColorKeyType {
+src-tauri/src/character/texture.rs:85:#[derive(Serialize, Deserialize, Clone, Copy)]
+src-tauri/src/character/texture.rs:87:pub struct ColorValue4F {
+src-tauri/src/character/texture.rs:110:#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+src-tauri/src/character/texture.rs:114:pub enum TextureType {
+src-tauri/src/character/texture.rs:123:#[derive(Clone)]
+src-tauri/src/character/texture.rs:125:pub struct CharMaterial {
+src-tauri/src/character/texture.rs:172:#[derive(Default, Copy, Clone, Debug, Serialize, Deserialize)]
+src-tauri/src/character/texture.rs:174:pub struct RenderStateAtom {
+src-tauri/src/character/texture.rs:190:#[derive(Debug, Copy, Clone)]
+src-tauri/src/character/texture.rs:192:pub struct LwColorValue4b {
+src-tauri/src/character/texture.rs:214:#[derive(Debug, Clone)]
+src-tauri/src/character/texture.rs:216:pub struct TextureInfo {
+src-tauri/src/character/texture.rs:287:#[derive(Debug, Clone)]
+src-tauri/src/character/texture.rs:289:pub struct TextureInfo0000 {
+src-tauri/src/character/texture.rs:299:#[derive(Debug, Clone)]
+src-tauri/src/character/texture.rs:301:pub struct TextureInfo0001 {
+
+thinking
+**Inspecting key module dependencies**
+exec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && sed -n '1,240p' src-tauri/src/map/scene_model.rs" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+//! LMO → glTF conversion for scene building models.
+//!
+//! Two entry points:
+//! - `build_gltf_from_lmo` — standalone building viewer (single LMO → complete glTF)
+//! - `load_scene_models` — map integration (batch load unique models, return glTF components)
+
+use std::collections::HashMap;
+use std::path::Path;
+
+use anyhow::{anyhow, Result};
+use base64::prelude::BASE64_STANDARD;
+use base64::Engine;
+use gltf::json as gltf_json;
+use gltf_json::{
+    accessor::{ComponentType, GenericComponentType},
+    animation::{Channel, Sampler, Target},
+    validation::{Checked, USize64},
+};
+
+use crate::item::model::decode_pko_texture;
+
+thinking
+**Analyzing parser dependencies**
+exec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && rg -n \"EffFile::from_bytes|EffFile::read_from|read_from\\(|to_bytes\\(|write_to\\(|load_effect|save_effect|effect\" src-tauri/src/effect src-tauri/src/map/shared.rs src-tauri/tests/effect_* src-tauri/tests/*effect*" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+src-tauri/tests/effect_schema_sync_test.rs:1:use pko_tools_lib::effect::model::EffFile;
+src-tauri/tests/effect_schema_sync_test.rs:8:/// The TypeScript test (`src/types/__tests__/effectSchema.test.ts`) reads this
+src-tauri/tests/effect_schema_sync_test.rs:17:    let bytes = std::fs::read(path).expect("read effect fixture");
+src-tauri/tests/effect_schema_sync_test.rs:18:    let eff = EffFile::from_bytes(&bytes)
+src-tauri/tests/effect_schema_sync_test.rs:30:    let output_path = output_dir.join("known_effect.json");
+src-tauri/tests/effect_schema_sync_test.rs:42:fn all_effects_produce_valid_json() {
+src-tauri/tests/effect_schema_sync_test.rs:48:        let eff = EffFile::from_bytes(&bytes)
+src-tauri/tests/effect_roundtrip_test.rs:1:use pko_tools_lib::effect::model::EffFile;
+src-tauri/tests/effect_roundtrip_test.rs:12:        let original_bytes = std::fs::read(&path).expect("read effect fixture");
+src-tauri/tests/effect_roundtrip_test.rs:13:        let eff = EffFile::from_bytes(&original_bytes)
+src-tauri/tests/effect_roundtrip_test.rs:16:            .to_bytes()
+src-tauri/tests/effect_roundtrip_test.rs:18:        let roundtrip = EffFile::from_bytes(&new_bytes)
+src-tauri/src/effect/model.rs:23:    pub sub_effects: Vec<SubEffect>,
+src-tauri/src/effect/model.rs:29:    pub effect_name: String,
+src-tauri/src/effect/model.rs:30:    pub effect_type: i32,
+src-tauri/src/effect/model.rs:79:        Self::read_from(&mut reader)
+src-tauri/src/effect/model.rs:82:    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+src-tauri/src/effect/model.rs:84:        self.write_to(&mut buffer)?;
+src-tauri/src/effect/model.rs:100:        let mut sub_effects = Vec::with_capacity(eff_num.max(0) as usize);
+src-tauri/src/effect/model.rs:102:            sub_effects.push(SubEffect::read_from(reader, version)?);
+
+thinking
+**Inspecting map and parse usage**
+exec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && rg -n \"parse_obj_file\\(|ParsedObjFile|parse_map\\(|ParsedMap|terrain::parse_map|scene_obj::parse_obj_file\" src-tauri/src src-tauri/tests" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+src-tauri/src/bin/export_cli.rs:153:        let parsed = match pko_tools_lib::map::scene_obj::parse_obj_file(&data) {
+src-tauri/src/map/scene_obj.rs:34:pub struct ParsedObjFile {
+src-tauri/src/map/scene_obj.rs:113:pub fn parse_obj_file(data: &[u8]) -> Result<ParsedObjFile> {
+src-tauri/src/map/scene_obj.rs:232:    Ok(ParsedObjFile {
+src-tauri/src/map/scene_obj.rs:257:        let parsed = parse_obj_file(&data).unwrap();
+src-tauri/src/map/scene_obj.rs:286:        let parsed = parse_obj_file(&data).unwrap();
+src-tauri/src/map/terrain.rs:18:use crate::map::scene_obj::{parse_obj_file, ParsedObjFile};
+src-tauri/src/map/terrain.rs:67:pub struct ParsedMap {
+src-tauri/src/map/terrain.rs:134:pub fn parse_map(data: &[u8]) -> Result<ParsedMap> {
+src-tauri/src/map/terrain.rs:206:    Ok(ParsedMap {
+src-tauri/src/map/terrain.rs:284:pub(crate) fn get_tile<'a>(map: &'a ParsedMap, tx: i32, ty: i32) -> Option<&'a MapTile> {
+src-tauri/src/map/terrain.rs:312:fn sample_scene_terrain_height(map: &ParsedMap, world_x: f32, world_y: f32) -> f32 {
+src-tauri/src/map/terrain.rs:358:fn get_render_vertex_tile<'a>(map: &'a ParsedMap, vx: i32, vy: i32) -> Option<&'a MapTile> {
+src-tauri/src/map/terrain.rs:388:    parsed_map: &ParsedMap,
+src-tauri/src/map/terrain.rs:389:    objects: Option<&ParsedObjFile>,
+src-tauri/src/map/terrain.rs:1092:    parsed_map: &ParsedMap,
+src-tauri/src/map/terrain.rs:1736:pub fn compute_global_normals(parsed_map: &ParsedMap) -> Vec<[f32; 3]> {
+src-tauri/src/map/terrain.rs:1811:    parsed_map: &ParsedMap,
+src-tauri/src/map/terrain.rs:2174:    parsed_map: &ParsedMap,
+src-tauri/src/map/terrain.rs:2377:    let parsed_map = parse_map(&map_data)?;
+
+thinking
+**Analyzing model usage distinctions**
+exec
+/bin/zsh -lc "cd /Users/anirudh/gamedev/pko-tools && rg -n \"CharacterGeometricModel|from_file\\(|read_le\\(\\).*CharacterGeometricModel|build_gltf_from_lgo|LGO\" src-tauri/src src-tauri/tests" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+Total output lines: 237
+
+src-tauri/tests/index_space_tests.rs:8:use pko_tools_lib::character::model::CharacterGeometricModel;
+src-tauri/tests/index_space_tests.rs:87:    // For this test, we need LGO files with their corresponding LAB
+src-tauri/tests/index_space_tests.rs:101:    // Find corresponding LGO files
+src-tauri/tests/index_space_tests.rs:114:        .take(3) // Test first 3 LGO files
+src-tauri/tests/index_space_tests.rs:124:        let mut lgo_file = fs::File::open(&lgo_path).expect("Failed to open LGO");
+src-tauri/tests/index_space_tests.rs:125:        let lgo_model: CharacterGeometricModel = lgo_file.read_le().expect("Failed to parse LGO");
+src-tauri/tests/index_space_tests.rs:131:                println!("  ⚠️  No mesh_info in this LGO, skipping");
+src-tauri/tests/roundtrip_test.rs:1:// Round-trip test: LAB/LGO → glTF → LAB/LGO
+src-tauri/tests/roundtrip_test.rs:6:use pko_tools_lib::character::model::CharacterGeometricModel;
+src-tauri/tests/roundtrip_test.rs:16:/// 3. Import glTF back to LAB/LGO (new files)
+src-tauri/tests/roundtrip_test.rs:26:    // Step 1: Load original LAB and LGO files
+src-tauri/tests/roundtrip_test.rs:46:    println!("  ⚠️  Skipping LGO comparison (parsing issues with 0725000000.lgo)");
+src-tauri/tests/roundtrip_test.rs:84:    // Step 3: Import glTF back to LAB (skip LGO for now)
+src-tauri/tests/model_725_black_dragon_test.rs:1:// Round-trip test for model 725 (Black Dragon): LAB+LGO → glTF → LAB+LGO
+src-tauri/tests/model_725_black_dragon_test.rs:8:use pko_tools_lib::character::model::CharacterGeometricModel;
+src-tauri/tests/model_725_black_dragon_test.rs:143:    // Verify the LGO file paths that would be generated
+src-tauri/tests/model_725_black_dragon_test.rs:177:    let lgo_part0: CharacterGeometricModel = lgo_part0_file
+src-tauri/tests/model_725_black_dragon_test.rs:193:    let lgo_part1: CharacterGeometricModel = lgo_part1_file

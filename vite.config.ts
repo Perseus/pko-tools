@@ -23,6 +23,70 @@ export default defineConfig(async () => ({
     },
   },
 
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (!id.includes("node_modules")) {
+            return undefined;
+          }
+          if (
+            id.includes("@react-three/fiber")
+          ) {
+            return "vendor-r3f";
+          }
+          if (
+            id.includes("@react-three/drei") ||
+            id.includes("three-stdlib")
+          ) {
+            return "vendor-drei";
+          }
+          if (
+            id.includes("camera-controls")
+          ) {
+            return "vendor-camera-controls";
+          }
+          if (
+            id.includes("react-dropzone") ||
+            id.includes("file-selector") ||
+            id.includes("attr-accept")
+          ) {
+            return "vendor-dropzone";
+          }
+          if (
+            id.includes("/three/examples/")
+          ) {
+            return "vendor-three-extras";
+          }
+          if (id.includes("/three/")) {
+            return "vendor-three-core";
+          }
+          if (id.includes("leva")) {
+            return "vendor-leva";
+          }
+          if (
+            id.includes("@radix-ui") ||
+            id.includes("cmdk") ||
+            id.includes("lucide-react")
+          ) {
+            return "vendor-ui";
+          }
+          if (id.includes("@tauri-apps")) {
+            return "vendor-tauri";
+          }
+          if (
+            id.includes("/react/") ||
+            id.includes("react-router") ||
+            id.includes("jotai")
+          ) {
+            return "vendor-react";
+          }
+          return "vendor-misc";
+        },
+      },
+    },
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent vite from obscuring rust errors

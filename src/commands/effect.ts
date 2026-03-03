@@ -1,4 +1,4 @@
-import { invoke } from "@tauri-apps/api/core";
+import { invokeTimed as invoke } from "@/commands/invokeTimed";
 import { EffectFile, Vec3 } from "@/types/effect";
 import type { ParticleController } from "@/types/particle";
 

@@ -3,11 +3,11 @@ import { PARTICLE_TYPE, type ParticleSystem } from "@/types/particle";
 import { effectPlaybackAtom, traceRecorderTickAtom } from "@/store/effect";
 import { particleDataAtom, selectedParticleSystemIndexAtom } from "@/store/particle";
 import { currentProjectAtom } from "@/store/project";
+import { invokeTimed as invoke } from "@/commands/invokeTimed";
 import { useAtomValue } from "jotai";
 import React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
-import { invoke } from "@tauri-apps/api/core";
 import * as THREE from "three";
 import {
   MAX_PARTICLES,

@@ -16,7 +16,7 @@ import React from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { PivotControls } from "@react-three/drei";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeTimed as invoke } from "@/commands/invokeTimed";
 import * as THREE from "three";
 import {
   createEffectTexture,
@@ -40,6 +40,7 @@ import {
 import { interpolateFrame, interpolateUVCoords, getTexListFrameIndex } from "@/features/effect/animation";
 import { useEffectHistory } from "@/features/effect/useEffectHistory";
 import { useEffectModel } from "@/features/effect/useEffectModel";
+import { usePlaybackClock } from "@/features/effect/playbackClock";
 
 type DecodedTexture = {
   width: number;
@@ -56,6 +57,39 @@ const _rotaQuat = new THREE.Quaternion();
 // PKO uses D3DXMatrixRotationYawPitchRoll(yaw=y, pitch=x, roll=z) → Euler 'YXZ'
 const _baseEuler = new THREE.Euler(0, 0, 0, "YXZ");
 const _effRotaAxis = new THREE.Vector3();
+const _gizmoPos = new THREE.Vector3();
+const _gizmoScale = new THREE.Vector3();
+const _gizmoQuat = new THREE.Quaternion();
+const _gizmoEuler = new THREE.Euler();
+
+function getCachedCylinderPositions(
+  cache: Map<string, Float32Array>,
+  params: { topRadius?: number; botRadius?: number; height?: number; segments?: number }
+): Float32Array {
+  const topRadius = params.topRadius || 0.5;
+  const botRadius = params.botRadius || 0.5;
+  const height = params.height || 1.0;
+  const segments = Math.max(params.segments || 16, 3);
+  const key = `${topRadius}:${botRadius}:${height}:${segments}`;
+
+  const existing = cache.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const geometry = new THREE.CylinderGeometry(
+    topRadius,
+    botRadius,
+    height,
+    segments,
+  );
+  const positions = new Float32Array(
+    (geometry.getAttribute("position").array as Float32Array).slice()
+  );
+  geometry.dispose();
+  cache.set(key, positions);
+  return positions;
+}
 
 type EffectSubRendererProps = {
   subEffectIndex: number;
@@ -72,6 +106,7 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
   const selectedSubEffectIndex = useAtomValue(selectedSubEffectIndexAtom);
   const selectedFrameIndex = useAtomValue(selectedFrameIndexAtom);
   const gizmoMode = useAtomValue(gizmoModeAtom);
+  const playbackTime = usePlaybackClock();
   const { pushSnapshot } = useEffectHistory();
 
   const isSelected = subEffectIndex === selectedSubEffectIndex;
@@ -87,6 +122,7 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
   const textureRef = useRef<THREE.Texture | null>(null);
   const boneMatrix = useAtomValue(boundBoneMatrixAtom);
   const snapshotPushed = useRef(false);
+  const cylinderPositionCache = useRef<Map<string, Float32Array>>(new Map());
 
   const subEffect = frameData?.subEffect ?? null;
 
@@ -138,8 +174,8 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
   // Smooth interpolation between keyframes during playback
   const interpolated = useMemo(() => {
     if (!subEffect || !playback.isPlaying) return null;
-    return interpolateFrame(subEffect, playback.currentTime, true);
-  }, [subEffect, playback.isPlaying, playback.currentTime]);
+    return interpolateFrame(subEffect, playbackTime, true);
+  }, [subEffect, playback.isPlaying, playbackTime]);
 
   const textureName = useMemo(() => {
     if (!subEffect) {
@@ -310,7 +346,7 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
       _effRotaAxis.set(rx, ry, rz);
       if (_effRotaAxis.lengthSq() > 0.0001) {
         _effRotaAxis.normalize();
-        const effAngle = playback.currentTime * effectData.rotaVel;
+        const effAngle = playbackTime * effectData.rotaVel;
         effectGroupRef.current.quaternion.setFromAxisAngle(_effRotaAxis, effAngle);
       }
     } else if (effectGroupRef.current) {
@@ -339,7 +375,7 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
       _rotaAxis.set(ax, ay, az);
       if (_rotaAxis.lengthSq() > 0.0001) {
         _rotaAxis.normalize();
-        const rotaAngle = playback.currentTime * speed;
+        const rotaAngle = playbackTime * speed;
         // Compose: RotaLoop * FrameRotation
         _baseEuler.set(angle[0], angle[1], angle[2], "YXZ");
         meshRef.current.quaternion.setFromEuler(_baseEuler);
@@ -365,7 +401,7 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
 
     // UV animation for effectType 2 (EFFECT_MODELUV) — interpolated UV coords
     if (subEffect && playback.isPlaying && subEffect.effectType === 2 && subEffect.coordList.length > 0) {
-      const uvResult = interpolateUVCoords(subEffect, playback.currentTime, true);
+      const uvResult = interpolateUVCoords(subEffect, playbackTime, true);
       if (uvResult && meshRef.current.geometry) {
         const uvAttr = meshRef.current.geometry.getAttribute("uv");
         if (uvAttr && uvAttr.count === uvResult.uvs.length) {
@@ -379,7 +415,7 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
 
     // UV animation for effectType 3 (EFFECT_MODELTEXTURE) — snapped UV sets
     if (subEffect && playback.isPlaying && subEffect.effectType === 3 && subEffect.texList.length > 0) {
-      const texIdx = getTexListFrameIndex(subEffect, playback.currentTime, true);
+      const texIdx = getTexListFrameIndex(subEffect, playbackTime, true);
       if (texIdx !== null && subEffect.texList[texIdx] && meshRef.current.geometry) {
         const uvAttr = meshRef.current.geometry.getAttribute("uv");
         const texUVs = subEffect.texList[texIdx];
@@ -406,36 +442,27 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
       const curParams = subEffect.perFrameCylinder[interpolated.frameIndex];
       const nxtParams = subEffect.perFrameCylinder[interpolated.nextFrameIndex];
       if (curParams && nxtParams && interpolated.lerp > 0.001) {
-        // Build two temporary cylinder geometries (Z-axis) and lerp their vertices
-        const segs = Math.max(curParams.segments || 16, 3);
-        const curGeo = createCylinderGeometry(
-          curParams.topRadius || 0.5, curParams.botRadius || 0.5,
-          curParams.height || 1.0, segs,
-        );
-        const nxtGeo = createCylinderGeometry(
-          nxtParams.topRadius || 0.5, nxtParams.botRadius || 0.5,
-          nxtParams.height || 1.0, segs,
-        );
-
-        const curPos = curGeo.getAttribute("position");
-        const nxtPos = nxtGeo.getAttribute("position");
+        const curPos = getCachedCylinderPositions(cylinderPositionCache.current, curParams);
+        const nxtPos = getCachedCylinderPositions(cylinderPositionCache.current, nxtParams);
         const targetPos = meshRef.current.geometry.getAttribute("position");
 
-        if (curPos && nxtPos && targetPos && curPos.count === nxtPos.count && curPos.count === targetPos.count) {
+        if (
+          targetPos &&
+          curPos.length === nxtPos.length &&
+          targetPos.count * 3 === curPos.length
+        ) {
           const t = interpolated.lerp;
-          for (let v = 0; v < curPos.count; v++) {
+          for (let v = 0; v < targetPos.count; v++) {
+            const offset = v * 3;
             targetPos.setXYZ(
               v,
-              curPos.getX(v) + (nxtPos.getX(v) - curPos.getX(v)) * t,
-              curPos.getY(v) + (nxtPos.getY(v) - curPos.getY(v)) * t,
-              curPos.getZ(v) + (nxtPos.getZ(v) - curPos.getZ(v)) * t,
+              curPos[offset] + (nxtPos[offset] - curPos[offset]) * t,
+              curPos[offset + 1] + (nxtPos[offset + 1] - curPos[offset + 1]) * t,
+              curPos[offset + 2] + (nxtPos[offset + 2] - curPos[offset + 2]) * t,
             );
           }
           targetPos.needsUpdate = true;
         }
-
-        curGeo.dispose();
-        nxtGeo.dispose();
       }
     }
   });
@@ -451,13 +478,8 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
         snapshotPushed.current = true;
       }
 
-      const pos = new THREE.Vector3();
-      const rot = new THREE.Euler();
-      const scl = new THREE.Vector3();
-      const quat = new THREE.Quaternion();
-
-      local.decompose(pos, quat, scl);
-      rot.setFromQuaternion(quat);
+      local.decompose(_gizmoPos, _gizmoQuat, _gizmoScale);
+      _gizmoEuler.setFromQuaternion(_gizmoQuat);
 
       const nextSubEffects = effectData.subEffects.map((se, i) => {
         if (i !== selectedSubEffectIndex) return se;
@@ -467,9 +489,9 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
         const nextSizes = [...se.frameSizes];
 
         if (gizmoMode === "translate" || gizmoMode === "rotate" || gizmoMode === "scale") {
-          nextPositions[frameData.frameIndex] = [pos.x, pos.y, pos.z];
-          nextAngles[frameData.frameIndex] = [rot.x, rot.y, rot.z];
-          nextSizes[frameData.frameIndex] = [scl.x, scl.y, scl.z];
+          nextPositions[frameData.frameIndex] = [_gizmoPos.x, _gizmoPos.y, _gizmoPos.z];
+          nextAngles[frameData.frameIndex] = [_gizmoEuler.x, _gizmoEuler.y, _gizmoEuler.z];
+          nextSizes[frameData.frameIndex] = [_gizmoScale.x, _gizmoScale.y, _gizmoScale.z];
         }
 
         return {
@@ -488,6 +510,12 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
   const handleGizmoDragEnd = useMemo(() => {
     return () => {
       snapshotPushed.current = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      cylinderPositionCache.current.clear();
     };
   }, []);
 

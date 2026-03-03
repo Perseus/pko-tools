@@ -5,6 +5,12 @@ import { Suspense } from "react";
 import { buildingGltfJsonAtom, buildingLoadingAtom, selectedBuildingAtom } from "@/store/buildings";
 import BuildingsModelViewer from "./BuildingsModelViewer";
 import { Loader2 } from "lucide-react";
+import { actionIds } from "@/features/actions/actionIds";
+import { ContextualActionMenu } from "@/features/actions/ContextualActionMenu";
+import { PerfFrameProbe, PerfOverlay } from "@/features/perf";
+import { CanvasErrorBoundary } from "@/components/CanvasErrorBoundary";
+
+const BUILDING_CONTEXT_ACTIONS = [actionIds.buildingExportGltf];
 
 function BuildingInfoPanel() {
   const building = useAtomValue(selectedBuildingAtom);
@@ -43,34 +49,44 @@ export default function BuildingsWorkbench() {
   }
 
   return (
-    <div className="relative h-full w-full">
+    <ContextualActionMenu
+      actionIds={BUILDING_CONTEXT_ACTIONS}
+      requireShiftKey
+      className="relative h-full w-full"
+    >
       <BuildingInfoPanel />
-      <Canvas
-        camera={{
-          position: [30, 25, 30],
-          fov: 45,
-          near: 0.01,
-          far: 10000,
-        }}
-        style={{
-          background: "linear-gradient(180deg, #b0c4de 0%, #dfe6ed 100%)",
-        }}
-      >
-        <ambientLight intensity={0.6} />
-        <directionalLight position={[10, 20, 10]} intensity={0.8} />
+      <CanvasErrorBoundary className="absolute inset-0 flex items-center justify-center">
+        <Canvas
+          camera={{
+            position: [30, 25, 30],
+            fov: 45,
+            near: 0.01,
+            far: 10000,
+          }}
+          dpr={[1, 1.5]}
+          gl={{ powerPreference: "high-performance" }}
+          style={{
+            background: "linear-gradient(180deg, #b0c4de 0%, #dfe6ed 100%)",
+          }}
+        >
+          <ambientLight intensity={0.6} />
+          <directionalLight position={[10, 20, 10]} intensity={0.8} />
 
-        <Suspense fallback={null}>
-          {gltfJson && <BuildingsModelViewer gltfJson={gltfJson} />}
-        </Suspense>
+          <Suspense fallback={null}>
+            {gltfJson && <BuildingsModelViewer gltfJson={gltfJson} />}
+          </Suspense>
 
-        <OrbitControls makeDefault />
+          <OrbitControls makeDefault />
 
-        <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
-          <GizmoViewport />
-        </GizmoHelper>
+          <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
+            <GizmoViewport />
+          </GizmoHelper>
 
-        <gridHelper args={[50, 50, "#888888", "#444444"]} />
-      </Canvas>
-    </div>
+          <gridHelper args={[50, 50, "#888888", "#444444"]} />
+          <PerfFrameProbe surface="buildings" />
+        </Canvas>
+      </CanvasErrorBoundary>
+      <PerfOverlay surface="buildings" className="right-3 top-3" />
+    </ContextualActionMenu>
   );
 }

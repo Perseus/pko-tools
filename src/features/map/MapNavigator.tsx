@@ -1,7 +1,7 @@
 import { currentProjectAtom } from "@/store/project";
 import { useAtom, useAtomValue } from "jotai";
 import { useVirtualizer, Virtualizer } from "@tanstack/react-virtual";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ScrollAreaVirtualizable } from "@/components/ui/scroll-area-virtualizable";
 import { SidebarHeader } from "@/components/ui/sidebar";
 import { MapEntry } from "@/types/map";
@@ -16,6 +16,8 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Download, Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { LatestOnly } from "@/lib/latestOnly";
+import { actionIds, useRegisterActionRuntime } from "@/features/actions";
 
 export default function MapNavigator() {
   const [maps, setMaps] = useState<MapEntry[]>([]);
@@ -27,15 +29,28 @@ export default function MapNavigator() {
   const [, setMapLoading] = useAtom(mapLoadingAtom);
   const [query, setQuery] = useState("");
   const [selectedMap, setSelectedMap] = useAtom(selectedMapAtom);
+  const listRequestGuard = useRef(new LatestOnly());
+  const loadRequestGuard = useRef(new LatestOnly());
 
   useEffect(() => {
     async function fetchMaps() {
-      if (currentProject) {
-        const mapList = await getMapList(currentProject.id);
-        setMaps(mapList);
+      const requestVersion = listRequestGuard.current.begin();
+      if (!currentProject) {
+        setMaps([]);
+        return;
       }
+
+      const mapList = await getMapList(currentProject.id);
+      if (!listRequestGuard.current.isLatest(requestVersion)) {
+        return;
+      }
+      setMaps(mapList);
     }
     fetchMaps();
+
+    return () => {
+      listRequestGuard.current.invalidate();
+    };
   }, [currentProject]);
 
   useEffect(() => {
@@ -57,6 +72,7 @@ export default function MapNavigator() {
 
   async function selectMap(map: MapEntry) {
     if (!currentProject) return;
+    const requestVersion = loadRequestGuard.current.begin();
     setSelectedMap(map);
     setMapGltfJson(null);
     setMapMetadata(null);
@@ -67,19 +83,32 @@ export default function MapNavigator() {
         loadMapTerrain(currentProject.id, map.name),
         getMapMetadata(currentProject.id, map.name),
       ]);
+      if (!loadRequestGuard.current.isLatest(requestVersion)) {
+        return;
+      }
       setMapGltfJson(gltfJson);
       setMapMetadata(metadata);
     } catch (err) {
-      console.error("Failed to load map:", err);
-      toast({
-        title: "Failed to load map",
-        description: String(err),
-        variant: "destructive",
-      });
+      if (loadRequestGuard.current.isLatest(requestVersion)) {
+        console.error("Failed to load map:", err);
+        toast({
+          title: "Failed to load map",
+          description: String(err),
+          variant: "destructive",
+        });
+      }
     } finally {
-      setMapLoading(false);
+      if (loadRequestGuard.current.isLatest(requestVersion)) {
+        setMapLoading(false);
+      }
     }
   }
+
+  useEffect(() => {
+    return () => {
+      loadRequestGuard.current.invalidate();
+    };
+  }, []);
 
   async function handleExport() {
     if (!currentProject || !selectedMap) return;
@@ -100,6 +129,26 @@ export default function MapNavigator() {
       setExporting(false);
     }
   }
+
+  const mapExportActionRuntime = useMemo(
+    () => ({
+      run: () => {
+        if (!exporting) {
+          void handleExport();
+        }
+      },
+      isEnabled: () => Boolean(currentProject && selectedMap && !exporting),
+      disabledReason: () => {
+        if (!currentProject) return "No project selected";
+        if (!selectedMap) return "No map selected";
+        if (exporting) return "Export already in progress";
+        return undefined;
+      },
+    }),
+    [currentProject, exporting, selectedMap],
+  );
+
+  useRegisterActionRuntime(actionIds.mapExportGltf, mapExportActionRuntime);
 
   return (
     <>

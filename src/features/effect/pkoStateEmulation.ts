@@ -116,7 +116,9 @@ export const PKO_EFFECT_TECHNIQUE_OVERRIDES: Record<number, Partial<PkoTechnique
 };
 
 /** Map D3DBLEND constant to Three.js blend factor. */
-export function mapBlendFactor(value: number): THREE.BlendingDstFactor | null {
+export function mapBlendFactor(
+  value: number
+): THREE.BlendingSrcFactor | THREE.BlendingDstFactor | null {
   switch (Number(value)) {
     case D3DBLEND_ZERO: return THREE.ZeroFactor;
     case D3DBLEND_ONE: return THREE.OneFactor;
@@ -204,8 +206,14 @@ export function applyTextureSampling(
   options: Partial<PkoTechniqueState> = {},
 ): void {
   if (!texture) return;
-  texture.minFilter = mapTextureFilter(options.minFilter ?? D3DTEXF_LINEAR, true);
-  texture.magFilter = mapTextureFilter(options.magFilter ?? D3DTEXF_LINEAR, false);
+  texture.minFilter = mapTextureFilter(
+    options.minFilter ?? D3DTEXF_LINEAR,
+    true
+  ) as THREE.MinificationTextureFilter;
+  texture.magFilter = mapTextureFilter(
+    options.magFilter ?? D3DTEXF_LINEAR,
+    false
+  ) as THREE.MagnificationTextureFilter;
   texture.wrapS = mapTextureAddress(options.addressU ?? D3DTADDRESS_CLAMP);
   texture.wrapT = mapTextureAddress(options.addressV ?? D3DTADDRESS_CLAMP);
   texture.needsUpdate = true;
@@ -226,9 +234,9 @@ function applyBlendToMaterial(
   }
   material.transparent = true;
   material.blending = THREE.CustomBlending;
-  material.blendSrc = src;
-  material.blendDst = dst;
-  material.blendEquation = THREE.AddEquation;
+  material.blendSrc = src as THREE.BlendingSrcFactor;
+  material.blendDst = dst as THREE.BlendingDstFactor;
+  material.blendEquation = THREE.AddEquation as THREE.BlendingEquation;
   material.depthWrite = false;
 }
 
@@ -249,7 +257,9 @@ export function applyPkoRenderState(
   material.depthTest = zEnable;
   material.depthWrite = zWriteEnable;
   material.side = mapCullMode(state.cullMode ?? D3DCULL_NONE);
-  material.fog = false;
+  if ("fog" in material) {
+    (material as THREE.Material & { fog: boolean }).fog = false;
+  }
   material.toneMapped = false;
 
   if (alphaBlendEnable) {

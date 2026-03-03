@@ -1,5 +1,5 @@
+import { invokeTimed as invoke } from "@/commands/invokeTimed";
 import { MapEntry, MapExportResult, MapForUnityExportResult, MapMetadata } from "@/types/map";
-import { invoke } from "@tauri-apps/api/core";
 
 export const getMapList = async (
   projectId: string

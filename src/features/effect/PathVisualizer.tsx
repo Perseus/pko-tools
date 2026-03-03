@@ -8,6 +8,7 @@ import React from "react";
 import { useMemo, useRef } from "react";
 import * as THREE from "three";
 import { getPathPosition } from "@/features/effect/animation";
+import { playbackClockStore } from "@/features/effect/playbackClock";
 
 /** Default path velocity — must match the value used in EffectViewport PathFollower. */
 const DEFAULT_PATH_VELOCITY = 2.0;
@@ -30,9 +31,10 @@ export default function PathVisualizer() {
     if (!markerRef.current || !pathPoints || pathPoints.length < 2) return;
 
     if (playback.isPlaying) {
+      const currentTime = playbackClockStore.get();
       const pos = getPathPosition(
         pathPoints,
-        playback.currentTime,
+        currentTime,
         DEFAULT_PATH_VELOCITY,
         playback.isLooping,
       );
