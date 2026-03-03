@@ -13,7 +13,9 @@ import { currentProjectAtom } from "@/store/project";
 import { Input } from "@/components/ui/input";
 import { useAtom, useAtomValue } from "jotai";
 import React from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { LatestOnly } from "@/lib/latestOnly";
+import { useEffectHistory } from "@/features/effect/useEffectHistory";
 
 export default function EffectNavigator() {
   const currentProject = useAtomValue(currentProjectAtom);
@@ -26,19 +28,30 @@ export default function EffectNavigator() {
   const [effectFiles, setEffectFiles] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const [pendingEffect, setPendingEffect] = useState<string | null>(null);
+  const listRequestGuard = useRef(new LatestOnly());
+  const loadRequestGuard = useRef(new LatestOnly());
+  const { resetHistory } = useEffectHistory();
 
   useEffect(() => {
     async function fetchEffects() {
+      const requestVersion = listRequestGuard.current.begin();
       if (!currentProject) {
         setEffectFiles([]);
         return;
       }
 
       const files = await listEffects(currentProject.id);
+      if (!listRequestGuard.current.isLatest(requestVersion)) {
+        return;
+      }
       setEffectFiles(files);
     }
 
     fetchEffects();
+
+    return () => {
+      listRequestGuard.current.invalidate();
+    };
   }, [currentProject]);
 
   const filteredEffects = useMemo(() => {
@@ -69,15 +82,26 @@ export default function EffectNavigator() {
       return;
     }
 
+    const requestVersion = loadRequestGuard.current.begin();
     setSelectedEffect(effectName);
     const data = await loadEffect(currentProject.id, effectName);
+    if (!loadRequestGuard.current.isLatest(requestVersion)) {
+      return;
+    }
     setEffectData(data);
     setOriginalEffect(structuredClone(data));
     setSelectedSubEffect(data.subEffects.length > 0 ? 0 : null);
     setSelectedFrame(0);
     setDirty(false);
+    resetHistory();
     setPendingEffect(null);
   }
+
+  useEffect(() => {
+    return () => {
+      loadRequestGuard.current.invalidate();
+    };
+  }, []);
 
   async function confirmDiscard() {
     if (!pendingEffect) {

@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@radix-ui/react-dropdown-menu";
 import { listen } from '@tauri-apps/api/event';
 import CharacterActions from "./CharacterActions";
+import { LatestOnly } from "@/lib/latestOnly";
 
 export default function CharacterNavigator() {
   const [characters, setCharacters] = useState<Character[]>([]);
@@ -24,16 +25,57 @@ export default function CharacterNavigator() {
   const [, setSelectedCharacter] = useAtom(selectedCharacterAtom);
   const [, setCharacterLoadingStatus] = useAtom(characterLoadingStatusAtom);
   const [, setCharacterMetadata] = useAtom(characterMetadataAtom);
+  const listRequestGuard = React.useRef(new LatestOnly());
+  const loadRequestGuard = React.useRef(new LatestOnly());
+
   useEffect(() => {
     async function fetchAnimationFiles() {
-      if (currentProject) {
-        const characters = await getCharacterList(currentProject?.id);
-        setCharacters(characters);
+      const requestVersion = listRequestGuard.current.begin();
+      if (!currentProject) {
+        setCharacters([]);
+        return;
       }
+
+      const nextCharacters = await getCharacterList(currentProject.id);
+      if (!listRequestGuard.current.isLatest(requestVersion)) {
+        return;
+      }
+      setCharacters(nextCharacters);
     }
 
     fetchAnimationFiles();
+
+    return () => {
+      listRequestGuard.current.invalidate();
+    };
   }, [currentProject]);
+
+  useEffect(() => {
+    let mounted = true;
+    let unlisten: (() => void) | null = null;
+
+    void listen<{ ModelLoadingUpdate: (string | number)[] }>("load_character_update", (event) => {
+      const modelLoadingUpdate = event.payload.ModelLoadingUpdate;
+      setCharacterLoadingStatus({
+        action: modelLoadingUpdate[0] as string,
+        subAction: modelLoadingUpdate[1] as string,
+        subActionCurrentStep: modelLoadingUpdate[2] as number,
+        subActionTotalSteps: modelLoadingUpdate[3] as number,
+      });
+    }).then((dispose) => {
+      if (!mounted) {
+        dispose();
+        return;
+      }
+      unlisten = dispose;
+    });
+
+    return () => {
+      mounted = false;
+      loadRequestGuard.current.invalidate();
+      unlisten?.();
+    };
+  }, [setCharacterLoadingStatus]);
 
   useEffect(() => {
     setFilteredCharacters(
@@ -57,17 +99,9 @@ export default function CharacterNavigator() {
       return;
     }
 
+    const requestVersion = loadRequestGuard.current.begin();
     setSelectedCharacter(character);
-    listen<{ ModelLoadingUpdate: (string | number)[] }>("load_character_update", (event) => {
-      const modelLoadingUpdate = event.payload.ModelLoadingUpdate;
-      setCharacterLoadingStatus({
-        action: modelLoadingUpdate[0] as string,
-        subAction: modelLoadingUpdate[1] as string,
-        subActionCurrentStep: modelLoadingUpdate[2] as number,
-        subActionTotalSteps: modelLoadingUpdate[3] as number,
-      });
-    });
-    
+
     // Fetch character glTF and metadata in parallel
     try {
       const [character_gltf_json, metadata] = await Promise.all([
@@ -78,10 +112,16 @@ export default function CharacterNavigator() {
         getCharacterMetadata(currentProject?.id || "", character.id)
       ]);
 
+      if (!loadRequestGuard.current.isLatest(requestVersion)) {
+        return;
+      }
+
       setCharacterGltfJson(character_gltf_json);
       setCharacterMetadata(metadata);
     } catch (error) {
-      console.error('Error loading character:', error);
+      if (loadRequestGuard.current.isLatest(requestVersion)) {
+        console.error('Error loading character:', error);
+      }
     }
   }
 
