@@ -12,6 +12,16 @@ pub struct LwVector3(
 );
 
 impl LwVector3 {
+    pub fn read_from<R: std::io::Read>(r: &mut R) -> std::io::Result<Self> {
+        let mut buf = [0u8; 12];
+        r.read_exact(&mut buf)?;
+        Ok(Self(Vector3::new(
+            f32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]),
+            f32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]),
+            f32::from_le_bytes([buf[8], buf[9], buf[10], buf[11]]),
+        )))
+    }
+
     pub fn to_slice(&self) -> [f32; 3] {
         let v = &self.0;
         [v.x, v.y, v.z]
@@ -63,6 +73,17 @@ pub struct LwVector2(
     #[bw(map = |v: &Vector2<f32>| [v.x, v.y])]
     pub Vector2<f32>,
 );
+
+impl LwVector2 {
+    pub fn read_from<R: std::io::Read>(r: &mut R) -> std::io::Result<Self> {
+        let mut buf = [0u8; 8];
+        r.read_exact(&mut buf)?;
+        Ok(Self(Vector2::new(
+            f32::from_le_bytes([buf[0], buf[1], buf[2], buf[3]]),
+            f32::from_le_bytes([buf[4], buf[5], buf[6], buf[7]]),
+        )))
+    }
+}
 
 impl Default for LwVector2 {
     fn default() -> Self {

@@ -5,12 +5,8 @@ use std::time::SystemTime;
 use binrw::BinWrite;
 use serde::{Deserialize, Serialize};
 
-use crate::character::helper::{
-    HelperData, HelperDummyInfo, HELPER_TYPE_BSPHERE, HELPER_TYPE_DUMMY,
-};
-use crate::character::mesh::CharacterMeshSubsetInfo;
+use crate::character::helper::{HelperData, HelperDummyInfo, HELPER_TYPE_DUMMY};
 use crate::character::model::CharacterGeometricModel;
-use crate::character::texture::CharMaterialTextureInfo;
 use crate::math::LwMatrix44;
 
 fn now_iso() -> String {
@@ -53,16 +49,14 @@ pub fn add_glow_overlay(lgo_path: &Path) -> anyhow::Result<()> {
             materials.insert(1, overlay_material);
             geom.material_num = materials.len() as u32;
 
-            // Recompute mtl_size
-            let mut size = std::mem::size_of::<u32>(); // material_num field
+            // Recompute mtl_size by measuring actual BinWrite output
+            // (size_of_val is wrong because Option<T> in-memory size != serialized size)
+            let mut mtl_buf = std::io::Cursor::new(Vec::new());
+            u32::write_le(&(materials.len() as u32), &mut mtl_buf).unwrap();
             for mat in materials.iter() {
-                size += std::mem::size_of_val(&mat.opacity);
-                size += std::mem::size_of_val(&mat.transp_type);
-                size += std::mem::size_of_val(&mat.material);
-                size += std::mem::size_of_val(&mat.rs_set);
-                size += std::mem::size_of_val(&mat.tex_seq);
+                mat.write_le(&mut mtl_buf).unwrap();
             }
-            geom.header.mtl_size = size as u32;
+            geom.header.mtl_size = mtl_buf.position() as u32;
         }
     }
 
@@ -917,46 +911,22 @@ pub fn register_item(
 
 fn recompute_mesh_size(geom: &mut CharacterGeometricModel) {
     if let Some(ref mesh) = geom.mesh_info {
-        use crate::character::mesh::CharacterInfoMeshHeader;
-        use crate::d3d::D3DVertexElement9;
-        use crate::math::{LwVector2, LwVector3};
-
-        let header_size = std::mem::size_of::<CharacterInfoMeshHeader>();
-        let ve_size = mesh.vertex_element_seq.len() * std::mem::size_of::<D3DVertexElement9>();
-        let vert_size = mesh.vertex_seq.len() * std::mem::size_of::<LwVector3>();
-        let norm_size = mesh.normal_seq.len() * std::mem::size_of::<LwVector3>();
-        let col_size = mesh.vercol_seq.len() * std::mem::size_of::<u32>();
-        let tc_size: usize = mesh
-            .texcoord_seq
-            .iter()
-            .map(|tc| tc.len() * std::mem::size_of::<LwVector2>())
-            .sum();
-        let idx_size = mesh.index_seq.len() * std::mem::size_of::<u32>();
-        let sub_size = mesh.subset_seq.len() * std::mem::size_of::<CharacterMeshSubsetInfo>();
-
-        geom.header.mesh_size = (header_size
-            + ve_size
-            + vert_size
-            + norm_size
-            + col_size
-            + tc_size
-            + idx_size
-            + sub_size) as u32;
+        // Measure actual BinWrite output size (avoids in-memory vs serialized size mismatches)
+        let mut buf = std::io::Cursor::new(Vec::new());
+        mesh.write_options(&mut buf, binrw::Endian::Little, (geom.version,))
+            .expect("mesh BinWrite to buffer should not fail");
+        geom.header.mesh_size = buf.position() as u32;
     }
 }
 
 fn recompute_helper_size(geom: &mut CharacterGeometricModel) {
     if let Some(ref helper_data) = geom.helper_data {
-        let mut size = 4u32; // _type field
-        if helper_data._type & HELPER_TYPE_DUMMY > 0 {
-            size += 4; // dummy_num
-            size += helper_data.dummy_num * 140;
-        }
-        if helper_data._type & HELPER_TYPE_BSPHERE > 0 {
-            size += 4; // bsphere_num
-            size += helper_data.bsphere_num * 84;
-        }
-        geom.header.helper_size = size;
+        // Measure actual BinWrite output size
+        let mut buf = std::io::Cursor::new(Vec::new());
+        helper_data
+            .write_le(&mut buf)
+            .expect("helper BinWrite to buffer should not fail");
+        geom.header.helper_size = buf.position() as u32;
     } else {
         geom.header.helper_size = 0;
     }

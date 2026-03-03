@@ -61,6 +61,59 @@ pub enum D3DFormat {
     InvalidMax = 0xffffffff,
 }
 
+impl TryFrom<u32> for D3DFormat {
+    type Error = String;
+    fn try_from(v: u32) -> Result<Self, Self::Error> {
+        match v {
+            0 => Ok(Self::Unknown),
+            20 => Ok(Self::R8G8B8),
+            21 => Ok(Self::A8R8G8B8),
+            22 => Ok(Self::X8R8G8B8),
+            23 => Ok(Self::R5G6B5),
+            24 => Ok(Self::X1R5G5B5),
+            25 => Ok(Self::A1R5G5B5),
+            26 => Ok(Self::A4R4G4B4),
+            27 => Ok(Self::R3G3B2),
+            28 => Ok(Self::A8),
+            29 => Ok(Self::A8R3G3B2),
+            30 => Ok(Self::X4R4G4B4),
+            31 => Ok(Self::A2B10G10R10),
+            34 => Ok(Self::G16R16),
+            40 => Ok(Self::A8P8),
+            41 => Ok(Self::P8),
+            50 => Ok(Self::L8),
+            51 => Ok(Self::A8L8),
+            52 => Ok(Self::A4L4),
+            60 => Ok(Self::V8U8),
+            61 => Ok(Self::L6V5U5),
+            62 => Ok(Self::X8L8V8U8),
+            63 => Ok(Self::Q8W8V8U8),
+            64 => Ok(Self::V16U16),
+            65 => Ok(Self::W11V11U10),
+            67 => Ok(Self::A2W10V10U10),
+            0x59565955 => Ok(Self::UYVY),
+            0x32595559 => Ok(Self::YUY2),
+            0x31545844 => Ok(Self::DXT1),
+            0x32545844 => Ok(Self::DXT2),
+            0x33545844 => Ok(Self::DXT3),
+            0x34545844 => Ok(Self::DXT4),
+            0x35545844 => Ok(Self::DXT5),
+            70 => Ok(Self::D16Lockable),
+            71 => Ok(Self::D32),
+            73 => Ok(Self::D15S1),
+            75 => Ok(Self::D24S8),
+            80 => Ok(Self::D16),
+            77 => Ok(Self::D24X8),
+            79 => Ok(Self::D24X4S4),
+            100 => Ok(Self::VertexData),
+            101 => Ok(Self::Index16),
+            102 => Ok(Self::Index32),
+            0xffffffff => Ok(Self::InvalidMax),
+            _ => Err(format!("Invalid D3DFormat: {}", v)),
+        }
+    }
+}
+
 #[repr(u32)]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize)]
 #[binrw]
@@ -85,6 +138,21 @@ pub enum D3DPool {
     ForceDword = 0x7fffffff,
 
     InvalidMax = 0xffffffff,
+}
+
+impl TryFrom<u32> for D3DPool {
+    type Error = String;
+    fn try_from(v: u32) -> Result<Self, Self::Error> {
+        match v {
+            0 => Ok(Self::Default),
+            1 => Ok(Self::Managed),
+            2 => Ok(Self::SystemMem),
+            3 => Ok(Self::Scratch),
+            0x7fffffff => Ok(Self::ForceDword),
+            0xffffffff => Ok(Self::InvalidMax),
+            _ => Err(format!("Invalid D3DPool: {}", v)),
+        }
+    }
 }
 
 #[repr(u32)]
@@ -262,6 +330,23 @@ pub enum D3DPrimitiveType {
     ForceDword = 0x7fffffff,
 
     InvalidMax = 0xffffffff,
+}
+
+impl TryFrom<u32> for D3DPrimitiveType {
+    type Error = String;
+    fn try_from(v: u32) -> Result<Self, Self::Error> {
+        match v {
+            1 => Ok(Self::PointList),
+            2 => Ok(Self::LineList),
+            3 => Ok(Self::LineStrip),
+            4 => Ok(Self::TriangleList),
+            5 => Ok(Self::TriangleStrip),
+            6 => Ok(Self::TriangleFan),
+            0x7fffffff => Ok(Self::ForceDword),
+            0xffffffff => Ok(Self::InvalidMax),
+            _ => Err(format!("Invalid D3DPrimitiveType: {}", v)),
+        }
+    }
 }
 
 /**

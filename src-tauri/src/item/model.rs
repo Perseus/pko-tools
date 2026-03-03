@@ -166,9 +166,9 @@ impl PkoTextureStageInfo {
     }
 }
 
-/// Read a u32 as a binrw-repr enum, falling back to `default` on failure.
-fn enum_from_u32_or<T: for<'a> BinRead<Args<'a> = ()>>(v: u32, default: T) -> T {
-    T::read_le(&mut std::io::Cursor::new(&v.to_le_bytes())).unwrap_or(default)
+/// Convert a u32 to a repr(u32) enum, falling back to `default` on failure.
+fn enum_from_u32_or<T: TryFrom<u32>>(v: u32, default: T) -> T {
+    T::try_from(v).unwrap_or(default)
 }
 
 impl Item {

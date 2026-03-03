@@ -1,45 +1,55 @@
 use core::f32;
 use std::{
     collections::{BTreeMap, HashMap},
-    fs::File,
     io::Seek,
     path::Path,
 };
 
 use crate::{
-    animation::character::LW_INVALID_INDEX,
-    character::Character,
     d3d::{D3DPrimitiveType, D3DVertexElement9},
     math::{self, LwVector2, LwVector3},
 };
 use ::gltf::{
-    buffer,
     json::{
         accessor::{ComponentType, GenericComponentType},
         image::MimeType,
         material::{EmissiveFactor, PbrBaseColorFactor, PbrMetallicRoughness, StrengthFactor},
         texture,
-        validation::{Checked, USize64, Validate},
-        Accessor, Index, Material,
+        validation::{Checked, USize64},
+        Accessor, Index,
     },
     material::AlphaMode,
     texture::MagFilter,
-    Document, Semantic,
+    Semantic,
 };
 use base64::{prelude::BASE64_STANDARD, Engine};
-use binrw::{binrw, BinRead, BinWrite};
+use binrw::BinWrite;
 use image::ImageReader;
 use serde::Serialize;
 use serde_json::json;
 
+fn read_f32_le(r: &mut impl std::io::Read) -> std::io::Result<f32> {
+    let mut buf = [0u8; 4];
+    r.read_exact(&mut buf)?;
+    Ok(f32::from_le_bytes(buf))
+}
+
+fn read_u16_le(r: &mut impl std::io::Read) -> std::io::Result<u16> {
+    let mut buf = [0u8; 2];
+    r.read_exact(&mut buf)?;
+    Ok(u16::from_le_bytes(buf))
+}
+
+fn read_u32_le(r: &mut impl std::io::Read) -> std::io::Result<u32> {
+    let mut buf = [0u8; 4];
+    r.read_exact(&mut buf)?;
+    Ok(u32::from_le_bytes(buf))
+}
+
 use super::{
-    model::{
-        RenderStateSetTemplate, RenderStateValue, EXP_OBJ_VERSION, EXP_OBJ_VERSION_0_0_0_0,
-        EXP_OBJ_VERSION_1_0_0_0, EXP_OBJ_VERSION_1_0_0_3, EXP_OBJ_VERSION_1_0_0_4,
-        LW_MAX_TEXTURESTAGE_NUM, MESH_VERSION0000, MESH_VERSION0001,
-    },
+    model::LW_MAX_TEXTURESTAGE_NUM,
     texture::{
-        CharMaterialTextureInfo, MaterialTextureInfoTransparencyType, RenderStateAtom, TextureInfo,
+        CharMaterialTextureInfo, MaterialTextureInfoTransparencyType, RenderStateAtom,
     },
     GLTFFieldsToAggregate,
 };
@@ -77,15 +87,13 @@ pub const D3DFVF_LASTBETA_UBYTE4: u32 = 0x1000;
 
 pub const D3DFVF_RESERVED2: u32 = 0xE000;
 
-#[derive(Debug, Clone, Default, Serialize)]
-#[binrw]
+#[derive(Debug, Clone, Default, Serialize, BinWrite)]
 pub struct CharacterMeshBlendInfo {
     pub indexd: u32,
     pub weight: [f32; 4],
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[binrw]
+#[derive(Debug, Clone, Serialize, BinWrite)]
 pub struct CharacterMeshSubsetInfo {
     pub primitive_num: u32,
     pub start_index: u32,
@@ -93,8 +101,7 @@ pub struct CharacterMeshSubsetInfo {
     pub min_index: u32,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[binrw]
+#[derive(Debug, Clone, Serialize, BinWrite)]
 pub struct CharacterInfoMeshHeader {
     // the type of vertex data available (positions, normals, texture coordinates etc.)
     // looks like its stored as kind of a bitmask
@@ -182,293 +189,6 @@ pub struct CharacterMeshInfo {
     // not sure what its used for yet
     // GLTF: extras
     pub vertex_element_seq: Vec<D3DVertexElement9>,
-}
-
-impl BinRead for CharacterMeshInfo {
-    type Args<'a> = (u32,);
-
-    fn read_options<R: std::io::Read + std::io::Seek>(
-        reader: &mut R,
-        endian: binrw::Endian,
-        args: Self::Args<'_>,
-    ) -> binrw::BinResult<Self> {
-        let mut version = args.0;
-        if version == EXP_OBJ_VERSION_0_0_0_0 {
-            let old_version = u32::read_options(reader, endian, ())?;
-            version = old_version;
-        }
-
-        let header;
-        let mut vertex_element_seq: Vec<D3DVertexElement9> = vec![];
-        let mut vertex_seq: Vec<LwVector3> = vec![];
-        let mut normal_seq: Vec<LwVector3> = vec![];
-        let mut texcoord_seq: [Vec<LwVector2>; LW_MAX_TEXTURESTAGE_NUM as usize] =
-            Default::default();
-        let mut vercol_seq: Vec<u32> = vec![];
-        let mut blend_seq: Vec<CharacterMeshBlendInfo> = vec![];
-        let mut bone_index_seq: Vec<u32> = vec![];
-        let mut index_seq: Vec<u32> = vec![];
-        let mut subset_seq: Vec<CharacterMeshSubsetInfo> = vec![];
-
-        // --- Parse header based on version ---
-        // Matches lwMeshInfo_Load header parsing branches in lwExpObj.cpp
-        if version >= EXP_OBJ_VERSION_1_0_0_4 {
-            header = CharacterInfoMeshHeader::read_options(reader, endian, ())?;
-        } else if (version >= EXP_OBJ_VERSION_1_0_0_0) || (version == MESH_VERSION0001) {
-            // lwMeshInfo_0003::lwMeshInfoHeader (6 fields, no rs_set)
-            let fvf = u32::read_options(reader, endian, ())?;
-            let pt_type = D3DPrimitiveType::read_options(reader, endian, ())?;
-            let vertex_num = u32::read_options(reader, endian, ())?;
-            let index_num = u32::read_options(reader, endian, ())?;
-            let subset_num = u32::read_options(reader, endian, ())?;
-            let bone_index_num = u32::read_options(reader, endian, ())?;
-
-            header = CharacterInfoMeshHeader {
-                fvf,
-                pt_type,
-                vertex_num,
-                index_num,
-                subset_num,
-                bone_index_num,
-                bone_infl_factor: if bone_index_num > 0 { 2 } else { 0 },
-                vertex_element_num: 0,
-                rs_set: [RenderStateAtom::new(); LW_MESH_RS_NUM],
-            };
-        } else if version == MESH_VERSION0000 {
-            // lwMeshInfo_0000::lwMeshInfoHeader (6 fields + lwRenderStateSetMesh2)
-            let fvf = u32::read_options(reader, endian, ())?;
-            let pt_type = D3DPrimitiveType::read_options(reader, endian, ())?;
-            let vertex_num = u32::read_options(reader, endian, ())?;
-            let index_num = u32::read_options(reader, endian, ())?;
-            let subset_num = u32::read_options(reader, endian, ())?;
-            let bone_index_num = u32::read_options(reader, endian, ())?;
-
-            // lwRenderStateSetMesh2 = lwRenderStateSetTemplate<2, LW_MESH_RS_NUM>
-            type RenderStateSetMesh2 = RenderStateSetTemplate<2, LW_MESH_RS_NUM>;
-            let rs_set_mesh = RenderStateSetMesh2::read_options(reader, endian, ())?;
-
-            // Convert lwRenderStateSetMesh2 → [RenderStateAtom; 8]
-            // D3DRS_AMBIENTMATERIALSOURCE = 147, D3DMCS_COLOR2 = 2
-            const D3DRS_AMBIENTMATERIALSOURCE: u32 = 147;
-            const D3DMCS_COLOR2: u32 = 2;
-
-            let mut rs_set = [RenderStateAtom::new(); LW_MESH_RS_NUM];
-            for j in 0..LW_MESH_RS_NUM {
-                let rsv = &rs_set_mesh.rsv_seq[0][j];
-                if rsv.state == LW_INVALID_INDEX {
-                    break;
-                }
-
-                let v = match rsv.state {
-                    D3DRS_AMBIENTMATERIALSOURCE => D3DMCS_COLOR2,
-                    _ => rsv.value,
-                };
-
-                rs_set[j] = RenderStateAtom {
-                    state: rsv.state,
-                    value0: v,
-                    value1: v,
-                };
-            }
-
-            header = CharacterInfoMeshHeader {
-                fvf,
-                pt_type,
-                vertex_num,
-                index_num,
-                subset_num,
-                bone_index_num,
-                bone_infl_factor: if bone_index_num > 0 { 2 } else { 0 },
-                vertex_element_num: 0,
-                rs_set,
-            };
-        } else {
-            return Err(binrw::Error::AssertFail {
-                pos: 0,
-                message: format!("Mesh decoding not implemented for version {}", version),
-            });
-        }
-
-        // --- Parse mesh data based on version ---
-        if version >= EXP_OBJ_VERSION_1_0_0_4 {
-            // Version 1.0.0.4+: vertex elements, vertices, normals, texcoords,
-            // vercol, blend+bones, indices, subsets
-            if header.vertex_element_num > 0 {
-                for _ in 0..header.vertex_element_num {
-                    vertex_element_seq.push(D3DVertexElement9::read_options(reader, endian, ())?);
-                }
-            }
-
-            if header.vertex_num > 0 {
-                for _ in 0..header.vertex_num {
-                    vertex_seq.push(LwVector3::read_options(reader, endian, ())?);
-                }
-            }
-
-            if (header.fvf & D3DFVF_NORMAL) > 0 {
-                for _ in 0..header.vertex_num {
-                    normal_seq.push(LwVector3::read_options(reader, endian, ())?);
-                }
-            }
-
-            if (header.fvf & D3DFVF_TEX1) > 0 {
-                for _ in 0..header.vertex_num {
-                    texcoord_seq[0].push(LwVector2::read_options(reader, endian, ())?);
-                }
-            } else if (header.fvf & D3DFVF_TEX2) > 0 {
-                for _ in 0..header.vertex_num {
-                    texcoord_seq[0].push(LwVector2::read_options(reader, endian, ())?);
-                }
-                for _ in 0..header.vertex_num {
-                    texcoord_seq[1].push(LwVector2::read_options(reader, endian, ())?);
-                }
-            } else if (header.fvf & D3DFVF_TEX3) > 0 {
-                for _ in 0..header.vertex_num {
-                    texcoord_seq[0].push(LwVector2::read_options(reader, endian, ())?);
-                }
-                for _ in 0..header.vertex_num {
-                    texcoord_seq[1].push(LwVector2::read_options(reader, endian, ())?);
-                }
-                for _ in 0..header.vertex_num {
-                    texcoord_seq[2].push(LwVector2::read_options(reader, endian, ())?);
-                }
-            } else if (header.fvf & D3DFVF_TEX4) > 0 {
-                for _ in 0..header.vertex_num {
-                    texcoord_seq[0].push(LwVector2::read_options(reader, endian, ())?);
-                }
-                for _ in 0..header.vertex_num {
-                    texcoord_seq[1].push(LwVector2::read_options(reader, endian, ())?);
-                }
-                for _ in 0..header.vertex_num {
-                    texcoord_seq[2].push(LwVector2::read_options(reader, endian, ())?);
-                }
-                for _ in 0..header.vertex_num {
-                    texcoord_seq[3].push(LwVector2::read_options(reader, endian, ())?);
-                }
-            }
-
-            if (header.fvf & D3DFVF_DIFFUSE) > 0 {
-                for _ in 0..header.vertex_num {
-                    vercol_seq.push(u32::read_options(reader, endian, ())?);
-                }
-            }
-
-            if header.bone_index_num > 0 {
-                for _ in 0..header.vertex_num {
-                    blend_seq.push(CharacterMeshBlendInfo::read_options(reader, endian, ())?);
-                }
-                for _ in 0..header.bone_index_num {
-                    bone_index_seq.push(u32::read_options(reader, endian, ())?);
-                }
-            }
-
-            if header.index_num > 0 {
-                for _ in 0..header.index_num {
-                    index_seq.push(u32::read_options(reader, endian, ())?);
-                }
-            }
-
-            if header.subset_num > 0 {
-                for _ in 0..header.subset_num {
-                    subset_seq.push(CharacterMeshSubsetInfo::read_options(reader, endian, ())?);
-                }
-            }
-        } else {
-            // Older versions (< 1.0.0.4): different data order
-            // subsets FIRST, then vertices, normals, texcoords, vercol, blend+bones, indices
-
-            if header.subset_num > 0 {
-                for _ in 0..header.subset_num {
-                    subset_seq.push(CharacterMeshSubsetInfo::read_options(reader, endian, ())?);
-                }
-            }
-
-            if header.vertex_num > 0 {
-                for _ in 0..header.vertex_num {
-                    vertex_seq.push(LwVector3::read_options(reader, endian, ())?);
-                }
-            }
-
-            if (header.fvf & D3DFVF_NORMAL) > 0 {
-                for _ in 0..header.vertex_num {
-                    normal_seq.push(LwVector3::read_options(reader, endian, ())?);
-                }
-            }
-
-            if (header.fvf & D3DFVF_TEX1) > 0 {
-                for _ in 0..header.vertex_num {
-                    texcoord_seq[0].push(LwVector2::read_options(reader, endian, ())?);
-                }
-            } else if (header.fvf & D3DFVF_TEX2) > 0 {
-                for _ in 0..header.vertex_num {
-                    texcoord_seq[0].push(LwVector2::read_options(reader, endian, ())?);
-                }
-                for _ in 0..header.vertex_num {
-                    texcoord_seq[1].push(LwVector2::read_options(reader, endian, ())?);
-                }
-            } else if (header.fvf & D3DFVF_TEX3) > 0 {
-                for _ in 0..header.vertex_num {
-                    texcoord_seq[0].push(LwVector2::read_options(reader, endian, ())?);
-                }
-                for _ in 0..header.vertex_num {
-                    texcoord_seq[1].push(LwVector2::read_options(reader, endian, ())?);
-                }
-                for _ in 0..header.vertex_num {
-                    texcoord_seq[2].push(LwVector2::read_options(reader, endian, ())?);
-                }
-            } else if (header.fvf & D3DFVF_TEX4) > 0 {
-                for _ in 0..header.vertex_num {
-                    texcoord_seq[0].push(LwVector2::read_options(reader, endian, ())?);
-                }
-                for _ in 0..header.vertex_num {
-                    texcoord_seq[1].push(LwVector2::read_options(reader, endian, ())?);
-                }
-                for _ in 0..header.vertex_num {
-                    texcoord_seq[2].push(LwVector2::read_options(reader, endian, ())?);
-                }
-                for _ in 0..header.vertex_num {
-                    texcoord_seq[3].push(LwVector2::read_options(reader, endian, ())?);
-                }
-            }
-
-            if (header.fvf & D3DFVF_DIFFUSE) > 0 {
-                for _ in 0..header.vertex_num {
-                    vercol_seq.push(u32::read_options(reader, endian, ())?);
-                }
-            }
-
-            // Old versions use D3DFVF_LASTBETA_UBYTE4 flag and BYTE bone indices
-            if (header.fvf & D3DFVF_LASTBETA_UBYTE4) > 0 {
-                for _ in 0..header.vertex_num {
-                    blend_seq.push(CharacterMeshBlendInfo::read_options(reader, endian, ())?);
-                }
-                // Bone indices stored as BYTE (u8), convert to u32
-                for _ in 0..header.bone_index_num {
-                    let byte_idx = u8::read_options(reader, endian, ())?;
-                    bone_index_seq.push(byte_idx as u32);
-                }
-            }
-
-            if header.index_num > 0 {
-                for _ in 0..header.index_num {
-                    index_seq.push(u32::read_options(reader, endian, ())?);
-                }
-            }
-        }
-
-        Ok(CharacterMeshInfo {
-            header,
-            vertex_seq,
-            normal_seq,
-            texcoord_seq,
-            vercol_seq,
-            index_seq,
-            bone_index_seq,
-            blend_seq,
-            subset_seq,
-            vertex_element_seq,
-        })
-    }
 }
 
 impl BinWrite for CharacterMeshInfo {
@@ -1380,11 +1100,7 @@ impl CharacterMeshInfo {
 
                             let mut reader = std::io::Cursor::new(data_as_slice);
                             for _ in 0..accessor.count() {
-                                let vertex = LwVector3::read_options(
-                                    &mut reader,
-                                    binrw::Endian::Little,
-                                    (),
-                                )?;
+                                let vertex = LwVector3::read_from(&mut reader)?;
                                 mesh.vertex_seq.push(vertex);
                             }
                         }
@@ -1398,11 +1114,7 @@ impl CharacterMeshInfo {
 
                             let mut reader = std::io::Cursor::new(data_as_slice);
                             for _ in 0..accessor.count() {
-                                let vertex_normal = LwVector3::read_options(
-                                    &mut reader,
-                                    binrw::Endian::Little,
-                                    (),
-                                )?;
+                                let vertex_normal = LwVector3::read_from(&mut reader)?;
                                 mesh.normal_seq.push(vertex_normal);
                             }
                         }
@@ -1415,10 +1127,10 @@ impl CharacterMeshInfo {
                             let data_as_slice = &data[data_idx..];
                             let mut reader = std::io::Cursor::new(data_as_slice);
                             for _ in 0..accessor.count() {
-                                let r = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
-                                let g = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
-                                let b = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
-                                let a = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
+                                let r = read_f32_le(&mut reader)?;
+                                let g = read_f32_le(&mut reader)?;
+                                let b = read_f32_le(&mut reader)?;
+                                let a = read_f32_le(&mut reader)?;
                                 let packed = ((r * 255.0) as u32)
                                     | (((g * 255.0) as u32) << 8)
                                     | (((b * 255.0) as u32) << 16)
@@ -1439,8 +1151,7 @@ impl CharacterMeshInfo {
                                 // Export writes u16 LAB bone positions (2 bytes each), so read 4 u16 values
                                 let mut joints_u16 = [0u16; 4];
                                 joints_u16.iter_mut().for_each(|j| {
-                                    *j = u16::read_options(&mut reader, binrw::Endian::Little, ())
-                                        .unwrap();
+                                    *j = read_u16_le(&mut reader).unwrap();
                                 });
                                 // These are LAB bone array positions - we'll convert them to bone_index_seq indices later
                                 joint_seq_u16.push(joints_u16);
@@ -1458,8 +1169,7 @@ impl CharacterMeshInfo {
                             for _ in 0..accessor.count() {
                                 let mut weights = [0.0; 4];
                                 weights.iter_mut().for_each(|w| {
-                                    *w = f32::read_options(&mut reader, binrw::Endian::Little, ())
-                                        .unwrap();
+                                    *w = read_f32_le(&mut reader).unwrap();
                                 });
                                 weight_seq.push(weights);
                             }
@@ -1477,8 +1187,7 @@ impl CharacterMeshInfo {
 
                             for _ in 0..accessor.count() {
                                 texcoords.push(
-                                    LwVector2::read_options(&mut reader, binrw::Endian::Little, ())
-                                        .unwrap(),
+                                    LwVector2::read_from(&mut reader).unwrap(),
                                 );
                             }
 
@@ -1505,12 +1214,12 @@ impl CharacterMeshInfo {
                 match gltf_vi_accessor.data_type() {
                     gltf::accessor::DataType::U16 => {
                         for _ in 0..gltf_vi_accessor.count() {
-                            index_seq.push(u16::read_le(&mut vi_reader).unwrap() as u32);
+                            index_seq.push(read_u16_le(&mut vi_reader).unwrap() as u32);
                         }
                     }
                     gltf::accessor::DataType::U32 => {
                         for _ in 0..gltf_vi_accessor.count() {
-                            index_seq.push(u32::read_le(&mut vi_reader).unwrap());
+                            index_seq.push(read_u32_le(&mut vi_reader).unwrap());
                         }
                     }
                     _ => {
@@ -1769,7 +1478,7 @@ impl CharacterMeshInfo {
                     let mut reader = std::io::Cursor::new(data_as_slice);
                     for _ in 0..accessor.count() {
                         let vertex =
-                            LwVector3::read_options(&mut reader, binrw::Endian::Little, ())?;
+                            LwVector3::read_from(&mut reader)?;
                         mesh.vertex_seq.push(vertex);
                     }
                 }
@@ -1784,7 +1493,7 @@ impl CharacterMeshInfo {
                     let mut reader = std::io::Cursor::new(data_as_slice);
                     for _ in 0..accessor.count() {
                         let vertex_normal =
-                            LwVector3::read_options(&mut reader, binrw::Endian::Little, ())?;
+                            LwVector3::read_from(&mut reader)?;
                         mesh.normal_seq.push(vertex_normal);
                     }
                 }
@@ -1797,10 +1506,10 @@ impl CharacterMeshInfo {
                     let data_as_slice = &data[data_idx..];
                     let mut reader = std::io::Cursor::new(data_as_slice);
                     for _ in 0..accessor.count() {
-                        let r = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
-                        let g = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
-                        let b = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
-                        let a = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
+                        let r = read_f32_le(&mut reader)?;
+                        let g = read_f32_le(&mut reader)?;
+                        let b = read_f32_le(&mut reader)?;
+                        let a = read_f32_le(&mut reader)?;
                         let packed = ((r * 255.0).round() as u32)
                             | (((g * 255.0).round() as u32) << 8)
                             | (((b * 255.0).round() as u32) << 16)
@@ -1820,7 +1529,7 @@ impl CharacterMeshInfo {
                     for _ in 0..accessor.count() {
                         let mut joints_u16 = [0u16; 4];
                         joints_u16.iter_mut().for_each(|j| {
-                            *j = u16::read_options(&mut reader, binrw::Endian::Little, ()).unwrap();
+                            *j = read_u16_le(&mut reader).unwrap();
                         });
                         joint_seq_u16.push(joints_u16);
                     }
@@ -1837,7 +1546,7 @@ impl CharacterMeshInfo {
                     for _ in 0..accessor.count() {
                         let mut weight = [0.0f32; 4];
                         weight.iter_mut().for_each(|w| {
-                            *w = f32::read_options(&mut reader, binrw::Endian::Little, ()).unwrap();
+                            *w = read_f32_le(&mut reader).unwrap();
                         });
                         weight_seq.push(weight);
                     }
@@ -1855,8 +1564,7 @@ impl CharacterMeshInfo {
 
                     for _ in 0..accessor.count() {
                         texcoords.push(
-                            LwVector2::read_options(&mut reader, binrw::Endian::Little, ())
-                                .unwrap(),
+                            LwVector2::read_from(&mut reader).unwrap(),
                         );
                     }
                     mesh.texcoord_seq[0] = texcoords;
@@ -1879,12 +1587,12 @@ impl CharacterMeshInfo {
         match gltf_vi_accessor.data_type() {
             gltf::accessor::DataType::U16 => {
                 for _ in 0..gltf_vi_accessor.count() {
-                    index_seq.push(u16::read_le(&mut vi_reader).unwrap() as u32);
+                    index_seq.push(read_u16_le(&mut vi_reader).unwrap() as u32);
                 }
             }
             gltf::accessor::DataType::U32 => {
                 for _ in 0..gltf_vi_accessor.count() {
-                    index_seq.push(u32::read_le(&mut vi_reader).unwrap());
+                    index_seq.push(read_u32_le(&mut vi_reader).unwrap());
                 }
             }
             _ => {
@@ -2121,7 +1829,7 @@ impl CharacterMeshInfo {
                     let mut reader = std::io::Cursor::new(data_as_slice);
                     for _ in 0..accessor.count() {
                         let vertex =
-                            LwVector3::read_options(&mut reader, binrw::Endian::Little, ())?;
+                            LwVector3::read_from(&mut reader)?;
                         mesh.vertex_seq.push(vertex);
                     }
                 }
@@ -2136,7 +1844,7 @@ impl CharacterMeshInfo {
                     let mut reader = std::io::Cursor::new(data_as_slice);
                     for _ in 0..accessor.count() {
                         let vertex_normal =
-                            LwVector3::read_options(&mut reader, binrw::Endian::Little, ())?;
+                            LwVector3::read_from(&mut reader)?;
                         mesh.normal_seq.push(vertex_normal);
                     }
                 }
@@ -2149,10 +1857,10 @@ impl CharacterMeshInfo {
                     let data_as_slice = &data[data_idx..];
                     let mut reader = std::io::Cursor::new(data_as_slice);
                     for _ in 0..accessor.count() {
-                        let r = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
-                        let g = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
-                        let b = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
-                        let a = f32::read_options(&mut reader, binrw::Endian::Little, ())?;
+                        let r = read_f32_le(&mut reader)?;
+                        let g = read_f32_le(&mut reader)?;
+                        let b = read_f32_le(&mut reader)?;
+                        let a = read_f32_le(&mut reader)?;
                         let packed = ((r * 255.0).round() as u32)
                             | (((g * 255.0).round() as u32) << 8)
                             | (((b * 255.0).round() as u32) << 16)
@@ -2172,7 +1880,7 @@ impl CharacterMeshInfo {
                     for _ in 0..accessor.count() {
                         let mut joints_u16 = [0u16; 4];
                         joints_u16.iter_mut().for_each(|j| {
-                            *j = u16::read_options(&mut reader, binrw::Endian::Little, ()).unwrap();
+                            *j = read_u16_le(&mut reader).unwrap();
                         });
                         joint_seq_u16.push(joints_u16);
                     }
@@ -2189,7 +1897,7 @@ impl CharacterMeshInfo {
                     for _ in 0..accessor.count() {
                         let mut weight = [0.0f32; 4];
                         weight.iter_mut().for_each(|w| {
-                            *w = f32::read_options(&mut reader, binrw::Endian::Little, ()).unwrap();
+                            *w = read_f32_le(&mut reader).unwrap();
                         });
                         weight_seq.push(weight);
                     }
@@ -2207,8 +1915,7 @@ impl CharacterMeshInfo {
 
                     for _ in 0..accessor.count() {
                         texcoords.push(
-                            LwVector2::read_options(&mut reader, binrw::Endian::Little, ())
-                                .unwrap(),
+                            LwVector2::read_from(&mut reader).unwrap(),
                         );
                     }
                     mesh.texcoord_seq[0] = texcoords;
@@ -2231,12 +1938,12 @@ impl CharacterMeshInfo {
         match gltf_vi_accessor.data_type() {
             gltf::accessor::DataType::U16 => {
                 for _ in 0..gltf_vi_accessor.count() {
-                    index_seq.push(u16::read_le(&mut vi_reader).unwrap() as u32);
+                    index_seq.push(read_u16_le(&mut vi_reader).unwrap() as u32);
                 }
             }
             gltf::accessor::DataType::U32 => {
                 for _ in 0..gltf_vi_accessor.count() {
-                    index_seq.push(u32::read_le(&mut vi_reader).unwrap());
+                    index_seq.push(read_u32_le(&mut vi_reader).unwrap());
                 }
             }
             _ => {

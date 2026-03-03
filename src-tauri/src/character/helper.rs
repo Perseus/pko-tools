@@ -1,4 +1,4 @@
-use binrw::{binrw, BinRead};
+use binrw::{binwrite, BinWrite};
 use serde::Serialize;
 
 use crate::math::{LwBox, LwMatrix44, LwPlane, LwSphere, LwVector3};
@@ -18,8 +18,7 @@ pub const HELPER_TYPE_MESH: u32 = 0x0004;
 pub const HELPER_TYPE_BBOX: u32 = 0x0010;
 pub const HELPER_TYPE_BSPHERE: u32 = 0x0020;
 
-#[derive(Debug, Serialize)]
-#[binrw]
+#[derive(Debug, Serialize, BinWrite)]
 pub struct HelperDummyInfo {
     pub id: u32,
     pub mat: LwMatrix44,
@@ -29,8 +28,7 @@ pub struct HelperDummyInfo {
     pub parent_id: u32,
 }
 
-#[derive(Debug, Serialize)]
-#[binrw]
+#[derive(Debug, Serialize, BinWrite)]
 pub struct HelperBoxInfo {
     pub id: u32,
     pub _type: u32,
@@ -41,8 +39,7 @@ pub struct HelperBoxInfo {
     pub name: [u8; 32],
 }
 
-#[derive(Debug, Serialize)]
-#[binrw]
+#[derive(Debug, Serialize, BinWrite)]
 pub struct HelperMeshFaceInfo {
     pub vertex: [u32; 3],
     pub adj_face: [u32; 3],
@@ -51,8 +48,7 @@ pub struct HelperMeshFaceInfo {
     pub center: LwVector3,
 }
 
-#[derive(Debug, Serialize)]
-#[binrw]
+#[derive(Debug, Serialize, BinWrite)]
 pub struct HelperMeshInfo {
     pub id: u32,
     pub _type: u32,
@@ -67,76 +63,57 @@ pub struct HelperMeshInfo {
     pub vertex_num: u32,
     pub face_num: u32,
 
-    #[br(count = vertex_num)]
     pub vertex_seq: Vec<LwVector3>,
 
-    #[br(count = face_num)]
     pub face_seq: Vec<HelperMeshFaceInfo>,
 }
 
-#[derive(Debug, Serialize)]
-#[binrw]
+#[derive(Debug, Serialize, BinWrite)]
 pub struct BoundingBoxInfo {
     pub id: u32,
     pub _box: LwBox,
     pub mat: LwMatrix44,
 }
 
-#[derive(Debug, Serialize)]
-#[binrw]
+#[derive(Debug, Serialize, BinWrite)]
 pub struct BoundingSphereInfo {
     pub id: u32,
     pub sphere: LwSphere,
     pub mat: LwMatrix44,
 }
 
-#[binrw]
+#[binwrite]
 #[derive(Debug, Serialize)]
 pub struct HelperData {
     pub _type: u32,
 
-    #[br(if(_type & HELPER_TYPE_DUMMY > 0))]
     #[bw(if(_type & HELPER_TYPE_DUMMY > 0))]
     pub dummy_num: u32,
 
-    #[br(if(dummy_num > 0))]
-    #[br(count = dummy_num)]
     #[bw(if(*dummy_num > 0))]
     pub dummy_seq: Vec<HelperDummyInfo>,
 
-    #[br(if(_type &  HELPER_TYPE_BOX > 0))]
     #[bw(if(_type &  HELPER_TYPE_BOX > 0))]
     pub box_num: u32,
 
-    #[br(if(box_num > 0))]
-    #[br(count = box_num)]
     #[bw(if(*box_num > 0))]
     pub box_seq: Vec<HelperBoxInfo>,
 
-    #[br(if(_type & HELPER_TYPE_MESH > 0))]
     #[bw(if(_type & HELPER_TYPE_MESH > 0))]
     pub mesh_num: u32,
 
-    #[br(if(mesh_num > 0))]
-    #[br(count = mesh_num)]
     #[bw(if(*mesh_num > 0))]
     pub mesh_seq: Vec<HelperMeshInfo>,
 
-    #[br(if(_type & HELPER_TYPE_BBOX > 0))]
     #[bw(if(_type & HELPER_TYPE_BBOX > 0))]
     pub bbox_num: u32,
 
-    #[br(if(bbox_num > 0))]
-    #[br(count = bbox_num)]
     #[bw(if(*bbox_num > 0))]
     pub bbox_seq: Vec<BoundingBoxInfo>,
 
-    #[br(if(_type & HELPER_TYPE_BSPHERE > 0))]
     #[bw(if(_type & HELPER_TYPE_BSPHERE > 0))]
     pub bsphere_num: u32,
 
-    #[br(if(bsphere_num > 0))]
-    #[br(count = bsphere_num)]
     #[bw(if(*bsphere_num > 0))]
     pub bsphere_seq: Vec<BoundingSphereInfo>,
 }

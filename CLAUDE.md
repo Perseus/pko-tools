@@ -141,7 +141,6 @@ All PKO binary formats are parsed through **Kaitai Struct** adapters. The pipeli
 | `.lit` | `map/lit.rs` (text, not Kaitai) | `Vec<LitEntry>` | `parse_lit_tx(path)` |
 
 **Not yet fully migrated:**
-- `.lgo` — Kaitai adapter exists (`lgo_loader.rs`) but `character/model.rs::from_file()` defaults to the native binrw parser. Set `PKO_LGO_PARSER=kaitai` to use the Kaitai path. The `pko_inspect` CLI always uses Kaitai.
 - `terrain_info` — has a `.ksy` spec and generated code (`gen/kaitai/terrain_info.rs`) but parsing still uses the hand-written parser in `map/texture.rs::parse_terrain_info()`.
 
 **Key patterns:**

@@ -1,7 +1,6 @@
 // Unit tests for skinning validity
 // These tests verify mesh-skeleton linkage is correct
 
-use binrw::BinReaderExt;
 use pko_tools_lib::animation::lab_loader::load_lab;
 use pko_tools_lib::character::model::CharacterGeometricModel;
 use std::fs;
@@ -48,8 +47,7 @@ fn bone_index_seq_values_in_bounds() {
             lgo_path.file_name().unwrap().to_string_lossy()
         );
 
-        let mut lgo_file = fs::File::open(&lgo_path).expect("Failed to open LGO");
-        let lgo_model: CharacterGeometricModel = lgo_file.read_le().expect("Failed to parse LGO");
+        let lgo_model = CharacterGeometricModel::from_file(lgo_path.clone()).expect("Failed to parse LGO");
 
         let lgo = match &lgo_model.mesh_info {
             Some(mesh) => mesh,
@@ -97,8 +95,7 @@ fn vertex_blend_indices_in_bounds() {
             lgo_path.file_name().unwrap().to_string_lossy()
         );
 
-        let mut lgo_file = fs::File::open(&lgo_path).expect("Failed to open LGO");
-        let lgo_model: CharacterGeometricModel = lgo_file.read_le().expect("Failed to parse LGO");
+        let lgo_model = CharacterGeometricModel::from_file(lgo_path.clone()).expect("Failed to parse LGO");
 
         let lgo = match &lgo_model.mesh_info {
             Some(mesh) => mesh,
@@ -145,8 +142,7 @@ fn bone_weights_sum_to_one() {
 
     for lgo_entry in lgo_files {
         let lgo_path = lgo_entry.path();
-        let mut lgo_file = fs::File::open(&lgo_path).expect("Failed to open LGO");
-        let lgo_model: CharacterGeometricModel = lgo_file.read_le().expect("Failed to parse LGO");
+        let lgo_model = CharacterGeometricModel::from_file(lgo_path.clone()).expect("Failed to parse LGO");
 
         let lgo = match &lgo_model.mesh_info {
             Some(mesh) => mesh,
@@ -199,8 +195,7 @@ fn bone_index_num_matches_sequence_length() {
 
     for lgo_entry in lgo_files {
         let lgo_path = lgo_entry.path();
-        let mut lgo_file = fs::File::open(&lgo_path).expect("Failed to open LGO");
-        let lgo_model: CharacterGeometricModel = lgo_file.read_le().expect("Failed to parse LGO");
+        let lgo_model = CharacterGeometricModel::from_file(lgo_path.clone()).expect("Failed to parse LGO");
 
         let lgo = match &lgo_model.mesh_info {
             Some(mesh) => mesh,

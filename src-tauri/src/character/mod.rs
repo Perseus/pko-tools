@@ -1,4 +1,3 @@
-pub mod animation;
 pub mod commands;
 pub mod helper;
 mod info;

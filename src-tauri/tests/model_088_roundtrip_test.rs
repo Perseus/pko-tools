@@ -2,7 +2,7 @@
 // This test verifies that converting files back and forth produces identical results
 
 use base64::Engine;
-use binrw::{BinReaderExt, BinWrite};
+use binrw::BinWrite;
 use pko_tools_lib::animation::character::LwBoneFile;
 use pko_tools_lib::animation::lab_loader::load_lab;
 use pko_tools_lib::character::model::CharacterGeometricModel;
@@ -356,10 +356,8 @@ fn roundtrip_088_lgo() {
 
     let original_lab = load_lab(&lab_path).expect("Failed to parse original LAB");
 
-    let mut original_lgo_file = fs::File::open(&lgo_path).expect("Failed to open original LGO");
-    let original_lgo: CharacterGeometricModel = original_lgo_file
-        .read_le()
-        .expect("Failed to parse original LGO");
+    let original_lgo =
+        CharacterGeometricModel::from_file(lgo_path.clone()).expect("Failed to parse original LGO");
 
     println!("  ✓ Original LAB: {} bones", original_lab.base_seq.len());
     println!("  ✓ Original LGO loaded");

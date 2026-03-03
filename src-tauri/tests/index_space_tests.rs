@@ -3,7 +3,6 @@
 // - Bug #1: parent_id stores array positions, not node indices
 // - Bug #3: bone_index_seq stores LAB array indices, not enumerate indices
 
-use binrw::BinReaderExt;
 use pko_tools_lib::animation::character::LW_INVALID_INDEX;
 use pko_tools_lib::animation::lab_loader::load_lab;
 use pko_tools_lib::character::model::CharacterGeometricModel;
@@ -119,8 +118,7 @@ fn bone_index_seq_references_lab_array_not_enumerate_index() {
             lgo_path.file_name().unwrap().to_string_lossy()
         );
 
-        let mut lgo_file = fs::File::open(&lgo_path).expect("Failed to open LGO");
-        let lgo_model: CharacterGeometricModel = lgo_file.read_le().expect("Failed to parse LGO");
+        let lgo_model = CharacterGeometricModel::from_file(lgo_path.clone()).expect("Failed to parse LGO");
 
         // Extract mesh_info from the model
         let lgo = match &lgo_model.mesh_info {

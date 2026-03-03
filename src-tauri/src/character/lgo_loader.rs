@@ -28,13 +28,9 @@ use crate::math::{LwBox, LwMatrix44, LwPlane, LwSphere, LwVector2, LwVector3};
 
 use cgmath::{Matrix4, Vector2, Vector3, Vector4};
 
-/// Transmute a u32 into a `#[repr(u32)]` enum.
-/// SAFETY: The enum must have a variant covering the value or a catch-all variant.
-/// All our D3D enums have InvalidMax = 0xffffffff which is read via binrw's repr(u32).
-macro_rules! from_u32_repr {
-    ($t:ty, $val:expr) => {
-        unsafe { std::mem::transmute::<u32, $t>($val) }
-    };
+/// Convert a u32 to a `#[repr(u32)]` enum via `TryFrom`, falling back to `default`.
+fn enum_from_u32<T: TryFrom<u32>>(v: u32, default: T) -> T {
+    T::try_from(v).unwrap_or(default)
 }
 
 // ============================================================================
@@ -512,8 +508,8 @@ fn extract_tex_info_0000(stages: &[OptRc<PkoLmo_TexInfo0000>]) -> [TextureInfo; 
         tex_seq[i].usage = 0;
         tex_seq[i].d3d_pool = D3DPool::Default;
         tex_seq[i]._type = TextureType::File;
-        tex_seq[i].d3d_format = from_u32_repr!(D3DFormat, *stage_rc.format());
-        tex_seq[i].colorkey_type = from_u32_repr!(ColorKeyType, *stage_rc.colorkey_type());
+        tex_seq[i].d3d_format = enum_from_u32(*stage_rc.format(), D3DFormat::Unknown);
+        tex_seq[i].colorkey_type = enum_from_u32(*stage_rc.colorkey_type(), ColorKeyType::None);
         let ck = stage_rc.colorkey().clone();
         tex_seq[i].colorkey = LwColorValue4b {
             b: *ck.b(), g: *ck.g(), r: *ck.r(), a: *ck.a(),
@@ -557,8 +553,8 @@ fn extract_tex_info_0001(stages: &[OptRc<PkoLmo_TexInfo0001>]) -> [TextureInfo; 
         tex_seq[i].usage = 0;
         tex_seq[i].d3d_pool = D3DPool::Default;
         tex_seq[i]._type = TextureType::File;
-        tex_seq[i].d3d_format = from_u32_repr!(D3DFormat, *stage_rc.format());
-        tex_seq[i].colorkey_type = from_u32_repr!(ColorKeyType, *stage_rc.colorkey_type());
+        tex_seq[i].d3d_format = enum_from_u32(*stage_rc.format(), D3DFormat::Unknown);
+        tex_seq[i].colorkey_type = enum_from_u32(*stage_rc.colorkey_type(), ColorKeyType::None);
         let ck = stage_rc.colorkey().clone();
         tex_seq[i].colorkey = LwColorValue4b {
             b: *ck.b(), g: *ck.g(), r: *ck.r(), a: *ck.a(),
@@ -589,13 +585,13 @@ fn extract_tex_info_current(stages: &[OptRc<PkoLmo_TexInfoCurrent>]) -> [Texture
         tex_seq[i].stage = *stage_rc.stage();
         tex_seq[i].level = *stage_rc.level();
         tex_seq[i].usage = *stage_rc.usage();
-        tex_seq[i].d3d_format = from_u32_repr!(D3DFormat, *stage_rc.format());
-        tex_seq[i].d3d_pool = from_u32_repr!(D3DPool, *stage_rc.pool());
+        tex_seq[i].d3d_format = enum_from_u32(*stage_rc.format(), D3DFormat::Unknown);
+        tex_seq[i].d3d_pool = enum_from_u32(*stage_rc.pool(), D3DPool::Default);
         tex_seq[i].byte_alignment_flag = *stage_rc.byte_alignment_flag();
-        tex_seq[i]._type = from_u32_repr!(TextureType, *stage_rc.tex_type());
+        tex_seq[i]._type = enum_from_u32(*stage_rc.tex_type(), TextureType::File);
         tex_seq[i].width = *stage_rc.width();
         tex_seq[i].height = *stage_rc.height();
-        tex_seq[i].colorkey_type = from_u32_repr!(ColorKeyType, *stage_rc.colorkey_type());
+        tex_seq[i].colorkey_type = enum_from_u32(*stage_rc.colorkey_type(), ColorKeyType::None);
         let ck = stage_rc.colorkey().clone();
         tex_seq[i].colorkey = LwColorValue4b {
             b: *ck.b(), g: *ck.g(), r: *ck.r(), a: *ck.a(),
@@ -823,7 +819,7 @@ fn convert_mesh_header(
             // MESH_VERSION0000: 6 fields + 128-byte raw rs_set
             let hdr = section.header_v0000().clone();
             let pt_type_raw = *hdr.pt_type();
-            let pt_type = from_u32_repr!(D3DPrimitiveType, pt_type_raw);
+            let pt_type = enum_from_u32(pt_type_raw, D3DPrimitiveType::TriangleList);
 
             // Parse raw 128-byte render state set
             let rs_raw = hdr.rs_set().clone();
@@ -845,7 +841,7 @@ fn convert_mesh_header(
             // MESH_VERSION0001 / v1000-v1003: 6 fields + 8 RenderStateAtoms
             let hdr = section.header_v0003().clone();
             let pt_type_raw = *hdr.pt_type();
-            let pt_type = from_u32_repr!(D3DPrimitiveType, pt_type_raw);
+            let pt_type = enum_from_u32(pt_type_raw, D3DPrimitiveType::TriangleList);
             let rs_set = extract_render_state_atoms(&hdr.rs_set().clone());
 
             Ok(CharacterInfoMeshHeader {
@@ -864,7 +860,7 @@ fn convert_mesh_header(
             // v1004+: 8 fields + 8 RenderStateAtoms
             let hdr = section.header_v1004().clone();
             let pt_type_raw = *hdr.pt_type();
-            let pt_type = from_u32_repr!(D3DPrimitiveType, pt_type_raw);
+            let pt_type = enum_from_u32(pt_type_raw, D3DPrimitiveType::TriangleList);
             let rs_set = extract_render_state_atoms(&hdr.rs_set().clone());
             let bone_infl_factor = *hdr.bone_infl_factor();
             let vertex_element_num = *hdr.vertex_element_num();
@@ -1178,29 +1174,6 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_artifacts")
     }
 
-    fn collect_lgo_files(dir: &Path, out: &mut Vec<PathBuf>) {
-        let entries = match std::fs::read_dir(dir) {
-            Ok(e) => e,
-            Err(_) => return,
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                collect_lgo_files(&path, out);
-            } else if path.extension().and_then(|e| e.to_str()) == Some("lgo") {
-                out.push(path);
-            }
-        }
-    }
-
-    fn model_dir() -> Option<PathBuf> {
-        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .parent()?
-            .join("top-client")
-            .join("model");
-        if path.exists() { Some(path) } else { None }
-    }
-
     #[test]
     fn kaitai_parses_single_lgo() {
         let path = test_artifacts_dir().join("0909000000.lgo");
@@ -1214,412 +1187,5 @@ mod tests {
         if let Some(ref mesh) = model.mesh_info {
             assert!(mesh.header.vertex_num > 0, "should have vertices");
         }
-    }
-
-    #[test]
-    fn kaitai_matches_native_on_single_file() {
-        let path = test_artifacts_dir().join("0909000000.lgo");
-        if !path.exists() {
-            eprintln!("Skipping: test artifact not found at {}", path.display());
-            return;
-        }
-
-        let native = CharacterGeometricModel::from_file(path.clone())
-            .expect("Native parse failed");
-        let kaitai = load_lgo(&path)
-            .expect("Kaitai parse failed");
-
-        assert_models_equal(&native, &kaitai, &path);
-    }
-
-    #[test]
-    fn kaitai_matches_native_on_all_lgo_files() {
-        let model_base = match model_dir() {
-            Some(d) => d,
-            None => {
-                eprintln!("Skipping: top-client/model/ not found");
-                return;
-            }
-        };
-
-        let mut total = 0u32;
-        let mut failures = Vec::new();
-        let mut native_errors = 0u32;
-
-        // Walk model/ directory for all .lgo files
-        let mut lgo_files = Vec::new();
-        collect_lgo_files(&model_base, &mut lgo_files);
-
-        for path in &lgo_files {
-            let path = path.as_path();
-
-            total += 1;
-
-            let native = match CharacterGeometricModel::from_file(path.to_path_buf()) {
-                Ok(m) => m,
-                Err(_e) => {
-                    // Files that the native parser can't read (corrupt/truncated)
-                    // are not adapter parity failures.
-                    native_errors += 1;
-                    continue;
-                }
-            };
-
-            let kaitai = match load_lgo(path) {
-                Ok(m) => m,
-                Err(e) => {
-                    failures.push(format!("{}: kaitai parse error: {}", path.display(), e));
-                    continue;
-                }
-            };
-
-            if let Err(e) = compare_models(&native, &kaitai) {
-                failures.push(format!("{}: {}", path.display(), e));
-            }
-        }
-
-        eprintln!("LGO parity: {total} files tested, {} parity failures, {native_errors} native parse errors (skipped)", failures.len());
-        for f in &failures {
-            eprintln!("  FAIL: {f}");
-        }
-        assert!(failures.is_empty(), "{} / {} files failed parity ({native_errors} native errors skipped)", failures.len(), total);
-        assert!(total > 0, "No .lgo files found — check top-client/model/ path");
-    }
-
-    // ========================================================================
-    // Comparison helpers
-    // ========================================================================
-
-    fn assert_models_equal(native: &CharacterGeometricModel, kaitai: &CharacterGeometricModel, path: &Path) {
-        compare_models(native, kaitai)
-            .unwrap_or_else(|e| panic!("{}: {}", path.display(), e));
-    }
-
-    fn compare_models(
-        native: &CharacterGeometricModel,
-        kaitai: &CharacterGeometricModel,
-    ) -> Result<(), String> {
-        // Version
-        if native.version != kaitai.version {
-            return Err(format!("version: native={} kaitai={}", native.version, kaitai.version));
-        }
-
-        // Header
-        compare_headers(&native.header, &kaitai.header)?;
-
-        // old_version
-        if native.old_version != kaitai.old_version {
-            return Err(format!("old_version: native={} kaitai={}", native.old_version, kaitai.old_version));
-        }
-
-        // material_num
-        if native.material_num != kaitai.material_num {
-            return Err(format!("material_num: native={} kaitai={}", native.material_num, kaitai.material_num));
-        }
-
-        // Materials
-        match (&native.material_seq, &kaitai.material_seq) {
-            (Some(n), Some(k)) => {
-                if n.len() != k.len() {
-                    return Err(format!("material_seq.len: native={} kaitai={}", n.len(), k.len()));
-                }
-                for (i, (nm, km)) in n.iter().zip(k.iter()).enumerate() {
-                    compare_materials(nm, km, i)?;
-                }
-            }
-            (None, None) => {}
-            _ => return Err(format!("material_seq presence mismatch")),
-        }
-
-        // Mesh
-        match (&native.mesh_info, &kaitai.mesh_info) {
-            (Some(n), Some(k)) => compare_mesh_info(n, k)?,
-            (None, None) => {}
-            _ => return Err(format!("mesh_info presence mismatch")),
-        }
-
-        // Helper
-        match (&native.helper_data, &kaitai.helper_data) {
-            (Some(n), Some(k)) => compare_helper_data(n, k)?,
-            (None, None) => {}
-            _ => return Err(format!("helper_data presence mismatch")),
-        }
-
-        Ok(())
-    }
-
-    fn compare_headers(n: &CharGeoModelInfoHeader, k: &CharGeoModelInfoHeader) -> Result<(), String> {
-        if n.id != k.id { return Err(format!("header.id: {} vs {}", n.id, k.id)); }
-        if n.parent_id != k.parent_id { return Err(format!("header.parent_id: {} vs {}", n.parent_id, k.parent_id)); }
-        if n._type != k._type { return Err(format!("header._type: {} vs {}", n._type, k._type)); }
-        compare_matrix44(&n.mat_local, &k.mat_local, "header.mat_local")?;
-        if n.rcci.ctrl_id != k.rcci.ctrl_id { return Err(format!("header.rcci.ctrl_id: {} vs {}", n.rcci.ctrl_id, k.rcci.ctrl_id)); }
-        if n.rcci.decl_id != k.rcci.decl_id { return Err(format!("header.rcci.decl_id: {} vs {}", n.rcci.decl_id, k.rcci.decl_id)); }
-        if n.rcci.vs_id != k.rcci.vs_id { return Err(format!("header.rcci.vs_id: {} vs {}", n.rcci.vs_id, k.rcci.vs_id)); }
-        if n.rcci.ps_id != k.rcci.ps_id { return Err(format!("header.rcci.ps_id: {} vs {}", n.rcci.ps_id, k.rcci.ps_id)); }
-        if n.state_ctrl._state_seq != k.state_ctrl._state_seq {
-            return Err(format!("header.state_ctrl: {:?} vs {:?}", n.state_ctrl._state_seq, k.state_ctrl._state_seq));
-        }
-        if n.mtl_size != k.mtl_size { return Err(format!("header.mtl_size: {} vs {}", n.mtl_size, k.mtl_size)); }
-        if n.mesh_size != k.mesh_size { return Err(format!("header.mesh_size: {} vs {}", n.mesh_size, k.mesh_size)); }
-        if n.helper_size != k.helper_size { return Err(format!("header.helper_size: {} vs {}", n.helper_size, k.helper_size)); }
-        if n.anim_size != k.anim_size { return Err(format!("header.anim_size: {} vs {}", n.anim_size, k.anim_size)); }
-        Ok(())
-    }
-
-    fn compare_materials(n: &CharMaterialTextureInfo, k: &CharMaterialTextureInfo, idx: usize) -> Result<(), String> {
-        let ctx = format!("material[{}]", idx);
-        if !f32_eq(n.opacity, k.opacity) {
-            return Err(format!("{ctx}.opacity: {} vs {}", n.opacity, k.opacity));
-        }
-        if n.transp_type != k.transp_type {
-            return Err(format!("{ctx}.transp_type: {:?} vs {:?}", n.transp_type, k.transp_type));
-        }
-        compare_char_material(&n.material, &k.material, &ctx)?;
-        compare_rs_set(&n.rs_set, &k.rs_set, &ctx)?;
-        for s in 0..4 {
-            compare_tex_info(&n.tex_seq[s], &k.tex_seq[s], &format!("{ctx}.tex[{s}]"))?;
-        }
-        Ok(())
-    }
-
-    fn compare_char_material(n: &CharMaterial, k: &CharMaterial, ctx: &str) -> Result<(), String> {
-        compare_color4f_val(&n.dif, &k.dif, &format!("{ctx}.dif"))?;
-        compare_color4f_val(&n.amb, &k.amb, &format!("{ctx}.amb"))?;
-        compare_color4f_opt(&n.spe, &k.spe, &format!("{ctx}.spe"))?;
-        compare_color4f_opt(&n.emi, &k.emi, &format!("{ctx}.emi"))?;
-        if !f32_eq(n.power, k.power) {
-            return Err(format!("{ctx}.power: {} vs {}", n.power, k.power));
-        }
-        Ok(())
-    }
-
-    fn compare_color4f_val(n: &ColorValue4F, k: &ColorValue4F, ctx: &str) -> Result<(), String> {
-        if !f32_eq(n.r, k.r) || !f32_eq(n.g, k.g) || !f32_eq(n.b, k.b) || !f32_eq(n.a, k.a) {
-            return Err(format!("{ctx}: ({},{},{},{}) vs ({},{},{},{})",
-                n.r, n.g, n.b, n.a, k.r, k.g, k.b, k.a));
-        }
-        Ok(())
-    }
-
-    fn compare_color4f_opt(n: &Option<ColorValue4F>, k: &Option<ColorValue4F>, ctx: &str) -> Result<(), String> {
-        match (n, k) {
-            (Some(nv), Some(kv)) => compare_color4f_val(nv, kv, ctx),
-            (None, None) => Ok(()),
-            _ => Err(format!("{ctx}: presence mismatch (Some vs None)")),
-        }
-    }
-
-    fn compare_rs_set(n: &[RenderStateAtom; 8], k: &[RenderStateAtom; 8], ctx: &str) -> Result<(), String> {
-        for i in 0..8 {
-            if n[i].state != k[i].state || n[i].value0 != k[i].value0 || n[i].value1 != k[i].value1 {
-                return Err(format!("{ctx}.rs_set[{i}]: ({},{},{}) vs ({},{},{})",
-                    n[i].state, n[i].value0, n[i].value1,
-                    k[i].state, k[i].value0, k[i].value1));
-            }
-        }
-        Ok(())
-    }
-
-    fn compare_tex_info(n: &TextureInfo, k: &TextureInfo, ctx: &str) -> Result<(), String> {
-        if n.stage != k.stage { return Err(format!("{ctx}.stage: {} vs {}", n.stage, k.stage)); }
-        if n.level != k.level { return Err(format!("{ctx}.level: {} vs {}", n.level, k.level)); }
-        if n.usage != k.usage { return Err(format!("{ctx}.usage: {} vs {}", n.usage, k.usage)); }
-        if n.d3d_format != k.d3d_format { return Err(format!("{ctx}.d3d_format: {:?} vs {:?}", n.d3d_format, k.d3d_format)); }
-        if n.d3d_pool != k.d3d_pool { return Err(format!("{ctx}.d3d_pool: {:?} vs {:?}", n.d3d_pool, k.d3d_pool)); }
-        if n.byte_alignment_flag != k.byte_alignment_flag { return Err(format!("{ctx}.byte_alignment_flag: {} vs {}", n.byte_alignment_flag, k.byte_alignment_flag)); }
-        if n._type != k._type { return Err(format!("{ctx}._type: {:?} vs {:?}", n._type, k._type)); }
-        if n.width != k.width { return Err(format!("{ctx}.width: {} vs {}", n.width, k.width)); }
-        if n.height != k.height { return Err(format!("{ctx}.height: {} vs {}", n.height, k.height)); }
-        if n.colorkey_type != k.colorkey_type { return Err(format!("{ctx}.colorkey_type: {:?} vs {:?}", n.colorkey_type, k.colorkey_type)); }
-        if n.colorkey.b != k.colorkey.b || n.colorkey.g != k.colorkey.g
-            || n.colorkey.r != k.colorkey.r || n.colorkey.a != k.colorkey.a {
-            return Err(format!("{ctx}.colorkey mismatch"));
-        }
-        if n.file_name != k.file_name { return Err(format!("{ctx}.file_name mismatch")); }
-        // data field is a runtime pointer — skip comparison
-        compare_rs_set_8(&n.tss_set, &k.tss_set, &format!("{ctx}.tss_set"))?;
-        Ok(())
-    }
-
-    fn compare_rs_set_8(n: &[RenderStateAtom; 8], k: &[RenderStateAtom; 8], ctx: &str) -> Result<(), String> {
-        for i in 0..8 {
-            if n[i].state != k[i].state || n[i].value0 != k[i].value0 || n[i].value1 != k[i].value1 {
-                return Err(format!("{ctx}[{i}]: ({},{},{}) vs ({},{},{})",
-                    n[i].state, n[i].value0, n[i].value1,
-                    k[i].state, k[i].value0, k[i].value1));
-            }
-        }
-        Ok(())
-    }
-
-    fn compare_mesh_info(n: &CharacterMeshInfo, k: &CharacterMeshInfo, ) -> Result<(), String> {
-        // Header
-        let nh = &n.header;
-        let kh = &k.header;
-        if nh.fvf != kh.fvf { return Err(format!("mesh.header.fvf: {} vs {}", nh.fvf, kh.fvf)); }
-        if nh.vertex_num != kh.vertex_num { return Err(format!("mesh.header.vertex_num: {} vs {}", nh.vertex_num, kh.vertex_num)); }
-        if nh.index_num != kh.index_num { return Err(format!("mesh.header.index_num: {} vs {}", nh.index_num, kh.index_num)); }
-        if nh.subset_num != kh.subset_num { return Err(format!("mesh.header.subset_num: {} vs {}", nh.subset_num, kh.subset_num)); }
-        if nh.bone_index_num != kh.bone_index_num { return Err(format!("mesh.header.bone_index_num: {} vs {}", nh.bone_index_num, kh.bone_index_num)); }
-        if nh.bone_infl_factor != kh.bone_infl_factor { return Err(format!("mesh.header.bone_infl_factor: {} vs {}", nh.bone_infl_factor, kh.bone_infl_factor)); }
-        if nh.vertex_element_num != kh.vertex_element_num { return Err(format!("mesh.header.vertex_element_num: {} vs {}", nh.vertex_element_num, kh.vertex_element_num)); }
-        compare_rs_set(&nh.rs_set, &kh.rs_set, "mesh.header")?;
-
-        // Vertex data
-        if n.vertex_seq.len() != k.vertex_seq.len() {
-            return Err(format!("mesh.vertex_seq.len: {} vs {}", n.vertex_seq.len(), k.vertex_seq.len()));
-        }
-        for (i, (nv, kv)) in n.vertex_seq.iter().zip(k.vertex_seq.iter()).enumerate() {
-            if !f32_eq(nv.0.x, kv.0.x) || !f32_eq(nv.0.y, kv.0.y) || !f32_eq(nv.0.z, kv.0.z) {
-                return Err(format!("mesh.vertex[{i}]: ({},{},{}) vs ({},{},{})",
-                    nv.0.x, nv.0.y, nv.0.z, kv.0.x, kv.0.y, kv.0.z));
-            }
-        }
-
-        // Normals
-        if n.normal_seq.len() != k.normal_seq.len() {
-            return Err(format!("mesh.normal_seq.len: {} vs {}", n.normal_seq.len(), k.normal_seq.len()));
-        }
-        for (i, (nv, kv)) in n.normal_seq.iter().zip(k.normal_seq.iter()).enumerate() {
-            if !f32_eq(nv.0.x, kv.0.x) || !f32_eq(nv.0.y, kv.0.y) || !f32_eq(nv.0.z, kv.0.z) {
-                return Err(format!("mesh.normal[{i}]: ({},{},{}) vs ({},{},{})",
-                    nv.0.x, nv.0.y, nv.0.z, kv.0.x, kv.0.y, kv.0.z));
-            }
-        }
-
-        // Texcoords (all 4 channels)
-        for ch in 0..4 {
-            if n.texcoord_seq[ch].len() != k.texcoord_seq[ch].len() {
-                return Err(format!("mesh.texcoord[{ch}].len: {} vs {}", n.texcoord_seq[ch].len(), k.texcoord_seq[ch].len()));
-            }
-            for (i, (nt, kt)) in n.texcoord_seq[ch].iter().zip(k.texcoord_seq[ch].iter()).enumerate() {
-                if !f32_eq(nt.0.x, kt.0.x) || !f32_eq(nt.0.y, kt.0.y) {
-                    return Err(format!("mesh.texcoord[{ch}][{i}]: ({},{}) vs ({},{})",
-                        nt.0.x, nt.0.y, kt.0.x, kt.0.y));
-                }
-            }
-        }
-
-        // Vertex colors
-        if n.vercol_seq != k.vercol_seq {
-            return Err(format!("mesh.vercol_seq mismatch (len {} vs {})", n.vercol_seq.len(), k.vercol_seq.len()));
-        }
-
-        // Indices
-        if n.index_seq != k.index_seq {
-            let first_diff = n.index_seq.iter().zip(k.index_seq.iter())
-                .position(|(a, b)| a != b);
-            return Err(format!("mesh.index_seq mismatch (len {} vs {}, first diff at {:?})",
-                n.index_seq.len(), k.index_seq.len(), first_diff));
-        }
-
-        // Bone indices
-        if n.bone_index_seq != k.bone_index_seq {
-            return Err(format!("mesh.bone_index_seq mismatch (len {} vs {})", n.bone_index_seq.len(), k.bone_index_seq.len()));
-        }
-
-        // Blend data
-        if n.blend_seq.len() != k.blend_seq.len() {
-            return Err(format!("mesh.blend_seq.len: {} vs {}", n.blend_seq.len(), k.blend_seq.len()));
-        }
-        for (i, (nb, kb)) in n.blend_seq.iter().zip(k.blend_seq.iter()).enumerate() {
-            if nb.indexd != kb.indexd {
-                return Err(format!("mesh.blend[{i}].indexd: {} vs {}", nb.indexd, kb.indexd));
-            }
-            for w in 0..4 {
-                if !f32_eq(nb.weight[w], kb.weight[w]) {
-                    return Err(format!("mesh.blend[{i}].weight[{w}]: {} vs {}", nb.weight[w], kb.weight[w]));
-                }
-            }
-        }
-
-        // Subsets
-        if n.subset_seq.len() != k.subset_seq.len() {
-            return Err(format!("mesh.subset_seq.len: {} vs {}", n.subset_seq.len(), k.subset_seq.len()));
-        }
-        for (i, (ns, ks)) in n.subset_seq.iter().zip(k.subset_seq.iter()).enumerate() {
-            if ns.primitive_num != ks.primitive_num || ns.start_index != ks.start_index
-                || ns.vertex_num != ks.vertex_num || ns.min_index != ks.min_index
-            {
-                return Err(format!("mesh.subset[{i}] mismatch"));
-            }
-        }
-
-        // Vertex elements
-        if n.vertex_element_seq != k.vertex_element_seq {
-            return Err(format!("mesh.vertex_element_seq mismatch"));
-        }
-
-        Ok(())
-    }
-
-    fn compare_helper_data(n: &HelperData, k: &HelperData) -> Result<(), String> {
-        if n._type != k._type {
-            return Err(format!("helper._type: {} vs {}", n._type, k._type));
-        }
-
-        // Dummies
-        if n.dummy_seq.len() != k.dummy_seq.len() {
-            return Err(format!("helper.dummy_seq.len: {} vs {}", n.dummy_seq.len(), k.dummy_seq.len()));
-        }
-        for (i, (nd, kd)) in n.dummy_seq.iter().zip(k.dummy_seq.iter()).enumerate() {
-            if nd.id != kd.id { return Err(format!("helper.dummy[{i}].id: {} vs {}", nd.id, kd.id)); }
-            compare_matrix44(&nd.mat, &kd.mat, &format!("helper.dummy[{i}].mat"))?;
-            compare_matrix44(&nd.mat_local, &kd.mat_local, &format!("helper.dummy[{i}].mat_local"))?;
-            if nd.parent_type != kd.parent_type { return Err(format!("helper.dummy[{i}].parent_type: {} vs {}", nd.parent_type, kd.parent_type)); }
-            if nd.parent_id != kd.parent_id { return Err(format!("helper.dummy[{i}].parent_id: {} vs {}", nd.parent_id, kd.parent_id)); }
-        }
-
-        // Boxes
-        if n.box_seq.len() != k.box_seq.len() {
-            return Err(format!("helper.box_seq.len: {} vs {}", n.box_seq.len(), k.box_seq.len()));
-        }
-        for (i, (nb, kb)) in n.box_seq.iter().zip(k.box_seq.iter()).enumerate() {
-            if nb.id != kb.id { return Err(format!("helper.box[{i}].id mismatch")); }
-            if nb._type != kb._type { return Err(format!("helper.box[{i}]._type mismatch")); }
-            if nb.name != kb.name { return Err(format!("helper.box[{i}].name mismatch")); }
-        }
-
-        // Meshes
-        if n.mesh_seq.len() != k.mesh_seq.len() {
-            return Err(format!("helper.mesh_seq.len: {} vs {}", n.mesh_seq.len(), k.mesh_seq.len()));
-        }
-
-        // Bounding boxes
-        if n.bbox_seq.len() != k.bbox_seq.len() {
-            return Err(format!("helper.bbox_seq.len: {} vs {}", n.bbox_seq.len(), k.bbox_seq.len()));
-        }
-
-        // Bounding spheres
-        if n.bsphere_seq.len() != k.bsphere_seq.len() {
-            return Err(format!("helper.bsphere_seq.len: {} vs {}", n.bsphere_seq.len(), k.bsphere_seq.len()));
-        }
-        for (i, (ns, ks)) in n.bsphere_seq.iter().zip(k.bsphere_seq.iter()).enumerate() {
-            if ns.id != ks.id { return Err(format!("helper.bsphere[{i}].id mismatch")); }
-            if !f32_eq(ns.sphere.r, ks.sphere.r) {
-                return Err(format!("helper.bsphere[{i}].radius: {} vs {}", ns.sphere.r, ks.sphere.r));
-            }
-        }
-
-        Ok(())
-    }
-
-    fn compare_matrix44(n: &LwMatrix44, k: &LwMatrix44, ctx: &str) -> Result<(), String> {
-        for r in 0..4 {
-            for c in 0..4 {
-                let nv = n.0[c][r]; // cgmath column-major
-                let kv = k.0[c][r];
-                if !f32_eq(nv, kv) {
-                    return Err(format!("{ctx}[{r}][{c}]: {} vs {}", nv, kv));
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Bitwise f32 equality — NaN == NaN.
-    fn f32_eq(a: f32, b: f32) -> bool {
-        a.to_bits() == b.to_bits()
     }
 }
