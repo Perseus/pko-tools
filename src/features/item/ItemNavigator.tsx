@@ -1,7 +1,7 @@
 import { currentProjectAtom } from "@/store/project";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useVirtualizer, Virtualizer } from "@tanstack/react-virtual";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ScrollAreaVirtualizable } from "@/components/ui/scroll-area-virtualizable";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { SidebarContent, SidebarHeader } from "@/components/ui/sidebar";
@@ -24,6 +24,7 @@ import { Download, Upload, ArrowLeft, Save, Loader2 } from "lucide-react";
 import { openImportWizardAtom } from "@/store/import";
 import { isWorkbenchModeAtom, activeWorkbenchAtom, dummyPlacementModeAtom } from "@/store/workbench";
 import { toast } from "@/hooks/use-toast";
+import { LatestOnly } from "@/lib/latestOnly";
 
 export default function ItemNavigator() {
   const [items, setItems] = useState<Item[]>([]);
@@ -43,15 +44,28 @@ export default function ItemNavigator() {
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const modelVariant = useAtomValue(selectedModelVariantAtom);
   const [selectedItem, setSelectedItem] = useAtom(selectedItemAtom);
+  const listRequestGuard = useRef(new LatestOnly());
+  const modelLoadGuard = useRef(new LatestOnly());
 
   useEffect(() => {
     async function fetchItems() {
-      if (currentProject) {
-        const itemList = await getItemList(currentProject.id);
-        setItems(itemList);
+      const requestVersion = listRequestGuard.current.begin();
+      if (!currentProject) {
+        setItems([]);
+        return;
       }
+
+      const itemList = await getItemList(currentProject.id);
+      if (!listRequestGuard.current.isLatest(requestVersion)) {
+        return;
+      }
+      setItems(itemList);
     }
     fetchItems();
+
+    return () => {
+      listRequestGuard.current.invalidate();
+    };
   }, [currentProject]);
 
   // Get unique item types for the filter dropdown
@@ -98,6 +112,7 @@ export default function ItemNavigator() {
 
   async function loadModel(item: Item, variant: ModelVariant) {
     if (!item || !currentProject) return;
+    const requestVersion = modelLoadGuard.current.begin();
 
     const modelId = getModelId(item, variant);
 
@@ -113,14 +128,21 @@ export default function ItemNavigator() {
           getItemMetadata(currentProject.id, item.id, modelId),
           getItemLitInfo(currentProject.id, item.id),
         ]);
+        if (!modelLoadGuard.current.isLatest(requestVersion)) {
+          return;
+        }
         setItemGltfJson(gltfJson);
         setItemMetadata(metadata);
         setItemLitInfo(litInfo);
       }
     } catch (error) {
-      console.error("Error loading item:", error);
+      if (modelLoadGuard.current.isLatest(requestVersion)) {
+        console.error("Error loading item:", error);
+      }
     } finally {
-      setItemLoading(false);
+      if (modelLoadGuard.current.isLatest(requestVersion)) {
+        setItemLoading(false);
+      }
     }
   }
 
@@ -138,6 +160,12 @@ export default function ItemNavigator() {
       loadModel(selectedItem, modelVariant);
     }
   }, [modelVariant]);
+
+  useEffect(() => {
+    return () => {
+      modelLoadGuard.current.invalidate();
+    };
+  }, []);
 
   function exitWorkbench() {
     setIsWorkbenchMode(false);

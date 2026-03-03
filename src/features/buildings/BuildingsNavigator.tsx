@@ -1,7 +1,7 @@
 import { currentProjectAtom } from "@/store/project";
 import { useAtom, useAtomValue } from "jotai";
 import { useVirtualizer, Virtualizer } from "@tanstack/react-virtual";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { ScrollAreaVirtualizable } from "@/components/ui/scroll-area-virtualizable";
 import { SidebarHeader } from "@/components/ui/sidebar";
 import { BuildingEntry } from "@/types/buildings";
@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Download, Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { LatestOnly } from "@/lib/latestOnly";
 
 export default function BuildingsNavigator() {
   const [buildings, setBuildings] = useState<BuildingEntry[]>([]);
@@ -27,19 +28,34 @@ export default function BuildingsNavigator() {
   const [, setBuildingLoading] = useAtom(buildingLoadingAtom);
   const [query, setQuery] = useState("");
   const [selectedBuilding, setSelectedBuilding] = useAtom(selectedBuildingAtom);
+  const listRequestGuard = useRef(new LatestOnly());
+  const loadRequestGuard = useRef(new LatestOnly());
 
   useEffect(() => {
     async function fetchBuildings() {
-      if (currentProject) {
-        try {
-          const list = await getBuildingList(currentProject.id);
-          setBuildings(list);
-        } catch (err) {
+      const requestVersion = listRequestGuard.current.begin();
+      if (!currentProject) {
+        setBuildings([]);
+        return;
+      }
+
+      try {
+        const list = await getBuildingList(currentProject.id);
+        if (!listRequestGuard.current.isLatest(requestVersion)) {
+          return;
+        }
+        setBuildings(list);
+      } catch (err) {
+        if (listRequestGuard.current.isLatest(requestVersion)) {
           console.error("Failed to load building list:", err);
         }
       }
     }
     fetchBuildings();
+
+    return () => {
+      listRequestGuard.current.invalidate();
+    };
   }, [currentProject]);
 
   useEffect(() => {
@@ -63,6 +79,7 @@ export default function BuildingsNavigator() {
 
   async function selectBuilding(building: BuildingEntry) {
     if (!currentProject) return;
+    const requestVersion = loadRequestGuard.current.begin();
     setSelectedBuilding(building);
     setBuildingGltfJson(null);
     setBuildingLoading(true);
@@ -72,18 +89,31 @@ export default function BuildingsNavigator() {
         currentProject.id,
         building.id
       );
+      if (!loadRequestGuard.current.isLatest(requestVersion)) {
+        return;
+      }
       setBuildingGltfJson(gltfJson);
     } catch (err) {
-      console.error("Failed to load building:", err);
-      toast({
-        title: "Failed to load building",
-        description: String(err),
-        variant: "destructive",
-      });
+      if (loadRequestGuard.current.isLatest(requestVersion)) {
+        console.error("Failed to load building:", err);
+        toast({
+          title: "Failed to load building",
+          description: String(err),
+          variant: "destructive",
+        });
+      }
     } finally {
-      setBuildingLoading(false);
+      if (loadRequestGuard.current.isLatest(requestVersion)) {
+        setBuildingLoading(false);
+      }
     }
   }
+
+  useEffect(() => {
+    return () => {
+      loadRequestGuard.current.invalidate();
+    };
+  }, []);
 
   async function handleExport() {
     if (!currentProject || !selectedBuilding) return;
