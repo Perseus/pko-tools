@@ -15,7 +15,7 @@ fn main() {
     if args.len() != 2 {
         eprintln!("Usage: pko_inspect <file>");
         eprintln!();
-        eprintln!("Supported formats: .lmo, .lgo, .lab, .map, .obj, .eff, .lit");
+        eprintln!("Supported formats: .lmo, .lgo, .lab, .map, .obj, .eff, .par, .lit");
         process::exit(1);
     }
 
@@ -66,6 +66,12 @@ fn inspect(path: &Path) -> Result<String> {
                 .with_context(|| format!("read {}", path.display()))?;
             let parsed = pko_tools_lib::effect::eff_loader::load_eff(&data)?;
             serde_json::to_value(&parsed).context("serialize EFF")?
+        }
+        "par" => {
+            let data = std::fs::read(path)
+                .with_context(|| format!("read {}", path.display()))?;
+            let parsed = pko_tools_lib::effect::par_loader::load_par(&data)?;
+            serde_json::to_value(&parsed).context("serialize PAR")?
         }
         "lit" => {
             let entries = pko_tools_lib::map::lit::parse_lit_tx(path)?;

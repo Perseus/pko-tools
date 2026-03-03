@@ -52,6 +52,14 @@ fn snapshot_obj_hell5() {
 }
 
 #[test]
+fn snapshot_par_00000001() {
+    let data = std::fs::read(fixture("00000001.par")).expect("read 00000001.par");
+    let par = pko_tools_lib::effect::par_loader::load_par(&data)
+        .expect("parse 00000001.par");
+    assert_yaml_snapshot!(par);
+}
+
+#[test]
 fn snapshot_lit() {
     let entries = pko_tools_lib::map::lit::parse_lit_tx(&fixture("lit.lit"))
         .expect("parse lit.lit");

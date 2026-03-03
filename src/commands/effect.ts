@@ -1,5 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { EffectFile, Vec3 } from "@/types/effect";
+import type { ParticleController } from "@/types/particle";
 
 export const listEffects = async (projectId: string): Promise<string[]> => {
   return invoke("list_effects", { projectId });
@@ -53,4 +54,19 @@ export const loadEffectModel = async (
   modelName: string
 ): Promise<string> => {
   return invoke("load_effect_model", { projectId, modelName });
+};
+
+/** Load a native .par binary file and return the parsed particle controller. */
+export const loadParFile = async (
+  projectId: string,
+  parName: string
+): Promise<unknown> => {
+  return invoke("load_par_file", { projectId, parName });
+};
+
+/** List all .par files in the project's effect directory. */
+export const listParFiles = async (
+  projectId: string
+): Promise<string[]> => {
+  return invoke("list_par_files", { projectId });
 };

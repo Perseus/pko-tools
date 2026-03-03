@@ -30,6 +30,11 @@ import {
   resolveTextureCandidates,
   resolveTextureName,
 } from "@/features/effect/rendering";
+import {
+  composePkoRenderState,
+  applyTextureSampling,
+  type PkoTechniqueState,
+} from "@/features/effect/pkoStateEmulation";
 import { interpolateFrame, interpolateUVCoords, getTexListFrameIndex } from "@/features/effect/animation";
 import { useEffectHistory } from "@/features/effect/useEffectHistory";
 import { useEffectModel } from "@/features/effect/useEffectModel";
@@ -111,6 +116,16 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
     return resolveBlendFactors(subEffect.srcBlend, subEffect.destBlend);
   }, [subEffect]);
 
+  // Compose technique state from idxTech + per-sub-effect blend overrides
+  const techniqueState = useMemo((): PkoTechniqueState | null => {
+    if (!effectData || !subEffect) return null;
+    const overrides: Partial<PkoTechniqueState> = {};
+    // Per-sub-effect blend mode overrides technique defaults
+    if (subEffect.srcBlend) overrides.srcBlend = subEffect.srcBlend;
+    if (subEffect.destBlend) overrides.destBlend = subEffect.destBlend;
+    return composePkoRenderState(effectData.idxTech, overrides);
+  }, [effectData, subEffect]);
+
   // Smooth interpolation between keyframes during playback
   const interpolated = useMemo(() => {
     if (!subEffect || !playback.isPlaying) return null;
@@ -181,6 +196,11 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
         const binary = Uint8Array.from(atob(decoded.data), (char) => char.charCodeAt(0));
         const loaded = createEffectTexture(binary, decoded.width, decoded.height);
 
+        // Apply technique-aware texture sampling (filter + address modes)
+        if (techniqueState) {
+          applyTextureSampling(loaded, techniqueState);
+        }
+
         textureRef.current?.dispose();
         textureRef.current = loaded;
         setTexture(loaded);
@@ -239,6 +259,10 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
         const binary = Uint8Array.from(atob(decoded.data), (char) => char.charCodeAt(0));
         const loaded = createEffectTexture(binary, decoded.width, decoded.height);
 
+        if (techniqueState) {
+          applyTextureSampling(loaded, techniqueState);
+        }
+
         textureRef.current?.dispose();
         textureRef.current = loaded;
         setTexture(loaded);
@@ -253,7 +277,7 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
       isActive = false;
       textureRef.current?.dispose();
     };
-  }, [textureName, currentProject, reloadToken, isSelected]);
+  }, [textureName, currentProject, reloadToken, isSelected, techniqueState]);
 
   useFrame((state: { camera: THREE.Camera }) => {
     // Apply bone binding transform to the outer group (only for selected sub-effect)
@@ -468,6 +492,20 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
   // PKO: when alpha=false, disables alpha blending and enables depth write
   const useAlpha = subEffect.alpha !== false;
 
+  // Technique-driven material properties
+  const techDepthTest = techniqueState ? techniqueState.zEnable : true;
+  const techDepthWrite = techniqueState
+    ? (techniqueState.zWriteEnable || !useAlpha)
+    : !useAlpha;
+  const techAlphaTest = techniqueState?.alphaTestEnable
+    ? (techniqueState.alphaFunc === 6 /* D3DCMP_NOTEQUAL */ ? 1 / 255 : 0)
+    : 0;
+  const techSide = techniqueState
+    ? (techniqueState.cullMode === 3 /* D3DCULL_CCW */ ? THREE.BackSide
+       : techniqueState.cullMode === 2 /* D3DCULL_CW */ ? THREE.FrontSide
+       : THREE.DoubleSide)
+    : THREE.DoubleSide;
+
   const showGizmo = isSelected && gizmoMode !== "off" && !playback.isPlaying;
 
   const meshElement = (
@@ -499,15 +537,18 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
       <meshBasicMaterial
         key={texture?.id ?? "no-tex"}
         color={materialColor}
-        transparent={useAlpha}
+        transparent={useAlpha || techAlphaTest > 0}
         opacity={useAlpha ? previewOpacity : 1}
         toneMapped={false}
+        fog={false}
         blending={useAlpha ? THREE.CustomBlending : THREE.NormalBlending}
         blendSrc={blendFactors.blendSrc}
         blendDst={blendFactors.blendDst}
-        depthWrite={!useAlpha}
+        depthTest={techDepthTest}
+        depthWrite={techDepthWrite}
+        alphaTest={techAlphaTest}
         map={texture}
-        side={THREE.DoubleSide}
+        side={techSide}
       />
     </mesh>
   );
