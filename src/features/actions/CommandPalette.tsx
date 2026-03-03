@@ -1,12 +1,8 @@
 import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { useActionKernel } from "@/features/actions";
 import type { ResolvedAction, ShortcutDefinition } from "@/features/actions/types";
-import { cn } from "@/lib/utils";
-import React, { useEffect, useMemo, useRef, useState } from "react";
-
-const MAX_RESULTS = 40;
+import { Command } from "cmdk";
+import React, { useEffect, useMemo, useState } from "react";
 
 function formatShortcut(shortcut?: ShortcutDefinition): string {
   if (!shortcut) {
@@ -45,17 +41,27 @@ function actionSearchText(action: ResolvedAction): string {
 export function CommandPalette() {
   const { isPaletteOpen, setPaletteOpen, getActionsForCurrentContext, runAction } = useActionKernel();
   const [query, setQuery] = useState("");
-  const [selectedIndex, setSelectedIndex] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
 
   const actions = useMemo(() => getActionsForCurrentContext(), [getActionsForCurrentContext, isPaletteOpen]);
-  const filteredActions = useMemo(() => {
-    const normalized = query.trim().toLowerCase();
-    const base = normalized
-      ? actions.filter((action) => actionSearchText(action).includes(normalized))
-      : actions;
-    return base.slice(0, MAX_RESULTS);
-  }, [actions, query]);
+  const filteredActions = useMemo(
+    () =>
+      actions.filter((action) =>
+        query.trim()
+          ? actionSearchText(action).includes(query.trim().toLowerCase())
+          : true
+      ),
+    [actions, query],
+  );
+  const groupedActions = useMemo(() => {
+    const groups = new Map<string, ResolvedAction[]>();
+    filteredActions.forEach((action) => {
+      const key = action.group ?? "General";
+      const entries = groups.get(key) ?? [];
+      entries.push(action);
+      groups.set(key, entries);
+    });
+    return Array.from(groups.entries());
+  }, [filteredActions]);
 
   useEffect(() => {
     if (!isPaletteOpen) {
@@ -63,19 +69,7 @@ export function CommandPalette() {
     }
 
     setQuery("");
-    setSelectedIndex(0);
-    const handle = window.requestAnimationFrame(() => {
-      inputRef.current?.focus();
-    });
-
-    return () => {
-      window.cancelAnimationFrame(handle);
-    };
   }, [isPaletteOpen]);
-
-  useEffect(() => {
-    setSelectedIndex((current) => Math.min(current, Math.max(filteredActions.length - 1, 0)));
-  }, [filteredActions.length]);
 
   const executeAction = async (action: ResolvedAction) => {
     if (!action.enabled) {
@@ -91,77 +85,67 @@ export function CommandPalette() {
   return (
     <Dialog open={isPaletteOpen} onOpenChange={setPaletteOpen}>
       <DialogContent className="max-w-xl gap-0 overflow-hidden p-0">
-        <div className="border-b border-border p-3">
-          <Input
-            ref={inputRef}
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "ArrowDown") {
-                event.preventDefault();
-                setSelectedIndex((idx) => Math.min(idx + 1, Math.max(filteredActions.length - 1, 0)));
-                return;
-              }
-              if (event.key === "ArrowUp") {
-                event.preventDefault();
-                setSelectedIndex((idx) => Math.max(idx - 1, 0));
-                return;
-              }
-              if (event.key === "Enter") {
-                event.preventDefault();
-                const selected = filteredActions[selectedIndex];
-                if (selected) {
-                  void executeAction(selected);
-                }
-              }
-            }}
-            placeholder="Type an action or page name..."
-            aria-label="command-palette-input"
-          />
-        </div>
-        <ScrollArea className="max-h-[420px]">
-          <div className="p-2">
-            {filteredActions.length === 0 ? (
-              <div className="px-2 py-3 text-sm text-muted-foreground">No matching actions</div>
-            ) : (
-              filteredActions.map((action, index) => {
-                const shortcut = formatShortcut(action.shortcuts?.[0]);
-                const selected = index === selectedIndex;
-
-                return (
-                  <button
-                    type="button"
-                    key={action.id}
-                    className={cn(
-                      "flex w-full items-center justify-between rounded-md px-2 py-2 text-left transition",
-                      selected ? "bg-accent text-accent-foreground" : "hover:bg-accent/60",
-                      !action.enabled && "opacity-60",
-                    )}
-                    onMouseEnter={() => setSelectedIndex(index)}
-                    onClick={() => {
-                      void executeAction(action);
-                    }}
-                    disabled={!action.enabled}
-                    aria-label={`action-${action.id}`}
-                  >
-                    <div>
-                      <div className="text-sm font-medium">{action.title}</div>
-                      {(action.group || action.disabledReason) && (
-                        <div className="text-xs text-muted-foreground">
-                          {action.group}
-                          {action.disabledReason ? ` - ${action.disabledReason}` : ""}
-                        </div>
-                      )}
-                    </div>
-                    {shortcut && (
-                      <div className="text-[10px] text-muted-foreground">{shortcut}</div>
-                    )}
-                  </button>
-                );
-              })
-            )}
+        <Command
+          label="Command Palette"
+          className="flex max-h-[460px] flex-col"
+        >
+          <div className="border-b border-border px-3 py-2">
+            <Command.Input
+              value={query}
+              onValueChange={setQuery}
+              placeholder="Type an action or page name..."
+              aria-label="command-palette-input"
+              className="h-8 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+            />
           </div>
-        </ScrollArea>
+          <Command.List className="max-h-[400px] overflow-y-auto p-2">
+            <Command.Empty className="px-2 py-3 text-sm text-muted-foreground">
+              No matching actions
+            </Command.Empty>
+            {groupedActions.map(([group, entries]) => (
+              <Command.Group
+                key={group}
+                heading={group}
+                className="mb-2 overflow-hidden text-xs text-muted-foreground"
+              >
+                {entries.map((action) => {
+                  const shortcut = formatShortcut(action.shortcuts?.[0]);
+
+                  return (
+                    <Command.Item
+                      key={action.id}
+                      value={`${action.id} ${action.title}`}
+                      keywords={[
+                        action.description ?? "",
+                        action.group ?? "",
+                        ...(action.keywords ?? []),
+                      ]}
+                      disabled={!action.enabled}
+                      onSelect={() => {
+                        void executeAction(action);
+                      }}
+                      aria-label={`action-${action.id}`}
+                      className="mt-1 flex cursor-pointer items-center justify-between rounded-md px-2 py-2 text-sm text-foreground outline-none transition data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50"
+                    >
+                      <div>
+                        <div className="font-medium">{action.title}</div>
+                        {(action.group || action.disabledReason) && (
+                          <div className="text-xs text-muted-foreground">
+                            {action.group}
+                            {action.disabledReason ? ` - ${action.disabledReason}` : ""}
+                          </div>
+                        )}
+                      </div>
+                      {shortcut && (
+                        <div className="text-[10px] text-muted-foreground">{shortcut}</div>
+                      )}
+                    </Command.Item>
+                  );
+                })}
+              </Command.Group>
+            ))}
+          </Command.List>
+        </Command>
       </DialogContent>
     </Dialog>
   );
