@@ -11,7 +11,6 @@ import { getCurrentProject, getProjectList } from "./commands/project";
 import { useAtom } from "jotai";
 import { currentProjectAtom, projectListAtom } from "./store/project";
 import { lazy, Suspense, useEffect } from "react";
-import StatusBar from "./components/StatusBar/StatusBar";
 import WorkspaceNavigator from "./components/WorkspaceNavigator/WorkspaceNavigator";
 import { Toaster } from "./components/ui/toaster";
 import { ImportWizard } from "./features/import/ImportWizard";
@@ -70,7 +69,6 @@ function App() {
           <ImportWizard />
           <CommandPalette />
           <Toaster />
-          <StatusBar className="fixed bottom-0 z-20" />
         </div>
       </ActionKernelProvider>
     </SidebarProvider>

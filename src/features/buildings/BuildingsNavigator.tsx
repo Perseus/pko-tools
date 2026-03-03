@@ -5,10 +5,11 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ScrollAreaVirtualizable } from "@/components/ui/scroll-area-virtualizable";
 import { SidebarHeader } from "@/components/ui/sidebar";
 import { BuildingEntry } from "@/types/buildings";
-import { getBuildingList, loadBuildingModel, exportBuildingToGltf } from "@/commands/buildings";
+import { getBuildingList, loadBuildingModel, exportBuildingToGltf, getBuildingMetadata } from "@/commands/buildings";
 import {
   buildingGltfJsonAtom,
   buildingLoadingAtom,
+  buildingMetadataAtom,
   selectedBuildingAtom,
 } from "@/store/buildings";
 import { Input } from "@/components/ui/input";
@@ -27,6 +28,7 @@ export default function BuildingsNavigator() {
   const currentProject = useAtomValue(currentProjectAtom);
   const [, setBuildingGltfJson] = useAtom(buildingGltfJsonAtom);
   const [, setBuildingLoading] = useAtom(buildingLoadingAtom);
+  const [, setBuildingMetadata] = useAtom(buildingMetadataAtom);
   const [query, setQuery] = useState("");
   const [selectedBuilding, setSelectedBuilding] = useAtom(selectedBuildingAtom);
   const listRequestGuard = useRef(new LatestOnly());
@@ -83,17 +85,19 @@ export default function BuildingsNavigator() {
     const requestVersion = loadRequestGuard.current.begin();
     setSelectedBuilding(building);
     setBuildingGltfJson(null);
+    setBuildingMetadata(null);
     setBuildingLoading(true);
 
     try {
-      const gltfJson = await loadBuildingModel(
-        currentProject.id,
-        building.id
-      );
+      const [gltfJson, metadata] = await Promise.all([
+        loadBuildingModel(currentProject.id, building.id),
+        getBuildingMetadata(currentProject.id, building.id),
+      ]);
       if (!loadRequestGuard.current.isLatest(requestVersion)) {
         return;
       }
       setBuildingGltfJson(gltfJson);
+      setBuildingMetadata(metadata);
     } catch (err) {
       if (loadRequestGuard.current.isLatest(requestVersion)) {
         console.error("Failed to load building:", err);

@@ -1,4 +1,5 @@
 import { Canvas } from "@react-three/fiber";
+import { modLabel } from "@/lib/platform";
 import { OrbitControls, GizmoHelper, GizmoViewport } from "@react-three/drei";
 import { useAtomValue, useAtom } from "jotai";
 import { Suspense, useMemo, useState } from "react";
@@ -185,8 +186,11 @@ export default function MapWorkbench() {
 
   if (!gltfJson && !loading) {
     return (
-      <div className="flex items-center justify-center h-full w-full text-muted-foreground text-sm">
-        Select a map from the navigator to view it.
+      <div className="flex flex-col items-center justify-center h-full w-full gap-2 text-muted-foreground text-sm">
+        <span>Select a map from the navigator to view it.</span>
+        <span className="text-xs text-muted-foreground/60">
+          Press <kbd className="rounded border px-1.5 py-0.5 font-mono text-[10px]">{modLabel}K</kbd> for actions
+        </span>
       </div>
     );
   }

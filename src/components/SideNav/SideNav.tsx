@@ -1,4 +1,5 @@
 import { ChevronsUpDown, GalleryVerticalEnd } from "lucide-react";
+import { modLabel } from "@/lib/platform";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -8,6 +9,7 @@ import {
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -16,6 +18,8 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "../ui/sidebar";
+import { Route, Routes } from "react-router";
+import CharacterStatusBar from "@/features/character/CharacterStatusBar";
 import { useAtom } from "jotai";
 import { currentProjectAtom, projectListAtom } from "@/store/project";
 import { NavLink, useLocation } from "react-router";
@@ -136,6 +140,17 @@ export default function SideNav() {
           ))}
         </SidebarContent>
       )}
+      <SidebarFooter>
+        <Routes>
+          <Route path="/characters" element={<CharacterStatusBar />} />
+        </Routes>
+        <div className="flex items-center justify-between text-sm text-sidebar-foreground/80">
+          <span>pko-tools {__APP_VERSION__} by Perseus</span>
+          <kbd className="pointer-events-none select-none rounded border border-sidebar-border bg-sidebar-accent px-1.5 py-0.5 font-mono text-xs text-sidebar-foreground">
+            {modLabel}K
+          </kbd>
+        </div>
+      </SidebarFooter>
     </Sidebar>
   );
 }

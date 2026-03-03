@@ -4,7 +4,7 @@
 //! achieves full parity (PR 8b).
 
 use cgmath::{InnerSpace, Matrix3, Matrix4, Quaternion, Vector3};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 // ============================================================================
 // D3D render state constants used by PKO scene materials/meshes
@@ -148,6 +148,119 @@ pub struct LmoMaterial {
 pub struct LmoModel {
     pub version: u32,
     pub geom_objects: Vec<LmoGeomObject>,
+}
+
+// ============================================================================
+// Building metadata types (for debug panel)
+// ============================================================================
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct BuildingMetadata {
+    pub building_id: u32,
+    pub filename: String,
+    pub version: u32,
+    pub geom_objects: Vec<GeomObjectInfo>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct GeomObjectInfo {
+    pub index: usize,
+    pub id: u32,
+    pub parent_id: u32,
+    pub vertex_count: usize,
+    pub triangle_count: usize,
+    pub subset_count: usize,
+    pub has_vertex_colors: bool,
+    pub has_animation: bool,
+    pub animation_frame_count: Option<u32>,
+    pub has_texuv_anim: bool,
+    pub has_teximg_anim: bool,
+    pub has_opacity_anim: bool,
+    pub materials: Vec<MaterialInfo>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MaterialInfo {
+    pub index: usize,
+    pub diffuse: [f32; 4],
+    pub ambient: [f32; 4],
+    pub emissive: [f32; 4],
+    pub opacity: f32,
+    pub transp_type: u32,
+    pub transp_type_name: String,
+    pub alpha_test_enabled: bool,
+    pub alpha_ref: u8,
+    pub src_blend: Option<u32>,
+    pub dest_blend: Option<u32>,
+    pub cull_mode: Option<u32>,
+    pub tex_filename: Option<String>,
+}
+
+/// Human-readable name for a transparency type constant.
+pub fn transp_type_name(t: u32) -> &'static str {
+    match t {
+        TRANSP_FILTER => "Filter",
+        TRANSP_ADDITIVE => "Additive",
+        TRANSP_ADDITIVE1 => "Additive1 (SrcColor/One)",
+        TRANSP_ADDITIVE2 => "Additive2 (SrcColor/InvSrc)",
+        TRANSP_ADDITIVE3 => "Additive3 (SrcAlpha/DestAlpha)",
+        TRANSP_SUBTRACTIVE => "Subtractive",
+        _ => "Unknown",
+    }
+}
+
+/// Build `BuildingMetadata` from a parsed `LmoModel`.
+pub fn build_metadata(lmo: &LmoModel, building_id: u32, filename: &str) -> BuildingMetadata {
+    let geom_objects = lmo
+        .geom_objects
+        .iter()
+        .enumerate()
+        .map(|(i, g)| {
+            let materials = g
+                .materials
+                .iter()
+                .enumerate()
+                .map(|(mi, m)| MaterialInfo {
+                    index: mi,
+                    diffuse: m.diffuse,
+                    ambient: m.ambient,
+                    emissive: m.emissive,
+                    opacity: m.opacity,
+                    transp_type: m.transp_type,
+                    transp_type_name: transp_type_name(m.transp_type).to_string(),
+                    alpha_test_enabled: m.alpha_test_enabled,
+                    alpha_ref: m.alpha_ref,
+                    src_blend: m.src_blend,
+                    dest_blend: m.dest_blend,
+                    cull_mode: m.cull_mode,
+                    tex_filename: m.tex_filename.clone(),
+                })
+                .collect();
+
+            GeomObjectInfo {
+                index: i,
+                id: g.id,
+                parent_id: g.parent_id,
+                vertex_count: g.vertices.len(),
+                triangle_count: g.indices.len() / 3,
+                subset_count: g.subsets.len(),
+                has_vertex_colors: !g.vertex_colors.is_empty(),
+                has_animation: g.animation.is_some(),
+                animation_frame_count: g.animation.as_ref().map(|a| a.frame_num),
+                has_texuv_anim: !g.texuv_anims.is_empty(),
+                has_teximg_anim: !g.teximg_anims.is_empty(),
+                has_opacity_anim: !g.mtlopac_anims.is_empty(),
+                materials,
+            }
+        })
+        .collect();
+
+    BuildingMetadata {
+        building_id,
+        filename: filename.to_string(),
+        version: lmo.version,
+        geom_objects,
+    }
 }
 
 // ============================================================================
