@@ -95,8 +95,7 @@ describe("D3D8 Euler convention vs Three.js", () => {
 
     // Compare all 16 elements
     for (let i = 0; i < 16; i++) {
-      expect(threeMatrix.elements[i]).toBeCloseTo(d3dMatrix.elements[i], 5,
-        `Element ${i} mismatch`);
+      expect(threeMatrix.elements[i]).toBeCloseTo(d3dMatrix.elements[i], 5);
     }
   });
 

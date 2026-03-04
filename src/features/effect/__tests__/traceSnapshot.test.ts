@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { sampleTraceFrame, diffTraceSessions, type TraceSession } from "@/features/effect/traceSnapshot";
-import { createPool, spawnParticle, stepParticles } from "@/features/effect/particle/particlePool";
+import { createPool, spawnParticle } from "@/features/effect/particle/particlePool";
 import { createDefaultParticleSystem } from "@/types/particle";
 
 describe("traceSnapshot", () => {

@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
   createPool,
-  resetPool,
   stepParticles,
   spawnParticle,
 } from "@/features/effect/particle/particlePool";
