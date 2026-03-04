@@ -2,8 +2,8 @@ name: "publish"
 
 on:
   push:
-    branches:
-      - master
+    tags:
+      - "pko-tools-v*"
 
 jobs:
   create-release:
@@ -108,7 +108,7 @@ jobs:
           release_id: ${{ needs.create-release.outputs.release_id }}
         with:
           script: |
-            github.rest.repos.updateRelease({
+            await github.rest.repos.updateRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
               release_id: process.env.release_id,
