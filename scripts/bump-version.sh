@@ -32,9 +32,9 @@ sed -i'' -e "s/\"version\": \"$CURRENT\"/\"version\": \"$NEW_VERSION\"/" "$ROOT/
 # 3. src-tauri/Cargo.toml (only the package version line)
 sed -i'' -e "s/^version = \"$CURRENT\"/version = \"$NEW_VERSION\"/" "$ROOT/src-tauri/Cargo.toml"
 
-# 4. Update Cargo.lock by running cargo check
-echo "Updating Cargo.lock..."
-(cd "$ROOT/src-tauri" && cargo update -p pko-tools --quiet 2>/dev/null || true)
+# 4. Update Cargo.lock version in-place (avoid cargo update which can pull new deps)
+sed -i'' -e "/^name = \"pko-tools\"/{n;s/^version = \"$CURRENT\"/version = \"$NEW_VERSION\"/;}" "$ROOT/src-tauri/Cargo.lock"
+rm -f "$ROOT/src-tauri/Cargo.lock-e"
 
 echo "Done. Updated files:"
 echo "  package.json"

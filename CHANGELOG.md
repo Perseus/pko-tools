@@ -5,6 +5,7 @@
 ### Improvements
 
 - **Installer cleanup:** CLI-only binaries (`export-cli`, `pko_inspect`) are no longer bundled into the Windows installer — the Start Menu now shows only the main app
+- **Dev-only MCP bridge:** `tauri-plugin-mcp-bridge` is now an optional dependency behind the `mcp` feature, excluded from release builds to avoid Windows compile conflicts. Use `pnpm tauri dev --config src-tauri/tauri.dev.conf.json` for dev with MCP support
 - **Automated release notes:** GitHub Releases now pull patch notes directly from CHANGELOG.md with image URLs rewritten to render correctly
 
 ---

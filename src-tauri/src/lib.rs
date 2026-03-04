@@ -51,10 +51,16 @@ pub fn run() {
         },
     ));
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_sql::Builder::new().build())
-        .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
+        .plugin(tauri_plugin_dialog::init());
+
+    #[cfg(feature = "mcp")]
+    {
+        builder = builder.plugin(tauri_plugin_mcp_bridge::init());
+    }
+
+    builder.setup(|app| {
             let _ = projects::commands::init_directories();
             let preferences = preferences::Preferences::new();
             let mut state = AppState {

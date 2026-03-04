@@ -24,6 +24,7 @@ required-features = ["cli"]
 
 [features]
 cli = []
+mcp = ["tauri-plugin-mcp-bridge"]
 
 [lib]
 # The `_lib` suffix may seem redundant but it is necessary
@@ -71,7 +72,7 @@ texture2ddecoder = "0.1"
 tauri-plugin-sql = { version = "2", features = ["sqlite"] }
 sentry = { version = "0.36.0", features = ["anyhow"] }
 kaitai = { git = "https://github.com/kaitai-io/kaitai_struct_rust_runtime.git", rev = "9959613" }
-tauri-plugin-mcp-bridge = "0.9"
+tauri-plugin-mcp-bridge = { version = "0.9", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
