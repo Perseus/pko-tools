@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.6] - 2026-03-04
+
+### Improvements
+
+- **Installer cleanup:** CLI-only binaries (`export-cli`, `pko_inspect`) are no longer bundled into the Windows installer — the Start Menu now shows only the main app
+- **Automated release notes:** GitHub Releases now pull patch notes directly from CHANGELOG.md with image URLs rewritten to render correctly
+
+---
+
 ## [0.1.5] - 2026-03-04
 
 ### Features
