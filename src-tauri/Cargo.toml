@@ -4,26 +4,13 @@ version = "0.1.6"
 description = "A Tauri App"
 authors = ["you"]
 edition = "2021"
-default-run = "pko-tools"
-
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[[bin]]
-name = "pko-tools"
-path = "src/main.rs"
-
-[[bin]]
-name = "export-cli"
-path = "src/bin/export_cli.rs"
-required-features = ["cli"]
-
-[[bin]]
-name = "pko_inspect"
-path = "src/bin/pko_inspect.rs"
-required-features = ["cli"]
+# CLI tools are Cargo examples to keep them out of Tauri's installer.
+#   cargo run --example export_cli -- <args>
+#   cargo run --example pko_inspect -- <file>
 
 [features]
-cli = []
 mcp = ["tauri-plugin-mcp-bridge"]
 
 [lib]
