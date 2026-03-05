@@ -13,6 +13,9 @@ export type EffectTextureStatus = {
   textureName: string | null;
 };
 
+export type EffectViewMode = "viewer" | "editor";
+export const effectViewModeAtom = atom<EffectViewMode>("viewer");
+
 export const selectedEffectAtom = atom<string | null>(null);
 export const effectDataAtom = atom<EffectFile | null>(null);
 export const selectedSubEffectIndexAtom = atom<number | null>(null);
@@ -64,6 +67,9 @@ export const boundBoneMatrixAtom = atom<Float32Array | null>(null);
 
 /** When true, render all sub-effects even when playback is stopped (composite preview). */
 export const compositePreviewAtom = atom(false);
+
+/** When set, only this sub-effect index renders in composite/playback mode (solo isolation). */
+export const effectSoloIndexAtom = atom<number | null>(null);
 
 /**
  * Holds the trace recorder's tick function ref so SingleSystemRenderer

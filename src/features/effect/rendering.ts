@@ -197,7 +197,7 @@ export function createRectPlaneGeometry(): THREE.BufferGeometry {
     -0.5, -0.5, 0, // v0
     -0.5,  0.5, 0, // v1
      0.5,  0.5, 0, // v2
-     0.5, -0.5, 0, // v3
+     0.5,-0.5, 0, // v3
   ]);
   const normals = new Float32Array([
     0, 0, 1,

@@ -6,7 +6,7 @@ import EffectPlaybackDriver from "@/features/effect/EffectPlaybackDriver";
 import ParticleSimulator from "@/features/effect/particle/ParticleSimulator";
 import CharacterPreview from "@/features/effect/CharacterPreview";
 import { Button } from "@/components/ui/button";
-import { compositePreviewAtom, effectDataAtom, effectPlaybackAtom, effectTextureReloadAtom, effectTextureStatusAtom, selectedSubEffectIndexAtom } from "@/store/effect";
+import { compositePreviewAtom, effectDataAtom, effectPlaybackAtom, effectSoloIndexAtom, effectTextureReloadAtom, effectTextureStatusAtom, effectViewModeAtom, selectedSubEffectIndexAtom } from "@/store/effect";
 import { pathPointsAtom } from "@/store/path";
 import { gizmoModeAtom, type GizmoMode } from "@/store/gizmo";
 import { useAtom, useAtomValue } from "jotai";
@@ -85,6 +85,8 @@ export default function EffectViewport() {
   const [, setReloadToken] = useAtom(effectTextureReloadAtom);
   const [gizmoMode, setGizmoMode] = useAtom(gizmoModeAtom);
   const [compositePreview, setCompositePreview] = useAtom(compositePreviewAtom);
+  const soloIndex = useAtomValue(effectSoloIndexAtom);
+  const viewMode = useAtomValue(effectViewModeAtom);
 
   return (
     <ContextualActionMenu
@@ -106,9 +108,11 @@ export default function EffectViewport() {
               PathFollower moves the entire effect group along the path during playback. */}
           <PathFollower>
             {effectData && (playback.isPlaying || compositePreview)
-              ? effectData.subEffects.map((_, i) => (
-                  <EffectSubRenderer key={i} subEffectIndex={i} />
-                ))
+              ? soloIndex !== null
+                ? <EffectSubRenderer key={soloIndex} subEffectIndex={soloIndex} />
+                : effectData.subEffects.map((_, i) => (
+                    <EffectSubRenderer key={i} subEffectIndex={i} />
+                  ))
               : selectedSubEffectIndex !== null && (
                   <EffectSubRenderer key={selectedSubEffectIndex} subEffectIndex={selectedSubEffectIndex} />
                 )}
@@ -127,8 +131,8 @@ export default function EffectViewport() {
       </CanvasErrorBoundary>
       <PerfOverlay surface="effects" className="bottom-8 right-3" />
 
-      {/* Gizmo mode toolbar */}
-      {effectData && (
+      {/* Gizmo mode toolbar — hidden in viewer mode */}
+      {effectData && viewMode === "editor" && (
         <div className="absolute left-3 top-3 flex gap-0.5 rounded-lg border border-border bg-background/80 p-0.5">
           {GIZMO_BUTTONS.map(({ mode, icon: Icon, label }) => (
             <Button
@@ -144,6 +148,21 @@ export default function EffectViewport() {
             </Button>
           ))}
           <div className="mx-0.5 h-5 w-px bg-border" />
+          <Button
+            size="icon"
+            variant={compositePreview ? "secondary" : "ghost"}
+            className="h-7 w-7"
+            title="Composite preview: show all sub-effects (C)"
+            aria-label="composite-preview"
+            onClick={() => setCompositePreview(!compositePreview)}
+          >
+            <Layers className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      )}
+      {/* Composite preview toggle — always visible (viewer + editor) */}
+      {effectData && viewMode === "viewer" && (
+        <div className="absolute left-3 top-3 flex gap-0.5 rounded-lg border border-border bg-background/80 p-0.5">
           <Button
             size="icon"
             variant={compositePreview ? "secondary" : "ghost"}

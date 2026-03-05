@@ -14,6 +14,8 @@ import {
   effectDataAtom,
   effectDirtyAtom,
   effectOriginalAtom,
+  effectPlaybackAtom,
+  effectViewModeAtom,
   selectedEffectAtom,
   traceRecorderTickAtom,
 } from "@/store/effect";
@@ -25,7 +27,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import { Circle, Redo2, Save, Square, Undo2, Video } from "lucide-react";
+import { Circle, Eye, Pause, Pencil, Play, Redo2, Repeat, Save, Square, Undo2, Video } from "lucide-react";
 import React from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import EffectViewport from "@/features/effect/EffectViewport";
@@ -39,6 +41,7 @@ import CharacterBinder from "@/features/effect/CharacterBinder";
 import StripEffectEditor from "@/features/effect/StripEffectEditor";
 import PathEditor from "@/features/effect/PathEditor";
 import EffectLibrary from "@/features/effect/EffectLibrary";
+import EffectDebugPanel from "@/features/effect/EffectDebugPanel";
 import CurveEditor from "@/features/effect/CurveEditor";
 import TextureBrowser from "@/features/effect/TextureBrowser";
 import ExportDialog from "@/features/effect/ExportDialog";
@@ -49,6 +52,57 @@ import type { ParticleController } from "@/types/particle";
 import { adaptParFile, adaptStrips, deriveParName, type RustParFile } from "@/features/effect/parAdapter";
 import { useTraceRecorder } from "@/features/effect/useTraceRecorder";
 import { actionIds, useRegisterActionRuntime } from "@/features/actions";
+
+/** Compact playback controls for viewer mode (Play/Pause, Stop, Loop, Speed). */
+function PlaybackBar() {
+  const [playback, setPlayback] = useAtom(effectPlaybackAtom);
+
+  return (
+    <div className="flex items-center gap-2 rounded-xl border border-border bg-background/70 px-3 py-2">
+      <Button
+        size="icon"
+        variant="ghost"
+        className="h-7 w-7"
+        title={playback.isPlaying ? "Pause playback" : "Play animation"}
+        onClick={() => setPlayback({ ...playback, isPlaying: !playback.isPlaying })}
+      >
+        {playback.isPlaying ? <Pause className="h-3.5 w-3.5" /> : <Play className="h-3.5 w-3.5" />}
+      </Button>
+      <Button
+        size="icon"
+        variant="ghost"
+        className="h-7 w-7"
+        title="Stop and reset"
+        onClick={() => setPlayback({ ...playback, isPlaying: false, currentTime: 0 })}
+      >
+        <Square className="h-3.5 w-3.5" />
+      </Button>
+      <Button
+        size="icon"
+        variant={playback.isLooping ? "secondary" : "ghost"}
+        className="h-7 w-7"
+        title={playback.isLooping ? "Looping enabled" : "Enable loop"}
+        onClick={() => setPlayback({ ...playback, isLooping: !playback.isLooping })}
+      >
+        <Repeat className="h-3.5 w-3.5" />
+      </Button>
+      <div className="flex items-center gap-0.5 border-l border-border pl-2" role="group" aria-label="playback-speed">
+        {[0.25, 0.5, 1, 2].map((speed) => (
+          <Button
+            key={speed}
+            size="sm"
+            variant={playback.speed === speed ? "secondary" : "ghost"}
+            className="h-6 px-1.5 text-[10px]"
+            title={`${speed}x speed`}
+            onClick={() => setPlayback({ ...playback, speed })}
+          >
+            {speed}x
+          </Button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function EffectWorkbench() {
   const [effectData, setEffectData] = useAtom(effectDataAtom);
@@ -67,6 +121,7 @@ export default function EffectWorkbench() {
   const [, setParStrips] = useAtom(parStripDataAtom);
   const [, setParModels] = useAtom(parModelDataAtom);
   const [, setTraceRecorderTick] = useAtom(traceRecorderTickAtom);
+  const [viewMode, setViewMode] = useAtom(effectViewModeAtom);
   const traceRecorder = useTraceRecorder();
   const [isTraceRecording, setIsTraceRecording] = useState(false);
 
@@ -333,109 +388,148 @@ export default function EffectWorkbench() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={!canUndo}
-            onClick={undo}
-            title="Undo (Cmd+Z)"
-          >
-            <Undo2 className="h-4 w-4" />
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            disabled={!canRedo}
-            onClick={redo}
-            title="Redo (Cmd+Shift+Z)"
-          >
-            <Redo2 className="h-4 w-4" />
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={!isDirty || !originalEffect || isSaving}
-            onClick={handleDiscard}
-            title="Revert all changes to the last saved state"
-          >
-            Discard
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={!effectData || !currentProject || isSaving}
-            onClick={() => setIsSaveAsOpen(true)}
-            title="Save a copy with a new filename"
-          >
-            Save As
-          </Button>
-          <Button
-            size="sm"
-            variant={isDirty ? "default" : "secondary"}
-            disabled={!effectData || !selectedEffect || !currentProject || isSaving}
-            onClick={handleSave}
-            title="Save effect (.eff) and particle data (.par JSON)"
-          >
-            <Save />
-            {isSaving ? "Saving" : isDirty ? "Save Changes" : "Save"}
-          </Button>
-          <Button
-            size="sm"
-            variant={isTraceRecording ? "destructive" : "outline"}
-            disabled={!effectData || !particleData}
-            onClick={handleToggleTrace}
-            title={isTraceRecording ? "Stop trace recording" : "Record particle trace for validation"}
-          >
-            {isTraceRecording ? (
-              <Square className="h-4 w-4" />
-            ) : (
-              <Circle className="h-4 w-4" />
-            )}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={!effectData}
-            onClick={() => setIsExportOpen(true)}
-            title="Record effect preview to video"
-          >
-            <Video className="h-4 w-4" />
-          </Button>
+          {/* View / Edit segmented toggle */}
+          <div className="flex rounded-md border border-border">
+            <Button
+              size="sm"
+              variant={viewMode === "viewer" ? "secondary" : "ghost"}
+              className="rounded-r-none border-0"
+              onClick={() => setViewMode("viewer")}
+              title="Viewer mode — clean inspection layout"
+            >
+              <Eye className="mr-1 h-3.5 w-3.5" />
+              View
+            </Button>
+            <Button
+              size="sm"
+              variant={viewMode === "editor" ? "secondary" : "ghost"}
+              className="rounded-l-none border-0"
+              onClick={() => setViewMode("editor")}
+              title="Editor mode — full editing layout"
+            >
+              <Pencil className="mr-1 h-3.5 w-3.5" />
+              Edit
+            </Button>
+          </div>
+          {viewMode === "editor" && (
+            <>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!canUndo}
+                onClick={undo}
+                title="Undo (Cmd+Z)"
+              >
+                <Undo2 className="h-4 w-4" />
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={!canRedo}
+                onClick={redo}
+                title="Redo (Cmd+Shift+Z)"
+              >
+                <Redo2 className="h-4 w-4" />
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!isDirty || !originalEffect || isSaving}
+                onClick={handleDiscard}
+                title="Revert all changes to the last saved state"
+              >
+                Discard
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!effectData || !currentProject || isSaving}
+                onClick={() => setIsSaveAsOpen(true)}
+                title="Save a copy with a new filename"
+              >
+                Save As
+              </Button>
+              <Button
+                size="sm"
+                variant={isDirty ? "default" : "secondary"}
+                disabled={!effectData || !selectedEffect || !currentProject || isSaving}
+                onClick={handleSave}
+                title="Save effect (.eff) and particle data (.par JSON)"
+              >
+                <Save />
+                {isSaving ? "Saving" : isDirty ? "Save Changes" : "Save"}
+              </Button>
+              <Button
+                size="sm"
+                variant={isTraceRecording ? "destructive" : "outline"}
+                disabled={!effectData || !particleData}
+                onClick={handleToggleTrace}
+                title={isTraceRecording ? "Stop trace recording" : "Record particle trace for validation"}
+              >
+                {isTraceRecording ? (
+                  <Square className="h-4 w-4" />
+                ) : (
+                  <Circle className="h-4 w-4" />
+                )}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={!effectData}
+                onClick={() => setIsExportOpen(true)}
+                title="Record effect preview to video"
+              >
+                <Video className="h-4 w-4" />
+              </Button>
+            </>
+          )}
         </div>
       </div>
-      <div className="grid flex-1 grid-cols-1 gap-4 xl:grid-cols-[220px_minmax(0,1fr)_320px]">
-        <SubEffectList />
-        <div className="flex min-h-[400px] flex-col gap-4">
-          <EffectViewport />
-          <KeyframeTimeline />
-          <CurveEditor />
+      {viewMode === "viewer" ? (
+        <div className="grid flex-1 grid-cols-1 gap-4 xl:grid-cols-[1fr_280px]">
+          <div className="flex min-h-[400px] flex-col gap-2">
+            <EffectViewport />
+            <PlaybackBar />
+          </div>
+          <div className="overflow-y-auto">
+            <EffectDebugPanel />
+          </div>
         </div>
-        <Tabs defaultValue="sub-effect" className="flex flex-col overflow-hidden">
-          <TabsList className="w-full shrink-0">
-            <TabsTrigger value="sub-effect" title="Edit properties of the selected sub-effect layer">Sub-Effect</TabsTrigger>
-            <TabsTrigger value="keyframe" title="Edit position, rotation, scale, and color for the current keyframe">Keyframe</TabsTrigger>
-            <TabsTrigger value="effect" title="Global effect settings: technique, path, sound, rotation">Effect</TabsTrigger>
-            <TabsTrigger value="tools" title="Particle systems, strip effects, skeleton binding, library">Tools</TabsTrigger>
-          </TabsList>
-          <TabsContent value="sub-effect" className="flex-1 overflow-y-auto mt-0">
-            <SubEffectProperties />
-          </TabsContent>
-          <TabsContent value="keyframe" className="flex-1 overflow-y-auto mt-0">
-            <KeyframeProperties />
-          </TabsContent>
-          <TabsContent value="effect" className="flex-1 overflow-y-auto mt-0 space-y-4">
-            <EffectProperties />
-            <PathEditor />
-          </TabsContent>
-          <TabsContent value="tools" className="flex-1 overflow-y-auto mt-0 space-y-4">
-            <ParticleSystemEditor />
-            <StripEffectEditor />
-            <TextureBrowser />
-            <CharacterBinder />
-            <EffectLibrary />
-          </TabsContent>
-        </Tabs>
-      </div>
+      ) : (
+        <div className="grid flex-1 grid-cols-1 gap-4 xl:grid-cols-[220px_minmax(0,1fr)_320px]">
+          <SubEffectList />
+          <div className="flex min-h-[400px] flex-col gap-4">
+            <EffectViewport />
+            <KeyframeTimeline />
+            <CurveEditor />
+          </div>
+          <Tabs defaultValue="sub-effect" className="flex flex-col overflow-hidden">
+            <TabsList className="w-full shrink-0">
+              <TabsTrigger value="sub-effect" title="Edit properties of the selected sub-effect layer">Sub-Effect</TabsTrigger>
+              <TabsTrigger value="keyframe" title="Edit position, rotation, scale, and color for the current keyframe">Keyframe</TabsTrigger>
+              <TabsTrigger value="effect" title="Global effect settings: technique, path, sound, rotation">Effect</TabsTrigger>
+              <TabsTrigger value="tools" title="Particle systems, strip effects, skeleton binding, library">Tools</TabsTrigger>
+            </TabsList>
+            <TabsContent value="sub-effect" className="flex-1 overflow-y-auto mt-0">
+              <SubEffectProperties />
+            </TabsContent>
+            <TabsContent value="keyframe" className="flex-1 overflow-y-auto mt-0">
+              <KeyframeProperties />
+            </TabsContent>
+            <TabsContent value="effect" className="flex-1 overflow-y-auto mt-0 space-y-4">
+              <EffectProperties />
+              <PathEditor />
+            </TabsContent>
+            <TabsContent value="tools" className="flex-1 overflow-y-auto mt-0 space-y-4">
+              <ParticleSystemEditor />
+              <StripEffectEditor />
+              <TextureBrowser />
+              <CharacterBinder />
+              <EffectLibrary />
+            </TabsContent>
+          </Tabs>
+        </div>
+      )}
       <ExportDialog
         open={isExportOpen}
         onOpenChange={setIsExportOpen}
