@@ -620,8 +620,11 @@ fn build_geom_primitives(
     }
 
     // Apply mat_local transform if not identity — skip for animated objects
-    // (animated objects get their transform from animation keyframes instead)
+    // (animated objects get their transform from animation keyframes instead).
     let use_local_mat = !skip_local_transform && !is_identity(&geom.mat_local);
+    // The Z-up→Y-up mapping (x,y,z)→(x,z,y) is a reflection (det=-1),
+    // so winding must always be reversed to restore correct front-face (CCW).
+    let should_reverse_winding = true;
 
     let positions: Vec<f32> = geom
         .vertices
@@ -632,8 +635,7 @@ fn build_geom_primitives(
             } else {
                 *v
             };
-            let t = transform_position(p);
-            t.into_iter()
+            transform_position(p).into_iter()
         })
         .collect();
 
@@ -646,8 +648,7 @@ fn build_geom_primitives(
                 } else {
                     *n
                 };
-                let t = transform_normal(n2);
-                t.into_iter()
+                transform_normal(n2).into_iter()
             })
             .collect()
     } else {
@@ -735,8 +736,12 @@ fn build_geom_primitives(
     // Build primitives per subset (each subset maps to a material)
     if geom.subsets.is_empty() {
         // No subsets — single primitive with all indices
-        let reversed = reverse_winding(&geom.indices);
-        let idx_acc = builder.add_index_accessor(&reversed, &format!("{}_idx", prefix));
+        let prim_indices = if should_reverse_winding {
+            reverse_winding(&geom.indices)
+        } else {
+            geom.indices.clone()
+        };
+        let idx_acc = builder.add_index_accessor(&prim_indices, &format!("{}_idx", prefix));
 
         let mut attributes = std::collections::BTreeMap::new();
         attributes.insert(
@@ -783,7 +788,11 @@ fn build_geom_primitives(
                 continue;
             }
 
-            let sub_indices = reverse_winding(&geom.indices[start..end]);
+            let sub_indices = if should_reverse_winding {
+                reverse_winding(&geom.indices[start..end])
+            } else {
+                geom.indices[start..end].to_vec()
+            };
             let idx_acc =
                 builder.add_index_accessor(&sub_indices, &format!("{}_idx_s{}", prefix, si));
 
@@ -965,14 +974,19 @@ fn build_anim_extras(geom: &LmoGeomObject, geom_index: usize) -> gltf_json::extr
 const FRAME_RATE: f32 = 30.0;
 
 /// Transform a position vector from Z-up game space to Y-up glTF space.
+/// Uses the same mapping as `transform_position`: (x,y,z) → (x,z,y).
 fn z_up_to_y_up_vec3(v: [f32; 3]) -> [f32; 3] {
-    [v[0], v[2], -v[1]]
+    [v[0], v[2], v[1]]
 }
 
 /// Transform a quaternion from Z-up game space to Y-up glTF space.
 /// Input/output in glTF [x, y, z, w] order.
+///
+/// The Y↔Z axis swap is a reflection (det = -1). For quaternions representing
+/// rotations, this means: swap Y↔Z components AND negate the rotation angle.
+/// Negating the angle negates the vector part: (qx,qy,qz,qw) → (-qx,-qz,-qy,qw).
 fn z_up_to_y_up_quat(q: [f32; 4]) -> [f32; 4] {
-    [q[0], q[2], -q[1], q[3]]
+    [-q[0], -q[2], -q[1], q[3]]
 }
 
 // ============================================================================
@@ -1715,8 +1729,39 @@ mod tests {
         // Game: Z-up → glTF: Y-up: (x, y, z) → (x, z, y)
         // Y is NOT negated so building Z matches terrain Z (south = positive).
         assert_eq!(transform_position([1.0, 2.0, 3.0]), [1.0, 3.0, 2.0]);
+        // z_up_to_y_up_vec3 must match transform_position for consistency
+        assert_eq!(z_up_to_y_up_vec3([1.0, 2.0, 3.0]), [1.0, 3.0, 2.0]);
         assert_eq!(transform_position([0.0, 0.0, 0.0]), [0.0, 0.0, 0.0]);
         assert_eq!(transform_normal([0.0, 0.0, 1.0]), [0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn z_up_to_y_up_vec3_matches_static_transform() {
+        // z_up_to_y_up_vec3 (used for animations) must produce the same Z component
+        // as transform_position (used for static geometry) for any PKO Y value.
+        for y in [-5.0f32, -1.0, 0.0, 1.0, 5.0, 100.0] {
+            let p = [0.0, y, 0.0];
+            assert_eq!(
+                z_up_to_y_up_vec3(p)[2],
+                transform_position(p)[2],
+                "Z mismatch for PKO Y={y}"
+            );
+        }
+    }
+
+    #[test]
+    fn animated_static_z_consistency() {
+        // For a mixed model where animated and static geom share the same PKO Y offset,
+        // the resulting glTF Z components must have the same sign.
+        let pko_y = 5.0f32;
+        let static_z = transform_position([0.0, pko_y, 0.0])[2];
+        let anim_z = z_up_to_y_up_vec3([0.0, pko_y, 0.0])[2];
+        assert_eq!(
+            static_z.signum(),
+            anim_z.signum(),
+            "Static Z ({static_z}) and animated Z ({anim_z}) must have the same sign"
+        );
+        assert_eq!(static_z, anim_z, "Static and animated Z must be equal");
     }
 
     #[test]
