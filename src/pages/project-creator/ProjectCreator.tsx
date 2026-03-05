@@ -8,18 +8,28 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useState } from "react";
+import { useAtom } from "jotai";
+import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { createProject } from "@/commands/project";
+import { createProject, getCurrentProject, getProjectList } from "@/commands/project";
 import { useToast } from "@/hooks/use-toast";
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
+import { currentProjectAtom, projectListAtom } from "@/store/project";
 
 export default function ProjectCreator() {
   const [projectName, setProjectName] = useState("");
   const [clientFolder, setClientFolder] = useState("");
+  const [isOpen, setIsOpen] = useState(true);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
+  const [, setProjectList] = useAtom(projectListAtom);
+  const [, setCurrentProject] = useAtom(currentProjectAtom);
   const { toast } = useToast();
   const navigate = useNavigate();
+  const location = useLocation();
+
+  useEffect(() => {
+    setIsOpen(true);
+  }, [location.state]);
 
   async function openClientFolderPicker() {
     const folder = await open({
@@ -35,9 +45,15 @@ export default function ProjectCreator() {
   async function triggerCreateProject() {
     const projectId = await createProject(projectName, clientFolder);
     if (projectId) {
+      const [projects, current] = await Promise.all([
+        getProjectList(),
+        getCurrentProject(),
+      ]);
+      setProjectList(projects);
+      setCurrentProject(current);
+
       setClientFolder("");
       setProjectName("");
-
       setIsCreatingProject(false);
       toast({
         title: "Project created",
@@ -49,7 +65,10 @@ export default function ProjectCreator() {
   }
 
   return (
-    <Dialog defaultOpen={true} modal={true}>
+    <Dialog open={isOpen} onOpenChange={(open) => {
+        setIsOpen(open);
+        if (!open) navigate("/");
+      }} modal={true}>
       <DialogContent
         onFocusOutside={(e) => e.preventDefault()}
         onInteractOutside={(e) => e.preventDefault()}
