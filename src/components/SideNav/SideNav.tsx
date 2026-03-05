@@ -18,7 +18,6 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "../ui/sidebar";
-import { Route, Routes } from "react-router";
 import CharacterStatusBar from "@/features/character/CharacterStatusBar";
 import { useAtom } from "jotai";
 import { currentProjectAtom, projectListAtom } from "@/store/project";
