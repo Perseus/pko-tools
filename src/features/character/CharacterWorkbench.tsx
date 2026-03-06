@@ -1,7 +1,6 @@
 import { characterGltfJsonAtom, characterMetadataAtom, dummyEditModeAtom } from "@/store/character";
-import { useAtomValue, useSetAtom } from "jotai";
+import { atom, useAtom, useAtomValue, useSetAtom } from "jotai";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useGLTF, OrbitControls,  CameraControls,  Environment, useAnimations } from '@react-three/drei';
 import { Canvas, useFrame} from '@react-three/fiber';
 import * as THREE from 'three';
@@ -35,20 +34,46 @@ function toClipTime(frameIndex: number, totalKeyframes: number, duration: number
 
 const SPEED_OPTIONS = [0.25, 0.5, 1, 1.5, 2] as const;
 
+// Bridge animation clip names from inside Canvas to outside for the action picker UI
+type SplitAnimState = {
+  clipNames: string[];
+  selectedIndex: number;
+  playing: boolean;
+  speed: number;
+};
+const splitAnimAtom = atom<SplitAnimState | null>(null);
+
 function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
   const { scene, animations } = useGLTF(gltfDataURI);
   const { mixer } = useAnimations(animations, scene);
   const setDummyEditMode = useSetAtom(dummyEditModeAtom);
+  const [splitAnim, setSplitAnim] = useAtom(splitAnimAtom);
 
   const hasSplitAnimations = animations.length > 1;
 
-  // --- Split animation state ---
-  const [selectedClipIndex, setSelectedClipIndex] = useState(0);
-  const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState(1);
+  // --- Split animation state (from atom, driven by external picker) ---
+  const [legacyPlaying, setLegacyPlaying] = useState(false);
+  const selectedClipIndex = splitAnim?.selectedIndex ?? 0;
+  const playing = hasSplitAnimations ? (splitAnim?.playing ?? false) : legacyPlaying;
+  const speed = splitAnim?.speed ?? 1;
   const [currentKeyframe, setCurrentKeyframe] = useState(0);
   const timeAccumulator = useRef(0);
   const currentActionRef = useRef<THREE.AnimationAction | null>(null);
+
+  // Publish clip names to the atom so the outside-Canvas picker can render
+  useEffect(() => {
+    if (hasSplitAnimations) {
+      setSplitAnim({
+        clipNames: animations.map(a => a.name),
+        selectedIndex: 0,
+        playing: false,
+        speed: 1,
+      });
+    } else {
+      setSplitAnim(null);
+    }
+    return () => setSplitAnim(null);
+  }, [hasSplitAnimations, animations, setSplitAnim]);
 
   const selectedClip = animations[selectedClipIndex] ?? animations[0] ?? null;
   const fps = 30;
@@ -74,7 +99,7 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
       play: {
         value: playing,
         label: 'Play animation',
-        onChange: (v: boolean) => setPlaying(v),
+        onChange: (v: boolean) => setLegacyPlaying(v),
       },
       keyframe: {
         value: currentKeyframe,
@@ -226,7 +251,8 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
       try { mixer.uncacheClip(primaryClip); } catch { /* ignore */ }
       try { mixer.uncacheRoot(scene); } catch { /* ignore */ }
       timeAccumulator.current = 0;
-      setPlaying(false);
+      setLegacyPlaying(false);
+      setSplitAnim(prev => prev ? { ...prev, playing: false } : null);
       setCurrentKeyframe(0);
       setAnimationControls({ play: false, keyframe: 0 });
     }
@@ -282,65 +308,52 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
       showDummies={showDummies}
     />
 
-    {/* Split animation action picker overlay */}
-    {hasSplitAnimations && (
-      <ActionPickerHtml
-        animations={animations}
-        selectedIndex={selectedClipIndex}
-        onSelect={setSelectedClipIndex}
-        playing={playing}
-        onTogglePlay={() => setPlaying(p => !p)}
-        speed={speed}
-        onSpeedChange={setSpeed}
-      />
-    )}
   </>;
 }
 
-/** Action picker panel rendered as an HTML overlay inside the Canvas */
-function ActionPickerHtml({
-  animations,
-  selectedIndex,
-  onSelect,
-  playing,
-  onTogglePlay,
-  speed,
-  onSpeedChange,
-}: {
-  animations: THREE.AnimationClip[];
-  selectedIndex: number;
-  onSelect: (i: number) => void;
-  playing: boolean;
-  onTogglePlay: () => void;
-  speed: number;
-  onSpeedChange: (s: number) => void;
-}) {
+/** Action picker panel rendered outside the Canvas as a fixed overlay */
+function ActionPickerPanel() {
+  const [splitAnim, setSplitAnim] = useAtom(splitAnimAtom);
 
+  const clipNames = splitAnim?.clipNames ?? [];
+  const selectedIndex = splitAnim?.selectedIndex ?? 0;
+  const playing = splitAnim?.playing ?? false;
+  const speed = splitAnim?.speed ?? 1;
+
+  const onSelect = useCallback((i: number) => {
+    setSplitAnim(prev => prev ? { ...prev, selectedIndex: i } : null);
+  }, [setSplitAnim]);
+  const onTogglePlay = useCallback(() => {
+    setSplitAnim(prev => prev ? { ...prev, playing: !prev.playing } : null);
+  }, [setSplitAnim]);
+  const onSpeedChange = useCallback((s: number) => {
+    setSplitAnim(prev => prev ? { ...prev, speed: s } : null);
+  }, [setSplitAnim]);
 
   // Group animations by weapon mode (suffix after last underscore for known weapon modes)
   const weaponModes = useMemo(() => {
     const modes = new Set<string>();
     const KNOWN_MODES = ['unarmed', 'sword', '2h', 'dual', 'gun', 'bow', 'dagger'];
-    for (const anim of animations) {
-      const parts = anim.name.split('_');
+    for (const name of clipNames) {
+      const parts = name.split('_');
       const last = parts[parts.length - 1];
       if (KNOWN_MODES.includes(last)) {
         modes.add(last);
       }
     }
     return Array.from(modes).sort();
-  }, [animations]);
+  }, [clipNames]);
 
   const [weaponFilter, setWeaponFilter] = useState<string | null>(null);
 
   const filteredAnimations = useMemo(() => {
-    if (!weaponFilter) return animations.map((a, i) => ({ anim: a, origIndex: i }));
-    return animations
-      .map((a, i) => ({ anim: a, origIndex: i }))
-      .filter(({ anim }) => anim.name.endsWith(`_${weaponFilter}`));
-  }, [animations, weaponFilter]);
+    if (!weaponFilter) return clipNames.map((name, i) => ({ name, origIndex: i }));
+    return clipNames
+      .map((name, i) => ({ name, origIndex: i }))
+      .filter(({ name }) => name.endsWith(`_${weaponFilter}`));
+  }, [clipNames, weaponFilter]);
 
-  return createPortal(
+  return (
       <div
         style={{
           position: 'fixed',
@@ -362,7 +375,7 @@ function ActionPickerHtml({
         }}
       >
         <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13 }}>
-          Actions ({animations.length})
+          Actions ({clipNames.length})
         </div>
 
         {/* Weapon filter */}
@@ -440,7 +453,7 @@ function ActionPickerHtml({
 
         {/* Action list */}
         <div style={{ overflowY: 'auto', flex: 1 }}>
-          {filteredAnimations.map(({ anim, origIndex }) => (
+          {filteredAnimations.map(({ name, origIndex }) => (
             <div
               key={origIndex}
               onClick={() => onSelect(origIndex)}
@@ -454,14 +467,13 @@ function ActionPickerHtml({
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
               }}
-              title={`${anim.name} (${(anim.duration * 30).toFixed(0)} frames)`}
+              title={name}
             >
-              {anim.name}
+              {name}
             </div>
           ))}
         </div>
-      </div>,
-    document.body
+      </div>
   );
 }
 
@@ -488,10 +500,12 @@ function Character() {
 
 export default function CharacterWorkbench() {
   const characterMetadata = useAtomValue(characterMetadataAtom);
+  const splitAnim = useAtomValue(splitAnimAtom);
 
   return <div className="h-full w-full relative">
     <Leva collapsed={false} />
     <CharacterMetadataPanel metadata={characterMetadata} />
+    {splitAnim && <ActionPickerPanel />}
     <ContextualActionMenu
       actionIds={CHARACTER_CONTEXT_ACTIONS}
       requireShiftKey
