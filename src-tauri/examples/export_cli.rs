@@ -12,6 +12,40 @@ fn main() {
         return;
     }
 
+    // Check for --characters mode: export_cli <client_dir> <output_dir> --characters [--no-split-animations] [--char-id <id>]
+    if args.len() >= 4 && args[3] == "--characters" {
+        let client_dir = PathBuf::from(&args[1]);
+        let output_dir = PathBuf::from(&args[2]);
+        let mut split_animations = true;
+        let mut char_id_filter: Option<u32> = None;
+
+        let mut i = 4;
+        while i < args.len() {
+            match args[i].as_str() {
+                "--no-split-animations" => {
+                    split_animations = false;
+                    i += 1;
+                }
+                "--char-id" => {
+                    if let Some(val) = args.get(i + 1) {
+                        char_id_filter = Some(val.parse().unwrap_or_else(|_| {
+                            eprintln!("Invalid character id: {}", val);
+                            std::process::exit(1);
+                        }));
+                        i += 2;
+                    } else {
+                        eprintln!("--char-id requires a value");
+                        std::process::exit(1);
+                    }
+                }
+                _ => { i += 1; }
+            }
+        }
+
+        export_characters(&client_dir, &output_dir, split_animations, char_id_filter);
+        return;
+    }
+
     // Check for --shared mode: export_cli <client_dir> <output_dir> --shared
     if args.len() >= 4 && args[3] == "--shared" {
         let client_dir = PathBuf::from(&args[1]);
@@ -42,6 +76,7 @@ fn main() {
         eprintln!("Usage:");
         eprintln!("  export_cli <client_dir> <output_dir> <map_name> [--format v2|v3] [--shared-dir <path>]");
         eprintln!("  export_cli <client_dir> <output_dir> --shared");
+        eprintln!("  export_cli <client_dir> <output_dir> --characters [--no-split-animations] [--char-id <id>]");
         eprintln!("  export_cli --dump-scene-obj-info <client_dir> [map_name]");
         eprintln!();
         eprintln!("Examples:");
@@ -49,6 +84,8 @@ fn main() {
         eprintln!("  export_cli ./top-client ./unity-export 07xmas2 --format v2");
         eprintln!("  export_cli ./top-client ./unity-export/Shared --shared");
         eprintln!("  export_cli ./top-client ./unity-export 07xmas2 --shared-dir ./unity-export/Shared");
+        eprintln!("  export_cli ./top-client ./unity-export --characters");
+        eprintln!("  export_cli ./top-client ./unity-export --characters --char-id 1");
         eprintln!("  export_cli --dump-scene-obj-info ./top-client");
         eprintln!("  export_cli --dump-scene-obj-info ./top-client 07xmas2");
         std::process::exit(1);
@@ -114,6 +151,111 @@ fn main() {
             eprintln!("Export failed: {:?}", e);
             std::process::exit(1);
         }
+    }
+}
+
+fn export_characters(
+    client_dir: &PathBuf,
+    output_dir: &PathBuf,
+    split_animations: bool,
+    char_id_filter: Option<u32>,
+) {
+    let char_info_path = client_dir.join("scripts/table/CharacterInfo.txt");
+    if !char_info_path.exists() {
+        eprintln!("CharacterInfo.txt not found at {}", char_info_path.display());
+        std::process::exit(1);
+    }
+
+    let characters = pko_tools_lib::character::info::parse_character_info(char_info_path)
+        .unwrap_or_else(|e| {
+            eprintln!("Failed to parse CharacterInfo.txt: {:?}", e);
+            std::process::exit(1);
+        });
+
+    let characters: Vec<_> = if let Some(id) = char_id_filter {
+        characters.into_iter().filter(|c| c.id == id).collect()
+    } else {
+        characters
+    };
+
+    if characters.is_empty() {
+        eprintln!("No characters found{}", char_id_filter.map_or(String::new(), |id| format!(" with id {}", id)));
+        std::process::exit(1);
+    }
+
+    // Deduplicate by model ID — multiple characters can share the same model
+    let mut seen_models: std::collections::HashSet<u16> = std::collections::HashSet::new();
+    let characters: Vec<_> = characters
+        .into_iter()
+        .filter(|c| seen_models.insert(c.model))
+        .collect();
+
+    std::fs::create_dir_all(output_dir).unwrap_or_else(|e| {
+        eprintln!("Failed to create output directory: {:?}", e);
+        std::process::exit(1);
+    });
+
+    eprintln!(
+        "Exporting {} unique character model(s) (split_animations={}) ...",
+        characters.len(),
+        split_animations
+    );
+    eprintln!("  Client dir: {}", client_dir.display());
+    eprintln!("  Output dir: {}", output_dir.display());
+
+    let y_up = true; // glTF standard
+    let mut exported = 0u32;
+    let mut failed = 0u32;
+
+    for character in &characters {
+        let gltf_result = if split_animations {
+            character.get_gltf_json(client_dir, y_up)
+        } else {
+            // Force legacy single-animation by temporarily hiding the data files.
+            // Instead, we call get_gltf_json which auto-detects — to force no-split,
+            // we'd need a parameter. For now, just use get_gltf_json since split is
+            // the default when data files exist. The --no-split flag would require
+            // a code path change in get_gltf_json. Log a note.
+            eprintln!("  [note] --no-split-animations not yet fully implemented, using auto-detect");
+            character.get_gltf_json(client_dir, y_up)
+        };
+
+        match gltf_result {
+            Ok(gltf_json) => {
+                let out_path = output_dir.join(format!("{}.gltf", character.id));
+                match std::fs::write(&out_path, gltf_json) {
+                    Ok(_) => {
+                        exported += 1;
+                        eprintln!(
+                            "  [ok] char {} (model {}) → {}",
+                            character.id,
+                            character.model,
+                            out_path.display()
+                        );
+                    }
+                    Err(e) => {
+                        failed += 1;
+                        eprintln!(
+                            "  [err] char {} (model {}): write failed: {}",
+                            character.id, character.model, e
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                failed += 1;
+                eprintln!(
+                    "  [err] char {} (model {}): {}",
+                    character.id, character.model, e
+                );
+            }
+        }
+    }
+
+    eprintln!();
+    eprintln!("Character export complete: {} exported, {} failed", exported, failed);
+    if failed > 0 {
+        std::process::exit(1);
     }
 }
 

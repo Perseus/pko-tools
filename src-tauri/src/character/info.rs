@@ -4,7 +4,7 @@ use crate::projects;
 
 use super::Character;
 
-fn parse_character_info(path: PathBuf) -> anyhow::Result<Vec<Character>> {
+pub fn parse_character_info(path: PathBuf) -> anyhow::Result<Vec<Character>> {
     let mut reader = csv::ReaderBuilder::new()
         .delimiter(b'\t')
         .has_headers(false)
