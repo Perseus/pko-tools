@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.9] - 2026-03-06
+
+### Improvements
+
+- **Release tooling:** Added a repo-local `release-changelog` skill, a `pnpm tauri:dev:mcp` workflow shortcut, and cleaner GitHub release-note handling for changelog screenshots
+
+### Bug Fixes
+
+- **Effect viewer preview:** Stopped render mode now freezes the full effect at frame 0 so viewer previews match the composite effect layout instead of showing a broken partial state
+
+---
+
 ## [0.1.8] - 2026-03-06
 
 ### Features
