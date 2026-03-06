@@ -61,9 +61,15 @@ const _gizmoEuler = new THREE.Euler();
 
 type EffectSubRendererProps = {
   subEffectIndex: number;
+  frozenFrameIndex?: number;
+  frozenPlaybackTime?: number;
 };
 
-export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererProps) {
+export default function EffectSubRenderer({
+  subEffectIndex,
+  frozenFrameIndex,
+  frozenPlaybackTime,
+}: EffectSubRendererProps) {
   const effectData = useAtomValue(effectDataAtom);
   const [, setEffectData] = useAtom(effectDataAtom);
   const [, setDirty] = useAtom(effectDirtyAtom);
@@ -76,12 +82,18 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
   const gizmoMode = useAtomValue(gizmoModeAtom);
   const playbackTime = usePlaybackClock();
   const { pushSnapshot } = useEffectHistory();
+  const hasFrozenPreview = frozenFrameIndex !== undefined || frozenPlaybackTime !== undefined;
+  const resolvedFrameIndex = frozenFrameIndex ?? selectedFrameIndex;
+  const resolvedPlaybackTime = playback.isPlaying && !hasFrozenPreview
+    ? playbackTime
+    : (frozenPlaybackTime ?? playback.currentTime);
+  const shouldInterpolate = playback.isPlaying && !hasFrozenPreview;
 
   const isSelected = subEffectIndex === selectedSubEffectIndex;
 
   const frameData = useMemo(
-    () => resolveFrameData(effectData, subEffectIndex, selectedFrameIndex),
-    [effectData, subEffectIndex, selectedFrameIndex]
+    () => resolveFrameData(effectData, subEffectIndex, resolvedFrameIndex),
+    [effectData, subEffectIndex, resolvedFrameIndex]
   );
   const meshRef = useRef<THREE.Mesh>(null);
   const groupRef = useRef<THREE.Group>(null);
@@ -95,8 +107,8 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
   const subEffect = frameData?.subEffect ?? null;
 
   const geometry = useMemo(
-    () => subEffect ? resolveGeometry(subEffect, selectedFrameIndex) : { type: "plane" as const },
-    [subEffect, selectedFrameIndex]
+    () => subEffect ? resolveGeometry(subEffect, resolvedFrameIndex) : { type: "plane" as const },
+    [subEffect, resolvedFrameIndex]
   );
 
   // Build PKO-correct BufferGeometry for builtin geometry types
@@ -134,9 +146,9 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
 
   // Smooth interpolation between keyframes during playback
   const interpolated = useMemo(() => {
-    if (!subEffect || !playback.isPlaying) return null;
-    return interpolateFrame(subEffect, playbackTime, true);
-  }, [subEffect, playback.isPlaying, playbackTime]);
+    if (!subEffect || !shouldInterpolate) return null;
+    return interpolateFrame(subEffect, resolvedPlaybackTime, true);
+  }, [resolvedPlaybackTime, shouldInterpolate, subEffect]);
 
   const textureName = useMemo(() => {
     if (!subEffect) {
@@ -144,9 +156,9 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
     }
 
     // During playback, use the independently-timed texture frame index
-    const texIdx = interpolated ? interpolated.texFrameIndex : selectedFrameIndex;
+    const texIdx = interpolated ? interpolated.texFrameIndex : resolvedFrameIndex;
     return resolveTextureName(subEffect, texIdx);
-  }, [selectedFrameIndex, subEffect, interpolated]);
+  }, [resolvedFrameIndex, subEffect, interpolated]);
 
   // Use interpolated values when playing, frame-exact values when scrubbing
   const size = interpolated?.size ?? frameData?.size ?? [1, 1, 1] as [number, number, number];
@@ -307,28 +319,43 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
       _effRotaAxis.set(rx, ry, rz);
       if (_effRotaAxis.lengthSq() > 0.0001) {
         _effRotaAxis.normalize();
-        const effAngle = playbackTime * effectData.rotaVel;
+        const effAngle = resolvedPlaybackTime * effectData.rotaVel;
         effectGroupRef.current.quaternion.setFromAxisAngle(_effRotaAxis, effAngle);
       }
     } else if (effectGroupRef.current) {
       effectGroupRef.current.quaternion.identity();
     }
 
-    if (!meshRef.current || !subEffect) return;
+    if (!meshRef.current || !subEffect || !frameData) return;
 
     // Delegate all per-frame rendering (position, scale, rotation, billboard,
     // color, UV animation, deformable mesh) to the shared function.
-    if (playback.isPlaying && interpolated) {
+    if (interpolated) {
       applySubEffectFrame(meshRef.current, state.camera, {
         sub: subEffect,
         position,
         scale: size,
         angle,
         color,
-        playbackTime,
+        playbackTime: resolvedPlaybackTime,
         frameIndex: interpolated.frameIndex,
         nextFrameIndex: interpolated.nextFrameIndex,
         lerp: interpolated.lerp,
+        editorMinOpacity: EDITOR_MIN_OPACITY,
+        cylinderCache: cylinderPositionCache.current,
+        isCylinder: geometry.type === "cylinder",
+      });
+    } else if (hasFrozenPreview) {
+      applySubEffectFrame(meshRef.current, state.camera, {
+        sub: subEffect,
+        position,
+        scale: size,
+        angle,
+        color,
+        playbackTime: resolvedPlaybackTime,
+        frameIndex: frameData.frameIndex,
+        nextFrameIndex: frameData.frameIndex,
+        lerp: 0,
         editorMinOpacity: EDITOR_MIN_OPACITY,
         cylinderCache: cylinderPositionCache.current,
         isCylinder: geometry.type === "cylinder",

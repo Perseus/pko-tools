@@ -8,6 +8,9 @@
 - **Shared effect rendering path:** Refactored the standalone effect viewer and item effect viewer onto shared sub-effect frame/material helpers for better parity and less duplicated rendering logic
 - **Effect skeleton viewer:** Added a dedicated skeleton inspection mode in the effect viewer with per-sub-effect hierarchy nodes, orientation arrows, geometry labels, and selected-layer proxy wireframes for debugging effect composition
 
+![Effect skeleton viewer hierarchy example](changelog-assets/effect-skeleton-01040014.png)
+![Effect skeleton viewer proxy geometry example](changelog-assets/effect-skeleton-jjry03.png)
+
 ### Improvements
 
 - **CLI batch export:** Added `export_cli --characters` mode for batch character GLB export

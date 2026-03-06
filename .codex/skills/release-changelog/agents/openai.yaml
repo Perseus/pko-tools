@@ -1,0 +1,4 @@
+version: 1
+display_name: Release Changelog
+short_description: Bump versions, write release notes, and capture changelog screenshots for PKO Tools releases.
+default_prompt: Prepare the next PKO Tools release entry by syncing versions, updating CHANGELOG.md, and collecting any needed screenshots into changelog-assets without pushing unless asked.

@@ -99,6 +99,15 @@ export default function EffectViewport() {
   const [viewportMode, setViewportMode] = useAtom(effectViewportModeAtom);
   const soloIndex = useAtomValue(effectSoloIndexAtom);
   const viewMode = useAtomValue(effectViewModeAtom);
+  const showFrozenViewerComposite =
+    viewportMode === "render" &&
+    viewMode === "viewer" &&
+    !playback.isPlaying;
+  const renderAllSubEffects =
+    playback.isPlaying || compositePreview || showFrozenViewerComposite;
+  const staticRenderProps = showFrozenViewerComposite
+    ? { frozenFrameIndex: 0, frozenPlaybackTime: 0 }
+    : {};
 
   return (
     <ContextualActionMenu
@@ -119,15 +128,15 @@ export default function EffectViewport() {
             <EffectSkeletonScene />
           ) : (
             <>
-              {/* During playback or composite preview, render ALL sub-effects simultaneously (PKO behavior).
-                  When stopped without composite, render only the selected sub-effect for editing.
-                  PathFollower moves the entire effect group along the path during playback. */}
+              {/* During playback, composite preview, or stopped viewer mode, render ALL sub-effects simultaneously.
+                  Viewer mode freezes the full effect at frame 0; editor mode still isolates the selected sub-effect
+                  unless composite preview is enabled. PathFollower moves the entire effect group during playback. */}
               <PathFollower>
-                {effectData && (playback.isPlaying || compositePreview)
+                {effectData && renderAllSubEffects
                   ? soloIndex !== null
-                    ? <EffectSubRenderer key={soloIndex} subEffectIndex={soloIndex} />
+                    ? <EffectSubRenderer key={soloIndex} subEffectIndex={soloIndex} {...staticRenderProps} />
                     : effectData.subEffects.map((_, i) => (
-                        <EffectSubRenderer key={i} subEffectIndex={i} />
+                        <EffectSubRenderer key={i} subEffectIndex={i} {...staticRenderProps} />
                       ))
                   : selectedSubEffectIndex !== null && (
                       <EffectSubRenderer key={selectedSubEffectIndex} subEffectIndex={selectedSubEffectIndex} />

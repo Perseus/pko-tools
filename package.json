@@ -10,6 +10,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "tauri": "tauri",
+    "tauri:dev:mcp": "tauri dev --config src-tauri/tauri.dev.conf.json",
     "kaitai:sync": "node scripts/sync-kaitai-formats.mjs"
   },
   "dependencies": {
