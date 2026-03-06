@@ -1,7 +1,7 @@
 import { characterGltfJsonAtom, characterMetadataAtom, dummyEditModeAtom } from "@/store/character";
 import { useAtomValue, useSetAtom } from "jotai";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useGLTF, OrbitControls,  CameraControls,  Environment, useAnimations } from '@react-three/drei';
+import { useGLTF, OrbitControls,  CameraControls,  Environment, useAnimations, Html } from '@react-three/drei';
 import { Canvas, useFrame} from '@react-three/fiber';
 import * as THREE from 'three';
 import { useControls, Leva } from 'leva';
@@ -314,7 +314,7 @@ function ActionPickerHtml({
   speed: number;
   onSpeedChange: (s: number) => void;
 }) {
-  const { Html } = require('@react-three/drei');
+
 
   // Group animations by weapon mode (suffix after last underscore for known weapon modes)
   const weaponModes = useMemo(() => {
