@@ -9,6 +9,7 @@ import {
   effectDataAtom,
   effectDirtyAtom,
   effectOriginalAtom,
+  effectViewModeAtom,
   selectedEffectAtom,
 } from "@/store/effect";
 import { EffectFile } from "@/types/effect";
@@ -96,6 +97,7 @@ describe("EffectWorkbench", () => {
     store.set(effectOriginalAtom, effectFixture);
     store.set(effectDirtyAtom, true);
     store.set(selectedEffectAtom, "spark.eff");
+    store.set(effectViewModeAtom, "editor");
 
     render(
       <Provider store={store}>

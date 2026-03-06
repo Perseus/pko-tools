@@ -15,6 +15,7 @@ import {
   effectDirtyAtom,
   effectOriginalAtom,
   effectPlaybackAtom,
+  effectViewportModeAtom,
   effectViewModeAtom,
   selectedEffectAtom,
   traceRecorderTickAtom,
@@ -42,6 +43,7 @@ import StripEffectEditor from "@/features/effect/StripEffectEditor";
 import PathEditor from "@/features/effect/PathEditor";
 import EffectLibrary from "@/features/effect/EffectLibrary";
 import EffectDebugPanel from "@/features/effect/EffectDebugPanel";
+import EffectSkeletonPanel from "@/features/effect/EffectSkeletonPanel";
 import CurveEditor from "@/features/effect/CurveEditor";
 import TextureBrowser from "@/features/effect/TextureBrowser";
 import ExportDialog from "@/features/effect/ExportDialog";
@@ -122,6 +124,7 @@ export default function EffectWorkbench() {
   const [, setParModels] = useAtom(parModelDataAtom);
   const [, setTraceRecorderTick] = useAtom(traceRecorderTickAtom);
   const [viewMode, setViewMode] = useAtom(effectViewModeAtom);
+  const [skeletonMode, setSkeletonMode] = useAtom(effectViewportModeAtom);
   const traceRecorder = useTraceRecorder();
   const [isTraceRecording, setIsTraceRecording] = useState(false);
 
@@ -373,6 +376,12 @@ export default function EffectWorkbench() {
     }
   }, [isSaveAsOpen, normalizedSelectedName]);
 
+  useEffect(() => {
+    if (viewMode === "editor" && skeletonMode === "skeleton") {
+      setSkeletonMode("render");
+    }
+  }, [skeletonMode, setSkeletonMode, viewMode]);
+
   return (
     <div className="flex h-full w-full flex-col gap-4 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -492,7 +501,7 @@ export default function EffectWorkbench() {
             <PlaybackBar />
           </div>
           <div className="overflow-y-auto">
-            <EffectDebugPanel />
+            {skeletonMode === "skeleton" ? <EffectSkeletonPanel /> : <EffectDebugPanel />}
           </div>
         </div>
       ) : (

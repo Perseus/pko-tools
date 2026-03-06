@@ -3,6 +3,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { invokeTimed as invoke } from "@/commands/invokeTimed";
 import { ParticleEffectInfo } from "@/types/item";
+import type { EffectFile, SubEffect } from "@/types/effect";
 import {
   createEffectTexture,
   createRectGeometry,
@@ -12,143 +13,18 @@ import {
   createTrianglePlaneGeometry,
   createCylinderGeometry,
 } from "@/features/effect/rendering";
+import { interpolateFrame } from "@/features/effect/animation";
+import { applySubEffectFrame } from "@/features/effect/applySubEffectFrame";
+import { buildEffectMaterialProps } from "@/features/effect/buildEffectMaterialProps";
+import {
+  composePkoRenderState,
+  applyTextureSampling,
+} from "@/features/effect/pkoStateEmulation";
 
 /** Effect animation type enum matching game engine I_Effect.h */
 const EFFECT_FRAMETEX = 1;
 
-/** Matches backend CylinderParams (camelCase via serde rename_all) */
-interface CylinderParams {
-  segments: number;
-  height: number;
-  topRadius: number;
-  botRadius: number;
-}
-
-/** Matches backend SubEffect (camelCase via serde rename_all) */
-interface SubEffect {
-  effectName: string;
-  effectType: number;
-  srcBlend: number;
-  destBlend: number;
-  length: number;
-  frameCount: number;
-  frameTimes: number[];
-  frameSizes: [number, number, number][];
-  frameAngles: [number, number, number][];
-  framePositions: [number, number, number][];
-  frameColors: [number, number, number, number][];
-  billboard: boolean;
-  texName: string;
-  modelName: string;
-  rotaBoard: boolean;
-  segments: number;
-  height: number;
-  topRadius: number;
-  botRadius: number;
-  rotaLoop: boolean;
-  rotaLoopVec: [number, number, number, number];
-  verCount: number;
-  coordCount: number;
-  coordFrameTime: number;
-  coordList: [number, number][][];
-  texCount: number;
-  texFrameTime: number;
-  texList: [number, number][][];
-  frameTexCount: number;
-  frameTexTime: number;
-  frameTexNames: string[];
-  frameTexTime2: number;
-  useParam: number;
-  perFrameCylinder: CylinderParams[];
-  vsIndex: number;
-  alpha: boolean;
-}
-
-/** Matches backend EffFile (camelCase via serde rename_all) */
-interface EffFileData {
-  rotating: boolean;
-  rotaVec: [number, number, number];
-  rotaVel: number;
-  subEffects: SubEffect[];
-}
-
-/** Assembled keyframe for interpolation */
-interface KeyFrame {
-  color: [number, number, number, number];
-  scale: [number, number, number];
-  position: [number, number, number];
-  rotation: [number, number, number];
-}
-
 const TEX_EXTENSIONS = [".tga", ".TGA", ".bmp", ".BMP", ".dds", ".png"];
-
-/**
- * Map D3DBlend enum values (serialized as u32 from the backend) to Three.js
- * blend factors.  The backend D3DBlend enum matches D3D9 numbering:
- *   Zero=1, One=2, SrcColor=3, InvSrcColor=4, SrcAlpha=5, InvSrcAlpha=6,
- *   DestAlpha=7, InvDestAlpha=8, DestColor=9, InvDestColor=10, SrcAlphaSat=11
- */
-function d3dBlendToThree(blend: number): THREE.BlendingDstFactor {
-  switch (blend) {
-    case 1:  return THREE.ZeroFactor as unknown as THREE.BlendingDstFactor;
-    case 2:  return THREE.OneFactor as unknown as THREE.BlendingDstFactor;
-    case 3:  return THREE.SrcColorFactor as unknown as THREE.BlendingDstFactor;
-    case 4:  return THREE.OneMinusSrcColorFactor as unknown as THREE.BlendingDstFactor;
-    case 5:  return THREE.SrcAlphaFactor as unknown as THREE.BlendingDstFactor;
-    case 6:  return THREE.OneMinusSrcAlphaFactor as unknown as THREE.BlendingDstFactor;
-    case 7:  return THREE.DstAlphaFactor as unknown as THREE.BlendingDstFactor;
-    case 8:  return THREE.OneMinusDstAlphaFactor as unknown as THREE.BlendingDstFactor;
-    case 9:  return THREE.DstColorFactor as unknown as THREE.BlendingDstFactor;
-    case 10: return THREE.OneMinusDstColorFactor as unknown as THREE.BlendingDstFactor;
-    default: return THREE.OneFactor as unknown as THREE.BlendingDstFactor;
-  }
-}
-
-/** Interpolate between two keyframes */
-function lerpFrame(a: KeyFrame, b: KeyFrame, t: number): KeyFrame {
-  const lerp = (x: number, y: number) => x + (y - x) * t;
-  return {
-    color: [
-      lerp(a.color[0], b.color[0]),
-      lerp(a.color[1], b.color[1]),
-      lerp(a.color[2], b.color[2]),
-      lerp(a.color[3], b.color[3]),
-    ],
-    scale: [
-      lerp(a.scale[0], b.scale[0]),
-      lerp(a.scale[1], b.scale[1]),
-      lerp(a.scale[2], b.scale[2]),
-    ],
-    position: [
-      lerp(a.position[0], b.position[0]),
-      lerp(a.position[1], b.position[1]),
-      lerp(a.position[2], b.position[2]),
-    ],
-    rotation: [
-      lerp(a.rotation[0], b.rotation[0]),
-      lerp(a.rotation[1], b.rotation[1]),
-      lerp(a.rotation[2], b.rotation[2]),
-    ],
-  };
-}
-
-/** Assemble keyframes from separate backend arrays.
- *  Note: frameColors are already in 0-1 range from the backend. */
-function assembleKeyFrames(sub: SubEffect): KeyFrame[] {
-  const count = sub.frameCount;
-  if (count === 0) return [];
-
-  const frames: KeyFrame[] = [];
-  for (let i = 0; i < count; i++) {
-    frames.push({
-      color: sub.frameColors?.[i] ?? [1, 1, 1, 1],
-      scale: sub.frameSizes?.[i] ?? [1, 1, 1],
-      position: sub.framePositions?.[i] ?? [0, 0, 0],
-      rotation: sub.frameAngles?.[i] ?? [0, 0, 0],
-    });
-  }
-  return frames;
-}
 
 /** Create geometry matching the game's built-in effect primitives.
  *  Delegates to shared C++-faithful geometry functions from rendering.ts. */
@@ -197,41 +73,17 @@ function GroupRotator({
 
 interface SingleEffectProps {
   sub: SubEffect;
-  keyFrames: KeyFrame[];
   textures: Map<string, THREE.Texture>;
   forgeAlpha: number;
+  idxTech: number;
 }
 
-function SingleSubEffect({ sub, keyFrames, textures, forgeAlpha }: SingleEffectProps) {
+function SingleSubEffect({ sub, textures, forgeAlpha, idxTech }: SingleEffectProps) {
   const meshRef = useRef<THREE.Mesh>(null);
-  // Per-frame timing: track current frame index and time within that frame
-  // (game's CMPModelEff::FrameMove uses per-frame durations from frameTimes[])
-  const frameIdxRef = useRef(0);
-  const frameTimeRef = useRef(0);
-  const loopAngleRef = useRef(0);
-  // Separate timer for UV animation (coordList / texList / frameTex)
+  const timeRef = useRef(0);
+  // Separate timer for EFFECT_FRAMETEX texture switching
   const uvTimeRef = useRef(0);
-
-  const totalFrames = keyFrames.length;
-
-  // Pre-compute rotaLoop axis and velocity
-  const rotaLoopAxis = useMemo(() => {
-    if (!sub.rotaLoop) return null;
-    const v = new THREE.Vector3(
-      sub.rotaLoopVec[0], sub.rotaLoopVec[1], sub.rotaLoopVec[2]
-    );
-    if (v.lengthSq() < 1e-8) return null;
-    return v.normalize();
-  }, [sub.rotaLoop, sub.rotaLoopVec?.[0], sub.rotaLoopVec?.[1], sub.rotaLoopVec?.[2]]);
-
-  const rotaLoopVel = sub.rotaLoopVec?.[3] ?? 0;
-
-  // Reusable quaternion objects to avoid per-frame allocation
-  const _qLoop = useMemo(() => new THREE.Quaternion(), []);
-  const _qKeyframe = useMemo(() => new THREE.Quaternion(), []);
-  // Game uses D3DXMatrixRotationYawPitchRoll(angleY, angleX, angleZ) which is
-  // Rz * Rx * Ry in D3D row-vector convention → Three.js Euler order 'YXZ'
-  const _euler = useMemo(() => new THREE.Euler(0, 0, 0, "YXZ"), []);
+  const cylinderCacheRef = useRef<Map<string, Float32Array>>(new Map());
 
   // Resolve main texture from map.
   // For EFFECT_FRAMETEX the initial texture comes from frameTexNames[0], not texName.
@@ -239,95 +91,41 @@ function SingleSubEffect({ sub, keyFrames, textures, forgeAlpha }: SingleEffectP
     ? (textures.get(sub.frameTexNames?.[0]) ?? textures.get(sub.texName) ?? null)
     : (textures.get(sub.texName) ?? null);
 
-  // Don't render until the required texture is loaded — the game engine
-  // skips drawing effects whose resources haven't been resolved yet.
-  // Without a texture, the geometry renders as a solid white/colored shape
-  // with whatever blending is set, producing visible artifacts (grid patterns
-  // from overlapping planes, solid dark cylinders, etc.).
+  // Don't render until the required texture is loaded
   const needsTexture =
     (sub.texName && sub.texName.length > 0) ||
     (sub.effectType === EFFECT_FRAMETEX && sub.frameTexCount > 0);
 
   const textureReady = !needsTexture || !!mainTexture;
 
+  const isCylinder = useMemo(() => {
+    const name = (sub.modelName || "").toLowerCase();
+    return name === "cylinder" || name === "cone";
+  }, [sub.modelName]);
+
   useFrame((state, delta) => {
-    if (!meshRef.current || totalFrames === 0 || !textureReady) return;
+    if (!meshRef.current || sub.frameCount === 0 || !textureReady) return;
 
-    // --- Keyframe timing: per-frame durations from frameTimes[] ---
-    // Game accumulates time, advances frame when time exceeds current frame's duration.
-    frameTimeRef.current += delta;
-    let safety = totalFrames + 1;
-    while (safety-- > 0) {
-      const ft = Math.max(sub.frameTimes[frameIdxRef.current] ?? 0.001, 0.001);
-      if (frameTimeRef.current < ft) break;
-      frameTimeRef.current -= ft;
-      frameIdxRef.current = (frameIdxRef.current + 1) % totalFrames;
-    }
+    timeRef.current += delta;
+    const frame = interpolateFrame(sub, timeRef.current, true);
 
-    const frameIdx = frameIdxRef.current;
-    const frameFrac = Math.min(
-      frameTimeRef.current / Math.max(sub.frameTimes[frameIdx] ?? 0.001, 0.001),
-      1
-    );
+    applySubEffectFrame(meshRef.current, state.camera, {
+      sub,
+      position: frame.position,
+      scale: frame.size,
+      angle: frame.angle,
+      color: frame.color,
+      playbackTime: timeRef.current,
+      frameIndex: frame.frameIndex,
+      nextFrameIndex: frame.nextFrameIndex,
+      lerp: frame.lerp,
+      forgeAlpha,
+      cylinderCache: cylinderCacheRef.current,
+      isCylinder,
+    });
 
-    const a = keyFrames[frameIdx];
-    const b = keyFrames[(frameIdx + 1) % totalFrames];
-    const frame = lerpFrame(a, b, frameFrac);
-
-    // Position & scale
-    meshRef.current.position.set(
-      frame.position[0],
-      frame.position[1],
-      frame.position[2]
-    );
-    meshRef.current.scale.set(
-      frame.scale[0],
-      frame.scale[1],
-      frame.scale[2]
-    );
-
-    // Rotation: combine keyframe rotation with per-sub-effect rotaLoop
-    if (sub.rotaLoop && rotaLoopAxis) {
-      loopAngleRef.current = (loopAngleRef.current + rotaLoopVel * delta) % (Math.PI * 2);
-      _qLoop.setFromAxisAngle(rotaLoopAxis, loopAngleRef.current);
-      _euler.set(frame.rotation[0], frame.rotation[1], frame.rotation[2]);
-      _qKeyframe.setFromEuler(_euler);
-      // Game: R_keyframe × R_rotaLoop (D3D row-vector = first R_keyframe, then R_rotaLoop)
-      // Three.js: copy(qOuter).multiply(qInner) applies qInner first, qOuter second
-      meshRef.current.quaternion.copy(_qLoop).multiply(_qKeyframe);
-    } else {
-      // Use YXZ Euler order to match D3DXMatrixRotationYawPitchRoll
-      _euler.set(frame.rotation[0], frame.rotation[1], frame.rotation[2], "YXZ");
-      meshRef.current.quaternion.setFromEuler(_euler);
-    }
-
-    // Billboard: rotaBoard only matters when billboard is also true.
-    if (sub.billboard) {
-      if (sub.rotaBoard) {
-        meshRef.current.quaternion.premultiply(state.camera.quaternion);
-      } else {
-        meshRef.current.quaternion.copy(state.camera.quaternion);
-      }
-    }
-
-    // Color — values are already 0-1 from the backend.
-    // Apply forge-level alpha multiplier (game's SItemForge::GetAlpha)
-    const mat = meshRef.current.material as THREE.MeshBasicMaterial;
-    if (mat) {
-      mat.color.setRGB(
-        frame.color[0],
-        frame.color[1],
-        frame.color[2]
-      );
-      mat.opacity = frame.color[3] * forgeAlpha;
-    }
-
-    // --- UV animation (separate timing from keyframe animation) ---
-    // C++ CMPModelEff::FrameMove skips EFFECT_MODELUV (type 2) and
-    // EFFECT_MODELTEXTURE (type 3) when IsItem() == true.
-    // Only EFFECT_FRAMETEX (type 1) texture switching runs for items.
-    if (sub.effectType === EFFECT_FRAMETEX && sub.frameTexCount > 0 && sub.frameTexTime > 0 && mat) {
-      // Texture resource switching (game swaps entire texture each frame)
+    // EFFECT_FRAMETEX texture switching (game swaps entire texture each frame)
+    if (sub.effectType === EFFECT_FRAMETEX && sub.frameTexCount > 0 && sub.frameTexTime > 0) {
       uvTimeRef.current += delta;
       const totalFTTime = sub.frameTexTime * sub.frameTexCount;
       if (uvTimeRef.current >= totalFTTime) uvTimeRef.current %= totalFTTime;
@@ -336,7 +134,8 @@ function SingleSubEffect({ sub, keyFrames, textures, forgeAlpha }: SingleEffectP
       const targetTexName = sub.frameTexNames[ftIdx];
       if (targetTexName) {
         const targetTex = textures.get(targetTexName) ?? null;
-        if (targetTex && mat.map !== targetTex) {
+        const mat = meshRef.current.material as THREE.MeshBasicMaterial;
+        if (targetTex && mat && mat.map !== targetTex) {
           mat.map = targetTex;
           mat.needsUpdate = true;
         }
@@ -346,8 +145,19 @@ function SingleSubEffect({ sub, keyFrames, textures, forgeAlpha }: SingleEffectP
 
   const geometry = useMemo(() => createGeometry(sub), [sub]);
 
+  const techniqueState = useMemo(() => {
+    const overrides: { srcBlend?: number; destBlend?: number } = {};
+    if (sub.srcBlend) overrides.srcBlend = sub.srcBlend;
+    if (sub.destBlend) overrides.destBlend = sub.destBlend;
+    return composePkoRenderState(idxTech, overrides);
+  }, [idxTech, sub.srcBlend, sub.destBlend]);
+
+  const matProps = useMemo(
+    () => buildEffectMaterialProps(sub, mainTexture, techniqueState),
+    [sub, mainTexture, techniqueState],
+  );
+
   if (!textureReady) {
-    // Keep the mesh in the tree (hooks must stay stable) but invisible
     return <mesh ref={meshRef} visible={false} geometry={geometry}>
       <meshBasicMaterial transparent opacity={0} />
     </mesh>;
@@ -356,13 +166,7 @@ function SingleSubEffect({ sub, keyFrames, textures, forgeAlpha }: SingleEffectP
   return (
     <mesh ref={meshRef} geometry={geometry}>
       <meshBasicMaterial
-        map={mainTexture}
-        transparent
-        blending={THREE.CustomBlending}
-        blendSrc={d3dBlendToThree(sub.srcBlend)}
-        blendDst={d3dBlendToThree(sub.destBlend)}
-        depthWrite={false}
-        side={THREE.DoubleSide}
+        {...matProps}
       />
     </mesh>
   );
@@ -378,7 +182,7 @@ interface EffectGroupProps {
 }
 
 function EffectGroup({ effectName, projectId, projectDir, dummyMatrix, effectScale, forgeAlpha }: EffectGroupProps) {
-  const [effData, setEffData] = useState<EffFileData | null>(null);
+  const [effData, setEffData] = useState<EffectFile | null>(null);
   const [textures, setTextures] = useState<Map<string, THREE.Texture>>(
     new Map()
   );
@@ -395,7 +199,7 @@ function EffectGroup({ effectName, projectId, projectDir, dummyMatrix, effectSca
 
     async function load() {
       try {
-        const data = await invoke<EffFileData>("load_effect", {
+        const data = await invoke<EffectFile>("load_effect", {
           projectId,
           effectName: effName,
         });
@@ -458,6 +262,10 @@ function EffectGroup({ effectName, projectId, projectDir, dummyMatrix, effectSca
       }
 
       const tex = createEffectTexture(bytes, decoded.width, decoded.height);
+      // Apply technique-aware texture sampling (filter + address modes)
+      if (effData?.idxTech !== undefined) {
+        applyTextureSampling(tex, composePkoRenderState(effData.idxTech));
+      }
       newTextures.set(texName, tex);
     }
 
@@ -514,16 +322,15 @@ function EffectGroup({ effectName, projectId, projectDir, dummyMatrix, effectSca
           rotaVel={effData.rotaVel}
         />
         {effData.subEffects.map((sub, idx) => {
-          const keyFrames = assembleKeyFrames(sub);
-          if (keyFrames.length === 0) return null;
+          if (sub.frameCount === 0) return null;
 
           return (
             <SingleSubEffect
               key={idx}
               sub={sub}
-              keyFrames={keyFrames}
               textures={textures}
               forgeAlpha={forgeAlpha}
+              idxTech={effData.idxTech}
             />
           );
         })}

@@ -6,6 +6,15 @@ export type Character = {
   suit_id: number;
 }
 
+export type CharacterAction = {
+  action_id: number;
+  name: string;
+  start_frame: number;
+  end_frame: number;
+  key_frames: number[];
+  weapon_mode: string | null;
+}
+
 export type CharacterMetadata = {
   character_id: number;
   character_name: string;

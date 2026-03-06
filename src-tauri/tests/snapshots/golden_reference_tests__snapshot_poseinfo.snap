@@ -1,0 +1,545 @@
+---
+source: tests/golden_reference_tests.rs
+expression: table
+---
+entries:
+  - pose_id: 1
+    name: Normal Wait
+    weapon_variants:
+      - 1
+      - 55
+      - 109
+      - 163
+      - 217
+      - 271
+      - 325
+  - pose_id: 2
+    name: Cool Pose
+    weapon_variants:
+      - 2
+      - 56
+      - 110
+      - 164
+      - 218
+      - 272
+      - 326
+  - pose_id: 3
+    name: Funny Pose
+    weapon_variants:
+      - 3
+      - 57
+      - 111
+      - 165
+      - 219
+      - 273
+      - 327
+  - pose_id: 4
+    name: Guard waiting
+    weapon_variants:
+      - 4
+      - 58
+      - 112
+      - 166
+      - 220
+      - 274
+      - 328
+  - pose_id: 5
+    name: Normal Run
+    weapon_variants:
+      - 5
+      - 59
+      - 113
+      - 167
+      - 221
+      - 275
+      - 329
+  - pose_id: 6
+    name: Guarded Run
+    weapon_variants:
+      - 6
+      - 60
+      - 114
+      - 168
+      - 222
+      - 276
+      - 330
+  - pose_id: 7
+    name: Normal Attack 1
+    weapon_variants:
+      - 7
+      - 61
+      - 115
+      - 169
+      - 223
+      - 277
+      - 331
+  - pose_id: 8
+    name: Normal Attack 2
+    weapon_variants:
+      - 8
+      - 62
+      - 116
+      - 170
+      - 224
+      - 278
+      - 332
+  - pose_id: 9
+    name: Normal Attack 3
+    weapon_variants:
+      - 9
+      - 63
+      - 117
+      - 171
+      - 225
+      - 279
+      - 333
+  - pose_id: 10
+    name: Mighty Strike
+    weapon_variants:
+      - 10
+      - 64
+      - 118
+      - 172
+      - 226
+      - 280
+      - 334
+  - pose_id: 11
+    name: Skill 1
+    weapon_variants:
+      - 11
+      - 65
+      - 119
+      - 173
+      - 227
+      - 281
+      - 335
+  - pose_id: 12
+    name: Skill��
+    weapon_variants:
+      - 12
+      - 66
+      - 120
+      - 174
+      - 228
+      - 282
+      - 336
+  - pose_id: 13
+    name: Skill 3
+    weapon_variants:
+      - 13
+      - 67
+      - 121
+      - 175
+      - 229
+      - 283
+      - 337
+  - pose_id: 14
+    name: Skill 4
+    weapon_variants:
+      - 14
+      - 68
+      - 122
+      - 176
+      - 230
+      - 284
+      - 338
+  - pose_id: 15
+    name: Skill 5
+    weapon_variants:
+      - 15
+      - 69
+      - 123
+      - 177
+      - 231
+      - 285
+      - 339
+  - pose_id: 16
+    name: Normal Sit
+    weapon_variants:
+      - 16
+      - 70
+      - 124
+      - 178
+      - 232
+      - 286
+      - 340
+  - pose_id: 17
+    name: Death (All)
+    weapon_variants:
+      - 17
+      - 71
+      - 125
+      - 179
+      - 233
+      - 287
+      - 341
+  - pose_id: 18
+    name: Wave (All)
+    weapon_variants:
+      - 18
+      - 72
+      - 126
+      - 180
+      - 234
+      - 288
+      - 342
+  - pose_id: 19
+    name: Cry (All)
+    weapon_variants:
+      - 19
+      - 73
+      - 127
+      - 181
+      - 235
+      - 289
+      - 343
+  - pose_id: 20
+    name: Gambol (All)
+    weapon_variants:
+      - 20
+      - 74
+      - 128
+      - 182
+      - 236
+      - 290
+      - 344
+  - pose_id: 21
+    name: Angry (All)
+    weapon_variants:
+      - 21
+      - 75
+      - 129
+      - 183
+      - 237
+      - 291
+      - 345
+  - pose_id: 22
+    name: Defy (All)
+    weapon_variants:
+      - 22
+      - 76
+      - 130
+      - 184
+      - 238
+      - 292
+      - 346
+  - pose_id: 23
+    name: Self Love (Male only)
+    weapon_variants:
+      - 23
+      - 77
+      - 131
+      - 185
+      - 239
+      - 293
+      - 347
+  - pose_id: 24
+    name: Emoticon 7
+    weapon_variants:
+      - 24
+      - 78
+      - 132
+      - 186
+      - 240
+      - 294
+      - 348
+  - pose_id: 25
+    name: Emoticon Action 8
+    weapon_variants:
+      - 25
+      - 79
+      - 133
+      - 187
+      - 241
+      - 295
+      - 349
+  - pose_id: 26
+    name: Emoticon Action 9
+    weapon_variants:
+      - 26
+      - 80
+      - 134
+      - 188
+      - 242
+      - 296
+      - 350
+  - pose_id: 27
+    name: Emoticon Action 10
+    weapon_variants:
+      - 27
+      - 81
+      - 135
+      - 189
+      - 243
+      - 297
+      - 351
+  - pose_id: 28
+    name: Mining (Scene Interchange)
+    weapon_variants:
+      - 28
+      - 82
+      - 136
+      - 190
+      - 244
+      - 298
+      - 352
+  - pose_id: 29
+    name: Gather (Scene Interchange)
+    weapon_variants:
+      - 29
+      - 83
+      - 137
+      - 191
+      - 245
+      - 299
+      - 353
+  - pose_id: 30
+    name: Sit Bench(Scene Interchange)
+    weapon_variants:
+      - 30
+      - 84
+      - 138
+      - 192
+      - 246
+      - 300
+      - 354
+  - pose_id: 31
+    name: Lean Wall (Interchange Action)
+    weapon_variants:
+      - 31
+      - 85
+      - 139
+      - 193
+      - 247
+      - 301
+      - 355
+  - pose_id: 32
+    name: Lean Tree (Interchange Action)
+    weapon_variants:
+      - 32
+      - 86
+      - 140
+      - 194
+      - 248
+      - 302
+      - 356
+  - pose_id: 33
+    name: Character Interchange (Scene Interchange)
+    weapon_variants:
+      - 33
+      - 87
+      - 141
+      - 195
+      - 249
+      - 303
+      - 357
+  - pose_id: 34
+    name: Scene Interchange Action 7
+    weapon_variants:
+      - 34
+      - 88
+      - 142
+      - 196
+      - 250
+      - 304
+      - 358
+  - pose_id: 35
+    name: Scene Interchange Action 8
+    weapon_variants:
+      - 35
+      - 89
+      - 143
+      - 197
+      - 251
+      - 305
+      - 359
+  - pose_id: 36
+    name: Scene Interchange Action 9
+    weapon_variants:
+      - 36
+      - 90
+      - 144
+      - 198
+      - 252
+      - 306
+      - 360
+  - pose_id: 37
+    name: Scene Action 10
+    weapon_variants:
+      - 37
+      - 91
+      - 145
+      - 199
+      - 253
+      - 307
+      - 361
+  - pose_id: 38
+    name: Sit down and wait
+    weapon_variants:
+      - 38
+      - 92
+      - 146
+      - 200
+      - 254
+      - 308
+      - 362
+  - pose_id: 39
+    name: Death Waiting Point
+    weapon_variants:
+      - 39
+      - 93
+      - 147
+      - 201
+      - 255
+      - 309
+      - 363
+  - pose_id: 40
+    name: Skill Action 6
+    weapon_variants:
+      - 40
+      - 94
+      - 148
+      - 202
+      - 256
+      - 310
+      - 364
+  - pose_id: 41
+    name: Skill Effect 7
+    weapon_variants:
+      - 41
+      - 95
+      - 149
+      - 203
+      - 257
+      - 311
+      - 365
+  - pose_id: 42
+    name: Skill Effect 8
+    weapon_variants:
+      - 42
+      - 96
+      - 150
+      - 204
+      - 258
+      - 312
+      - 366
+  - pose_id: 43
+    name: Skill Action 9
+    weapon_variants:
+      - 43
+      - 97
+      - 151
+      - 205
+      - 259
+      - 313
+      - 367
+  - pose_id: 44
+    name: Skill Action 10
+    weapon_variants:
+      - 44
+      - 98
+      - 152
+      - 206
+      - 260
+      - 314
+      - 368
+  - pose_id: 45
+    name: Skill Action 11
+    weapon_variants:
+      - 45
+      - 99
+      - 153
+      - 207
+      - 261
+      - 315
+      - 369
+  - pose_id: 46
+    name: Skill Action 12
+    weapon_variants:
+      - 46
+      - 100
+      - 154
+      - 208
+      - 262
+      - 316
+      - 370
+  - pose_id: 47
+    name: Skill Action 13
+    weapon_variants:
+      - 47
+      - 101
+      - 155
+      - 209
+      - 263
+      - 317
+      - 371
+  - pose_id: 48
+    name: Skill Action 14
+    weapon_variants:
+      - 48
+      - 102
+      - 156
+      - 210
+      - 264
+      - 318
+      - 372
+  - pose_id: 49
+    name: Skill Action 15
+    weapon_variants:
+      - 49
+      - 103
+      - 157
+      - 211
+      - 265
+      - 319
+      - 373
+  - pose_id: 50
+    name: Skill Action 16
+    weapon_variants:
+      - 50
+      - 104
+      - 158
+      - 212
+      - 266
+      - 320
+      - 374
+  - pose_id: 51
+    name: Skill Action 17
+    weapon_variants:
+      - 51
+      - 105
+      - 159
+      - 213
+      - 267
+      - 321
+      - 375
+  - pose_id: 52
+    name: Skill Action 18
+    weapon_variants:
+      - 52
+      - 106
+      - 160
+      - 214
+      - 268
+      - 322
+      - 376
+  - pose_id: 53
+    name: Skill Action 19
+    weapon_variants:
+      - 53
+      - 107
+      - 161
+      - 215
+      - 269
+      - 323
+      - 377
+  - pose_id: 54
+    name: Skill movement 20
+    weapon_variants:
+      - 54
+      - 108
+      - 162
+      - 216
+      - 270
+      - 324
+      - 378

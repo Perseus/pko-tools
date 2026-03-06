@@ -2,7 +2,7 @@
 //!
 //! Usage: pko_inspect <file>
 //!
-//! Supported formats: .lmo, .lgo, .lab, .map, .obj, .eff, .lit
+//! Supported formats: .lmo, .lgo, .lab, .map, .obj, .eff, .lit, .bin (characterposeinfo)
 
 use std::path::Path;
 use std::process;
@@ -15,7 +15,7 @@ fn main() {
     if args.len() != 2 {
         eprintln!("Usage: pko_inspect <file>");
         eprintln!();
-        eprintln!("Supported formats: .lmo, .lgo, .lab, .map, .obj, .eff, .par, .lit");
+        eprintln!("Supported formats: .lmo, .lgo, .lab, .map, .obj, .eff, .par, .lit, .bin");
         process::exit(1);
     }
 
@@ -76,6 +76,10 @@ fn inspect(path: &Path) -> Result<String> {
         "lit" => {
             let entries = pko_tools_lib::map::lit::parse_lit_tx(path)?;
             serde_json::to_value(&entries).context("serialize LIT")?
+        }
+        "bin" => {
+            let table = pko_tools_lib::animation::pose_info::load_poseinfo(path)?;
+            serde_json::to_value(&table).context("serialize poseinfo")?
         }
         other => bail!("Unsupported file extension: .{other}"),
     };
