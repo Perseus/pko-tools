@@ -1,7 +1,8 @@
 import { characterGltfJsonAtom, characterMetadataAtom, dummyEditModeAtom } from "@/store/character";
 import { useAtomValue, useSetAtom } from "jotai";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useGLTF, OrbitControls,  CameraControls,  Environment, useAnimations, Html } from '@react-three/drei';
+import { createPortal } from "react-dom";
+import { useGLTF, OrbitControls,  CameraControls,  Environment, useAnimations } from '@react-three/drei';
 import { Canvas, useFrame} from '@react-three/fiber';
 import * as THREE from 'three';
 import { useControls, Leva } from 'leva';
@@ -339,24 +340,12 @@ function ActionPickerHtml({
       .filter(({ anim }) => anim.name.endsWith(`_${weaponFilter}`));
   }, [animations, weaponFilter]);
 
-  return (
-    <Html
-      position={[0, 0, 0]}
-      style={{
-        position: 'fixed',
-        top: '8px',
-        right: '8px',
-        width: '260px',
-        pointerEvents: 'auto',
-      }}
-      zIndexRange={[100, 100]}
-      calculatePosition={() => [0, 0]}
-    >
+  return createPortal(
       <div
         style={{
           position: 'fixed',
           top: 8,
-          right: 8,
+          left: 8,
           width: 260,
           background: '#1a1a2e',
           borderRadius: 8,
@@ -368,6 +357,8 @@ function ActionPickerHtml({
           display: 'flex',
           flexDirection: 'column',
           boxShadow: '0 2px 12px rgba(0,0,0,0.4)',
+          zIndex: 1000,
+          pointerEvents: 'auto',
         }}
       >
         <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13 }}>
@@ -469,8 +460,8 @@ function ActionPickerHtml({
             </div>
           ))}
         </div>
-      </div>
-    </Html>
+      </div>,
+    document.body
   );
 }
 
