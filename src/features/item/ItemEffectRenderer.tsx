@@ -16,6 +16,10 @@ import {
 import { interpolateFrame } from "@/features/effect/animation";
 import { applySubEffectFrame } from "@/features/effect/applySubEffectFrame";
 import { buildEffectMaterialProps } from "@/features/effect/buildEffectMaterialProps";
+import {
+  composePkoRenderState,
+  applyTextureSampling,
+} from "@/features/effect/pkoStateEmulation";
 
 /** Effect animation type enum matching game engine I_Effect.h */
 const EFFECT_FRAMETEX = 1;
@@ -71,9 +75,10 @@ interface SingleEffectProps {
   sub: SubEffect;
   textures: Map<string, THREE.Texture>;
   forgeAlpha: number;
+  idxTech: number;
 }
 
-function SingleSubEffect({ sub, textures, forgeAlpha }: SingleEffectProps) {
+function SingleSubEffect({ sub, textures, forgeAlpha, idxTech }: SingleEffectProps) {
   const meshRef = useRef<THREE.Mesh>(null);
   const timeRef = useRef(0);
   // Separate timer for EFFECT_FRAMETEX texture switching
@@ -139,9 +144,17 @@ function SingleSubEffect({ sub, textures, forgeAlpha }: SingleEffectProps) {
   });
 
   const geometry = useMemo(() => createGeometry(sub), [sub]);
+
+  const techniqueState = useMemo(() => {
+    const overrides: { srcBlend?: number; destBlend?: number } = {};
+    if (sub.srcBlend) overrides.srcBlend = sub.srcBlend;
+    if (sub.destBlend) overrides.destBlend = sub.destBlend;
+    return composePkoRenderState(idxTech, overrides);
+  }, [idxTech, sub.srcBlend, sub.destBlend]);
+
   const matProps = useMemo(
-    () => buildEffectMaterialProps(sub, mainTexture),
-    [sub, mainTexture],
+    () => buildEffectMaterialProps(sub, mainTexture, techniqueState),
+    [sub, mainTexture, techniqueState],
   );
 
   if (!textureReady) {
@@ -249,6 +262,10 @@ function EffectGroup({ effectName, projectId, projectDir, dummyMatrix, effectSca
       }
 
       const tex = createEffectTexture(bytes, decoded.width, decoded.height);
+      // Apply technique-aware texture sampling (filter + address modes)
+      if (effData?.idxTech !== undefined) {
+        applyTextureSampling(tex, composePkoRenderState(effData.idxTech));
+      }
       newTextures.set(texName, tex);
     }
 
@@ -313,6 +330,7 @@ function EffectGroup({ effectName, projectId, projectDir, dummyMatrix, effectSca
               sub={sub}
               textures={textures}
               forgeAlpha={forgeAlpha}
+              idxTech={effData.idxTech}
             />
           );
         })}
