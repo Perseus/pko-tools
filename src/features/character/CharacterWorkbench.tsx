@@ -1,4 +1,6 @@
-import { characterGltfJsonAtom, characterMetadataAtom, dummyEditModeAtom } from "@/store/character";
+import { characterGltfJsonAtom, characterMetadataAtom, dummyEditModeAtom, selectedCharacterAtom } from "@/store/character";
+import { currentProjectAtom } from "@/store/project";
+import { getCharacterActions } from "@/commands/character";
 import { atom, useAtom, useAtomValue, useSetAtom } from "jotai";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useGLTF, OrbitControls,  CameraControls,  Environment, useAnimations } from '@react-three/drei';
@@ -34,48 +36,61 @@ function toClipTime(frameIndex: number, totalKeyframes: number, duration: number
 
 const SPEED_OPTIONS = [0.25, 0.5, 1, 1.5, 2] as const;
 
-// Bridge animation clip names from inside Canvas to outside for the action picker UI
-type SplitAnimState = {
-  clipNames: string[];
+// Bridge action data from the Rust backend to the action picker UI
+type ActionInfo = {
+  name: string;
+  startFrame: number;
+  endFrame: number;
+  weaponMode: string | null;
+};
+type ActionPickerState = {
+  actions: ActionInfo[];
   selectedIndex: number;
   playing: boolean;
   speed: number;
 };
-const splitAnimAtom = atom<SplitAnimState | null>(null);
+const actionPickerAtom = atom<ActionPickerState | null>(null);
 
 function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
   const { scene, animations } = useGLTF(gltfDataURI);
   const { mixer } = useAnimations(animations, scene);
   const setDummyEditMode = useSetAtom(dummyEditModeAtom);
-  const [splitAnim, setSplitAnim] = useAtom(splitAnimAtom);
+  const [actionPicker, setActionPicker] = useAtom(actionPickerAtom);
+  const character = useAtomValue(selectedCharacterAtom);
+  const project = useAtomValue(currentProjectAtom);
 
-  const hasSplitAnimations = animations.length > 1;
-
-  // --- Split animation state (from atom, driven by external picker) ---
+  // --- Animation state ---
   const [legacyPlaying, setLegacyPlaying] = useState(false);
-  const selectedClipIndex = splitAnim?.selectedIndex ?? 0;
-  const playing = hasSplitAnimations ? (splitAnim?.playing ?? false) : legacyPlaying;
-  const speed = splitAnim?.speed ?? 1;
+  const playing = actionPicker ? (actionPicker.playing) : legacyPlaying;
+  const speed = actionPicker?.speed ?? 1;
   const [currentKeyframe, setCurrentKeyframe] = useState(0);
   const timeAccumulator = useRef(0);
   const currentActionRef = useRef<THREE.AnimationAction | null>(null);
 
-  // Publish clip names to the atom so the outside-Canvas picker can render
+  // Load action table from backend and populate the picker atom
   useEffect(() => {
-    if (hasSplitAnimations) {
-      setSplitAnim({
-        clipNames: animations.map(a => a.name),
-        selectedIndex: 0,
-        playing: false,
-        speed: 1,
-      });
-    } else {
-      setSplitAnim(null);
-    }
-    return () => setSplitAnim(null);
-  }, [hasSplitAnimations, animations, setSplitAnim]);
+    if (!character || !project) return;
+    let cancelled = false;
+    getCharacterActions(project.id, character.id).then(actions => {
+      if (cancelled) return;
+      if (actions.length > 0) {
+        setActionPicker({
+          actions: actions.map(a => ({
+            name: a.name + (a.weapon_mode ? `_${a.weapon_mode}` : ''),
+            startFrame: a.start_frame,
+            endFrame: a.end_frame,
+            weaponMode: a.weapon_mode,
+          })),
+          selectedIndex: 0,
+          playing: false,
+          speed: 1,
+        });
+      }
+    }).catch(() => { /* action table not available — no picker */ });
+    return () => { cancelled = true; setActionPicker(null); };
+  }, [character, project, setActionPicker]);
 
-  const selectedClip = animations[selectedClipIndex] ?? animations[0] ?? null;
+  const selectedClip = animations[0] ?? null;
   const fps = 30;
   const animationDuration = selectedClip?.duration || 1;
   const totalKeyframes = Math.max(Math.floor(animationDuration * fps), 1);
@@ -93,9 +108,10 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
     setVisibleMeshIndices(new Set(meshIndices));
   }, [meshIndices]);
 
-  // --- Legacy single-animation controls (when only 1 animation) ---
+  // --- Animation controls (leva panel, always shows for single-animation or when no actions loaded) ---
+  const hasActionPicker = !!actionPicker;
   const [, setAnimationControls] = useControls(() => ({
-    ...(hasSplitAnimations ? {} : {
+    ...(hasActionPicker ? {} : {
       play: {
         value: playing,
         label: 'Play animation',
@@ -175,19 +191,6 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
   useControls('Mesh Parts', meshVisibilityConfig, { collapsed: true }, [meshVisibilityConfig]);
 
   // --- Play selected clip ---
-  const playClip = useCallback((clip: THREE.AnimationClip | null) => {
-    if (currentActionRef.current) {
-      currentActionRef.current.stop();
-    }
-    if (!clip) return;
-
-    const action = mixer.clipAction(clip, scene);
-    action.reset();
-    action.setEffectiveTimeScale(speed);
-    action.play();
-    currentActionRef.current = action;
-  }, [mixer, scene, speed]);
-
   // Update speed on current action
   useEffect(() => {
     if (currentActionRef.current) {
@@ -195,54 +198,33 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
     }
   }, [speed, playing]);
 
-  // --- Split animation: switch clips ---
+  // --- Action picker: seek to selected action's frame range ---
+  const selectedAction = actionPicker?.actions[actionPicker.selectedIndex] ?? null;
   useEffect(() => {
-    if (!hasSplitAnimations || !selectedClip) return;
-
-    // Reset frame tracking
-    setCurrentKeyframe(0);
+    if (!selectedAction || !selectedClip || !currentActionRef.current) return;
+    const startTime = selectedAction.startFrame / fps;
+    currentActionRef.current.time = startTime;
+    mixer.setTime(startTime);
     timeAccumulator.current = 0;
+  }, [selectedAction, selectedClip, mixer, fps]);
 
-    if (playing) {
-      playClip(selectedClip);
-    } else {
-      // Show first frame
-      const action = mixer.clipAction(selectedClip, scene);
-      action.reset().play();
-      action.paused = true;
-      action.time = 0;
-      currentActionRef.current = action;
-    }
-
-    return () => {
-      if (currentActionRef.current) {
-        currentActionRef.current.stop();
-        currentActionRef.current = null;
-      }
-    };
-  }, [selectedClip, hasSplitAnimations]);
-
-  // --- Split animation: toggle play/pause ---
+  // --- Action picker: play/pause within frame range ---
   useEffect(() => {
-    if (!hasSplitAnimations || !currentActionRef.current) return;
-
-    if (playing) {
-      currentActionRef.current.paused = false;
-      currentActionRef.current.setEffectiveTimeScale(speed);
-    } else {
-      currentActionRef.current.paused = true;
+    if (!currentActionRef.current) return;
+    if (hasActionPicker) {
+      currentActionRef.current.paused = !playing;
+      currentActionRef.current.setEffectiveTimeScale(playing ? speed : 0);
     }
-  }, [playing, hasSplitAnimations, speed]);
+  }, [playing, hasActionPicker, speed]);
 
-  // --- Legacy single animation effect ---
+  // --- Single animation setup (always, since we now only have 1 clip) ---
   useEffect(() => {
-    if (hasSplitAnimations) return;
-
     const primaryClip = animations[0] ?? null;
     if (!primaryClip) return;
 
     const action = mixer.clipAction(primaryClip, scene);
     action.reset().play();
+    currentActionRef.current = action;
 
     return () => {
       action.stop();
@@ -252,38 +234,49 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
       try { mixer.uncacheRoot(scene); } catch { /* ignore */ }
       timeAccumulator.current = 0;
       setLegacyPlaying(false);
-      setSplitAnim(prev => prev ? { ...prev, playing: false } : null);
+      setActionPicker(null);
       setCurrentKeyframe(0);
       setAnimationControls({ play: false, keyframe: 0 });
     }
-  }, [mixer, animations, scene, setAnimationControls, hasSplitAnimations]);
+  }, [mixer, animations, scene, setAnimationControls]);
 
-  // --- Frame stepping (legacy single animation) ---
+  // --- Frame stepping ---
   useFrame((_state, delta) => {
-    if (hasSplitAnimations) return; // split animations use mixer's own clock
+    if (!currentActionRef.current) return;
 
-    if (playing) {
-      timeAccumulator.current += delta;
-      const keyframeDuration = 1/fps;
-
-      if (timeAccumulator.current >= keyframeDuration) {
-        const framesToAdvance = Math.floor(timeAccumulator.current / keyframeDuration);
-        timeAccumulator.current = timeAccumulator.current % keyframeDuration;
-
-        setCurrentKeyframe(prev => {
-          let next = prev + framesToAdvance;
-          if (next >= totalKeyframes) {
-            next = next % totalKeyframes;
-          }
-          setAnimationControls({ keyframe: next });
-          const newTime = toClipTime(next, totalKeyframes, animationDuration);
-          mixer.setTime(newTime);
-          return next;
-        })
+    if (hasActionPicker && selectedAction && playing) {
+      // Clamp playback within the selected action's frame range
+      const startTime = selectedAction.startFrame / fps;
+      const endTime = selectedAction.endFrame / fps;
+      const actionDuration = endTime - startTime;
+      if (actionDuration > 0 && currentActionRef.current.time > endTime) {
+        currentActionRef.current.time = startTime; // loop within range
       }
-    } else {
-      const newTime = toClipTime(currentKeyframe, totalKeyframes, animationDuration);
-      mixer.setTime(newTime);
+    } else if (!hasActionPicker) {
+      // Legacy keyframe-based playback
+      if (playing) {
+        timeAccumulator.current += delta;
+        const keyframeDuration = 1/fps;
+
+        if (timeAccumulator.current >= keyframeDuration) {
+          const framesToAdvance = Math.floor(timeAccumulator.current / keyframeDuration);
+          timeAccumulator.current = timeAccumulator.current % keyframeDuration;
+
+          setCurrentKeyframe(prev => {
+            let next = prev + framesToAdvance;
+            if (next >= totalKeyframes) {
+              next = next % totalKeyframes;
+            }
+            setAnimationControls({ keyframe: next });
+            const newTime = toClipTime(next, totalKeyframes, animationDuration);
+            mixer.setTime(newTime);
+            return next;
+          })
+        }
+      } else {
+        const newTime = toClipTime(currentKeyframe, totalKeyframes, animationDuration);
+        mixer.setTime(newTime);
+      }
     }
   });
 
@@ -313,45 +306,40 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
 
 /** Action picker panel rendered outside the Canvas as a fixed overlay */
 function ActionPickerPanel() {
-  const [splitAnim, setSplitAnim] = useAtom(splitAnimAtom);
+  const [picker, setPicker] = useAtom(actionPickerAtom);
 
-  const clipNames = splitAnim?.clipNames ?? [];
-  const selectedIndex = splitAnim?.selectedIndex ?? 0;
-  const playing = splitAnim?.playing ?? false;
-  const speed = splitAnim?.speed ?? 1;
+  const actions = picker?.actions ?? [];
+  const selectedIndex = picker?.selectedIndex ?? 0;
+  const playing = picker?.playing ?? false;
+  const speed = picker?.speed ?? 1;
 
   const onSelect = useCallback((i: number) => {
-    setSplitAnim(prev => prev ? { ...prev, selectedIndex: i } : null);
-  }, [setSplitAnim]);
+    setPicker(prev => prev ? { ...prev, selectedIndex: i } : null);
+  }, [setPicker]);
   const onTogglePlay = useCallback(() => {
-    setSplitAnim(prev => prev ? { ...prev, playing: !prev.playing } : null);
-  }, [setSplitAnim]);
+    setPicker(prev => prev ? { ...prev, playing: !prev.playing } : null);
+  }, [setPicker]);
   const onSpeedChange = useCallback((s: number) => {
-    setSplitAnim(prev => prev ? { ...prev, speed: s } : null);
-  }, [setSplitAnim]);
+    setPicker(prev => prev ? { ...prev, speed: s } : null);
+  }, [setPicker]);
 
-  // Group animations by weapon mode (suffix after last underscore for known weapon modes)
+  // Group by weapon mode
   const weaponModes = useMemo(() => {
     const modes = new Set<string>();
-    const KNOWN_MODES = ['unarmed', 'sword', '2h', 'dual', 'gun', 'bow', 'dagger'];
-    for (const name of clipNames) {
-      const parts = name.split('_');
-      const last = parts[parts.length - 1];
-      if (KNOWN_MODES.includes(last)) {
-        modes.add(last);
-      }
+    for (const action of actions) {
+      if (action.weaponMode) modes.add(action.weaponMode);
     }
     return Array.from(modes).sort();
-  }, [clipNames]);
+  }, [actions]);
 
   const [weaponFilter, setWeaponFilter] = useState<string | null>(null);
 
-  const filteredAnimations = useMemo(() => {
-    if (!weaponFilter) return clipNames.map((name, i) => ({ name, origIndex: i }));
-    return clipNames
-      .map((name, i) => ({ name, origIndex: i }))
-      .filter(({ name }) => name.endsWith(`_${weaponFilter}`));
-  }, [clipNames, weaponFilter]);
+  const filteredActions = useMemo(() => {
+    if (!weaponFilter) return actions.map((a, i) => ({ action: a, origIndex: i }));
+    return actions
+      .map((a, i) => ({ action: a, origIndex: i }))
+      .filter(({ action }) => action.weaponMode === weaponFilter);
+  }, [actions, weaponFilter]);
 
   return (
       <div
@@ -375,7 +363,7 @@ function ActionPickerPanel() {
         }}
       >
         <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13 }}>
-          Actions ({clipNames.length})
+          Actions ({actions.length})
         </div>
 
         {/* Weapon filter */}
@@ -453,7 +441,7 @@ function ActionPickerPanel() {
 
         {/* Action list */}
         <div style={{ overflowY: 'auto', flex: 1 }}>
-          {filteredAnimations.map(({ name, origIndex }) => (
+          {filteredActions.map(({ action, origIndex }) => (
             <div
               key={origIndex}
               onClick={() => onSelect(origIndex)}
@@ -467,9 +455,9 @@ function ActionPickerPanel() {
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
               }}
-              title={name}
+              title={`${action.name} (frames ${action.startFrame}-${action.endFrame})`}
             >
-              {name}
+              {action.name}
             </div>
           ))}
         </div>
@@ -500,12 +488,12 @@ function Character() {
 
 export default function CharacterWorkbench() {
   const characterMetadata = useAtomValue(characterMetadataAtom);
-  const splitAnim = useAtomValue(splitAnimAtom);
+  const actionPicker = useAtomValue(actionPickerAtom);
 
   return <div className="h-full w-full relative">
     <Leva collapsed={false} />
     <CharacterMetadataPanel metadata={characterMetadata} />
-    {splitAnim && <ActionPickerPanel />}
+    {actionPicker && <ActionPickerPanel />}
     <ContextualActionMenu
       actionIds={CHARACTER_CONTEXT_ACTIONS}
       requireShiftKey

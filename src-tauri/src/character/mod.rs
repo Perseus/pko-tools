@@ -201,6 +201,10 @@ impl Character {
     }
 
     pub fn get_gltf_json(&self, project_dir: &Path, y_up: bool) -> anyhow::Result<String> {
+        self.get_gltf_json_with_split(project_dir, y_up, true)
+    }
+
+    pub fn get_gltf_json_with_split(&self, project_dir: &Path, y_up: bool, split_animations: bool) -> anyhow::Result<String> {
         let parts = self.get_parts();
         let mut model_locations = vec![];
 
@@ -280,7 +284,7 @@ impl Character {
         let action_table_path = project_dir.join("scripts/txt/CharacterAction.tx");
         let poseinfo_path = project_dir.join("scripts/table/characterposeinfo.bin");
 
-        let use_split = action_table_path.exists() && poseinfo_path.exists();
+        let use_split = split_animations && action_table_path.exists() && poseinfo_path.exists();
         if use_split {
             let action_table =
                 super::animation::action_table::load_action_table(&action_table_path)?;
@@ -488,7 +492,11 @@ pub fn get_character_gltf_json(
     project_id: uuid::Uuid,
     character_id: u32,
 ) -> anyhow::Result<String> {
-    get_character_gltf_json_with_options(project_id, character_id, false)
+    // Viewer path: single monolithic animation (fast), action picker uses frame ranges
+    let project = projects::project::Project::get_project(project_id)?;
+    let character = get_character(project_id, character_id)?;
+    let project_dir = project.project_directory.as_ref();
+    character.get_gltf_json_with_split(project_dir, false, false)
 }
 
 pub fn get_character_gltf_json_with_options(
@@ -496,13 +504,11 @@ pub fn get_character_gltf_json_with_options(
     character_id: u32,
     y_up: bool,
 ) -> anyhow::Result<String> {
+    // Export path: split animations for Unity import
     let project = projects::project::Project::get_project(project_id)?;
     let character = get_character(project_id, character_id)?;
-
     let project_dir = project.project_directory.as_ref();
-
-    let gltf_json = character.get_gltf_json(project_dir, y_up)?;
-    Ok(gltf_json)
+    character.get_gltf_json_with_split(project_dir, y_up, true)
 }
 
 pub fn get_character_metadata(
