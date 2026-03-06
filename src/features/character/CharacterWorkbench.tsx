@@ -1,6 +1,6 @@
 import { characterGltfJsonAtom, characterMetadataAtom, dummyEditModeAtom } from "@/store/character";
 import { useAtomValue, useSetAtom } from "jotai";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useGLTF, OrbitControls,  CameraControls,  Environment, useAnimations } from '@react-three/drei';
 import { Canvas, useFrame} from '@react-three/fiber';
 import * as THREE from 'three';
@@ -32,52 +32,63 @@ function toClipTime(frameIndex: number, totalKeyframes: number, duration: number
   return (frameIndex / denominator) * duration;
 }
 
+const SPEED_OPTIONS = [0.25, 0.5, 1, 1.5, 2] as const;
+
 function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
   const { scene, animations } = useGLTF(gltfDataURI);
   const { mixer } = useAnimations(animations, scene);
-  const primaryClip = animations[0] ?? null;
   const setDummyEditMode = useSetAtom(dummyEditModeAtom);
-  const animationDuration = animations?.[0]?.duration || 1;
-  const fps = 30;
-  const totalKeyframes = Math.floor(animationDuration * fps);
 
+  const hasSplitAnimations = animations.length > 1;
+
+  // --- Split animation state ---
+  const [selectedClipIndex, setSelectedClipIndex] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [speed, setSpeed] = useState(1);
   const [currentKeyframe, setCurrentKeyframe] = useState(0);
   const timeAccumulator = useRef(0);
+  const currentActionRef = useRef<THREE.AnimationAction | null>(null);
+
+  const selectedClip = animations[selectedClipIndex] ?? animations[0] ?? null;
+  const fps = 30;
+  const animationDuration = selectedClip?.duration || 1;
+  const totalKeyframes = Math.max(Math.floor(animationDuration * fps), 1);
 
   // Extract bounding spheres and meshes from the loaded glTF scene
   const boundingSpheres = useMemo(() => extractBoundingSpheres(scene), [scene]);
   const meshes = useMemo(() => extractMeshes(scene), [scene]);
   const meshIndices = useMemo(() => getUniqueMeshIndices(meshes), [meshes]);
-  
+
   // State for visible mesh indices (all visible by default)
   const [visibleMeshIndices, setVisibleMeshIndices] = useState<Set<number>>(() => new Set(meshIndices));
-  
+
   // Update visible indices when meshes change
   useEffect(() => {
     setVisibleMeshIndices(new Set(meshIndices));
   }, [meshIndices]);
 
+  // --- Legacy single-animation controls (when only 1 animation) ---
   const [, setAnimationControls] = useControls(() => ({
-    play: {
-      value: playing,
-      label: 'Play animation',
-      onChange: (v) => setPlaying(v),
-    },
-    keyframe: {
-      value: currentKeyframe,
-      min: 0,
-      max: totalKeyframes,
-      step: 1,
-      label: 'Keyframe',
-      onChange: v => {
-        setCurrentKeyframe(v);
-        const newTime = toClipTime(v, totalKeyframes, animationDuration);
-        mixer.setTime(newTime);
-
-        timeAccumulator.current = 0;
+    ...(hasSplitAnimations ? {} : {
+      play: {
+        value: playing,
+        label: 'Play animation',
+        onChange: (v: boolean) => setPlaying(v),
+      },
+      keyframe: {
+        value: currentKeyframe,
+        min: 0,
+        max: totalKeyframes,
+        step: 1,
+        label: 'Keyframe',
+        onChange: (v: number) => {
+          setCurrentKeyframe(v);
+          const newTime = toClipTime(v, totalKeyframes, animationDuration);
+          mixer.setTime(newTime);
+          timeAccumulator.current = 0;
+        }
       }
-    }
+    })
   }));
 
   const { showBoundingSpheres, showMeshHighlights, showBones, showDummies, editDummies } = useControls('Debug', {
@@ -108,11 +119,11 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
     setDummyEditMode((showDummies as boolean) && (editDummies as boolean));
     return () => setDummyEditMode(false);
   }, [showDummies, editDummies, setDummyEditMode]);
-  
+
   // Dynamic mesh visibility controls - create toggle for each mesh
   const meshVisibilityConfig = useMemo(() => {
     if (meshIndices.length <= 1) return {};
-    
+
     const config: Record<string, any> = {};
     meshIndices.forEach((idx) => {
       config[`mesh${idx}`] = {
@@ -133,12 +144,97 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
     });
     return config;
   }, [meshIndices]);
-  
+
   // Only show mesh parts folder if there are multiple meshes
   useControls('Mesh Parts', meshVisibilityConfig, { collapsed: true }, [meshVisibilityConfig]);
 
+  // --- Play selected clip ---
+  const playClip = useCallback((clip: THREE.AnimationClip | null) => {
+    if (currentActionRef.current) {
+      currentActionRef.current.stop();
+    }
+    if (!clip) return;
 
+    const action = mixer.clipAction(clip, scene);
+    action.reset();
+    action.setEffectiveTimeScale(speed);
+    action.play();
+    currentActionRef.current = action;
+  }, [mixer, scene, speed]);
+
+  // Update speed on current action
+  useEffect(() => {
+    if (currentActionRef.current) {
+      currentActionRef.current.setEffectiveTimeScale(playing ? speed : 0);
+    }
+  }, [speed, playing]);
+
+  // --- Split animation: switch clips ---
+  useEffect(() => {
+    if (!hasSplitAnimations || !selectedClip) return;
+
+    // Reset frame tracking
+    setCurrentKeyframe(0);
+    timeAccumulator.current = 0;
+
+    if (playing) {
+      playClip(selectedClip);
+    } else {
+      // Show first frame
+      const action = mixer.clipAction(selectedClip, scene);
+      action.reset().play();
+      action.paused = true;
+      action.time = 0;
+      currentActionRef.current = action;
+    }
+
+    return () => {
+      if (currentActionRef.current) {
+        currentActionRef.current.stop();
+        currentActionRef.current = null;
+      }
+    };
+  }, [selectedClip, hasSplitAnimations]);
+
+  // --- Split animation: toggle play/pause ---
+  useEffect(() => {
+    if (!hasSplitAnimations || !currentActionRef.current) return;
+
+    if (playing) {
+      currentActionRef.current.paused = false;
+      currentActionRef.current.setEffectiveTimeScale(speed);
+    } else {
+      currentActionRef.current.paused = true;
+    }
+  }, [playing, hasSplitAnimations, speed]);
+
+  // --- Legacy single animation effect ---
+  useEffect(() => {
+    if (hasSplitAnimations) return;
+
+    const primaryClip = animations[0] ?? null;
+    if (!primaryClip) return;
+
+    const action = mixer.clipAction(primaryClip, scene);
+    action.reset().play();
+
+    return () => {
+      action.stop();
+      clearSceneHelpers(scene);
+      try { mixer.stopAllAction(); } catch { /* ignore */ }
+      try { mixer.uncacheClip(primaryClip); } catch { /* ignore */ }
+      try { mixer.uncacheRoot(scene); } catch { /* ignore */ }
+      timeAccumulator.current = 0;
+      setPlaying(false);
+      setCurrentKeyframe(0);
+      setAnimationControls({ play: false, keyframe: 0 });
+    }
+  }, [mixer, animations, scene, setAnimationControls, hasSplitAnimations]);
+
+  // --- Frame stepping (legacy single animation) ---
   useFrame((_state, delta) => {
+    if (hasSplitAnimations) return; // split animations use mixer's own clock
+
     if (playing) {
       timeAccumulator.current += delta;
       const keyframeDuration = 1/fps;
@@ -150,16 +246,11 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
         setCurrentKeyframe(prev => {
           let next = prev + framesToAdvance;
           if (next >= totalKeyframes) {
-            next = next % totalKeyframes
+            next = next % totalKeyframes;
           }
-
-          setAnimationControls({
-            keyframe: next
-          });
-
+          setAnimationControls({ keyframe: next });
           const newTime = toClipTime(next, totalKeyframes, animationDuration);
           mixer.setTime(newTime);
-
           return next;
         })
       }
@@ -168,44 +259,6 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
       mixer.setTime(newTime);
     }
   });
-
-
-  useEffect(() => {
-    if (!primaryClip) {
-      return;
-    }
-    const action = mixer.clipAction(primaryClip, scene);
-    action.reset().play();
-
-    return () => {
-      action.stop();
-      // Remove debug helper meshes from the scene tree before uncaching.
-      clearSceneHelpers(scene);
-
-      try {
-        mixer.stopAllAction();
-      } catch {
-        // ignore teardown race
-      }
-      try {
-        mixer.uncacheClip(primaryClip);
-      } catch {
-        // ignore teardown race
-      }
-      try {
-        mixer.uncacheRoot(scene);
-      } catch {
-        // Non-fatal: model switches can race with internal mixer caches
-      }
-      timeAccumulator.current = 0;
-      setPlaying(false);
-      setCurrentKeyframe(0);
-      setAnimationControls({
-        play: false,
-        keyframe: 0
-      });
-    }
-  }, [mixer, primaryClip, scene, setAnimationControls]);
 
   return <>
     <group rotation={[-Math.PI / 2, 0, 0]}>
@@ -227,8 +280,198 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
       showBones={showBones}
       showDummies={showDummies}
     />
-  </>;
 
+    {/* Split animation action picker overlay */}
+    {hasSplitAnimations && (
+      <ActionPickerHtml
+        animations={animations}
+        selectedIndex={selectedClipIndex}
+        onSelect={setSelectedClipIndex}
+        playing={playing}
+        onTogglePlay={() => setPlaying(p => !p)}
+        speed={speed}
+        onSpeedChange={setSpeed}
+      />
+    )}
+  </>;
+}
+
+/** Action picker panel rendered as an HTML overlay inside the Canvas */
+function ActionPickerHtml({
+  animations,
+  selectedIndex,
+  onSelect,
+  playing,
+  onTogglePlay,
+  speed,
+  onSpeedChange,
+}: {
+  animations: THREE.AnimationClip[];
+  selectedIndex: number;
+  onSelect: (i: number) => void;
+  playing: boolean;
+  onTogglePlay: () => void;
+  speed: number;
+  onSpeedChange: (s: number) => void;
+}) {
+  const { Html } = require('@react-three/drei');
+
+  // Group animations by weapon mode (suffix after last underscore for known weapon modes)
+  const weaponModes = useMemo(() => {
+    const modes = new Set<string>();
+    const KNOWN_MODES = ['unarmed', 'sword', '2h', 'dual', 'gun', 'bow', 'dagger'];
+    for (const anim of animations) {
+      const parts = anim.name.split('_');
+      const last = parts[parts.length - 1];
+      if (KNOWN_MODES.includes(last)) {
+        modes.add(last);
+      }
+    }
+    return Array.from(modes).sort();
+  }, [animations]);
+
+  const [weaponFilter, setWeaponFilter] = useState<string | null>(null);
+
+  const filteredAnimations = useMemo(() => {
+    if (!weaponFilter) return animations.map((a, i) => ({ anim: a, origIndex: i }));
+    return animations
+      .map((a, i) => ({ anim: a, origIndex: i }))
+      .filter(({ anim }) => anim.name.endsWith(`_${weaponFilter}`));
+  }, [animations, weaponFilter]);
+
+  return (
+    <Html
+      position={[0, 0, 0]}
+      style={{
+        position: 'fixed',
+        top: '8px',
+        right: '8px',
+        width: '260px',
+        pointerEvents: 'auto',
+      }}
+      zIndexRange={[100, 100]}
+      calculatePosition={() => [0, 0]}
+    >
+      <div
+        style={{
+          position: 'fixed',
+          top: 8,
+          right: 8,
+          width: 260,
+          background: '#1a1a2e',
+          borderRadius: 8,
+          padding: 8,
+          color: '#e0e0e0',
+          fontSize: 12,
+          fontFamily: 'monospace',
+          maxHeight: 'calc(100vh - 80px)',
+          display: 'flex',
+          flexDirection: 'column',
+          boxShadow: '0 2px 12px rgba(0,0,0,0.4)',
+        }}
+      >
+        <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13 }}>
+          Actions ({animations.length})
+        </div>
+
+        {/* Weapon filter */}
+        {weaponModes.length > 1 && (
+          <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap', marginBottom: 4 }}>
+            <button
+              onClick={() => setWeaponFilter(null)}
+              style={{
+                padding: '2px 6px',
+                borderRadius: 4,
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: 10,
+                background: weaponFilter === null ? '#4a90d9' : '#333',
+                color: '#fff',
+              }}
+            >
+              All
+            </button>
+            {weaponModes.map(m => (
+              <button
+                key={m}
+                onClick={() => setWeaponFilter(m)}
+                style={{
+                  padding: '2px 6px',
+                  borderRadius: 4,
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: 10,
+                  background: weaponFilter === m ? '#4a90d9' : '#333',
+                  color: '#fff',
+                }}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Play controls */}
+        <div style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center' }}>
+          <button
+            onClick={onTogglePlay}
+            style={{
+              padding: '4px 10px',
+              borderRadius: 4,
+              border: 'none',
+              cursor: 'pointer',
+              background: playing ? '#d94a4a' : '#4ad97a',
+              color: '#fff',
+              fontWeight: 'bold',
+              fontSize: 11,
+            }}
+          >
+            {playing ? 'Pause' : 'Play'}
+          </button>
+          {SPEED_OPTIONS.map(s => (
+            <button
+              key={s}
+              onClick={() => onSpeedChange(s)}
+              style={{
+                padding: '2px 6px',
+                borderRadius: 4,
+                border: 'none',
+                cursor: 'pointer',
+                fontSize: 10,
+                background: speed === s ? '#4a90d9' : '#333',
+                color: '#fff',
+              }}
+            >
+              {s}x
+            </button>
+          ))}
+        </div>
+
+        {/* Action list */}
+        <div style={{ overflowY: 'auto', flex: 1 }}>
+          {filteredAnimations.map(({ anim, origIndex }) => (
+            <div
+              key={origIndex}
+              onClick={() => onSelect(origIndex)}
+              style={{
+                padding: '4px 6px',
+                borderRadius: 4,
+                cursor: 'pointer',
+                background: origIndex === selectedIndex ? '#2a4a6e' : 'transparent',
+                marginBottom: 1,
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+              title={`${anim.name} (${(anim.duration * 30).toFixed(0)} frames)`}
+            >
+              {anim.name}
+            </div>
+          ))}
+        </div>
+      </div>
+    </Html>
+  );
 }
 
 function Character() {

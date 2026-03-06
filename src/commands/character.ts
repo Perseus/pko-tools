@@ -1,5 +1,5 @@
 import { invokeTimed as invoke } from "@/commands/invokeTimed";
-import { Character, CharacterMetadata } from "@/types/character";
+import { Character, CharacterAction, CharacterMetadata } from "@/types/character";
 
 export const getCharacterList = async (
   projectId: string
@@ -12,4 +12,11 @@ export const getCharacterMetadata = async (
   characterId: number
 ): Promise<CharacterMetadata> => {
   return invoke("get_character_metadata_cmd", { projectId, characterId });
+};
+
+export const getCharacterActions = async (
+  projectId: string,
+  charTypeId: number
+): Promise<CharacterAction[]> => {
+  return invoke("get_character_actions", { projectId, charTypeId });
 };
