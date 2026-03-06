@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.1.8] - 2026-03-06
+
+### Features
+
+- **Character action browser:** Added `CharacterAction.tx` and `PoseInfo` parsing, split-animation export support, action lookup commands, and a frontend action picker for character preview workflows
+- **Shared effect rendering path:** Refactored the standalone effect viewer and item effect viewer onto shared sub-effect frame/material helpers for better parity and less duplicated rendering logic
+- **Effect skeleton viewer:** Added a dedicated skeleton inspection mode in the effect viewer with per-sub-effect hierarchy nodes, orientation arrows, geometry labels, and selected-layer proxy wireframes for debugging effect composition
+
+### Improvements
+
+- **CLI batch export:** Added `export_cli --characters` mode for batch character GLB export
+- **Character viewer stability:** Moved the action picker out of the Canvas path, hardened split-animation handling, and fixed action-table lookup to key by character ID instead of model number
+- **Item/effect parity:** Wired item effect rendering through the same technique-state and transform/material path used by the standalone effect viewer
+
+---
+
 ## [0.1.6] - 2026-03-04
 
 ### Improvements
