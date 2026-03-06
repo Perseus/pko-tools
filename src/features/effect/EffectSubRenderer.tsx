@@ -26,7 +26,6 @@ import {
   createTriangleGeometry,
   createTrianglePlaneGeometry,
   createCylinderGeometry,
-  resolveBlendFactors,
   resolveFrameData,
   resolveGeometry,
   resolveTextureCandidates,
@@ -37,7 +36,9 @@ import {
   applyTextureSampling,
   type PkoTechniqueState,
 } from "@/features/effect/pkoStateEmulation";
-import { interpolateFrame, interpolateUVCoords, getTexListFrameIndex } from "@/features/effect/animation";
+import { interpolateFrame } from "@/features/effect/animation";
+import { applySubEffectFrame } from "@/features/effect/applySubEffectFrame";
+import { buildEffectMaterialProps } from "@/features/effect/buildEffectMaterialProps";
 import { useEffectHistory } from "@/features/effect/useEffectHistory";
 import { useEffectModel } from "@/features/effect/useEffectModel";
 import { usePlaybackClock } from "@/features/effect/playbackClock";
@@ -51,45 +52,12 @@ type DecodedTexture = {
 /** Minimum opacity in the editor so fully-transparent keyframes remain visible. */
 const EDITOR_MIN_OPACITY = 0.15;
 
-// Reusable objects for per-frame computation (avoids GC per frame)
-const _rotaAxis = new THREE.Vector3();
-const _rotaQuat = new THREE.Quaternion();
-// PKO uses D3DXMatrixRotationYawPitchRoll(yaw=y, pitch=x, roll=z) → Euler 'YXZ'
-const _baseEuler = new THREE.Euler(0, 0, 0, "YXZ");
+// Reusable objects for editor-specific per-frame computation
 const _effRotaAxis = new THREE.Vector3();
 const _gizmoPos = new THREE.Vector3();
 const _gizmoScale = new THREE.Vector3();
 const _gizmoQuat = new THREE.Quaternion();
 const _gizmoEuler = new THREE.Euler();
-
-function getCachedCylinderPositions(
-  cache: Map<string, Float32Array>,
-  params: { topRadius?: number; botRadius?: number; height?: number; segments?: number }
-): Float32Array {
-  const topRadius = params.topRadius || 0.5;
-  const botRadius = params.botRadius || 0.5;
-  const height = params.height || 1.0;
-  const segments = Math.max(params.segments || 16, 3);
-  const key = `${topRadius}:${botRadius}:${height}:${segments}`;
-
-  const existing = cache.get(key);
-  if (existing) {
-    return existing;
-  }
-
-  const geometry = new THREE.CylinderGeometry(
-    topRadius,
-    botRadius,
-    height,
-    segments,
-  );
-  const positions = new Float32Array(
-    (geometry.getAttribute("position").array as Float32Array).slice()
-  );
-  geometry.dispose();
-  cache.set(key, positions);
-  return positions;
-}
 
 type EffectSubRendererProps = {
   subEffectIndex: number;
@@ -153,13 +121,6 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
     geometry.type === "model" ? geometry.modelName : undefined,
     currentProject?.id,
   );
-
-  const blendFactors = useMemo(() => {
-    if (!subEffect) {
-      return resolveBlendFactors(5, 6); // default: standard alpha blend
-    }
-    return resolveBlendFactors(subEffect.srcBlend, subEffect.destBlend);
-  }, [subEffect]);
 
   // Compose technique state from idxTech + per-sub-effect blend overrides
   const techniqueState = useMemo((): PkoTechniqueState | null => {
@@ -353,117 +314,25 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
       effectGroupRef.current.quaternion.identity();
     }
 
-    if (!meshRef.current) return;
+    if (!meshRef.current || !subEffect) return;
 
-    // PKO billboard logic (MPModelEff.cpp RenderVS):
-    // - Billboard is triggered ONLY by the billboard flag, NOT rotaBoard alone.
-    // - effectType=4 (Model) uses VS index 1 which overrides billboard VS index 2.
-    // - When billboard=true && rotaBoard=false: rotation is discarded (identity),
-    //   then billboard matrix applied. rotaLoop is also discarded.
-    // - When billboard=true && rotaBoard=true: frame rotation (and rotaLoop)
-    //   is preserved and composed with billboard matrix.
-    const isModelEffect = subEffect?.effectType === 4 && geometry.type === "model";
-    const isBillboard = !!subEffect?.billboard && !isModelEffect;
-    const isRotaBoard = !!subEffect?.rotaBoard;
-
-    // Step 1: Build base rotation (frame rotation + optional rotaLoop)
-    // PKO: GetTransformMatrix builds Scale * Rotation (with optional RotaLoop)
-    if (subEffect?.rotaLoop && !(isBillboard && !isRotaBoard)) {
-      // Apply rotaLoop UNLESS billboard is on with rotaBoard off
-      // (PKO discards everything including rotaLoop for billboard+!rotaBoard)
-      const [ax, ay, az, speed] = subEffect.rotaLoopVec;
-      _rotaAxis.set(ax, ay, az);
-      if (_rotaAxis.lengthSq() > 0.0001) {
-        _rotaAxis.normalize();
-        const rotaAngle = playbackTime * speed;
-        // Compose: RotaLoop * FrameRotation
-        _baseEuler.set(angle[0], angle[1], angle[2], "YXZ");
-        meshRef.current.quaternion.setFromEuler(_baseEuler);
-        _rotaQuat.setFromAxisAngle(_rotaAxis, rotaAngle);
-        meshRef.current.quaternion.premultiply(_rotaQuat);
-      }
-    }
-
-    // Step 2: Apply billboard
-    // PKO: if billboard, multiply (or replace) result with inverse view matrix
-    if (isBillboard) {
-      if (!isRotaBoard) {
-        // billboard + !rotaBoard: discard all rotation, just face camera
-        meshRef.current.lookAt(state.camera.position);
-      } else {
-        // billboard + rotaBoard: compose current rotation with billboard
-        // Save current quaternion (frame rotation + rotaLoop), apply billboard, then compose
-        _rotaQuat.copy(meshRef.current.quaternion);
-        meshRef.current.lookAt(state.camera.position);
-        meshRef.current.quaternion.multiply(_rotaQuat);
-      }
-    }
-
-    // UV animation for effectType 2 (EFFECT_MODELUV) — interpolated UV coords
-    if (subEffect && playback.isPlaying && subEffect.effectType === 2 && subEffect.coordList.length > 0) {
-      const uvResult = interpolateUVCoords(subEffect, playbackTime, true);
-      if (uvResult && meshRef.current.geometry) {
-        const uvAttr = meshRef.current.geometry.getAttribute("uv");
-        if (uvAttr && uvAttr.count === uvResult.uvs.length) {
-          for (let v = 0; v < uvResult.uvs.length; v++) {
-            uvAttr.setXY(v, uvResult.uvs[v][0], uvResult.uvs[v][1]);
-          }
-          uvAttr.needsUpdate = true;
-        }
-      }
-    }
-
-    // UV animation for effectType 3 (EFFECT_MODELTEXTURE) — snapped UV sets
-    if (subEffect && playback.isPlaying && subEffect.effectType === 3 && subEffect.texList.length > 0) {
-      const texIdx = getTexListFrameIndex(subEffect, playbackTime, true);
-      if (texIdx !== null && subEffect.texList[texIdx] && meshRef.current.geometry) {
-        const uvAttr = meshRef.current.geometry.getAttribute("uv");
-        const texUVs = subEffect.texList[texIdx];
-        if (uvAttr && uvAttr.count === texUVs.length) {
-          for (let v = 0; v < texUVs.length; v++) {
-            uvAttr.setXY(v, texUVs[v][0], texUVs[v][1]);
-          }
-          uvAttr.needsUpdate = true;
-        }
-      }
-    }
-
-    // Deformable mesh interpolation: when useParam > 0 and geometry is cylinder/cone,
-    // interpolate vertex positions between frames (PKO RenderTob D3DXVec3Lerp)
-    if (
-      subEffect &&
-      playback.isPlaying &&
-      interpolated &&
-      subEffect.useParam > 0 &&
-      subEffect.perFrameCylinder.length > 1 &&
-      geometry.type === "cylinder" &&
-      meshRef.current.geometry
-    ) {
-      const curParams = subEffect.perFrameCylinder[interpolated.frameIndex];
-      const nxtParams = subEffect.perFrameCylinder[interpolated.nextFrameIndex];
-      if (curParams && nxtParams && interpolated.lerp > 0.001) {
-        const curPos = getCachedCylinderPositions(cylinderPositionCache.current, curParams);
-        const nxtPos = getCachedCylinderPositions(cylinderPositionCache.current, nxtParams);
-        const targetPos = meshRef.current.geometry.getAttribute("position");
-
-        if (
-          targetPos &&
-          curPos.length === nxtPos.length &&
-          targetPos.count * 3 === curPos.length
-        ) {
-          const t = interpolated.lerp;
-          for (let v = 0; v < targetPos.count; v++) {
-            const offset = v * 3;
-            targetPos.setXYZ(
-              v,
-              curPos[offset] + (nxtPos[offset] - curPos[offset]) * t,
-              curPos[offset + 1] + (nxtPos[offset + 1] - curPos[offset + 1]) * t,
-              curPos[offset + 2] + (nxtPos[offset + 2] - curPos[offset + 2]) * t,
-            );
-          }
-          targetPos.needsUpdate = true;
-        }
-      }
+    // Delegate all per-frame rendering (position, scale, rotation, billboard,
+    // color, UV animation, deformable mesh) to the shared function.
+    if (playback.isPlaying && interpolated) {
+      applySubEffectFrame(meshRef.current, state.camera, {
+        sub: subEffect,
+        position,
+        scale: size,
+        angle,
+        color,
+        playbackTime,
+        frameIndex: interpolated.frameIndex,
+        nextFrameIndex: interpolated.nextFrameIndex,
+        lerp: interpolated.lerp,
+        editorMinOpacity: EDITOR_MIN_OPACITY,
+        cylinderCache: cylinderPositionCache.current,
+        isCylinder: geometry.type === "cylinder",
+      });
     }
   });
 
@@ -537,22 +406,9 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
   const materialColor = new THREE.Color(color[0], color[1], color[2]);
   const opacity = Math.min(Math.max(color[3], 0), 1);
   const previewOpacity = Math.max(opacity, EDITOR_MIN_OPACITY);
-  // PKO: when alpha=false, disables alpha blending and enables depth write
   const useAlpha = subEffect.alpha !== false;
 
-  // Technique-driven material properties
-  const techDepthTest = techniqueState ? techniqueState.zEnable : true;
-  const techDepthWrite = techniqueState
-    ? (techniqueState.zWriteEnable || !useAlpha)
-    : !useAlpha;
-  const techAlphaTest = techniqueState?.alphaTestEnable
-    ? (techniqueState.alphaFunc === 6 /* D3DCMP_NOTEQUAL */ ? 1 / 255 : 0)
-    : 0;
-  const techSide = techniqueState
-    ? (techniqueState.cullMode === 3 /* D3DCULL_CCW */ ? THREE.BackSide
-       : techniqueState.cullMode === 2 /* D3DCULL_CW */ ? THREE.FrontSide
-       : THREE.DoubleSide)
-    : THREE.DoubleSide;
+  const matProps = buildEffectMaterialProps(subEffect, texture, techniqueState);
 
   const showGizmo = isSelected && gizmoMode !== "off" && !playback.isPlaying;
 
@@ -574,19 +430,9 @@ export default function EffectSubRenderer({ subEffectIndex }: EffectSubRendererP
       )}
       <meshBasicMaterial
         key={texture?.id ?? "no-tex"}
+        {...matProps}
         color={materialColor}
-        transparent={useAlpha || techAlphaTest > 0}
         opacity={useAlpha ? previewOpacity : 1}
-        toneMapped={false}
-        fog={false}
-        blending={useAlpha ? THREE.CustomBlending : THREE.NormalBlending}
-        blendSrc={blendFactors.blendSrc}
-        blendDst={blendFactors.blendDst}
-        depthTest={techDepthTest}
-        depthWrite={techDepthWrite}
-        alphaTest={techAlphaTest}
-        map={texture}
-        side={techSide}
       />
     </mesh>
   );
