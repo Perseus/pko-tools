@@ -287,7 +287,8 @@ impl Character {
             let pose_table =
                 super::animation::pose_info::load_poseinfo(&poseinfo_path)?;
 
-            if let Some(actions) = action_table.get(&self.model) {
+            // Action table key is char_type_id (matches Character.id), not model number
+            if let Some(actions) = action_table.get(&(self.id as u16)) {
                 animation.to_gltf_animations_split(
                     &mut fields_to_aggregate,
                     actions,
