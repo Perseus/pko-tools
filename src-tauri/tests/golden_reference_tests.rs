@@ -65,3 +65,12 @@ fn snapshot_lit() {
         .expect("parse lit.lit");
     assert_yaml_snapshot!(entries);
 }
+
+#[test]
+fn snapshot_poseinfo() {
+    let table = pko_tools_lib::animation::pose_info::load_poseinfo(
+        &fixture("characterposeinfo.bin"),
+    )
+    .expect("parse characterposeinfo.bin");
+    assert_yaml_snapshot!(table);
+}
