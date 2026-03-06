@@ -3,6 +3,7 @@ import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
 import { invokeTimed as invoke } from "@/commands/invokeTimed";
 import { ParticleEffectInfo } from "@/types/item";
+import type { EffectFile, SubEffect } from "@/types/effect";
 import {
   createEffectTexture,
   createRectGeometry,
@@ -15,62 +16,6 @@ import {
 
 /** Effect animation type enum matching game engine I_Effect.h */
 const EFFECT_FRAMETEX = 1;
-
-/** Matches backend CylinderParams (camelCase via serde rename_all) */
-interface CylinderParams {
-  segments: number;
-  height: number;
-  topRadius: number;
-  botRadius: number;
-}
-
-/** Matches backend SubEffect (camelCase via serde rename_all) */
-interface SubEffect {
-  effectName: string;
-  effectType: number;
-  srcBlend: number;
-  destBlend: number;
-  length: number;
-  frameCount: number;
-  frameTimes: number[];
-  frameSizes: [number, number, number][];
-  frameAngles: [number, number, number][];
-  framePositions: [number, number, number][];
-  frameColors: [number, number, number, number][];
-  billboard: boolean;
-  texName: string;
-  modelName: string;
-  rotaBoard: boolean;
-  segments: number;
-  height: number;
-  topRadius: number;
-  botRadius: number;
-  rotaLoop: boolean;
-  rotaLoopVec: [number, number, number, number];
-  verCount: number;
-  coordCount: number;
-  coordFrameTime: number;
-  coordList: [number, number][][];
-  texCount: number;
-  texFrameTime: number;
-  texList: [number, number][][];
-  frameTexCount: number;
-  frameTexTime: number;
-  frameTexNames: string[];
-  frameTexTime2: number;
-  useParam: number;
-  perFrameCylinder: CylinderParams[];
-  vsIndex: number;
-  alpha: boolean;
-}
-
-/** Matches backend EffFile (camelCase via serde rename_all) */
-interface EffFileData {
-  rotating: boolean;
-  rotaVec: [number, number, number];
-  rotaVel: number;
-  subEffects: SubEffect[];
-}
 
 /** Assembled keyframe for interpolation */
 interface KeyFrame {
@@ -378,7 +323,7 @@ interface EffectGroupProps {
 }
 
 function EffectGroup({ effectName, projectId, projectDir, dummyMatrix, effectScale, forgeAlpha }: EffectGroupProps) {
-  const [effData, setEffData] = useState<EffFileData | null>(null);
+  const [effData, setEffData] = useState<EffectFile | null>(null);
   const [textures, setTextures] = useState<Map<string, THREE.Texture>>(
     new Map()
   );
@@ -395,7 +340,7 @@ function EffectGroup({ effectName, projectId, projectDir, dummyMatrix, effectSca
 
     async function load() {
       try {
-        const data = await invoke<EffFileData>("load_effect", {
+        const data = await invoke<EffectFile>("load_effect", {
           projectId,
           effectName: effName,
         });
