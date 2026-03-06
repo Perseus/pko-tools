@@ -15,11 +15,14 @@ export type EffectTextureStatus = {
 
 export type EffectViewMode = "viewer" | "editor";
 export const effectViewModeAtom = atom<EffectViewMode>("viewer");
+export type EffectViewportMode = "render" | "skeleton";
+export const effectViewportModeAtom = atom<EffectViewportMode>("render");
 
 export const selectedEffectAtom = atom<string | null>(null);
 export const effectDataAtom = atom<EffectFile | null>(null);
 export const selectedSubEffectIndexAtom = atom<number | null>(null);
 export const selectedFrameIndexAtom = atom<number>(0);
+export const selectedEffectSkeletonNodeAtom = atom<string | null>(null);
 export const effectPlaybackAtom = atom<EffectPlaybackState>({
   isPlaying: false,
   isLooping: true,

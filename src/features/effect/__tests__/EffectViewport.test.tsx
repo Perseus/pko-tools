@@ -1,4 +1,4 @@
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { Provider, createStore } from "jotai";
 import React from "react";
 import { describe, expect, it, vi } from "vitest";
@@ -7,6 +7,7 @@ import EffectMeshRenderer from "@/features/effect/EffectMeshRenderer";
 import {
   effectDataAtom,
   effectPlaybackAtom,
+  effectViewportModeAtom,
   selectedFrameIndexAtom,
   selectedSubEffectIndexAtom,
 } from "@/store/effect";
@@ -180,5 +181,22 @@ describe("EffectViewport", () => {
 
     const canvas = screen.getByTestId("canvas");
     expect(canvas).toBeInTheDocument();
+  });
+
+  it("switches to skeleton mode from the viewer toolbar", () => {
+    const store = createStore();
+    store.set(effectDataAtom, effectFixture);
+    store.set(selectedSubEffectIndexAtom, 0);
+
+    render(
+      <Provider store={store}>
+        <EffectViewport />
+      </Provider>
+    );
+
+    fireEvent.click(screen.getByLabelText("viewport-skeleton-mode"));
+
+    expect(store.get(effectViewportModeAtom)).toBe("skeleton");
+    expect(screen.getByText(/click nodes to inspect local transforms/i)).toBeInTheDocument();
   });
 });
