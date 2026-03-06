@@ -276,7 +276,31 @@ impl Character {
             total_helper_nodes += helper_nodes.len();
             fields_to_aggregate.nodes.extend(helper_nodes.clone());
         }
-        animation.to_gltf_animations_and_sampler(&mut fields_to_aggregate, y_up);
+        // Try to load action table + pose table for split animations
+        let action_table_path = project_dir.join("scripts/txt/CharacterAction.tx");
+        let poseinfo_path = project_dir.join("scripts/table/characterposeinfo.bin");
+
+        let use_split = action_table_path.exists() && poseinfo_path.exists();
+        if use_split {
+            let action_table =
+                super::animation::action_table::load_action_table(&action_table_path)?;
+            let pose_table =
+                super::animation::pose_info::load_poseinfo(&poseinfo_path)?;
+
+            if let Some(actions) = action_table.get(&self.model) {
+                animation.to_gltf_animations_split(
+                    &mut fields_to_aggregate,
+                    actions,
+                    Some(&pose_table),
+                    y_up,
+                );
+            } else {
+                // No actions for this char type — fall back to single animation
+                animation.to_gltf_animations_and_sampler(&mut fields_to_aggregate, y_up);
+            }
+        } else {
+            animation.to_gltf_animations_and_sampler(&mut fields_to_aggregate, y_up);
+        }
 
         // Build scene node indices: root bone, skinned mesh nodes, and all helper nodes
         let mut scene_nodes = vec![

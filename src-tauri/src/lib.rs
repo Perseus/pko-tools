@@ -95,6 +95,7 @@ pub fn run() {
             character::commands::import_character_from_gltf,
             character::commands::get_character_metadata_cmd,
             character::commands::invalidate_character_cache,
+            character::commands::get_character_actions,
             effect::commands::list_effects,
             effect::commands::load_effect,
             effect::commands::save_effect,
