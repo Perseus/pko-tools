@@ -3074,6 +3074,12 @@ pub fn export_map_for_unity(
             obj.insert("flag".into(), serde_json::json!(info.flag));
             obj.insert("size_flag".into(), serde_json::json!(info.size_flag));
             obj.insert("is_really_big".into(), serde_json::json!(info.is_really_big));
+            // Fade data (overhead roof fade)
+            if info.fade_obj_num > 0 {
+                obj.insert("fade_obj_num".into(), serde_json::json!(info.fade_obj_num));
+                obj.insert("fade_obj_seq".into(), serde_json::json!(info.fade_obj_seq));
+                obj.insert("fade_coefficient".into(), serde_json::json!(info.fade_coefficient));
+            }
             // Point light data (meaningful when obj_type == 3)
             obj.insert("point_color".into(), serde_json::json!(info.point_color));
             obj.insert("point_range".into(), serde_json::json!(info.point_range));
