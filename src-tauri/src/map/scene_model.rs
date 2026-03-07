@@ -1477,20 +1477,28 @@ fn build_bone_skin(
 }
 
 // ============================================================================
-// Public API: build glTF from a single LMO file (standalone building viewer)
+// Shared geometry processing for both glTF and GLB export paths
 // ============================================================================
 
-/// Build a complete glTF JSON string for a single LMO building model.
-pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String> {
-    let model = lmo_loader::load_lmo(lmo_path)?;
+/// Intermediate result from processing all geometry objects in an LMO model.
+struct LmoGeomResult {
+    /// Root node index (building_root).
+    root_idx: u32,
+    /// All glTF animations (matrix + bone).
+    animations: Vec<gltf_json::Animation>,
+    /// All glTF skins (one per skinned geometry object).
+    skins: Vec<gltf_json::Skin>,
+}
 
-    if model.geom_objects.is_empty() {
-        return Err(anyhow!("LMO file has no geometry objects"));
-    }
-
-    let mut builder = GltfBuilder::new();
+/// Process all geometry objects from an LMO model into the GltfBuilder.
+/// Shared by both `build_gltf_from_lmo` and `build_glb_from_lmo`.
+fn process_lmo_geometry<'a>(
+    builder: &mut GltfBuilder,
+    model: &'a LmoModel,
+    project_dir: &Path,
+) -> Result<LmoGeomResult> {
     let mut child_indices = Vec::new();
-    let mut animated_nodes: Vec<(u32, &LmoGeomObject)> = Vec::new();
+    let mut animated_nodes: Vec<(u32, &'a LmoGeomObject)> = Vec::new();
     let mut skins: Vec<gltf_json::Skin> = Vec::new();
     let mut all_bone_samplers: Vec<Sampler> = Vec::new();
     let mut all_bone_channels: Vec<Channel> = Vec::new();
@@ -1499,11 +1507,9 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         let prefix = format!("geom{}", gi);
         let material_base_idx = builder.materials.len() as u32;
 
-        // Add materials for this geometry object (with textures for standalone viewer)
         if geom.materials.is_empty() {
-            // Default material
             build_lmo_material(
-                &mut builder,
+                builder,
                 &lmo::LmoMaterial {
                     diffuse: [0.7, 0.7, 0.7, 1.0],
                     ambient: [0.3, 0.3, 0.3, 1.0],
@@ -1524,7 +1530,7 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         } else {
             for (mi, mat) in geom.materials.iter().enumerate() {
                 build_lmo_material(
-                    &mut builder,
+                    builder,
                     mat,
                     &format!("{}_mat{}", prefix, mi),
                     project_dir,
@@ -1536,7 +1542,7 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         let has_animation = geom.animation.is_some();
         let has_bone_animation = geom.bone_animation.is_some();
         let primitives = build_geom_primitives(
-            &mut builder,
+            builder,
             geom,
             &prefix,
             material_base_idx,
@@ -1556,10 +1562,8 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
             extras: None,
         });
 
-        // Build bone skinning before creating the mesh node (joint nodes are
-        // added to builder.nodes by build_bone_skin)
         let skin_data = if has_bone_animation {
-            build_bone_skin(&mut builder, geom, &prefix)
+            build_bone_skin(builder, geom, &prefix)
         } else {
             None
         };
@@ -1577,9 +1581,7 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         });
         child_indices.push(gltf_json::Index::new(node_idx));
 
-        // Add joint root nodes as children of the mesh node for proper hierarchy
         if let Some(ref sd) = skin_data {
-            // Find root bones (parent_id == INVALID) and add as children of mesh node
             if let Some(ref bone_anim) = geom.bone_animation {
                 let root_joints: Vec<gltf_json::Index<gltf_json::Node>> = bone_anim
                     .bones
@@ -1594,13 +1596,11 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
             }
         }
 
-        // Track animated objects for glTF animation generation
         if has_animation {
             animated_nodes.push((node_idx, geom));
         }
 
         if let Some(sd) = skin_data {
-            // Merge bone channels into the combined animation, offsetting sampler indices
             let sampler_offset = all_bone_samplers.len() as u32;
             all_bone_samplers.extend(sd.bone_samplers);
             for mut ch in sd.bone_channels {
@@ -1615,10 +1615,8 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         return Err(anyhow!("No renderable geometry in LMO file"));
     }
 
-    // Build matrix animations (non-bone) if any objects are animated
-    let mut animations = build_animations(&mut builder, &animated_nodes);
+    let mut animations = build_animations(builder, &animated_nodes);
 
-    // Merge all bone animation channels into a single Animation
     if !all_bone_channels.is_empty() {
         animations.push(gltf_json::Animation {
             name: Some("BoneAnimation".to_string()),
@@ -1629,13 +1627,34 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         });
     }
 
-    // Root node
     let root_idx = builder.nodes.len() as u32;
     builder.nodes.push(gltf_json::Node {
         name: Some("building_root".to_string()),
         children: Some(child_indices),
         ..Default::default()
     });
+
+    Ok(LmoGeomResult {
+        root_idx,
+        animations,
+        skins,
+    })
+}
+
+// ============================================================================
+// Public API: build glTF from a single LMO file (standalone building viewer)
+// ============================================================================
+
+/// Build a complete glTF JSON string for a single LMO building model.
+pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String> {
+    let model = lmo_loader::load_lmo(lmo_path)?;
+
+    if model.geom_objects.is_empty() {
+        return Err(anyhow!("LMO file has no geometry objects"));
+    }
+
+    let mut builder = GltfBuilder::new();
+    let geom_result = process_lmo_geometry(&mut builder, &model, project_dir)?;
 
     let root = gltf_json::Root {
         asset: gltf_json::Asset {
@@ -1645,7 +1664,7 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         },
         nodes: builder.nodes,
         scenes: vec![gltf_json::Scene {
-            nodes: vec![gltf_json::Index::new(root_idx)],
+            nodes: vec![gltf_json::Index::new(geom_result.root_idx)],
             name: Some("BuildingScene".to_string()),
             extensions: None,
             extras: None,
@@ -1659,8 +1678,8 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         images: builder.images,
         samplers: builder.samplers,
         textures: builder.textures,
-        animations,
-        skins,
+        animations: geom_result.animations,
+        skins: geom_result.skins,
         ..Default::default()
     };
 
@@ -1678,144 +1697,8 @@ pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String
         return Err(anyhow!("LMO file has no geometry objects"));
     }
 
-    // Build using the same GltfBuilder approach as build_gltf_from_lmo
     let mut builder = GltfBuilder::new();
-    let mut child_indices = Vec::new();
-    let mut animated_nodes: Vec<(u32, &LmoGeomObject)> = Vec::new();
-    let mut skins: Vec<gltf_json::Skin> = Vec::new();
-    let mut all_bone_samplers: Vec<Sampler> = Vec::new();
-    let mut all_bone_channels: Vec<Channel> = Vec::new();
-
-    for (gi, geom) in model.geom_objects.iter().enumerate() {
-        let prefix = format!("geom{}", gi);
-        let material_base_idx = builder.materials.len() as u32;
-
-        if geom.materials.is_empty() {
-            build_lmo_material(
-                &mut builder,
-                &lmo::LmoMaterial {
-                    diffuse: [0.7, 0.7, 0.7, 1.0],
-                    ambient: [0.3, 0.3, 0.3, 1.0],
-                    emissive: [0.0, 0.0, 0.0, 0.0],
-                    opacity: 1.0,
-                    transp_type: 0,
-                    alpha_test_enabled: false,
-                    alpha_ref: 0,
-                    src_blend: None,
-                    dest_blend: None,
-                    cull_mode: None,
-                    tex_filename: None,
-                },
-                &format!("{}_default_mat", prefix),
-                project_dir,
-                true,
-            );
-        } else {
-            for (mi, mat) in geom.materials.iter().enumerate() {
-                build_lmo_material(
-                    &mut builder,
-                    mat,
-                    &format!("{}_mat{}", prefix, mi),
-                    project_dir,
-                    true,
-                );
-            }
-        }
-
-        let has_animation = geom.animation.is_some();
-        let has_bone_animation = geom.bone_animation.is_some();
-        let primitives = build_geom_primitives(
-            &mut builder,
-            geom,
-            &prefix,
-            material_base_idx,
-            has_animation || has_bone_animation,
-        );
-
-        if primitives.is_empty() {
-            continue;
-        }
-
-        let mesh_idx = builder.meshes.len() as u32;
-        builder.meshes.push(gltf_json::Mesh {
-            name: Some(format!("geom_{}", gi)),
-            primitives,
-            weights: None,
-            extensions: None,
-            extras: None,
-        });
-
-        let skin_data = if has_bone_animation {
-            build_bone_skin(&mut builder, geom, &prefix)
-        } else {
-            None
-        };
-
-        let node_idx = builder.nodes.len() as u32;
-        let anim_extras = build_anim_extras(geom, gi);
-        builder.nodes.push(gltf_json::Node {
-            mesh: Some(gltf_json::Index::new(mesh_idx)),
-            name: Some(format!("geom_node_{}", gi)),
-            extras: anim_extras,
-            skin: skin_data
-                .as_ref()
-                .map(|_| gltf_json::Index::new(skins.len() as u32)),
-            ..Default::default()
-        });
-        child_indices.push(gltf_json::Index::new(node_idx));
-
-        if let Some(ref sd) = skin_data {
-            if let Some(ref bone_anim) = geom.bone_animation {
-                let root_joints: Vec<gltf_json::Index<gltf_json::Node>> = bone_anim
-                    .bones
-                    .iter()
-                    .enumerate()
-                    .filter(|(_, b)| b.parent_id == 0xFFFFFFFF)
-                    .map(|(bi, _)| gltf_json::Index::new(sd.joint_node_indices[bi]))
-                    .collect();
-                if !root_joints.is_empty() {
-                    builder.nodes[node_idx as usize].children = Some(root_joints);
-                }
-            }
-        }
-
-        if has_animation {
-            animated_nodes.push((node_idx, geom));
-        }
-
-        if let Some(sd) = skin_data {
-            let sampler_offset = all_bone_samplers.len() as u32;
-            all_bone_samplers.extend(sd.bone_samplers);
-            for mut ch in sd.bone_channels {
-                ch.sampler = gltf_json::Index::new(ch.sampler.value() as u32 + sampler_offset);
-                all_bone_channels.push(ch);
-            }
-            skins.push(sd.skin);
-        }
-    }
-
-    if child_indices.is_empty() {
-        return Err(anyhow!("No renderable geometry in LMO file"));
-    }
-
-    let mut animations = build_animations(&mut builder, &animated_nodes);
-
-    if !all_bone_channels.is_empty() {
-        animations.push(gltf_json::Animation {
-            name: Some("BoneAnimation".to_string()),
-            channels: all_bone_channels,
-            samplers: all_bone_samplers,
-            extensions: None,
-            extras: None,
-        });
-    }
-
-    let root_idx = builder.nodes.len() as u32;
-    builder.nodes.push(gltf_json::Node {
-        name: Some("building_root".to_string()),
-        children: Some(child_indices),
-        ..Default::default()
-    });
+    let geom_result = process_lmo_geometry(&mut builder, &model, project_dir)?;
 
     // Convert data-URI buffers into a single GLB binary buffer, then append
     // image data as additional buffer views.
@@ -1876,7 +1759,7 @@ pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String
         },
         nodes: builder.nodes,
         scenes: vec![gltf_json::Scene {
-            nodes: vec![gltf_json::Index::new(root_idx)],
+            nodes: vec![gltf_json::Index::new(geom_result.root_idx)],
             name: Some("BuildingScene".to_string()),
             extensions: None,
             extras: None,
@@ -1890,8 +1773,8 @@ pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String
         images: images_out,
         samplers: builder.samplers,
         textures: builder.textures,
-        animations,
-        skins,
+        animations: geom_result.animations,
+        skins: geom_result.skins,
         ..Default::default()
     };
 

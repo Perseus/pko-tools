@@ -594,7 +594,9 @@ fn convert_mesh_section(
                     if w[i] > 0.0 {
                         let raw_idx = raw_bi[i] as usize;
                         remapped[i] = if raw_idx < bone_index_lut.len() {
-                            bone_index_lut[raw_idx] as u8
+                            let mapped = bone_index_lut[raw_idx];
+                            debug_assert!(mapped < 256, "bone index {} exceeds u8 range", mapped);
+                            mapped as u8
                         } else {
                             0
                         };
@@ -848,6 +850,14 @@ fn convert_bone_animation(
     let mut inv_bind_matrices = Vec::with_capacity(bone_num);
     for m in &invmat_seq {
         inv_bind_matrices.push(extract_matrix44(m));
+    }
+
+    if inv_bind_matrices.len() != bone_num {
+        anyhow::bail!(
+            "bone animation IBM count ({}) != bone_num ({})",
+            inv_bind_matrices.len(),
+            bone_num
+        );
     }
 
     // Parse per-bone keyframes and decompose to translation + rotation
