@@ -152,10 +152,22 @@ fn export_all_buildings(
     let mut entries: Vec<_> = obj_info.values().collect();
     entries.sort_by_key(|e| e.id);
 
+    let total_models = entries.iter().filter(|e| e.obj_type == 0).count();
+    let mut model_idx: usize = 0;
+
     for info in &entries {
         // Only export type 0 (buildings/models)
         if info.obj_type != 0 {
             continue;
+        }
+
+        model_idx += 1;
+        // Log progress every 25 buildings
+        if model_idx == 1 || model_idx % 25 == 0 || model_idx == total_models {
+            eprintln!(
+                "[shared] Building {}/{}: {}",
+                model_idx, total_models, info.filename
+            );
         }
 
         let lmo_path = match super::scene_model::find_lmo_path(project_dir, &info.filename) {

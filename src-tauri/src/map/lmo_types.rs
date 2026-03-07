@@ -65,6 +65,42 @@ pub struct LmoAnimData {
     pub rotations: Vec<[f32; 4]>,    // per-frame quaternion [x,y,z,w] (Z-up game space)
 }
 
+/// Bone animation key type — matches PKO BONE_KEY_TYPE_* constants.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub enum BoneKeyType {
+    Mat43 = 1,
+    Mat44 = 2,
+    Quat = 3,
+}
+
+/// A single bone in the skeleton hierarchy.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LmoBoneInfo {
+    pub name: String,
+    pub id: u32,
+    pub parent_id: u32,
+}
+
+/// Per-bone animation keyframes, decomposed to translation + rotation.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LmoBoneKeyframes {
+    pub translations: Vec<[f32; 3]>, // per-frame translation (Z-up game space)
+    pub rotations: Vec<[f32; 4]>,    // per-frame quaternion [x,y,z,w] (Z-up game space)
+}
+
+/// Bone animation data embedded in an LMO geometry object.
+/// Matches lwAnimDataBone from the PKO engine.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LmoBoneAnimData {
+    pub bone_num: u32,
+    pub frame_num: u32,
+    pub dummy_num: u32,
+    pub key_type: BoneKeyType,
+    pub bones: Vec<LmoBoneInfo>,
+    pub inv_bind_matrices: Vec<[[f32; 4]; 4]>,
+    pub keyframes: Vec<LmoBoneKeyframes>, // one per bone
+}
+
 /// UV animation data — per-frame 4×4 texture coordinate transform matrix.
 /// Stored per (subset_index, stage_index).
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -113,6 +149,9 @@ pub struct LmoGeomObject {
     pub subsets: Vec<LmoSubset>,
     pub materials: Vec<LmoMaterial>,
     pub animation: Option<LmoAnimData>,
+    pub bone_animation: Option<LmoBoneAnimData>,
+    pub blend_weights: Vec<[f32; 4]>,
+    pub bone_indices: Vec<[u8; 4]>,
     pub texuv_anims: Vec<LmoTexUvAnim>,
     pub teximg_anims: Vec<LmoTexImgAnim>,
     pub mtlopac_anims: Vec<LmoMtlOpacAnim>,
@@ -173,6 +212,10 @@ pub struct GeomObjectInfo {
     pub has_vertex_colors: bool,
     pub has_animation: bool,
     pub animation_frame_count: Option<u32>,
+    pub has_bone_animation: bool,
+    pub bone_animation_frame_count: Option<u32>,
+    pub bone_count: Option<u32>,
+    pub has_blend_weights: bool,
     pub has_texuv_anim: bool,
     pub has_teximg_anim: bool,
     pub has_opacity_anim: bool,
@@ -247,6 +290,10 @@ pub fn build_metadata(lmo: &LmoModel, building_id: u32, filename: &str) -> Build
                 has_vertex_colors: !g.vertex_colors.is_empty(),
                 has_animation: g.animation.is_some(),
                 animation_frame_count: g.animation.as_ref().map(|a| a.frame_num),
+                has_bone_animation: g.bone_animation.is_some(),
+                bone_animation_frame_count: g.bone_animation.as_ref().map(|a| a.frame_num),
+                bone_count: g.bone_animation.as_ref().map(|a| a.bone_num),
+                has_blend_weights: !g.blend_weights.is_empty(),
                 has_texuv_anim: !g.texuv_anims.is_empty(),
                 has_teximg_anim: !g.teximg_anims.is_empty(),
                 has_opacity_anim: !g.mtlopac_anims.is_empty(),
