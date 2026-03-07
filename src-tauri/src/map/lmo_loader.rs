@@ -3,7 +3,8 @@ use std::path::Path;
 use anyhow::{Context, Result, bail};
 
 use super::lmo_types::{
-    LmoAnimData, LmoGeomObject, LmoMaterial, LmoModel, LmoMtlOpacAnim, LmoOpacityKeyframe,
+    LmoAnimData, LmoBoneAnimData, LmoBoneInfo, LmoBoneKeyframes, BoneKeyType,
+    LmoGeomObject, LmoMaterial, LmoModel, LmoMtlOpacAnim, LmoOpacityKeyframe,
     LmoSubset, LmoTexImgAnim, LmoTexUvAnim, MaterialRenderState,
     D3DRS_ALPHATESTENABLE, D3DRS_SRCBLEND, D3DRS_DESTBLEND, D3DRS_ALPHAREF,
     D3DRS_CULLMODE, D3DRS_ALPHAFUNC, D3DCMP_GREATER, LW_INVALID_INDEX,
@@ -124,11 +125,11 @@ fn convert_geometry_chunk(
     // Parse mesh
     let mesh_size = *header.mesh_size()
         .map_err(|e| anyhow::anyhow!("header.mesh_size error: {:?}", e))?;
-    let (vertices, normals, texcoords, vertex_colors, mut indices, subsets, mesh_alpha) = if mesh_size > 0 {
+    let (vertices, normals, texcoords, vertex_colors, mut indices, subsets, mesh_alpha, blend_weights, bone_indices) = if mesh_size > 0 {
         let mesh_section = chunk.mesh().clone();
         convert_mesh_section(&mesh_section, file_version)?
     } else {
-        (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), MaterialRenderState::default())
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), MaterialRenderState::default(), Vec::new(), Vec::new())
     };
 
     // Workaround: Kaitai runtime BytesReader clone bug — _io.pos() returns 0
@@ -192,12 +193,12 @@ fn convert_geometry_chunk(
     // Parse animations
     let anim_size = *header.anim_size()
         .map_err(|e| anyhow::anyhow!("header.anim_size error: {:?}", e))?;
-    let (animation, texuv_anims, teximg_anims, mtlopac_anims) =
+    let (animation, bone_animation, texuv_anims, teximg_anims, mtlopac_anims) =
         if parse_animations && anim_size > 0 {
             let anim_section = chunk.anim().clone();
             convert_anim_section(&anim_section, file_version)?
         } else {
-            (None, Vec::new(), Vec::new(), Vec::new())
+            (None, None, Vec::new(), Vec::new(), Vec::new())
         };
 
     Ok(LmoGeomObject {
@@ -213,6 +214,9 @@ fn convert_geometry_chunk(
         subsets,
         materials,
         animation,
+        bone_animation,
+        blend_weights,
+        bone_indices,
         texuv_anims,
         teximg_anims,
         mtlopac_anims,
@@ -488,7 +492,7 @@ fn extract_tex_filename_current(stages: &[OptRc<PkoLmo_TexInfoCurrent>]) -> Opti
 fn convert_mesh_section(
     section: &OptRc<PkoLmo_MeshSection>,
     _file_version: u32,
-) -> Result<(Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<u32>, Vec<u32>, Vec<LmoSubset>, MaterialRenderState)> {
+) -> Result<(Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<u32>, Vec<u32>, Vec<LmoSubset>, MaterialRenderState, Vec<[f32; 4]>, Vec<[u8; 4]>)> {
     let vertex_num = *section.vertex_num()
         .map_err(|e| anyhow::anyhow!("vertex_num error: {:?}", e))? as usize;
     let _fvf = *section.fvf()
@@ -555,10 +559,63 @@ fn convert_mesh_section(
         extract_subsets(&section.subset_seq_old().clone())
     };
 
+    // Blend weights and bone indices (for skinned meshes)
+    let has_blend = *section.has_blend_data()
+        .map_err(|e| anyhow::anyhow!("has_blend_data error: {:?}", e))?;
+    let mut blend_weights = Vec::new();
+    let mut bone_indices = Vec::new();
+    if has_blend {
+        // Read bone_index_seq lookup table — maps blend indices to actual bone positions
+        let bone_index_lut: Vec<u32> = if header_kind == 2 {
+            section.bone_index_seq_u4().clone()
+        } else {
+            section.bone_index_seq_u1().iter().map(|&v| v as u32).collect()
+        };
+
+        let blend_seq = section.blend_seq().clone();
+        blend_weights.reserve(vertex_num);
+        bone_indices.reserve(vertex_num);
+        for b in &blend_seq {
+            let idx_dword = *b.index_dword();
+            // Bone indices packed as 4 bytes in a u32
+            let raw_bi = [
+                (idx_dword & 0xFF) as u8,
+                ((idx_dword >> 8) & 0xFF) as u8,
+                ((idx_dword >> 16) & 0xFF) as u8,
+                ((idx_dword >> 24) & 0xFF) as u8,
+            ];
+
+            let w = b.weight().clone();
+
+            // Remap through bone_index_seq: raw index → actual bone array position
+            let bi = if !bone_index_lut.is_empty() {
+                let mut remapped = [0u8; 4];
+                for i in 0..4 {
+                    if w[i] > 0.0 {
+                        let raw_idx = raw_bi[i] as usize;
+                        remapped[i] = if raw_idx < bone_index_lut.len() {
+                            let mapped = bone_index_lut[raw_idx];
+                            debug_assert!(mapped < 256, "bone index {} exceeds u8 range", mapped);
+                            mapped as u8
+                        } else {
+                            0
+                        };
+                    }
+                }
+                remapped
+            } else {
+                raw_bi
+            };
+
+            bone_indices.push(bi);
+            blend_weights.push([w[0], w[1], w[2], w[3]]);
+        }
+    }
+
     // Mesh-level render states
     let mesh_alpha = extract_mesh_render_state(section, header_kind as i32)?;
 
-    Ok((vertices, normals, texcoords, vertex_colors, indices, subsets, mesh_alpha))
+    Ok((vertices, normals, texcoords, vertex_colors, indices, subsets, mesh_alpha, blend_weights, bone_indices))
 }
 
 fn extract_subsets(subset_seq: &[OptRc<PkoLmo_SubsetInfo>]) -> Vec<LmoSubset> {
@@ -636,8 +693,21 @@ fn parse_old_rs_from_raw_bytes(raw: &[u8]) -> MaterialRenderState {
 fn convert_anim_section(
     section: &OptRc<PkoLmo_AnimSection>,
     file_version: u32,
-) -> Result<(Option<LmoAnimData>, Vec<LmoTexUvAnim>, Vec<LmoTexImgAnim>, Vec<LmoMtlOpacAnim>)> {
-    // Matrix animation (bone data is skipped, same as native parser)
+) -> Result<(Option<LmoAnimData>, Option<LmoBoneAnimData>, Vec<LmoTexUvAnim>, Vec<LmoTexImgAnim>, Vec<LmoMtlOpacAnim>)> {
+    // Bone animation
+    let data_bone_size = *section.data_bone_size();
+    let bone_animation = if data_bone_size > 0 {
+        let anim_bone_opt = section.anim_bone().clone();
+        if !anim_bone_opt.is_none() {
+            convert_bone_animation(&anim_bone_opt, file_version)?
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Matrix animation
     let data_mat_size = *section.data_mat_size();
     let animation = if data_mat_size > 0 {
         let anim_mat_opt = section.anim_mat().clone();
@@ -735,7 +805,133 @@ fn convert_anim_section(
         }
     }
 
-    Ok((animation, texuv_anims, teximg_anims, mtlopac_anims))
+    Ok((animation, bone_animation, texuv_anims, teximg_anims, mtlopac_anims))
+}
+
+/// Convert Kaitai bone animation data to domain types.
+/// Matches lwAnimDataBone::Load() and lwAnimDataBone::GetValue() from the PKO engine.
+fn convert_bone_animation(
+    anim_bone: &OptRc<PkoLmo_AnimDataBone>,
+    file_version: u32,
+) -> Result<Option<LmoBoneAnimData>> {
+    let header = anim_bone.header().clone();
+    let bone_num = *header.bone_num() as usize;
+    let frame_num = *header.frame_num();
+    let dummy_num = *header.dummy_num();
+    let key_type_raw = *header.key_type();
+
+    if bone_num == 0 || frame_num == 0 || frame_num > 100_000 {
+        return Ok(None);
+    }
+
+    let key_type = match key_type_raw {
+        1 => BoneKeyType::Mat43,
+        2 => BoneKeyType::Mat44,
+        3 => BoneKeyType::Quat,
+        _ => return Ok(None),
+    };
+
+    // Parse bone hierarchy
+    let base_seq = anim_bone.base_seq().clone();
+    let mut bones = Vec::with_capacity(bone_num);
+    for b in &base_seq {
+        let name_bytes = b.name().clone();
+        let end = name_bytes.iter().position(|&c| c == 0).unwrap_or(name_bytes.len());
+        let name = String::from_utf8_lossy(&name_bytes[..end]).to_string();
+        bones.push(LmoBoneInfo {
+            name,
+            id: *b.id(),
+            parent_id: *b.parent_id(),
+        });
+    }
+
+    // Parse inverse bind matrices
+    let invmat_seq = anim_bone.invmat_seq().clone();
+    let mut inv_bind_matrices = Vec::with_capacity(bone_num);
+    for m in &invmat_seq {
+        inv_bind_matrices.push(extract_matrix44(m));
+    }
+
+    if inv_bind_matrices.len() != bone_num {
+        anyhow::bail!(
+            "bone animation IBM count ({}) != bone_num ({})",
+            inv_bind_matrices.len(),
+            bone_num
+        );
+    }
+
+    // Parse per-bone keyframes and decompose to translation + rotation
+    let key_seq = anim_bone.key_seq().clone();
+    let mut keyframes = Vec::with_capacity(bone_num);
+
+    for (bone_idx, key_rc) in key_seq.iter().enumerate() {
+        let mut translations = Vec::with_capacity(frame_num as usize);
+        let mut rotations = Vec::with_capacity(frame_num as usize);
+
+        match key_type {
+            BoneKeyType::Mat43 => {
+                let mat_seq = key_rc.mat43_seq().clone();
+                for mat_rc in &mat_seq {
+                    let raw = extract_matrix43_array(mat_rc);
+                    let (t, q) = decompose_matrix43(&raw);
+                    translations.push(t);
+                    rotations.push(q);
+                }
+            }
+            BoneKeyType::Mat44 => {
+                let mat_seq = key_rc.mat44_seq().clone();
+                for mat_rc in &mat_seq {
+                    let raw = extract_matrix44(mat_rc);
+                    let (t, q) = decompose_matrix44_to_tq(&raw);
+                    translations.push(t);
+                    rotations.push(q);
+                }
+            }
+            BoneKeyType::Quat => {
+                // Position: for version >= 4099, pos_num == frame_num for all bones.
+                // For older versions, only root bones (parent_id == INVALID) get
+                // per-frame positions; child bones get a single position.
+                let pos_seq = key_rc.pos_seq().clone();
+                let quat_seq = key_rc.quat_seq().clone();
+                let parent_id = bones[bone_idx].parent_id;
+                let has_per_frame_pos = file_version >= 4099 || parent_id == LW_INVALID_INDEX;
+
+                for f in 0..frame_num as usize {
+                    // Position
+                    let pos_idx = if has_per_frame_pos { f } else { 0 };
+                    if pos_idx < pos_seq.len() {
+                        let p = &pos_seq[pos_idx];
+                        translations.push([*p.x(), *p.y(), *p.z()]);
+                    } else {
+                        translations.push([0.0, 0.0, 0.0]);
+                    }
+
+                    // Rotation (quaternion)
+                    if f < quat_seq.len() {
+                        let q = &quat_seq[f];
+                        rotations.push([*q.x(), *q.y(), *q.z(), *q.w()]);
+                    } else {
+                        rotations.push([0.0, 0.0, 0.0, 1.0]);
+                    }
+                }
+            }
+        }
+
+        keyframes.push(LmoBoneKeyframes {
+            translations,
+            rotations,
+        });
+    }
+
+    Ok(Some(LmoBoneAnimData {
+        bone_num: bone_num as u32,
+        frame_num,
+        dummy_num,
+        key_type,
+        bones,
+        inv_bind_matrices,
+        keyframes,
+    }))
 }
 
 fn convert_matrix_animation(
@@ -779,6 +975,21 @@ fn extract_matrix44(mat: &OptRc<PkoLmo_Matrix44>) -> [[f32; 4]; 4] {
 
 fn extract_matrix44_array(mat: &OptRc<PkoLmo_Matrix44>) -> [[f32; 4]; 4] {
     extract_matrix44(mat)
+}
+
+/// Decompose a 4×4 matrix into translation + quaternion.
+fn decompose_matrix44_to_tq(raw: &[[f32; 4]; 4]) -> ([f32; 3], [f32; 4]) {
+    // Translation from row 3 (row-major) = column 3 (column-major)
+    let translation = [raw[3][0], raw[3][1], raw[3][2]];
+    // Convert to flat 12-element array for decompose_matrix43
+    let flat: [f32; 12] = [
+        raw[0][0], raw[0][1], raw[0][2],
+        raw[1][0], raw[1][1], raw[1][2],
+        raw[2][0], raw[2][1], raw[2][2],
+        raw[3][0], raw[3][1], raw[3][2],
+    ];
+    let (_, q) = decompose_matrix43(&flat);
+    (translation, q)
 }
 
 fn extract_matrix43_array(mat: &OptRc<PkoLmo_Matrix43>) -> [f32; 12] {

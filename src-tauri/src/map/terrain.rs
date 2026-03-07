@@ -2891,10 +2891,12 @@ pub fn export_map_for_unity(
     let v3 = options.manifest_version >= 3;
 
     // 1. Parse .map file
+    eprintln!("[map] Parsing {}.map ...", map_name);
     let map_path = project_dir.join("map").join(format!("{}.map", map_name));
     let map_data = std::fs::read(&map_path)
         .with_context(|| format!("Failed to read map file: {}", map_path.display()))?;
     let parsed_map = super::map_loader::load_map(&map_data)?;
+    eprintln!("[map] Map size: {}x{} tiles", parsed_map.header.n_width, parsed_map.header.n_height);
 
     // 2. Parse .obj file (scene objects)
     let obj_path = project_dir.join("map").join(format!("{}.obj", map_name));
@@ -2927,6 +2929,9 @@ pub fn export_map_for_unity(
     let atlas = super::texture::try_bake_atlas(project_dir, &parsed_map);
 
     // 5. Environment settings
+    // NOTE: mapinfo.bin fLightDir/btLightColor are exported as data but the original
+    // engine NEVER reads them for rendering. Scene::_Init() uses g_Config values from
+    // kop.cfg instead. The Unity client's GameConfig handles the correct defaults.
     let light_direction = this_map_info
         .map(|info| info.light_dir)
         .unwrap_or([-1.0, -1.0, -1.0]);
@@ -3156,6 +3161,7 @@ pub fn export_map_for_unity(
     }
 
     // 9. Build grids
+    eprintln!("[map] Building grids...");
     let collision = build_collision_grid(&parsed_map);
     let obj_height = build_obj_height_grid(&parsed_map);
     let terrain_height = build_terrain_height_grid(&parsed_map);
@@ -3233,6 +3239,7 @@ pub fn export_map_for_unity(
     }
 
     // 11. Write terrain
+    eprintln!("[map] Building terrain mesh...");
     let terrain_file_path;
     let mut terrain_sections_info: Option<serde_json::Value> = None;
 

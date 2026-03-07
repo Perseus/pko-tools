@@ -1,37 +1,36 @@
 # Session Context
 
 ## Plan
-- **File:** plans/named-animation-actions.md
-- **Feature:** Named Animation Actions — split .lab animations into named clips
-- **Started:** 2026-03-06
-- **Completed:** 2026-03-06
-
-## Linear Issues
-| Phase | Issue | Status |
-|-------|-------|--------|
-| 1A: Kaitai spec for characterposeinfo.bin | PKO-163 | Done |
-| 1B: Rust adapter for PoseInfo | PKO-164 | Done |
-| 1C: CharacterAction.tx parser | PKO-165 | Done |
-| 2: Split animation export | PKO-166 | Done |
-| 3: Frontend action picker | PKO-167 | Done |
-| 4: Unity import adjustments | PKO-168 | Done |
-| 5: CLI integration | PKO-169 | Done |
+- **File:** plans/area-transition-banner.md
+- **Branch:** pko-182-area-banner-phase-a
+- **Linear Parent Issue:** PKO-181
+- **Started:** 2026-03-07
 
 ## Progress
-| Phase | Branch | Status | Commit |
-|-------|--------|--------|--------|
-| Phase 1A | feat/named-animation-actions-phase-1a | complete | 5b4d081 |
-| Phase 1B | (same branch) | complete | 1323b25 |
-| Phase 1C | (same branch) | complete | e9cb33d |
-| Phase 2 | (same branch) | complete | 5737367 |
-| Phase 3 | (same branch) | complete | 9d13ba0 |
-| Phase 4 | client-unity/main | complete | f4641f7 |
-| Phase 5 | (same branch) | complete | b46a083 |
+| Phase | Branch | Linear Issue | Status | Tests Added | Commit |
+|-------|--------|-------------|--------|-------------|--------|
+| Phase 1: Export area names | pko-182-area-banner-phase-a | PKO-182 | in-progress | - | - |
+| Phase 2: Import area names | (client-unity) | PKO-183 | pending | - | - |
+| Phase 3: Banner textures | (client-unity) | PKO-184 | pending | - | - |
+| Phase 4: AreaTracker | (client-unity) | PKO-185 | pending | - | - |
+| Phase 5-6: Banner widget | (client-unity) | PKO-186 | pending | - | - |
+| Phase 7: Tests | both repos | PKO-187 | pending | - | - |
+
+## Test Summary
+- **Total tests passing:** TBD
+- **Tests added this session:** 0
 
 ## Decisions
-1. Used single branch for all pko-tools phases (1A-3, 5) instead of separate phase branches — simpler for a continuous feature.
-2. Phase 4 (Unity) committed to client-unity/main since it's a separate repo.
-3. --no-split-animations flag logs a note that it's not fully implemented (auto-detect is used). Full override would require a parameter change in get_gltf_json().
+<none yet>
 
 ## Known Issues
-- --no-split-animations flag doesn't fully disable split animations when data files exist (logs a note, auto-detects anyway)
+<none yet>
+
+## Linear Issues Created
+- PKO-181: Area Transition Banner — full implementation (In Progress)
+- PKO-182: Phase 1: Export area names from pko-tools (In Progress)
+- PKO-183: Phase 2: Import area names in Unity
+- PKO-184: Phase 3: Prepare banner textures
+- PKO-185: Phase 4: Centralized AreaTracker + AreaChangedEvent
+- PKO-186: Phase 5-6: Area Banner UI widget + wiring
+- PKO-187: Phase 7: Area banner tests

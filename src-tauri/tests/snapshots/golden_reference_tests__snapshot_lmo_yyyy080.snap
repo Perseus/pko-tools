@@ -135,6 +135,9 @@ geom_objects:
         cull_mode: ~
         tex_filename: 030014.bmp
     animation: ~
+    bone_animation: ~
+    blend_weights: []
+    bone_indices: []
     texuv_anims: []
     teximg_anims: []
     mtlopac_anims: []
