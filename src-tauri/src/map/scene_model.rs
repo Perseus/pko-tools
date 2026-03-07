@@ -1080,6 +1080,28 @@ fn build_anim_extras(geom: &LmoGeomObject, geom_index: usize) -> gltf_json::extr
     serde_json::value::RawValue::from_string(json_str).ok()
 }
 
+/// Build glTF node extras combining animation data + pko_primitive_id.
+/// The primitive ID maps this mesh node to the PKO LMO subset index, used by
+/// Unity to identify which mesh pieces should fade (overhead roof fade system).
+fn build_node_extras(geom: &LmoGeomObject, geom_index: usize) -> gltf_json::extras::Extras {
+    let anim_extras = build_anim_extras(geom, geom_index);
+
+    // Start with existing anim extras or empty map
+    let mut extras: serde_json::Map<String, serde_json::Value> = match &anim_extras {
+        Some(raw) => serde_json::from_str(raw.get()).unwrap_or_default(),
+        None => serde_json::Map::new(),
+    };
+
+    // Always write pko_primitive_id so Unity can map subset indices
+    extras.insert(
+        "pko_primitive_id".to_string(),
+        serde_json::json!(geom_index),
+    );
+
+    let json_str = serde_json::to_string(&extras).ok()?;
+    serde_json::value::RawValue::from_string(json_str).ok()
+}
+
 // ============================================================================
 // Coordinate helpers (used by build_anim_extras and build_animations)
 // ============================================================================
@@ -1569,11 +1591,11 @@ fn process_lmo_geometry<'a>(
         };
 
         let node_idx = builder.nodes.len() as u32;
-        let anim_extras = build_anim_extras(geom, gi);
+        let node_extras = build_node_extras(geom, gi);
         builder.nodes.push(gltf_json::Node {
             mesh: Some(gltf_json::Index::new(mesh_idx)),
             name: Some(format!("geom_node_{}", gi)),
-            extras: anim_extras,
+            extras: node_extras,
             skin: skin_data
                 .as_ref()
                 .map(|_| gltf_json::Index::new(skins.len() as u32)),
@@ -2744,6 +2766,34 @@ mod tests {
 
         let extras = build_anim_extras(static_geom, 0);
         assert!(extras.is_none(), "static geom with no anims should produce None");
+    }
+
+    #[test]
+    fn build_node_extras_always_includes_primitive_id() {
+        let model = make_test_model();
+        let static_geom = &model.geom_objects[0];
+
+        // Even a static geom with no anims should get pko_primitive_id
+        let extras = build_node_extras(static_geom, 7);
+        assert!(extras.is_some(), "node extras should always be Some (has pko_primitive_id)");
+
+        let parsed: serde_json::Value = serde_json::from_str(&extras.unwrap().to_string()).unwrap();
+        assert_eq!(parsed["pko_primitive_id"], 7);
+    }
+
+    #[test]
+    fn build_node_extras_merges_anim_and_primitive_id() {
+        let model = make_animated_test_model();
+        let animated_geom = &model.geom_objects[1];
+
+        let extras = build_node_extras(animated_geom, 3);
+        assert!(extras.is_some());
+
+        let parsed: serde_json::Value = serde_json::from_str(&extras.unwrap().to_string()).unwrap();
+        // Should have both pko_primitive_id AND animation data
+        assert_eq!(parsed["pko_primitive_id"], 3);
+        assert!(parsed["transform_anim"].is_object(), "should still have transform_anim");
+        assert_eq!(parsed["geom_index"], 3);
     }
 
     // ====================================================================
