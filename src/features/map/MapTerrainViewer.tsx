@@ -1,25 +1,8 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
 import { MapViewConfig } from "@/types/map";
-
-function jsonToDataURI(json: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    try {
-      if (!json) {
-        reject(new Error("No JSON provided"));
-        return;
-      }
-      const blob = new Blob([json], { type: "application/json" });
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result as string);
-      reader.onerror = (error) => reject(error);
-      reader.readAsDataURL(blob);
-    } catch (error) {
-      reject(error);
-    }
-  });
-}
+import { useGltfResource } from "@/hooks/use-gltf-resource";
 
 function TerrainModel({
   gltfDataURI,
@@ -75,17 +58,81 @@ function TerrainModel({
 
       {/* Object markers */}
       {viewConfig.showObjectMarkers &&
-        objectMarkers.map((marker, i) => (
-          <mesh key={`marker-${i}`} position={marker.position}>
-            <sphereGeometry args={[0.5, 8, 6]} />
-            <meshBasicMaterial
-              color={marker.type === 0 ? "#22c55e" : "#f97316"}
-              transparent
-              opacity={0.7}
-            />
-          </mesh>
-        ))}
+        <ObjectMarkerInstances markers={objectMarkers} />}
     </group>
+  );
+}
+
+const _markerMatrix = new THREE.Matrix4();
+
+function ObjectMarkerInstances({
+  markers,
+}: {
+  markers: { position: THREE.Vector3; type: number; id: number }[];
+}) {
+  const terrainMarkers = useMemo(
+    () => markers.filter((marker) => marker.type === 0),
+    [markers],
+  );
+  const objectMarkers = useMemo(
+    () => markers.filter((marker) => marker.type !== 0),
+    [markers],
+  );
+
+  const terrainRef = useRef<THREE.InstancedMesh>(null);
+  const objectRef = useRef<THREE.InstancedMesh>(null);
+
+  useEffect(() => {
+    const mesh = terrainRef.current;
+    if (!mesh) return;
+
+    terrainMarkers.forEach((marker, index) => {
+      _markerMatrix.makeTranslation(
+        marker.position.x,
+        marker.position.y,
+        marker.position.z,
+      );
+      mesh.setMatrixAt(index, _markerMatrix);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+  }, [terrainMarkers]);
+
+  useEffect(() => {
+    const mesh = objectRef.current;
+    if (!mesh) return;
+
+    objectMarkers.forEach((marker, index) => {
+      _markerMatrix.makeTranslation(
+        marker.position.x,
+        marker.position.y,
+        marker.position.z,
+      );
+      mesh.setMatrixAt(index, _markerMatrix);
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+  }, [objectMarkers]);
+
+  return (
+    <>
+      {terrainMarkers.length > 0 && (
+        <instancedMesh
+          ref={terrainRef}
+          args={[undefined, undefined, terrainMarkers.length]}
+        >
+          <sphereGeometry args={[0.5, 8, 6]} />
+          <meshBasicMaterial color="#22c55e" transparent opacity={0.7} />
+        </instancedMesh>
+      )}
+      {objectMarkers.length > 0 && (
+        <instancedMesh
+          ref={objectRef}
+          args={[undefined, undefined, objectMarkers.length]}
+        >
+          <sphereGeometry args={[0.5, 8, 6]} />
+          <meshBasicMaterial color="#f97316" transparent opacity={0.7} />
+        </instancedMesh>
+      )}
+    </>
   );
 }
 
@@ -96,17 +143,15 @@ export default function MapTerrainViewer({
   gltfJson: string;
   viewConfig: MapViewConfig;
 }) {
-  const [dataURI, setDataURI] = useState<string | null>(null);
+  const dataURI = useGltfResource(gltfJson);
 
   useEffect(() => {
-    let cancelled = false;
-    jsonToDataURI(gltfJson).then((uri) => {
-      if (!cancelled) setDataURI(uri);
-    });
     return () => {
-      cancelled = true;
+      if (dataURI) {
+        useGLTF.clear(dataURI);
+      }
     };
-  }, [gltfJson]);
+  }, [dataURI]);
 
   if (!dataURI) return null;
 

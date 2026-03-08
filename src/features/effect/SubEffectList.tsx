@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { modLabel } from "@/lib/platform";
 import {
   effectDataAtom,
   effectDirtyAtom,
@@ -147,6 +148,9 @@ export default function SubEffectList() {
             <div className="mt-1 text-[10px]">
               Select a .eff file from the navigator to begin editing.
               Each layer is a visual component of the effect.
+            </div>
+            <div className="mt-2 text-[10px] text-muted-foreground/60">
+              Press <kbd className="rounded border px-1 py-0.5 font-mono">{modLabel}K</kbd> for actions
             </div>
           </div>
         )}

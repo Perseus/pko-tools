@@ -1,7 +1,7 @@
-pub mod animation;
 pub mod commands;
 pub mod helper;
-mod info;
+pub mod info;
+pub mod lgo_loader;
 pub mod mesh;
 pub mod model;
 pub mod texture;
@@ -201,6 +201,10 @@ impl Character {
     }
 
     pub fn get_gltf_json(&self, project_dir: &Path, y_up: bool) -> anyhow::Result<String> {
+        self.get_gltf_json_with_split(project_dir, y_up, true)
+    }
+
+    pub fn get_gltf_json_with_split(&self, project_dir: &Path, y_up: bool, split_animations: bool) -> anyhow::Result<String> {
         let parts = self.get_parts();
         let mut model_locations = vec![];
 
@@ -276,7 +280,32 @@ impl Character {
             total_helper_nodes += helper_nodes.len();
             fields_to_aggregate.nodes.extend(helper_nodes.clone());
         }
-        animation.to_gltf_animations_and_sampler(&mut fields_to_aggregate, y_up);
+        // Try to load action table + pose table for split animations
+        let action_table_path = project_dir.join("scripts/txt/CharacterAction.tx");
+        let poseinfo_path = project_dir.join("scripts/table/characterposeinfo.bin");
+
+        let use_split = split_animations && action_table_path.exists() && poseinfo_path.exists();
+        if use_split {
+            let action_table =
+                super::animation::action_table::load_action_table(&action_table_path)?;
+            let pose_table =
+                super::animation::pose_info::load_poseinfo(&poseinfo_path)?;
+
+            // Action table key is char_type_id (matches Character.id), not model number
+            if let Some(actions) = action_table.get(&(self.id as u16)) {
+                animation.to_gltf_animations_split(
+                    &mut fields_to_aggregate,
+                    actions,
+                    Some(&pose_table),
+                    y_up,
+                );
+            } else {
+                // No actions for this char type — fall back to single animation
+                animation.to_gltf_animations_and_sampler(&mut fields_to_aggregate, y_up);
+            }
+        } else {
+            animation.to_gltf_animations_and_sampler(&mut fields_to_aggregate, y_up);
+        }
 
         // Build scene node indices: root bone, skinned mesh nodes, and all helper nodes
         let mut scene_nodes = vec![
@@ -465,7 +494,11 @@ pub fn get_character_gltf_json(
     project_id: uuid::Uuid,
     character_id: u32,
 ) -> anyhow::Result<String> {
-    get_character_gltf_json_with_options(project_id, character_id, false)
+    // Viewer path: single monolithic animation (fast), action picker uses frame ranges
+    let project = projects::project::Project::get_project(project_id)?;
+    let character = get_character(project_id, character_id)?;
+    let project_dir = project.project_directory.as_ref();
+    character.get_gltf_json_with_split(project_dir, false, false)
 }
 
 pub fn get_character_gltf_json_with_options(
@@ -473,13 +506,11 @@ pub fn get_character_gltf_json_with_options(
     character_id: u32,
     y_up: bool,
 ) -> anyhow::Result<String> {
+    // Export path: split animations for Unity import
     let project = projects::project::Project::get_project(project_id)?;
     let character = get_character(project_id, character_id)?;
-
     let project_dir = project.project_directory.as_ref();
-
-    let gltf_json = character.get_gltf_json(project_dir, y_up)?;
-    Ok(gltf_json)
+    character.get_gltf_json_with_split(project_dir, y_up, true)
 }
 
 pub fn get_character_metadata(

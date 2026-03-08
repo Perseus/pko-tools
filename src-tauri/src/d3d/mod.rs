@@ -2,7 +2,7 @@ use binrw::{binrw, BinRead};
 use serde::{Deserialize, Serialize};
 
 #[repr(u32)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize)]
 #[binrw]
 #[br(repr = u32)]
 #[bw(repr = u32)]
@@ -61,8 +61,61 @@ pub enum D3DFormat {
     InvalidMax = 0xffffffff,
 }
 
+impl TryFrom<u32> for D3DFormat {
+    type Error = String;
+    fn try_from(v: u32) -> Result<Self, Self::Error> {
+        match v {
+            0 => Ok(Self::Unknown),
+            20 => Ok(Self::R8G8B8),
+            21 => Ok(Self::A8R8G8B8),
+            22 => Ok(Self::X8R8G8B8),
+            23 => Ok(Self::R5G6B5),
+            24 => Ok(Self::X1R5G5B5),
+            25 => Ok(Self::A1R5G5B5),
+            26 => Ok(Self::A4R4G4B4),
+            27 => Ok(Self::R3G3B2),
+            28 => Ok(Self::A8),
+            29 => Ok(Self::A8R3G3B2),
+            30 => Ok(Self::X4R4G4B4),
+            31 => Ok(Self::A2B10G10R10),
+            34 => Ok(Self::G16R16),
+            40 => Ok(Self::A8P8),
+            41 => Ok(Self::P8),
+            50 => Ok(Self::L8),
+            51 => Ok(Self::A8L8),
+            52 => Ok(Self::A4L4),
+            60 => Ok(Self::V8U8),
+            61 => Ok(Self::L6V5U5),
+            62 => Ok(Self::X8L8V8U8),
+            63 => Ok(Self::Q8W8V8U8),
+            64 => Ok(Self::V16U16),
+            65 => Ok(Self::W11V11U10),
+            67 => Ok(Self::A2W10V10U10),
+            0x59565955 => Ok(Self::UYVY),
+            0x32595559 => Ok(Self::YUY2),
+            0x31545844 => Ok(Self::DXT1),
+            0x32545844 => Ok(Self::DXT2),
+            0x33545844 => Ok(Self::DXT3),
+            0x34545844 => Ok(Self::DXT4),
+            0x35545844 => Ok(Self::DXT5),
+            70 => Ok(Self::D16Lockable),
+            71 => Ok(Self::D32),
+            73 => Ok(Self::D15S1),
+            75 => Ok(Self::D24S8),
+            80 => Ok(Self::D16),
+            77 => Ok(Self::D24X8),
+            79 => Ok(Self::D24X4S4),
+            100 => Ok(Self::VertexData),
+            101 => Ok(Self::Index16),
+            102 => Ok(Self::Index32),
+            0xffffffff => Ok(Self::InvalidMax),
+            _ => Err(format!("Invalid D3DFormat: {}", v)),
+        }
+    }
+}
+
 #[repr(u32)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize)]
 #[binrw]
 #[br(repr = u32)]
 #[bw(repr = u32)]
@@ -87,8 +140,23 @@ pub enum D3DPool {
     InvalidMax = 0xffffffff,
 }
 
+impl TryFrom<u32> for D3DPool {
+    type Error = String;
+    fn try_from(v: u32) -> Result<Self, Self::Error> {
+        match v {
+            0 => Ok(Self::Default),
+            1 => Ok(Self::Managed),
+            2 => Ok(Self::SystemMem),
+            3 => Ok(Self::Scratch),
+            0x7fffffff => Ok(Self::ForceDword),
+            0xffffffff => Ok(Self::InvalidMax),
+            _ => Err(format!("Invalid D3DPool: {}", v)),
+        }
+    }
+}
+
 #[repr(u32)]
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Serialize)]
 #[binrw]
 #[br(repr = u32)]
 #[bw(repr = u32)]
@@ -175,7 +243,7 @@ pub enum D3DRenderStateType {
     InvalidIndex = 0xffffffff,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 #[repr(u32)]
 #[binrw]
 #[br(repr = u32)]
@@ -246,7 +314,7 @@ impl TryFrom<u32> for D3DBlend {
 }
 
 #[repr(u32)]
-#[derive(Default, Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Default, Debug, Copy, Clone, PartialEq, Eq, Serialize)]
 #[binrw]
 #[br(repr = u32)]
 #[bw(repr = u32)]
@@ -264,6 +332,23 @@ pub enum D3DPrimitiveType {
     InvalidMax = 0xffffffff,
 }
 
+impl TryFrom<u32> for D3DPrimitiveType {
+    type Error = String;
+    fn try_from(v: u32) -> Result<Self, Self::Error> {
+        match v {
+            1 => Ok(Self::PointList),
+            2 => Ok(Self::LineList),
+            3 => Ok(Self::LineStrip),
+            4 => Ok(Self::TriangleList),
+            5 => Ok(Self::TriangleStrip),
+            6 => Ok(Self::TriangleFan),
+            0x7fffffff => Ok(Self::ForceDword),
+            0xffffffff => Ok(Self::InvalidMax),
+            _ => Err(format!("Invalid D3DPrimitiveType: {}", v)),
+        }
+    }
+}
+
 /**
  * typedef struct _D3DVERTEXELEMENT9 {
     WORD Stream;
@@ -276,7 +361,7 @@ pub enum D3DPrimitiveType {
 
  */
 
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 #[binrw]
 pub struct D3DVertexElement9 {
     pub stream: u16,
@@ -286,4 +371,57 @@ pub struct D3DVertexElement9 {
     pub method: u8,
     pub usage: u8,
     pub usage_index: u8,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn d3d_enums_serialize_as_string_variants() {
+        assert_eq!(
+            serde_json::to_string(&D3DFormat::DXT1).unwrap(),
+            "\"DXT1\""
+        );
+        assert_eq!(
+            serde_json::to_string(&D3DPool::Managed).unwrap(),
+            "\"Managed\""
+        );
+        assert_eq!(
+            serde_json::to_string(&D3DRenderStateType::AlphaTestEnable).unwrap(),
+            "\"AlphaTestEnable\""
+        );
+        assert_eq!(
+            serde_json::to_string(&D3DCmpFunc::Greater).unwrap(),
+            "\"Greater\""
+        );
+        assert_eq!(
+            serde_json::to_string(&D3DPrimitiveType::TriangleList).unwrap(),
+            "\"TriangleList\""
+        );
+    }
+
+    #[test]
+    fn d3d_blend_serializes_as_u32() {
+        // D3DBlend keeps u32 serialization for frontend compatibility
+        assert_eq!(serde_json::to_string(&D3DBlend::SrcAlpha).unwrap(), "5");
+        assert_eq!(serde_json::to_string(&D3DBlend::One).unwrap(), "2");
+    }
+
+    #[test]
+    fn d3d_vertex_element_serializes() {
+        let elem = D3DVertexElement9 {
+            stream: 0,
+            offset: 12,
+            _type: 2,
+            method: 0,
+            usage: 3,
+            usage_index: 0,
+        };
+        let json: serde_json::Value = serde_json::to_value(&elem).unwrap();
+        assert_eq!(json["stream"], 0);
+        assert_eq!(json["offset"], 12);
+        assert_eq!(json["_type"], 2);
+        assert_eq!(json["usage"], 3);
+    }
 }

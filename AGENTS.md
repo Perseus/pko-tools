@@ -35,3 +35,7 @@
 ## Configuration & Asset Notes
 - The app reads from a user-selected game client folder and expects `scripts/table/CharacterInfo.txt`.
 - Exported glTF files go to `exports/gltf/`; imports are read from `imports/character/`.
+
+## Local Skills
+- Repo-local Codex skills live under `.codex/skills/`.
+- Use `.codex/skills/release-changelog/` for PKO Tools release-note work: version bumps, `CHANGELOG.md` updates, changelog screenshots, and release-prep steps.

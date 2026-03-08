@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
+use encoding_rs::GBK;
 use serde::{Deserialize, Serialize};
 
 /// A single area definition from AreaSet.bin.
@@ -9,6 +10,8 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AreaDefinition {
     pub area_id: u32,
+    /// Display name from szDataName (GBK-decoded, e.g. "Outskirt of Argent City")
+    pub name: String,
     /// Minimap color (ARGB packed as [R, G, B, A])
     pub color: [u8; 4],
     /// Background music track index
@@ -25,6 +28,8 @@ pub struct AreaDefinition {
 
 // CRawDataInfo base layout constants (shared with sceneobjinfo, sceneffectinfo)
 const RAW_DATA_INFO_BEXIST_OFFSET: usize = 0;
+const RAW_DATA_INFO_DATANAME_OFFSET: usize = 8;
+const RAW_DATA_INFO_DATANAME_LEN: usize = 72;
 const RAW_DATA_INFO_NID_OFFSET: usize = 100;
 
 // AreaSet derived fields start after CRawDataInfo base (108 bytes)
@@ -112,6 +117,23 @@ pub fn parse_area_set_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, AreaDefini
             None => continue,
         };
 
+        // szDataName: 72-byte null-terminated GBK string at offset 8
+        let name = {
+            let name_end = RAW_DATA_INFO_DATANAME_OFFSET + RAW_DATA_INFO_DATANAME_LEN;
+            if chunk.len() < name_end {
+                String::new()
+            } else {
+                let name_bytes =
+                    &chunk[RAW_DATA_INFO_DATANAME_OFFSET..name_end];
+                let null_pos = name_bytes
+                    .iter()
+                    .position(|&b| b == 0)
+                    .unwrap_or(RAW_DATA_INFO_DATANAME_LEN);
+                let (decoded, _, _) = GBK.decode(&name_bytes[..null_pos]);
+                decoded.trim().to_string()
+            }
+        };
+
         // Derived fields — need at least offset d+28 (29 bytes from d)
         let d = AREA_DERIVED_OFFSET;
         let dw_color = match read_u32(chunk, d) {
@@ -147,6 +169,7 @@ pub fn parse_area_set_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, AreaDefini
             area_id,
             AreaDefinition {
                 area_id,
+                name,
                 color: unpack_windows_rgb(dw_color),
                 music: n_music,
                 env_color: unpack_argb_rgb(dw_env_color),
@@ -187,6 +210,7 @@ pub fn areas_to_json(areas: &HashMap<u32, AreaDefinition>) -> serde_json::Value 
         map.insert(
             id.to_string(),
             serde_json::json!({
+                "name": area.name,
                 "color": area.color,
                 "music": area.music,
                 "env_color": area.env_color,
@@ -272,6 +296,7 @@ mod tests {
             1,
             AreaDefinition {
                 area_id: 1,
+                name: "Test Area".to_string(),
                 color: [140, 220, 180, 255],
                 music: 3,
                 env_color: [255, 255, 255],
@@ -286,7 +311,122 @@ mod tests {
         let obj = json.as_object().unwrap();
         assert!(obj.contains_key("1"));
         let entry = &obj["1"];
+        assert_eq!(entry["name"], "Test Area");
         assert_eq!(entry["music"], 3);
         assert_eq!(entry["zone_type"], 1);
+    }
+
+    #[test]
+    fn parse_real_data_has_names() {
+        let bin_path = std::path::PathBuf::from("../top-client/scripts/table/AreaSet.bin");
+        if !bin_path.exists() {
+            return;
+        }
+
+        let data = std::fs::read(&bin_path).unwrap();
+        let map = parse_area_set_bin(&data).unwrap();
+
+        // At least some areas should have non-empty names
+        let named_count = map.values().filter(|a| !a.name.is_empty()).count();
+        eprintln!(
+            "AreaSet.bin: {} entries, {} with names",
+            map.len(),
+            named_count
+        );
+        assert!(named_count > 0, "expected at least some areas with names");
+
+        for (id, area) in map.iter().take(10) {
+            eprintln!(
+                "  area_id={}, name={:?}, zone_type={}",
+                id, area.name, area.zone_type
+            );
+        }
+    }
+
+    /// Helper: build a minimal valid AreaSet.bin chunk for testing.
+    /// `entry_size` is the size of each CAreaRecord entry.
+    /// Returns bytes: [entry_size as u32 LE] + entry_data
+    fn build_test_entry(
+        entry_size: usize,
+        b_exist: i32,
+        area_id: u32,
+        name_bytes: &[u8],
+        zone_type: u8,
+    ) -> Vec<u8> {
+        let mut entry = vec![0u8; entry_size];
+
+        // bExist at offset 0
+        entry[0..4].copy_from_slice(&b_exist.to_le_bytes());
+        // szDataName at offset 8 (up to 72 bytes)
+        let copy_len = name_bytes.len().min(RAW_DATA_INFO_DATANAME_LEN);
+        entry[RAW_DATA_INFO_DATANAME_OFFSET..RAW_DATA_INFO_DATANAME_OFFSET + copy_len]
+            .copy_from_slice(&name_bytes[..copy_len]);
+        // nID at offset 100
+        entry[RAW_DATA_INFO_NID_OFFSET..RAW_DATA_INFO_NID_OFFSET + 4]
+            .copy_from_slice(&area_id.to_le_bytes());
+        // Derived fields at 108: dwColor(4) + nMusic(4) + dwEnvColor(4) + dwLightColor(4) + lightDir(12) + chType(1)
+        let d = AREA_DERIVED_OFFSET;
+        entry[d..d + 4].copy_from_slice(&0u32.to_le_bytes()); // dwColor
+        entry[d + 4..d + 8].copy_from_slice(&0i32.to_le_bytes()); // nMusic
+        entry[d + 8..d + 12].copy_from_slice(&0u32.to_le_bytes()); // dwEnvColor
+        entry[d + 12..d + 16].copy_from_slice(&0u32.to_le_bytes()); // dwLightColor
+        // lightDir: 3 floats at d+16..d+28 (already zero)
+        entry[d + 28] = zone_type;
+
+        // Prefix with entry_size
+        let mut data = (entry_size as u32).to_le_bytes().to_vec();
+        data.extend_from_slice(&entry);
+        data
+    }
+
+    #[test]
+    fn parse_ascii_name() {
+        let data = build_test_entry(
+            140,
+            1,
+            42,
+            b"Outskirt of Argent City\0",
+            1,
+        );
+        let map = parse_area_set_bin(&data).unwrap();
+        let area = map.get(&42).expect("area 42 should exist");
+        assert_eq!(area.name, "Outskirt of Argent City");
+        assert_eq!(area.zone_type, 1);
+    }
+
+    #[test]
+    fn parse_gbk_chinese_name() {
+        // GBK encoding of "测试区域" (test area)
+        let gbk_bytes: &[u8] = &[0xB2, 0xE2, 0xCA, 0xD4, 0xC7, 0xF8, 0xD3, 0xF2, 0x00];
+        let data = build_test_entry(140, 1, 10, gbk_bytes, 0);
+        let map = parse_area_set_bin(&data).unwrap();
+        let area = map.get(&10).expect("area 10 should exist");
+        assert_eq!(area.name, "\u{6D4B}\u{8BD5}\u{533A}\u{57DF}"); // 测试区域
+    }
+
+    #[test]
+    fn parse_all_null_name() {
+        let data = build_test_entry(140, 1, 5, &[0u8; 72], 0);
+        let map = parse_area_set_bin(&data).unwrap();
+        let area = map.get(&5).expect("area 5 should exist");
+        assert_eq!(area.name, "");
+    }
+
+    #[test]
+    fn parse_name_no_null_terminator() {
+        // Fill all 72 bytes with 'A', no null terminator
+        let name = [b'A'; 72];
+        let data = build_test_entry(140, 1, 7, &name, 0);
+        let map = parse_area_set_bin(&data).unwrap();
+        let area = map.get(&7).expect("area 7 should exist");
+        assert_eq!(area.name.len(), 72);
+        assert!(area.name.chars().all(|c| c == 'A'));
+    }
+
+    #[test]
+    fn parse_skips_nonexistent_entries() {
+        let data = build_test_entry(140, 0, 99, b"Skipped\0", 0);
+        let map = parse_area_set_bin(&data).unwrap();
+        assert!(map.is_empty(), "entry with bExist=0 should be skipped");
     }
 }

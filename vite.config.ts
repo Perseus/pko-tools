@@ -23,6 +23,12 @@ export default defineConfig(async () => ({
     },
   },
 
+  build: {
+    // Let Vite/Rollup handle code splitting automatically.
+    // Manual manualChunks caused load-order races where chunks using
+    // React.forwardRef / useLayoutEffect evaluated before React itself.
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent vite from obscuring rust errors

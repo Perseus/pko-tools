@@ -1,29 +1,20 @@
 use std::{
-    ffi::c_void,
-    fs::File,
-    io::BufWriter,
     path::{Path, PathBuf},
     vec,
 };
 
 use crate::{
-    animation::character::{LwBoneFile, LW_INVALID_INDEX, LW_MAX_NAME},
-    character::{helper::BoundingSphereInfo, mesh::CharacterInfoMeshHeader, texture},
-    d3d::{D3DBlend, D3DCmpFunc, D3DFormat, D3DPool, D3DRenderStateType},
+    animation::character::LW_INVALID_INDEX,
+    character::{helper::BoundingSphereInfo, texture},
+    d3d::D3DRenderStateType,
     math::{self, LwMatrix44, LwSphere, LwVector3},
 };
-use ::gltf::{
-    buffer, image,
-    json::{self, scene::UnitQuaternion, Index, Node, Scene},
-    Document,
-};
-use base64::{prelude::BASE64_STANDARD, Engine};
-use binrw::{binrw, BinRead, BinWrite, Error, NullString};
+use ::gltf::{buffer, image, Document};
+use binrw::{binwrite, BinWrite};
 use cgmath::{Matrix4, SquareMatrix, Vector3};
 use gltf::json as gltf;
-use gltf::Texture;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, value::RawValue};
+use serde_json::value::RawValue;
 
 use super::{
     helper::HelperData, mesh::CharacterMeshInfo, texture::CharMaterialTextureInfo,
@@ -61,9 +52,8 @@ pub const LW_RENDERCTRL_VS_USER: u32 = 0x100;
 pub const LW_RENDERCTRL_VS_INVALID: u32 = 0xffffffff;
 
 #[repr(u32)]
-#[derive(Debug, Default, Copy, Clone)]
-#[binrw]
-#[br(repr = u32)]
+#[derive(Debug, Default, Copy, Clone, Serialize)]
+#[binwrite]
 #[bw(repr = u32)]
 pub enum GeomObjType {
     #[default]
@@ -73,8 +63,7 @@ pub enum GeomObjType {
     BB2 = 2,
 }
 
-#[derive(Debug, Default, Copy, Clone)]
-#[binrw]
+#[derive(Debug, Default, Copy, Clone, Serialize, BinWrite)]
 pub struct RenderStateValue {
     pub state: u32,
     pub value: u32,
@@ -82,10 +71,21 @@ pub struct RenderStateValue {
 
 /// Matches lwRenderStateSetTemplate in the client source.
 /// SET_SIZE and SEQUENCE_SIZE are compile-time constants in C++ (not stored in the binary).
-#[derive(Debug, Clone)]
-#[binrw]
+#[derive(Debug, Clone, BinWrite)]
 pub struct RenderStateSetTemplate<const SET_SIZE: usize, const SEQ_SIZE: usize> {
     pub rsv_seq: [[RenderStateValue; SEQ_SIZE]; SET_SIZE],
+}
+
+impl<const SET_SIZE: usize, const SEQ_SIZE: usize> Serialize
+    for RenderStateSetTemplate<SET_SIZE, SEQ_SIZE>
+{
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        let mut s = serializer.serialize_struct("RenderStateSetTemplate", 1)?;
+        let rows: Vec<&[RenderStateValue]> = self.rsv_seq.iter().map(|r| r.as_slice()).collect();
+        s.serialize_field("rsv_seq", &rows)?;
+        s.end()
+    }
 }
 
 impl<const SET_SIZE: usize, const SEQ_SIZE: usize> RenderStateSetTemplate<SET_SIZE, SEQ_SIZE> {
@@ -95,8 +95,7 @@ impl<const SET_SIZE: usize, const SEQ_SIZE: usize> RenderStateSetTemplate<SET_SI
     }
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
-#[binrw]
+#[derive(Debug, Serialize, Deserialize, Clone, BinWrite)]
 pub struct RenderCtrlCreateInfo {
     // this determines the type of rendering pipeline or vertex shader behaviour that the object will use
     // FILE: lwPrimitive.cpp, FN: ExtractGeomObjInfo
@@ -130,8 +129,7 @@ pub struct RenderCtrlCreateInfo {
     pub ps_id: u32,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
-#[binrw]
+#[derive(Serialize, Deserialize, Clone, BinWrite)]
 pub struct StateCtrl {
     // 8 flags that determine the state of an object in the scene/game world
     // possible values -
@@ -145,7 +143,7 @@ pub struct StateCtrl {
     pub _state_seq: [u8; 8],
 }
 
-#[binrw]
+#[derive(Serialize, BinWrite)]
 pub struct CharGeoModelInfoHeader {
     pub id: u32,
     pub parent_id: u32,
@@ -179,29 +177,21 @@ pub struct CharGeoModelInfoHeader {
 
 // the LGO model structure
 // FILE: lwExpObj.cpp, FN: lwGeomObjInfo::Load
-#[binrw]
+#[derive(Serialize)]
+#[binwrite]
 pub struct CharacterGeometricModel {
     pub version: u32,
     pub header: CharGeoModelInfoHeader,
 
-    #[br(if(version == EXP_OBJ_VERSION_0_0_0_0))]
     #[bw(if(*version == EXP_OBJ_VERSION_0_0_0_0))]
     pub old_version: u32,
 
-    #[br(if(header.mesh_size > 0))]
     pub material_num: u32,
 
-    #[br(if(header.mtl_size > 0))]
-    #[br(count = material_num, args{
-        inner: (version, material_num,)
-    })]
     pub material_seq: Option<Vec<CharMaterialTextureInfo>>,
 
-    #[br(if(header.mesh_size > 0))]
-    #[br(args(version,))]
     pub mesh_info: Option<CharacterMeshInfo>,
 
-    #[br(if(header.helper_size > 0))]
     pub helper_data: Option<HelperData>,
 }
 
@@ -325,31 +315,15 @@ impl CharacterGeometricModel {
     }
 
     pub fn from_file(file_path: PathBuf) -> anyhow::Result<Self> {
-        use std::io::{Seek, SeekFrom};
-
-        let file = File::open(&file_path).map_err(|e| {
-            anyhow::anyhow!("Failed to open LGO file '{}': {}", file_path.display(), e)
-        })?;
-
-        let file_size = file.metadata().map(|m| m.len()).unwrap_or(0);
-
-        let mut reader = std::io::BufReader::new(file);
-
-        let geom: CharacterGeometricModel =
-            BinRead::read_options(&mut reader, binrw::Endian::Little, ()).map_err(|e| {
-                let bytes_read = reader.stream_position().unwrap_or(0);
-                anyhow::anyhow!(
-                    "Failed to parse LGO file '{}': {}\n\
-                     File size: {} bytes, bytes read before error: {} bytes\n\
-                     This may indicate a corrupted or truncated file.",
-                    file_path.display(),
-                    e,
-                    file_size,
-                    bytes_read
-                )
-            })?;
-
-        Ok(geom)
+        super::lgo_loader::load_lgo(&file_path).map_err(|e| {
+            let size = std::fs::metadata(&file_path).map(|m| m.len()).unwrap_or(0);
+            anyhow::anyhow!(
+                "Failed to parse LGO '{}' ({} bytes, possibly corrupted or truncated): {}",
+                file_path.display(),
+                size,
+                e
+            )
+        })
     }
 
     pub fn from_gltf(
@@ -718,56 +692,3 @@ impl CharacterGeometricModel {
     }
 }
 
-#[cfg(test)]
-mod tests {
-
-    use crate::animation::character::LwBoneFile;
-
-    use super::*;
-
-    // TODO: test old file versions
-
-    #[test]
-    fn it_parses_geom_file() {
-        let data = include_bytes!("../../test_artifacts/0909000000.lgo");
-        let mut reader = std::io::Cursor::new(data);
-
-        let geom: CharacterGeometricModel =
-            BinRead::read_options(&mut reader, binrw::Endian::Little, ()).unwrap();
-
-        assert_eq!(geom.version, EXP_OBJ_VERSION_1_0_0_5);
-
-        let mesh = geom.mesh_info.unwrap();
-        assert_eq!(mesh.header.fvf, 4376);
-        assert_eq!(mesh.header.vertex_num, 1323);
-        assert_eq!(mesh.header.vertex_element_num, 6);
-
-        let helper = geom.helper_data.unwrap();
-        assert_eq!(helper._type, 32);
-        assert_eq!(helper.bsphere_num, 7);
-        assert_eq!(helper.bsphere_seq[0].sphere.r, 0.8649084)
-    }
-
-    // #[test]
-    // fn it_writes_gltf_file() {
-    //     let model_data = include_bytes!("../../test_artifacts/0730000000.lgo");
-    //     let mut model_reader = std::io::Cursor::new(model_data);
-
-    //     let geom: CharacterGeometricModel =
-    //         BinRead::read_options(&mut model_reader, binrw::Endian::Little, ()).unwrap();
-
-    //     let anim_data = include_bytes!("../../test_artifacts/0730.lab");
-    //     let mut anim_reader = std::io::Cursor::new(anim_data);
-
-    //     let (tx, rx) = tokio::sync::mpsc::channel::<(String, u8)>(100);
-
-    //     let anim: LwBoneFile = BinRead::read_options(
-    //         &mut anim_reader,
-    //         binrw::Endian::Little,
-    //         ()
-    //     )
-    //     .unwrap();
-
-    //     geom.to_gltf(anim);
-    // }
-}

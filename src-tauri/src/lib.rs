@@ -51,10 +51,16 @@ pub fn run() {
         },
     ));
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_sql::Builder::new().build())
-        .plugin(tauri_plugin_dialog::init())
-        .setup(|app| {
+        .plugin(tauri_plugin_dialog::init());
+
+    #[cfg(feature = "mcp")]
+    {
+        builder = builder.plugin(tauri_plugin_mcp_bridge::init());
+    }
+
+    builder.setup(|app| {
             let _ = projects::commands::init_directories();
             let preferences = preferences::Preferences::new();
             let mut state = AppState {
@@ -89,6 +95,7 @@ pub fn run() {
             character::commands::import_character_from_gltf,
             character::commands::get_character_metadata_cmd,
             character::commands::invalidate_character_cache,
+            character::commands::get_character_actions,
             effect::commands::list_effects,
             effect::commands::load_effect,
             effect::commands::save_effect,
@@ -99,6 +106,8 @@ pub fn run() {
             effect::commands::list_texture_files,
             effect::commands::load_path_file,
             effect::commands::load_effect_model,
+            effect::commands::load_par_file,
+            effect::commands::list_par_files,
             item::commands::get_item_list,
             item::commands::load_item_model,
             item::commands::get_item_lit_info,
@@ -147,6 +156,7 @@ pub fn run() {
             map::commands::get_building_list,
             map::commands::load_building_model,
             map::commands::export_building_to_gltf,
+            map::commands::get_building_metadata,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

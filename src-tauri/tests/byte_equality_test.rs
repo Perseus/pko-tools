@@ -1,8 +1,9 @@
 // Test for byte-by-byte equality after round-trip conversion
 // This test identifies exactly which bytes differ and helps debug the issue
 
-use binrw::{BinReaderExt, BinWrite};
+use binrw::BinWrite;
 use pko_tools_lib::animation::character::LwBoneFile;
+use pko_tools_lib::animation::lab_loader::load_lab;
 use std::fs;
 use std::io::BufWriter;
 
@@ -19,10 +20,7 @@ fn test_byte_equality_after_roundtrip() {
 
     // Load original LAB
     let lab_path = test_dir.join("0725.lab");
-    let mut original_lab_file = fs::File::open(&lab_path).expect("Failed to open original LAB");
-    let original_lab: LwBoneFile = original_lab_file
-        .read_le()
-        .expect("Failed to parse original LAB");
+    let original_lab = load_lab(&lab_path).expect("Failed to parse original LAB");
 
     // Load glTF
     let gltf_path = test_dir.join("789.gltf");

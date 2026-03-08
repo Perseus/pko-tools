@@ -1,5 +1,95 @@
 # Changelog
 
+## [0.1.9] - 2026-03-06
+
+### Improvements
+
+- **Release tooling:** Added a repo-local `release-changelog` skill, a `pnpm tauri:dev:mcp` workflow shortcut, and cleaner GitHub release-note handling for changelog screenshots
+
+### Bug Fixes
+
+- **Effect viewer preview:** Stopped render mode now freezes the full effect at frame 0 so viewer previews match the composite effect layout instead of showing a broken partial state
+
+---
+
+## [0.1.8] - 2026-03-06
+
+### Features
+
+- **Character action browser:** Added `CharacterAction.tx` and `PoseInfo` parsing, split-animation export support, action lookup commands, and a frontend action picker for character preview workflows
+- **Shared effect rendering path:** Refactored the standalone effect viewer and item effect viewer onto shared sub-effect frame/material helpers for better parity and less duplicated rendering logic
+- **Effect skeleton viewer:** Added a dedicated skeleton inspection mode in the effect viewer with per-sub-effect hierarchy nodes, orientation arrows, geometry labels, and selected-layer proxy wireframes for debugging effect composition
+
+![Effect skeleton viewer hierarchy example](changelog-assets/effect-skeleton-01040014.png)
+![Effect skeleton viewer proxy geometry example](changelog-assets/effect-skeleton-jjry03.png)
+
+### Improvements
+
+- **CLI batch export:** Added `export_cli --characters` mode for batch character GLB export
+- **Character viewer stability:** Moved the action picker out of the Canvas path, hardened split-animation handling, and fixed action-table lookup to key by character ID instead of model number
+- **Item/effect parity:** Wired item effect rendering through the same technique-state and transform/material path used by the standalone effect viewer
+
+---
+
+## [0.1.6] - 2026-03-04
+
+### Improvements
+
+- **Installer cleanup:** CLI-only binaries (`export-cli`, `pko_inspect`) are no longer bundled into the Windows installer — the Start Menu now shows only the main app
+- **Dev-only MCP bridge:** `tauri-plugin-mcp-bridge` is now an optional dependency behind the `mcp` feature, excluded from release builds to avoid Windows compile conflicts. Use `pnpm tauri dev --config src-tauri/tauri.dev.conf.json` for dev with MCP support
+- **Automated release notes:** GitHub Releases now pull patch notes directly from CHANGELOG.md with image URLs rewritten to render correctly
+
+---
+
+## [0.1.5] - 2026-03-04
+
+### Features
+
+- **Effect rendering engine:** Added a D3D8-accurate effect rendering engine with `.par` binary parser, geometry/state parity fixes matching C++ `I_Effect.cpp` and `eff.fx` shader source, and contextual action menus wired into the effect viewport
+
+![Gem effect](changelog-assets/gem-weapon-effect-1.png)
+![Gem effect with sword](changelog-assets/gem-weapon-sword-effect-2.png)
+
+- **Command palette (cmdk):** Centralized action registry and keyboard router with a command palette UI, contextual menus across all workbenches, and usage-ranked suggestions
+
+![CMDK palette](changelog-assets/cmdk-palette.png)
+
+- **Map export pipeline (v3):** Per-section terrain export for large maps, shared asset export system, GLB writer for terrain and buildings, terrain height grid PNG export, and alpha mask atlas splitting into 16 slices
+
+- **Kaitai-only parsing:** Migrated all PKO binary format parsers (LGO, LMO, LAB, OBJ, MAP, EFF) to Kaitai Struct adapters with exhaustive parity tests; deleted all legacy native parsers
+- **`pko_inspect` CLI:** New binary that parses any supported PKO format and prints structured JSON for debugging
+- **Golden reference snapshot tests:** Snapshot tests covering all Kaitai adapters to catch parser regressions
+- **TRS keyframe export:** Animation TRS keyframes and frame rate exported to glTF node extras alongside standard animation channels, with point light data added to the manifest
+- **Building debug tools:** Debug tools, cmdk actions, metadata panel, and UX improvements for the buildings workbench
+
+![Building debug tools](changelog-assets/building-debug-tools.png)
+
+- **Scene object parsing:** Full `CSceneObjInfo` semantic field parsing from `sceneobjinfo.bin`, including effect texture copying and `texuv`/`teximg`/`mtlopac` animation data
+
+### Improvements
+
+- **Performance:** Code-split routes, tuned vendor chunking, per-workbench frame probes and dev performance overlay, instrumented Tauri invokes with timing metrics, capped DPR, preferred high-performance WebGL, and instanced mesh rendering for map object markers
+- **Effect performance:** Cached cylinder deformation geometry, reused gizmo temporaries, moved playback clock off Jotai frame updates, and disabled persistent draw buffers
+- **Blend/material state:** Per-material blend state via structured PKO suffix, `D3DRS_CULLMODE` extraction for double-sided materials, alpha test state parsing from V0000/V0001 render state blocks, and additive blend mode + vertex color export from LMO buildings
+- **Terrain export quality:** Clamped boundary vertices to eliminate cliff faces at section edges; removed incorrect 25x height exaggeration from glTF output
+
+### Bug Fixes
+
+- **DXT1 alpha:** Fixed silent alpha channel loss when decoding DXT1/BC1 textures; punch-through alpha now preserved across all DDS-to-PNG conversion paths
+- **Scene object height:** Corrected height sampling to match PKO's bilinear terrain interpolation instead of nearest-tile lookup
+- **LMO parser:** Fixed V0 parser for legacy headers, blend gating, material detection, and incorrect `transp_type` remapping (subtractive vs. additive)
+- **Terrain tile colors:** Default missing-section tile colors to white instead of black; corrected BGR565 vertex color decode and sea floor triangle emission
+- **Character animation:** Hardened animation teardown during rapid model switches to prevent stale state
+- **Atlas URI in section GLBs:** Removed embedded atlas URI from section GLBs to fix slow Unity import times
+
+---
+
+## [0.1.4] - 2025-02-12
+
+_No changelog entry was written for this release._
+
+---
+
 ## [0.1.3] - 2025-02-03
 
 ### Features & Improvements

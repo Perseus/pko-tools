@@ -1,5 +1,5 @@
+import { invokeTimed as invoke } from "@/commands/invokeTimed";
 import { Project } from "@/types/project";
-import { invoke } from "@tauri-apps/api/core";
 
 export const getProjectList = async (): Promise<Project[]> => {
   return invoke("get_projects_list");

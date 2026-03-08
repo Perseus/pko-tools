@@ -1,10 +1,8 @@
-use std::io::{Cursor, Seek};
+use std::io::Seek;
 
-use ::image::{ImageFormat, ImageReader};
-use base64::{prelude::BASE64_STANDARD, Engine};
-use binrw::{binrw, BinRead, BinWrite, Error};
-use gltf::{buffer, Document, Texture};
-use image::Rgb;
+use binrw::{binwrite, BinWrite};
+
+use gltf::{buffer, Document};
 
 use serde::{Deserialize, Serialize};
 
@@ -12,22 +10,21 @@ use crate::texture_pipeline::converter::{self, TextureConvertOptions};
 
 use crate::{
     animation::character::{LW_INVALID_INDEX, LW_MAX_NAME},
-    d3d::{D3DBlend, D3DCmpFunc, D3DFormat, D3DPool, D3DRenderStateType},
+    d3d::{D3DFormat, D3DPool},
 };
 
-use super::model::{
-    RenderStateSetTemplate, D3DRS_ALPHAFUNC, D3DRS_ALPHAREF, EXP_OBJ_VERSION_1_0_0_0,
-    LW_MAX_TEXTURESTAGE_NUM, LW_MTL_RS_NUM, MTLTEX_VERSION0000, MTLTEX_VERSION0001,
-    MTLTEX_VERSION0002,
-};
-
-type RenderStateSetMaterial2 = RenderStateSetTemplate<2, 8>;
-type TextureStageStateTexture2 = RenderStateSetTemplate<2, 8>;
+fn serialize_fixed_cstr<const N: usize, S: serde::Serializer>(
+    buf: &[u8; N],
+    ser: S,
+) -> Result<S::Ok, S::Error> {
+    let end = buf.iter().position(|&b| b == 0).unwrap_or(N);
+    let s = String::from_utf8_lossy(&buf[..end]);
+    ser.serialize_str(&s)
+}
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(into = "u32", try_from = "u32")]
-#[binrw]
-#[br(repr = u32)]
+#[binwrite]
 #[bw(repr = u32)]
 pub enum MaterialTextureInfoTransparencyType {
     #[default]
@@ -70,9 +67,8 @@ impl TryFrom<u32> for MaterialTextureInfoTransparencyType {
 }
 
 #[repr(u32)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[binrw]
-#[br(repr = u32)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize)]
+#[binwrite]
 #[bw(repr = u32)]
 pub enum ColorKeyType {
     None = 0,
@@ -82,8 +78,20 @@ pub enum ColorKeyType {
     InvalidMax = 0xffffffff,
 }
 
-#[derive(Serialize, Deserialize, Clone, Copy)]
-#[binrw]
+impl TryFrom<u32> for ColorKeyType {
+    type Error = String;
+    fn try_from(v: u32) -> Result<Self, Self::Error> {
+        match v {
+            0 => Ok(Self::None),
+            1 => Ok(Self::Color),
+            2 => Ok(Self::Pixel),
+            0xffffffff => Ok(Self::InvalidMax),
+            _ => Err(format!("Invalid ColorKeyType: {}", v)),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, BinWrite)]
 pub struct ColorValue4F {
     pub r: f32,
     pub g: f32,
@@ -107,9 +115,8 @@ impl ColorValue4F {
 }
 
 #[repr(u32)]
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-#[binrw]
-#[br(repr = u32)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize)]
+#[binwrite]
 #[bw(repr = u32)]
 pub enum TextureType {
     File = 0,
@@ -120,8 +127,21 @@ pub enum TextureType {
     InvalidMax = 0xffffffff,
 }
 
-#[derive(Clone)]
-#[binrw]
+impl TryFrom<u32> for TextureType {
+    type Error = String;
+    fn try_from(v: u32) -> Result<Self, Self::Error> {
+        match v {
+            0 => Ok(Self::File),
+            1 => Ok(Self::Size),
+            2 => Ok(Self::Data),
+            0x7FFFFFFF => Ok(Self::Invalid),
+            0xffffffff => Ok(Self::InvalidMax),
+            _ => Err(format!("Invalid TextureType: {}", v)),
+        }
+    }
+}
+
+#[derive(Clone, Serialize, BinWrite)]
 pub struct CharMaterial {
     // diffuse
     // base color of the material when lit by diffuse (direct) light
@@ -169,8 +189,7 @@ impl CharMaterial {
 }
 
 // render states? dont know what this does yet
-#[derive(Default, Copy, Clone, Debug, Serialize, Deserialize)]
-#[binrw]
+#[derive(Default, Copy, Clone, Debug, Serialize, Deserialize, BinWrite)]
 pub struct RenderStateAtom {
     pub state: u32,
     pub value0: u32,
@@ -187,8 +206,7 @@ impl RenderStateAtom {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
-#[binrw]
+#[derive(Debug, Copy, Clone, Serialize, BinWrite)]
 pub struct LwColorValue4b {
     pub b: u8,
     pub g: u8,
@@ -211,8 +229,7 @@ impl LwColorValue4b {
     }
 }
 
-#[derive(Debug, Clone)]
-#[binrw]
+#[derive(Debug, Clone, Serialize, BinWrite)]
 pub struct TextureInfo {
     // texture stage? there seem to be multiple stages in lwIUtil.cpp, FN: lwPrimitiveTexLitA
     // dont fully understand the concept yet
@@ -250,8 +267,10 @@ pub struct TextureInfo {
     pub colorkey_type: ColorKeyType,
     pub colorkey: LwColorValue4b,
 
+    #[serde(serialize_with = "serialize_fixed_cstr::<64, _>")]
     pub file_name: [u8; 64],
 
+    #[serde(skip)]
     pub data: u32,
 
     pub tss_set: [RenderStateAtom; 8],
@@ -282,42 +301,7 @@ impl TextureInfo {
     }
 }
 
-/// Matches lwTexInfo_0000 in the client source.
-/// Used for MTLTEX_VERSION0000 files (version 0 item models).
-#[derive(Debug, Clone)]
-#[binrw]
-pub struct TextureInfo0000 {
-    pub stage: u32,
-    pub colorkey_type: ColorKeyType,
-    pub colorkey: LwColorValue4b,
-    pub format: D3DFormat,
-    pub file_name: [u8; 64],
-    pub tss_set: TextureStageStateTexture2,
-}
-
-/// Matches lwTexInfo_0001 in the client source.
-#[derive(Debug, Clone)]
-#[binrw]
-pub struct TextureInfo0001 {
-    stage: u32,
-    level: u32,
-    usage: u32,
-    format: D3DFormat,
-    pool: D3DPool,
-    byte_alignment_flag: u32,
-    _type: TextureType,
-    width: u32,
-    height: u32,
-    colorkey_type: ColorKeyType,
-    colorkey: LwColorValue4b,
-    file_name: [u8; 64],
-
-    data: u32,
-
-    tss_set: TextureStageStateTexture2,
-}
-
-#[derive(Clone)]
+#[derive(Clone, Serialize)]
 pub struct CharMaterialTextureInfo {
     pub opacity: f32,
     pub transp_type: MaterialTextureInfoTransparencyType,
@@ -672,220 +656,6 @@ impl CharMaterialTextureInfo {
 
         material_seq.push(material);
         Ok(material_seq)
-    }
-}
-
-impl BinRead for CharMaterialTextureInfo {
-    type Args<'a> = (u32, u32);
-
-    fn read_options<R: std::io::Read + std::io::Seek>(
-        reader: &mut R,
-        endian: binrw::Endian,
-        args: Self::Args<'_>,
-    ) -> binrw::BinResult<Self> {
-        let version = args.0;
-
-        let mut opacity: f32 = 0.0;
-        let mut transp_type: MaterialTextureInfoTransparencyType =
-            MaterialTextureInfoTransparencyType::default();
-        let material: CharMaterial;
-        let mut rs_set: [RenderStateAtom; 8] = [RenderStateAtom::new(); 8];
-        let mut tex_seq: [TextureInfo; 4] = [
-            TextureInfo::new(),
-            TextureInfo::new(),
-            TextureInfo::new(),
-            TextureInfo::new(),
-        ];
-
-        if version > EXP_OBJ_VERSION_1_0_0_0 || version == MTLTEX_VERSION0002 {
-            opacity = f32::read_options(reader, endian, ())?;
-            transp_type = MaterialTextureInfoTransparencyType::read_options(reader, endian, ())?;
-            material = CharMaterial::read_options(reader, endian, ())?;
-            rs_set.iter_mut().for_each(|rs| {
-                *rs = RenderStateAtom::read_options(reader, endian, ()).unwrap();
-            });
-            tex_seq.iter_mut().for_each(|ts| {
-                *ts = TextureInfo::read_options(reader, endian, ()).unwrap();
-            });
-        } else if version == MTLTEX_VERSION0001 {
-            opacity = f32::read_options(reader, endian, ())?;
-            transp_type = MaterialTextureInfoTransparencyType::read_options(reader, endian, ())?;
-            material = CharMaterial::read_options(reader, endian, ())?;
-
-            let rsm = RenderStateSetMaterial2::read_options(reader, endian, ())?;
-            // Read 4 TextureInfo0001 individually (vec![expr?; N] only evaluates once then clones)
-            let tex_info_0001: [TextureInfo0001; LW_MAX_TEXTURESTAGE_NUM as usize] = [
-                TextureInfo0001::read_options(reader, endian, ())?,
-                TextureInfo0001::read_options(reader, endian, ())?,
-                TextureInfo0001::read_options(reader, endian, ())?,
-                TextureInfo0001::read_options(reader, endian, ())?,
-            ];
-
-            rs_set.iter_mut().enumerate().for_each(|(i, rs)| {
-                let rsv = rsm.rsv_seq[0][i];
-                if rsv.state == LW_INVALID_INDEX {
-                    return;
-                }
-
-                let v: u32 = match rsv.state {
-                    D3DRS_ALPHAFUNC => D3DCmpFunc::Greater as u32,
-                    D3DRS_ALPHAREF => 129,
-                    _ => rsv.value,
-                };
-
-                rs.state = rsv.state;
-                rs.value0 = v;
-                rs.value1 = v;
-            });
-
-            tex_seq.iter_mut().enumerate().for_each(|(i, ts)| {
-                let p = &tex_info_0001[i];
-                if p.stage == LW_INVALID_INDEX {
-                    return;
-                }
-
-                ts.level = u32::MAX;
-                ts.usage = 0;
-                ts.d3d_pool = D3DPool::Default;
-                ts._type = TextureType::File;
-
-                ts.stage = p.stage;
-                ts.d3d_format = p.format;
-                ts.colorkey = p.colorkey;
-                ts.colorkey_type = p.colorkey_type;
-                ts.byte_alignment_flag = 0;
-                ts.file_name = p.file_name;
-
-                for j in 0..p.tss_set.rsv_seq[0].len() as u32 {
-                    let rsv = p.tss_set.rsv_seq[0][j as usize];
-                    if rsv.state == LW_INVALID_INDEX {
-                        break;
-                    }
-
-                    ts.tss_set[j as usize].state = rsv.state;
-                    ts.tss_set[j as usize].value0 = rsv.value;
-                    ts.tss_set[j as usize].value1 = rsv.value;
-                }
-            });
-        } else if version == MTLTEX_VERSION0000 {
-            // Version 0 format: no opacity/transp_type fields,
-            // uses lwTexInfo_0000 (smaller struct) instead of lwTexInfo_0001
-            material = CharMaterial::read_options(reader, endian, ())?;
-
-            let render_state_mtl_2 = RenderStateSetMaterial2::read_options(reader, endian, ())?;
-            // Read 4 TextureInfo0000 individually
-            let texture_info_0000: [TextureInfo0000; LW_MAX_TEXTURESTAGE_NUM as usize] = [
-                TextureInfo0000::read_options(reader, endian, ())?,
-                TextureInfo0000::read_options(reader, endian, ())?,
-                TextureInfo0000::read_options(reader, endian, ())?,
-                TextureInfo0000::read_options(reader, endian, ())?,
-            ];
-
-            for i in 0..render_state_mtl_2.rsv_seq[0].len() {
-                let rsv = render_state_mtl_2.rsv_seq[0][i as usize];
-                if rsv.state == LW_INVALID_INDEX {
-                    break;
-                }
-
-                let v: u32 = match rsv.state {
-                    D3DRS_ALPHAFUNC => D3DCmpFunc::Greater as u32,
-                    D3DRS_ALPHAREF => 129,
-                    _ => rsv.value,
-                };
-
-                let rs = RenderStateAtom {
-                    state: rsv.state,
-                    value0: v,
-                    value1: v,
-                };
-
-                rs_set[i as usize] = rs;
-            }
-
-            tex_seq.iter_mut().enumerate().for_each(|(i, tex)| {
-                let p = &texture_info_0000[i];
-                if p.stage == LW_INVALID_INDEX {
-                    return;
-                }
-
-                tex.level = u32::MAX;
-                tex.usage = 0;
-                tex.d3d_pool = D3DPool::Default;
-                tex._type = TextureType::File;
-
-                tex.stage = p.stage;
-                tex.d3d_format = p.format;
-                tex.colorkey = p.colorkey;
-                tex.colorkey_type = p.colorkey_type;
-                tex.byte_alignment_flag = 0;
-                tex.file_name = p.file_name;
-
-                for j in 0..p.tss_set.rsv_seq[0].len() as u32 {
-                    let rsv = p.tss_set.rsv_seq[0][j as usize];
-                    if rsv.state == LW_INVALID_INDEX {
-                        break;
-                    }
-
-                    tex.tss_set[j as usize].state = rsv.state;
-                    tex.tss_set[j as usize].value0 = rsv.value;
-                    tex.tss_set[j as usize].value1 = rsv.value;
-                }
-            });
-
-            if tex_seq[0].d3d_format == D3DFormat::A4R4G4B4 {
-                tex_seq[0].d3d_format = D3DFormat::A1R5G5B5;
-            }
-        } else {
-            return Err(Error::AssertFail {
-                pos: 0,
-                message: "Invalid file version".to_string(),
-            });
-        }
-
-        tex_seq[0].d3d_pool = D3DPool::Managed;
-        tex_seq[0].level = u32::MAX;
-
-        let mut transp_flag: bool = false;
-        let mut total_mtl_rs_num: u32 = 0;
-
-        for i in 0..LW_MTL_RS_NUM {
-            let rsa = rs_set[i as usize];
-
-            if rsa.state == LW_INVALID_INDEX {
-                break;
-            }
-
-            total_mtl_rs_num += 1;
-
-            if rsa.state == D3DRenderStateType::DestBlend as u32
-                && (rsa.value0 == D3DBlend::One as u32
-                    || rsa.value0 == D3DBlend::InvSrcColor as u32)
-            {
-                transp_flag = true;
-            }
-
-            if rsa.state == D3DRenderStateType::Lighting as u32 && rsa.value0 == 0 {
-                transp_flag = !transp_flag;
-            }
-        }
-
-        if transp_flag && total_mtl_rs_num < (LW_MTL_RS_NUM - 1) {
-            rs_set[total_mtl_rs_num as usize].state = D3DRenderStateType::Lighting as u32;
-            rs_set[total_mtl_rs_num as usize].value0 = 0;
-            rs_set[total_mtl_rs_num as usize].value1 = 0;
-        }
-
-        if transp_type == MaterialTextureInfoTransparencyType::Additive1 {
-            transp_type = MaterialTextureInfoTransparencyType::Subtractive;
-        }
-
-        Ok(CharMaterialTextureInfo {
-            opacity,
-            material,
-            rs_set,
-            tex_seq,
-            transp_type,
-        })
     }
 }
 

@@ -1,0 +1,1734 @@
+OpenAI Codex v0.106.0 (research preview)
+--------
+workdir: /Users/anirudh/gamedev/pko-tools
+model: gpt-5.3-codex
+provider: openai
+approval: never
+sandbox: read-only
+reasoning effort: xhigh
+reasoning summaries: none
+session id: 019cb429-db52-7440-ae14-684f5e512d7c
+--------
+user
+Read the file at /Users/anirudh/gamedev/pko-tools/agents/counselors/1772549151-overall-arch-cmdk-plan-review-1772549167908/prompt.md and follow the instructions within it.
+deprecated: `collab` is deprecated. Use `[features].multi_agent` instead.
+  Enable it with `--enable multi_agent` or `[features].multi_agent` in config.toml. See https://developers.openai.com/codex/config-basic#feature-flags for details.
+mcp: linear starting
+mcp: unity starting
+mcp: unity ready
+mcp: linear ready
+mcp startup: ready: unity, linear
+
+thinking
+**Starting file inspection and skill check**
+codex
+I’ll open that `prompt.md` file first, extract its instructions, and then execute them exactly within the current workspace constraints.
+exec
+/bin/zsh -lc 'cat /Users/anirudh/gamedev/pko-tools/agents/counselors/1772549151-overall-arch-cmdk-plan-review-1772549167908/prompt.md' in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+# Plan Review Request
+
+## Goal
+Critically review this implementation plan for `pko-tools` frontend architecture + contextual Cmd+K integration. The review should identify missing decisions, sequencing risks, blind spots, over/under-scoping, test/rollout gaps, and any changes needed to make execution decision-complete.
+
+## Proposed Plan (to review)
+
+### Summary
+Performance-first foundation before UX layering. Stabilize render/state architecture and correctness issues, then introduce a contextual action system with Cmd+K.
+
+### Goals / Success Criteria
+1. Remove known correctness/performance hazards.
+2. Separate render-hot state from UI/editor state.
+3. Introduce unified action model powering Cmd+K, shortcuts, toolbar actions, and context menus.
+4. Preserve existing behavior during migration.
+5. Add measurable perf + UX acceptance gates.
+
+### Key Findings Integrated
+1. Character navigator event listener leak on repeated selection.
+2. Effect playback `currentTime` updates global state each frame, causing broad rerenders.
+
+thinking
+**Assessing counselor skill usage**
+codex
+I’ve read the prompt and will now produce the requested architecture review in the exact 6-part structure. I’ll quickly check the local `counselors` skill instructions first to ensure I follow repository-specific process rules.
+exec
+/bin/zsh -lc 'cat /Users/anirudh/.codex/skills/counselors/SKILL.md' in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+---
+name: counselors
+description: Run parallel second-opinion reviews with the counselors CLI. Use when the user asks for independent AI reviews, architecture sanity checks, risk analysis from multiple models, or a synthesized consensus and disagreement report across agents.
+---
+
+# Counselors
+
+## Overview
+Use `counselors` to fan out one review prompt to multiple configured AI CLIs in parallel, then synthesize their responses.
+
+## Workflow
+1. Gather context.
+- Parse the user request and scope.
+- Read only relevant files.
+- Capture `git diff HEAD` and `git diff --staged` when code changes matter.
+
+2. Select agents.
+- Run `counselors ls`.
+- Print the full command output for the user.
+- Ask the user which agent IDs to use (or all).
+
+thinking
+**Assessing skill applicability and planning context gathering**
+codex
+I’m gathering a bit of repository context so the critique is grounded in the current codebase, especially around keyboard handling, render loops, and viewer state boundaries.
+exec
+/bin/zsh -lc 'ls -la src/features' in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc 'ls -la src' in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc 'ls -la' in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+total 0
+drwxr-xr-x@  8 anirudh  staff   256 Feb 12 14:33 .
+drwxr-xr-x@ 15 anirudh  staff   480 Feb 12 14:33 ..
+drwxr-xr-x   5 anirudh  staff   160 Feb 13 23:20 buildings
+drwxr-xr-x@ 13 anirudh  staff   416 Feb 12 14:33 character
+drwxr-xr-x  37 anirudh  staff  1184 Mar  3 15:30 effect
+drwxr-xr-x   7 anirudh  staff   224 Feb 24 17:52 import
+drwxr-xr-x  22 anirudh  staff   704 Feb 13 23:20 item
+drwxr-xr-x   5 anirudh  staff   160 Feb 13 23:20 map
+ succeeded in 51ms:
+total 24
+drwxr-xr-x@ 15 anirudh  staff   480 Feb 12 14:33 .
+drwxr-xr-x@ 40 anirudh  staff  1280 Mar  3 15:38 ..
+-rw-r--r--   1 anirudh  staff  2415 Feb 12 14:33 App.tsx
+drwxr-xr-x@  4 anirudh  staff   128 Jan  5 06:14 assets
+drwxr-xr-x@  9 anirudh  staff   288 Mar  3 15:44 commands
+drwxr-xr-x@  6 anirudh  staff   192 Jan  5 06:14 components
+drwxr-xr-x@  8 anirudh  staff   256 Feb 12 14:33 features
+drwxr-xr-x@  4 anirudh  staff   128 Jan  5 06:14 hooks
+drwxr-xr-x@  3 anirudh  staff    96 Jan  5 06:14 lib
+-rw-r--r--@  1 anirudh  staff   317 Jan  5 06:14 main.tsx
+drwxr-xr-x@  8 anirudh  staff   256 Feb 12 14:33 pages
+drwxr-xr-x@ 16 anirudh  staff   512 Feb 13 23:20 store
+drwxr-xr-x   3 anirudh  staff    96 Feb  1 18:38 tests
+drwxr-xr-x@ 13 anirudh  staff   416 Feb 13 23:20 types
+-rw-r--r--   1 anirudh  staff   122 Feb  1 18:38 vite-env.d.ts
+ succeeded in 51ms:
+total 624
+drwxr-xr-x@ 40 anirudh  staff    1280 Mar  3 15:38 .
+drwxr-xr-x@ 26 anirudh  staff     832 Mar  3 12:03 ..
+-rw-r--r--@  1 anirudh  staff   10244 Mar  1 21:12 .DS_Store
+drwx------   4 anirudh  staff     128 Feb 17 18:22 .claude
+drwxr-xr-x@ 17 anirudh  staff     544 Mar  3 14:05 .git
+drwxr-xr-x@  3 anirudh  staff      96 Jan  5 06:14 .github
+-rw-r--r--@  1 anirudh  staff     631 Feb 26 15:05 .gitignore
+drwxr-xr-x@  3 anirudh  staff      96 Jan  5 06:14 .vscode
+-rw-r--r--   1 anirudh  staff    2478 Jan  8 13:42 AGENTS.md
+-rw-r--r--   1 anirudh  staff    8735 Feb  3 09:36 CHANGELOG.md
+-rw-r--r--@  1 anirudh  staff   14117 Mar  3 13:12 CLAUDE.md
+-rw-r--r--@  1 anirudh  staff    5343 Mar  2 19:12 README.md
+-rw-r--r--@  1 anirudh  staff    1908 Mar  2 19:13 SESSION_CONTEXT.md
+drwxr-xr-x@  3 anirudh  staff      96 Feb 27 08:54 agents
+drwxr-xr-x   8 anirudh  staff     256 Feb  3 09:36 changelog-assets
+lrwxr-xr-x   1 anirudh  staff     111 Jan 24 07:50 client-src -> /Users/anirudh/Downloads/Client 1.3x Clean Fixed + League Of Pirates Online SRC/Client 1.3x Clean Fixed/source/
+-rw-r--r--@  1 anirudh  staff     448 Jan  5 06:14 components.json
+drwxr-xr-x@  7 anirudh  staff     224 Feb  4 22:18 dist
+drwxr-xr-x   9 anirudh  staff     288 Feb 26 15:05 docs
+
+thinking
+**Planning parallel pattern search**
+exec
+/bin/zsh -lc "rg -n \"preserveDrawingBuffer|toDataURL|data:image|createObjectURL|revokeObjectURL|useFrame|currentTime|history|undo|addEventListener\\\\(|removeEventListener\\\\(|keydown|cmdk|command palette|CommandPalette|Keyboard\" src | head -n 300" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "rg -n \"atom\\(|jotai|useAtom|useSetAtom|useAtomValue\" src/features src/store | head -n 200" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc 'rg --files src/commands src/features/effect src/features/map src/features/character | head -n 300' in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+src/store/effect.ts:8:  currentTime: number;
+src/store/effect.ts:24:  currentTime: 0,
+src/features/item/ItemParticleRenderer.tsx:2:import { useFrame } from "@react-three/fiber";
+src/features/item/ItemParticleRenderer.tsx:129:  useFrame((_, delta) => {
+src/hooks/use-mobile.tsx:13:    mql.addEventListener("change", onChange)
+src/hooks/use-mobile.tsx:15:    return () => mql.removeEventListener("change", onChange)
+src/store/effectHistory.ts:18:/** Push the current state onto the undo stack. Call BEFORE mutating effectDataAtom. */
+src/store/effectHistory.ts:20:  const history = get(effectHistoryAtom);
+src/store/effectHistory.ts:21:  const past = [...history.past, structuredClone(snapshot)];
+src/store/effectHistory.ts:28:/** Whether undo is available. */
+src/features/effect/particle/ParticleSimulator.tsx:9:import { useFrame } from "@react-three/fiber";
+src/features/effect/particle/ParticleSimulator.tsx:102:  useFrame((_state, delta) => {
+src/features/effect/particle/ParticleSimulator.tsx:244:  useFrame(() => {
+src/features/effect/particle/ParticleSimulator.tsx:308:  useFrame(() => {
+src/features/item/DummyPlacementOverlay.tsx:2:import { useThree, useFrame } from "@react-three/fiber";
+src/features/item/DummyPlacementOverlay.tsx:37:  useFrame(() => {
+src/features/item/DummyPlacementOverlay.tsx:60:    canvas.addEventListener("click", handleClick);
+src/features/item/DummyPlacementOverlay.tsx:61:    return () => canvas.removeEventListener("click", handleClick);
+src/features/effect/EffectWorkbench.tsx:59:  const { undo, redo, canUndo, canRedo } = useEffectHistory();
+src/features/effect/EffectWorkbench.tsx:164:    function onKeyDown(event: KeyboardEvent) {
+ succeeded in 51ms:
+src/features/import/ImportWizard.tsx:8:import { useAtom, useAtomValue, useSetAtom } from "jotai";
+src/features/import/ImportWizard.tsx:48:  const [open, setOpen] = useAtom(importWizardOpenAtom);
+src/features/import/ImportWizard.tsx:49:  const [state, setState] = useAtom(importWizardStateAtom);
+src/features/import/ImportWizard.tsx:50:  const resetWizard = useSetAtom(resetImportWizardAtom);
+src/features/import/ImportWizard.tsx:51:  const canNext = useAtomValue(canGoNextAtom);
+src/features/import/ImportWizard.tsx:52:  const canPrev = useAtomValue(canGoPrevAtom);
+src/store/import.ts:1:import { atom } from "jotai";
+src/store/import.ts:10:export const importWizardOpenAtom = atom(false);
+src/store/import.ts:17:export const setImportStepAtom = atom(null, (_get, set, step: ImportWizardStep) => {
+src/store/import.ts:21:export const setImportTypeAtom = atom(null, (_get, set, importType: ImportType) => {
+src/store/import.ts:25:export const setImportFileAtom = atom(
+src/store/import.ts:32:export const setImportModelIdAtom = atom(null, (_get, set, modelId: string) => {
+src/store/import.ts:36:export const setImportCharacterNameAtom = atom(
+src/store/import.ts:43:export const setImportScaleAtom = atom(null, (_get, set, scaleFactor: number) => {
+src/store/import.ts:47:export const resetImportWizardAtom = atom(null, (_get, set) => {
+src/store/import.ts:52:export const openImportWizardAtom = atom(null, (_get, set, importType: ImportType) => {
+src/store/import.ts:58:export const canGoNextAtom = atom((get) => {
+src/store/import.ts:79:export const canGoPrevAtom = atom((get) => {
+src/store/keyframeClipboard.ts:1:import { atom } from "jotai";
+src/features/import/steps/PreviewStep.tsx:1:import { useAtom } from "jotai";
+ succeeded in 50ms:
+src/features/map/MapWorkbench.tsx
+src/features/map/MapTerrainViewer.tsx
+src/features/map/MapNavigator.tsx
+src/commands/project.ts
+src/features/character/ExportToGltf.tsx
+src/features/character/CharacterWorkbench.tsx
+src/features/character/SkeletonDebugHelpers.tsx
+src/features/character/CharacterMetadataPanel.tsx
+src/features/character/CharacterStatusBar.tsx
+src/features/character/MeshHighlights.tsx
+src/features/character/CharacterActions.tsx
+src/features/character/CharacterNavigator.tsx
+src/features/character/BoundingSphereIndicators.tsx
+src/features/character/ImportFromGltf.tsx
+src/commands/effect.ts
+src/commands/item.ts
+src/commands/character.ts
+src/commands/buildings.ts
+src/commands/map.ts
+src/commands/import.ts
+
+thinking
+**Prioritizing file inspections**
+codex
+I found direct evidence of the listed hotspots in the code. Next I’m reading the key files to verify where the plan is strong and where decision gaps remain.
+exec
+/bin/zsh -lc "sed -n '1,260p' src/features/character/CharacterNavigator.tsx" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,260p' src/features/effect/EffectPlaybackDriver.tsx" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,280p' src/features/effect/EffectViewport.tsx" in /Users/anirudh/gamedev/pko-tools succeeded in 50ms:
+import { currentProjectAtom } from "@/store/project";
+import { useAtom, useAtomValue } from "jotai";
+import { useVirtualizer, Virtualizer } from "@tanstack/react-virtual";
+import React, { useEffect, useState } from "react";
+import { ScrollAreaVirtualizable } from "@/components/ui/scroll-area-virtualizable";
+import { SidebarContent, SidebarHeader } from "@/components/ui/sidebar";
+import { Button } from "@/components/ui/button";
+import { invoke } from "@tauri-apps/api/core";
+import { Character } from "@/types/character";
+import { getCharacterList, getCharacterMetadata } from "@/commands/character";
+import { characterGltfJsonAtom, characterLoadingStatusAtom, selectedCharacterAtom, characterMetadataAtom } from "@/store/character";
+import { Input } from "@/components/ui/input";
+import { Label } from "@radix-ui/react-dropdown-menu";
+import { listen } from '@tauri-apps/api/event';
+import CharacterActions from "./CharacterActions";
+
+export default function CharacterNavigator() {
+  const [characters, setCharacters] = useState<Character[]>([]);
+  const [filteredCharacters, setFilteredCharacters] = useState<Character[]>([]);
+  const [, setCharacterGltfJson] = useAtom(characterGltfJsonAtom);
+ succeeded in 51ms:
+import { Canvas, useFrame } from "@react-three/fiber";
+import { OrbitControls } from "@react-three/drei";
+import React, { Suspense, useEffect, useRef } from "react";
+import EffectSubRenderer from "@/features/effect/EffectSubRenderer";
+import EffectPlaybackDriver from "@/features/effect/EffectPlaybackDriver";
+import ParticleSimulator from "@/features/effect/particle/ParticleSimulator";
+import CharacterPreview from "@/features/effect/CharacterPreview";
+import { Button } from "@/components/ui/button";
+import { compositePreviewAtom, effectDataAtom, effectPlaybackAtom, effectTextureReloadAtom, effectTextureStatusAtom, selectedSubEffectIndexAtom } from "@/store/effect";
+import { pathPointsAtom } from "@/store/path";
+import { gizmoModeAtom, type GizmoMode } from "@/store/gizmo";
+import { useAtom, useAtomValue } from "jotai";
+import { Layers, Maximize2, MousePointer, Move, RotateCw } from "lucide-react";
+import StripEffectRenderer from "@/features/effect/StripEffectRenderer";
+import PathVisualizer from "@/features/effect/PathVisualizer";
+import { getPathPosition } from "@/features/effect/animation";
+import * as THREE from "three";
+
+/** Default path velocity when no explicit velocity is provided in the .csf file. */
+const DEFAULT_PATH_VELOCITY = 2.0;
+ succeeded in 51ms:
+import {
+  effectDataAtom,
+  effectPlaybackAtom,
+} from "@/store/effect";
+import { useFrame } from "@react-three/fiber";
+import { useAtom } from "jotai";
+import { useMemo } from "react";
+
+const DEFAULT_FRAME_DURATION = 1 / 30;
+
+export default function EffectPlaybackDriver() {
+  const [effectData] = useAtom(effectDataAtom);
+  const [playback, setPlayback] = useAtom(effectPlaybackAtom);
+
+  // Compute total duration as the MAX across all sub-effects (PKO plays them all simultaneously)
+  const totalDuration = useMemo(() => {
+    if (!effectData || effectData.subEffects.length === 0) {
+      return 0;
+    }
+
+
+thinking
+**Planning code inspection**
+exec
+/bin/zsh -lc "sed -n '1,320p' src/features/effect/EffectWorkbench.tsx" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,260p' src/features/effect/KeyframeProperties.tsx" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,220p' src/store/effect.ts" in /Users/anirudh/gamedev/pko-tools succeeded in 50ms:
+import { saveEffect, saveParticles, loadParticles } from "@/commands/effect";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { useToast } from "@/hooks/use-toast";
+import {
+  effectDataAtom,
+  effectDirtyAtom,
+  effectOriginalAtom,
+  selectedEffectAtom,
+} from "@/store/effect";
+import { currentProjectAtom } from "@/store/project";
+import { useAtom, useAtomValue } from "jotai";
+ succeeded in 50ms:
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { FieldLabel } from "@/features/effect/HelpTip";
+import {
+  effectDataAtom,
+  effectDirtyAtom,
+  selectedFrameIndexAtom,
+  selectedSubEffectIndexAtom,
+} from "@/store/effect";
+import { keyframeClipboardAtom } from "@/store/keyframeClipboard";
+import { useAtom } from "jotai";
+import { Clipboard, ClipboardPaste } from "lucide-react";
+import React from "react";
+import { useCallback, useEffect, useMemo } from "react";
+import { useEffectHistory } from "@/features/effect/useEffectHistory";
+
+function formatVector(values: number[], precision = 2) {
+  return values.map((value) => value.toFixed(precision)).join(", ");
+}
+
+ succeeded in 52ms:
+import { atom } from "jotai";
+import { EffectFile } from "@/types/effect";
+
+export type EffectPlaybackState = {
+  isPlaying: boolean;
+  isLooping: boolean;
+  speed: number;
+  currentTime: number;
+};
+
+export type EffectTextureStatus = {
+  status: "idle" | "loading" | "loaded" | "error";
+  textureName: string | null;
+};
+
+export const selectedEffectAtom = atom<string | null>(null);
+export const effectDataAtom = atom<EffectFile | null>(null);
+export const selectedSubEffectIndexAtom = atom<number | null>(null);
+export const selectedFrameIndexAtom = atom<number>(0);
+export const effectPlaybackAtom = atom<EffectPlaybackState>({
+
+thinking
+**Scoping relevant map/navigation files**
+exec
+/bin/zsh -lc "sed -n '1,320p' src/features/item/ItemNavigator.tsx" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,260p' src/features/map/MapNavigator.tsx" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "rg -n \"data:.*gltf|gltfDataUri|encodeURIComponent\\(|btoa\\(|Blob\\(|URL\\.createObjectURL|JSON\\.stringify\\(.*gltf|atob\\(\" src/features src/commands src/store | head -n 400" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+import { currentProjectAtom } from "@/store/project";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
+import { useVirtualizer, Virtualizer } from "@tanstack/react-virtual";
+import React, { useEffect, useMemo, useState } from "react";
+import { ScrollAreaVirtualizable } from "@/components/ui/scroll-area-virtualizable";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { SidebarContent, SidebarHeader } from "@/components/ui/sidebar";
+import { Button } from "@/components/ui/button";
+import { Item, ITEM_TYPE_NAMES, ModelVariant } from "@/types/item";
+import { getItemList, getItemLitInfo, getItemMetadata, loadItemModel, saveWorkbench } from "@/commands/item";
+import {
+  itemGltfJsonAtom,
+  itemLitInfoAtom,
+  itemLoadingAtom,
+  itemMetadataAtom,
+  selectedItemAtom,
+  selectedModelVariantAtom,
+} from "@/store/item";
+import { Input } from "@/components/ui/input";
+import { ExportItemToGltf } from "./ExportItemToGltf";
+ succeeded in 51ms:
+import { currentProjectAtom } from "@/store/project";
+import { useAtom, useAtomValue } from "jotai";
+import { useVirtualizer, Virtualizer } from "@tanstack/react-virtual";
+import React, { useEffect, useState } from "react";
+import { ScrollAreaVirtualizable } from "@/components/ui/scroll-area-virtualizable";
+import { SidebarHeader } from "@/components/ui/sidebar";
+import { MapEntry } from "@/types/map";
+import { getMapList, getMapMetadata, loadMapTerrain, exportMapToGltf } from "@/commands/map";
+import {
+  mapGltfJsonAtom,
+  mapLoadingAtom,
+  mapMetadataAtom,
+  selectedMapAtom,
+} from "@/store/map";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Download, Loader2 } from "lucide-react";
+import { toast } from "@/hooks/use-toast";
+
+export default function MapNavigator() {
+ succeeded in 50ms:
+src/store/effect.ts:41:  gltfDataUri: string | null;
+src/store/effect.ts:52:  gltfDataUri: null,
+src/features/effect/CharacterBinder.tsx:115:      const dataUri = `data:model/gltf+json;base64,${btoa(gltfJson)}`;
+src/features/effect/CharacterBinder.tsx:119:        gltfDataUri: dataUri,
+src/features/effect/CharacterBinder.tsx:132:      gltfDataUri: null,
+src/features/effect/particle/ParticleSimulator.tsx:160:        const binary = Uint8Array.from(atob(decoded.data), (char) =>
+src/features/effect/useCanvasCapture.ts:37:            const blob = new Blob(chunksRef.current, { type: mimeType });
+src/features/effect/StripEffectRenderer.tsx:256:        const binary = Uint8Array.from(atob(decoded.data), (char) =>
+src/features/effect/EffectSubRenderer.tsx:196:        const binary = Uint8Array.from(atob(decoded.data), (char) => char.charCodeAt(0));
+src/features/effect/EffectSubRenderer.tsx:259:        const binary = Uint8Array.from(atob(decoded.data), (char) => char.charCodeAt(0));
+src/features/effect/ExportDialog.tsx:43:    setBlob(null);
+src/features/effect/ExportDialog.tsx:62:      setBlob(result);
+src/features/effect/ExportDialog.tsx:80:    const url = URL.createObjectURL(blob);
+src/features/effect/EffectLibrary.tsx:33:    const blob = new Blob([json], { type: "application/json" });
+src/features/effect/EffectLibrary.tsx:34:    const url = URL.createObjectURL(blob);
+src/features/effect/CharacterPreview.tsx:19:  if (!binding.gltfDataUri || binding.status !== "loaded") {
+src/features/effect/CharacterPreview.tsx:23:  return <CharacterGhost dataUri={binding.gltfDataUri} />;
+src/features/effect/__tests__/useCanvasCapture.test.ts:20:      this.ondataavailable?.({ data: new Blob(["test"], { type: "video/webm" }) });
+src/features/character/CharacterWorkbench.tsx:21:      const blob = new Blob([json], { type: 'application/json' });
+src/features/item/ItemModelViewer.tsx:26:      const blob = new Blob([json], { type: "application/json" });
+
+thinking
+**Planning markers instancing test**
+exec
+/bin/zsh -lc "sed -n '1,240p' src/features/buildings/BuildingsNavigator.tsx" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,360p' src/features/map/MapTerrainViewer.tsx" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,320p' src/features/map/MapWorkbench.tsx" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+import { useEffect, useMemo, useState } from "react";
+import { useGLTF } from "@react-three/drei";
+import * as THREE from "three";
+import { MapViewConfig } from "@/types/map";
+
+function jsonToDataURI(json: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    try {
+      if (!json) {
+        reject(new Error("No JSON provided"));
+        return;
+      }
+      const blob = new Blob([json], { type: "application/json" });
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = (error) => reject(error);
+      reader.readAsDataURL(blob);
+    } catch (error) {
+      reject(error);
+    }
+ succeeded in 52ms:
+import { currentProjectAtom } from "@/store/project";
+import { useAtom, useAtomValue } from "jotai";
+import { useVirtualizer, Virtualizer } from "@tanstack/react-virtual";
+import React, { useEffect, useState } from "react";
+import { ScrollAreaVirtualizable } from "@/components/ui/scroll-area-virtualizable";
+import { SidebarHeader } from "@/components/ui/sidebar";
+import { BuildingEntry } from "@/types/buildings";
+import { getBuildingList, loadBuildingModel, exportBuildingToGltf } from "@/commands/buildings";
+import {
+  buildingGltfJsonAtom,
+  buildingLoadingAtom,
+  selectedBuildingAtom,
+} from "@/store/buildings";
+import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Download, Loader2 } from "lucide-react";
+import { toast } from "@/hooks/use-toast";
+
+export default function BuildingsNavigator() {
+  const [buildings, setBuildings] = useState<BuildingEntry[]>([]);
+ succeeded in 52ms:
+import { Canvas } from "@react-three/fiber";
+import { OrbitControls, GizmoHelper, GizmoViewport } from "@react-three/drei";
+import { useAtomValue, useAtom } from "jotai";
+import { Suspense, useState } from "react";
+import { mapGltfJsonAtom, mapLoadingAtom, mapMetadataAtom, mapViewConfigAtom, selectedMapAtom } from "@/store/map";
+import { currentProjectAtom } from "@/store/project";
+import MapTerrainViewer from "./MapTerrainViewer";
+import { Loader2, Download } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { exportMapForUnity } from "@/commands/map";
+import { toast } from "@/hooks/use-toast";
+
+function MapViewToolbar() {
+  const [viewConfig, setViewConfig] = useAtom(mapViewConfigAtom);
+  const selectedMap = useAtomValue(selectedMapAtom);
+  const currentProject = useAtomValue(currentProjectAtom);
+  const [exporting, setExporting] = useState(false);
+
+  const handleExportForUnity = async () => {
+    if (!currentProject || !selectedMap) return;
+
+thinking
+**Inspecting model viewer caching**
+exec
+/bin/zsh -lc "sed -n '1,260p' src/features/item/ItemModelViewer.tsx" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,260p' src/features/character/CharacterWorkbench.tsx" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,260p' src/features/buildings/BuildingsModelViewer.tsx" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+import { useEffect, useMemo, useState } from "react";
+import { useGLTF } from "@react-three/drei";
+import * as THREE from "three";
+import { ItemLitInfo, WorkbenchDummy } from "@/types/item";
+import { ItemEffectConfig, ItemDebugConfig } from "@/store/item";
+import { ItemLitRenderer } from "./ItemLitRenderer";
+import { ForgeEffectPreview } from "@/types/item";
+import { ItemParticleRenderer } from "./ItemParticleRenderer";
+import { ItemEffectRenderer } from "./ItemEffectRenderer";
+import {
+  extractItemBoundingSpheres,
+  extractItemMeshes,
+  ItemBoundingSphereIndicators,
+  ItemMeshHighlights,
+  ItemDummyHelpers,
+  ItemWorkbenchDummyHelpers,
+} from "./ItemDebugOverlays";
+
+function jsonToDataURI(json: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+ succeeded in 51ms:
+import { characterGltfJsonAtom, characterMetadataAtom, dummyEditModeAtom } from "@/store/character";
+import { useAtomValue, useSetAtom } from "jotai";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useGLTF, OrbitControls,  CameraControls,  Environment, useAnimations } from '@react-three/drei';
+import { Canvas, useFrame} from '@react-three/fiber';
+import * as THREE from 'three';
+import { useControls, Leva } from 'leva';
+import { extractBoundingSpheres, BoundingSphereIndicators } from './BoundingSphereIndicators';
+import { SkeletonDebugHelpers } from './SkeletonDebugHelpers';
+import { CharacterMetadataPanel } from './CharacterMetadataPanel';
+import { extractMeshes, MeshHighlights, getUniqueMeshIndices } from './MeshHighlights';
+
+function jsonToDataURI(json: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    try {
+
+      if (!json) {
+        reject(new Error('No JSON provided'));
+        return;
+      }
+ succeeded in 51ms:
+import { useEffect, useState } from "react";
+import { useGLTF, useAnimations } from "@react-three/drei";
+import * as THREE from "three";
+
+function jsonToDataURI(json: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    try {
+      if (!json) {
+        reject(new Error("No JSON provided"));
+        return;
+      }
+      const blob = new Blob([json], { type: "application/json" });
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = (error) => reject(error);
+      reader.readAsDataURL(blob);
+    } catch (error) {
+      reject(error);
+    }
+  });
+
+thinking
+**Inspecting character binder for data URI**
+exec
+/bin/zsh -lc "sed -n '1,260p' src/features/effect/CharacterBinder.tsx" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { effectBindingAtom } from "@/store/effect";
+import { currentProjectAtom } from "@/store/project";
+import { useAtom, useAtomValue } from "jotai";
+import { Loader2, Unlink, X } from "lucide-react";
+import React from "react";
+import { useCallback, useMemo, useState } from "react";
+import { invoke } from "@tauri-apps/api/core";
+import BoneTreeView, { buildBoneTree, type BoneNode } from "@/features/effect/BoneTreeView";
+import { ChevronDown, ChevronRight } from "lucide-react";
+import { SmallLabel } from "@/features/effect/HelpTip";
+
+/**
+ * Extract bones and dummies from a glTF JSON object.
+ * Looks for nodes with extras.bone_id (bones) or extras.dummy (dummy nodes).
+ */
+function extractBonesFromGltf(gltfJson: Record<string, unknown>): {
+  bones: { name: string; id: number; parentId: number }[];
+  dummies: { name: string; id: number; parentBoneId: number }[];
+
+thinking
+**Inspecting existing command modules**
+exec
+/bin/zsh -lc "sed -n '1,260p' src/commands/effect.ts" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,220p' src/commands/project.ts" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+import { invoke } from "@tauri-apps/api/core";
+import { EffectFile, Vec3 } from "@/types/effect";
+import type { ParticleController } from "@/types/particle";
+
+export const listEffects = async (projectId: string): Promise<string[]> => {
+  return invoke("list_effects", { projectId });
+};
+
+export const loadEffect = async (
+  projectId: string,
+  effectName: string
+): Promise<EffectFile> => {
+  return invoke("load_effect", { projectId, effectName });
+};
+
+export const saveEffect = async (
+  projectId: string,
+  effectName: string,
+  effect: EffectFile
+): Promise<void> => {
+exec
+/bin/zsh -lc 'rg -n "shortcut|keyboard|hotkey|cmdk|command|palette|context menu|toolbar" src/pages src/components src/features | head -n 300' in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+import { Project } from "@/types/project";
+import { invoke } from "@tauri-apps/api/core";
+
+export const getProjectList = async (): Promise<Project[]> => {
+  return invoke("get_projects_list");
+};
+
+export const getCurrentProject = async (): Promise<Project> => {
+  return invoke("get_current_project");
+};
+
+
+
+export const createProject = async (
+  projectName: string,
+  projectDirectory: string
+): Promise<string> => {
+  const projectId = (await invoke("create_project", {
+    projectName,
+    projectDirectory,
+ succeeded in 52ms:
+src/pages/project-creator/ProjectCreator.tsx:13:import { createProject } from "@/commands/project";
+src/features/import/steps/PreviewStep.tsx:7:import { analyzeMesh, validateModelForImport } from "@/commands/import";
+src/features/item/ItemViewerToolbar.tsx:54:  // ── Workbench mode: focused creation toolbar ──
+src/features/item/ItemViewerToolbar.tsx:120:  // ── Normal mode: full item viewer toolbar ──
+src/features/effect/EffectViewport.tsx:119:      {/* Gizmo mode toolbar */}
+src/features/import/steps/ResultStep.tsx:5:import { registerImportedCharacter, loadModelPreview } from "@/commands/import";
+src/features/import/steps/ResultStep.tsx:6:import { createWorkbench } from "@/commands/item";
+src/features/import/steps/ResultStep.tsx:15:import { listWorkbenches, loadWorkbench } from "@/commands/item";
+src/features/effect/TextureBrowser.tsx:2:import { listTextureFiles } from "@/commands/effect";
+src/features/import/steps/ConfigurationStep.tsx:12:import { checkModelIdAvailable, getNextAvailableModelId } from "@/commands/import";
+src/features/effect/PathEditor.tsx:3:import { loadPathFile } from "@/commands/effect";
+src/features/item/WorkbenchNavigator.tsx:6:import { listWorkbenches, loadWorkbench, deleteWorkbench } from "@/commands/item";
+src/features/item/WorkbenchNavigator.tsx:7:import { loadModelPreview } from "@/commands/import";
+src/features/effect/EffectWorkbench.tsx:1:import { saveEffect, saveParticles, loadParticles } from "@/commands/effect";
+src/features/item/ImportItemFromGltf.tsx:14:import { importItemFromGltf } from "@/commands/item";
+src/features/import/steps/ProcessingStep.tsx:8:import { importItemFromGltf } from "@/commands/item";
+src/features/effect/EffectNavigator.tsx:3:import { listEffects, loadEffect } from "@/commands/effect";
+src/features/item/ItemWorkbench.tsx:30:} from "@/commands/item";
+src/features/item/ItemNavigator.tsx:10:import { getItemList, getItemLitInfo, getItemMetadata, loadItemModel, saveWorkbench } from "@/commands/item";
+src/components/ui/sidebar.tsx:97:    // Adds a keyboard shortcut to toggle the sidebar.
+
+thinking
+**Inspecting sidebar keyboard ownership**
+exec
+/bin/zsh -lc "sed -n '1,220p' src/components/ui/sidebar.tsx" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+import * as React from "react"
+import { Slot } from "@radix-ui/react-slot"
+import { VariantProps, cva } from "class-variance-authority"
+import { PanelLeft } from "lucide-react"
+
+import { useIsMobile } from "@/hooks/use-mobile"
+import { cn } from "@/lib/utils"
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Separator } from "@/components/ui/separator"
+import { Sheet, SheetContent } from "@/components/ui/sheet"
+import { Skeleton } from "@/components/ui/skeleton"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip"
+
+const SIDEBAR_COOKIE_NAME = "sidebar:state"
+
+thinking
+**Planning inspection of history reset**
+exec
+/bin/zsh -lc "sed -n '1,320p' src/features/effect/EffectNavigator.tsx" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+import { Button } from "@/components/ui/button";
+import { SidebarContent, SidebarHeader } from "@/components/ui/sidebar";
+import { listEffects, loadEffect } from "@/commands/effect";
+import {
+  effectDataAtom,
+  effectDirtyAtom,
+  effectOriginalAtom,
+  selectedEffectAtom,
+  selectedFrameIndexAtom,
+  selectedSubEffectIndexAtom,
+} from "@/store/effect";
+import { currentProjectAtom } from "@/store/project";
+import { Input } from "@/components/ui/input";
+import { useAtom, useAtomValue } from "jotai";
+import React from "react";
+import { useEffect, useMemo, useState } from "react";
+
+export default function EffectNavigator() {
+  const currentProject = useAtomValue(currentProjectAtom);
+  const [, setSelectedEffect] = useAtom(selectedEffectAtom);
+
+thinking
+**Inspecting effect reset usage**
+exec
+/bin/zsh -lc "sed -n '1,260p' src/features/effect/useEffectHistory.ts" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,220p' src/store/effectHistory.ts" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "rg -n \"resetHistory\\(|effectHistoryAtom|pushSnapshot\\(\" src/features/effect src/store | head -n 200" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+import { useCallback } from "react";
+import { useAtom } from "jotai";
+import { effectDataAtom, effectDirtyAtom } from "@/store/effect";
+import { effectHistoryAtom } from "@/store/effectHistory";
+
+/**
+ * Hook providing undo/redo actions for effect data.
+ *
+ * Usage:
+ *   const { undo, redo, pushSnapshot, canUndo, canRedo } = useEffectHistory();
+ *   // Before mutating effect data:
+ *   pushSnapshot();
+ *   setEffectData(newData);
+ */
+export function useEffectHistory() {
+  const [effectData, setEffectData] = useAtom(effectDataAtom);
+  const [history, setHistory] = useAtom(effectHistoryAtom);
+  const [, setDirty] = useAtom(effectDirtyAtom);
+
+  const canUndo = history.past.length > 0;
+ succeeded in 52ms:
+import { atom } from "jotai";
+import type { EffectFile } from "@/types/effect";
+
+const MAX_HISTORY = 50;
+
+export type EffectHistoryState = {
+  /** Past states (most recent at end). */
+  past: EffectFile[];
+  /** Future states for redo (most recent at end). */
+  future: EffectFile[];
+};
+
+export const effectHistoryAtom = atom<EffectHistoryState>({
+  past: [],
+  future: [],
+});
+
+/** Push the current state onto the undo stack. Call BEFORE mutating effectDataAtom. */
+export const pushHistoryAtom = atom(null, (get, set, snapshot: EffectFile) => {
+  const history = get(effectHistoryAtom);
+ succeeded in 52ms:
+src/store/effectHistory.ts:13:export const effectHistoryAtom = atom<EffectHistoryState>({
+src/store/effectHistory.ts:20:  const history = get(effectHistoryAtom);
+src/store/effectHistory.ts:25:  set(effectHistoryAtom, { past, future: [] });
+src/store/effectHistory.ts:29:export const canUndoAtom = atom((get) => get(effectHistoryAtom).past.length > 0);
+src/store/effectHistory.ts:32:export const canRedoAtom = atom((get) => get(effectHistoryAtom).future.length > 0);
+src/features/effect/useEffectHistory.ts:4:import { effectHistoryAtom } from "@/store/effectHistory";
+src/features/effect/useEffectHistory.ts:12: *   pushSnapshot();
+src/features/effect/useEffectHistory.ts:17:  const [history, setHistory] = useAtom(effectHistoryAtom);
+src/features/effect/CurveEditor.tsx:231:      pushSnapshot();
+src/features/effect/KeyframeProperties.tsx:111:    pushSnapshot();
+src/features/effect/SubEffectList.tsx:30:    pushSnapshot();
+src/features/effect/SubEffectList.tsx:43:    pushSnapshot();
+src/features/effect/SubEffectList.tsx:59:    pushSnapshot();
+src/features/effect/__tests__/effectHistory.test.ts:4:import { effectHistoryAtom, pushHistoryAtom, canUndoAtom, canRedoAtom } from "@/store/effectHistory";
+src/features/effect/__tests__/effectHistory.test.ts:35:    expect(store.get(effectHistoryAtom).past).toHaveLength(1);
+src/features/effect/__tests__/effectHistory.test.ts:36:    expect(store.get(effectHistoryAtom).future).toHaveLength(0);
+src/features/effect/__tests__/effectHistory.test.ts:44:    expect(store.get(effectHistoryAtom).past).toHaveLength(50);
+src/features/effect/__tests__/effectHistory.test.ts:51:    store.set(effectHistoryAtom, {
+src/features/effect/__tests__/effectHistory.test.ts:66:    expect(store.get(effectHistoryAtom).past[0].effNum).toBe(1);
+src/features/effect/EffectSubRenderer.tsx:441:        pushSnapshot();
+
+thinking
+**Inspecting geometry allocations**
+codex
+I’ve confirmed the concrete problem sites (listener leak, frame-time atom writes, repeated DataURI conversion, and per-surface key handlers). I’m now checking renderer internals to evaluate whether phase sequencing and risk controls are sufficient.
+exec
+/bin/zsh -lc "sed -n '220,520p' src/features/effect/EffectSubRenderer.tsx" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '240,520p' src/features/effect/StripEffectRenderer.tsx" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+
+  // Non-selected sub-effects load their own textures independently (no global status)
+  useEffect(() => {
+    if (isSelected) return; // handled above
+
+    if (!textureName || !currentProject) {
+      setTexture(null);
+      return;
+    }
+
+    const sanitized = textureName.trim();
+    if (!sanitized) {
+      setTexture(null);
+      return;
+    }
+
+    const isTauriRuntime =
+      typeof window !== "undefined" &&
+      ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
+    if (!isTauriRuntime) {
+exec
+/bin/zsh -lc "sed -n '1,220p' src/features/effect/PathVisualizer.tsx" in /Users/anirudh/gamedev/pko-tools succeeded in 50ms:
+    }
+
+    const candidates = resolveTextureCandidates(texName, currentProject.projectDirectory);
+    let isActive = true;
+
+    const tryLoad = async (index: number) => {
+      if (index >= candidates.length) {
+        setTexture(null);
+        return;
+      }
+      try {
+        const decoded = await invoke<DecodedTexture>("decode_texture", {
+          path: candidates[index],
+        });
+        if (!isActive) return;
+
+        const binary = Uint8Array.from(atob(decoded.data), (char) =>
+          char.charCodeAt(0),
+        );
+        const loaded = createEffectTexture(binary, decoded.width, decoded.height);
+ succeeded in 52ms:
+/// <reference types="@react-three/fiber" />
+import { pathPointsAtom } from "@/store/path";
+import { effectDataAtom, effectPlaybackAtom } from "@/store/effect";
+import { useAtomValue } from "jotai";
+import { Line } from "@react-three/drei";
+import { useFrame } from "@react-three/fiber";
+import React from "react";
+import { useMemo, useRef } from "react";
+import * as THREE from "three";
+import { getPathPosition } from "@/features/effect/animation";
+
+/** Default path velocity — must match the value used in EffectViewport PathFollower. */
+const DEFAULT_PATH_VELOCITY = 2.0;
+
+export default function PathVisualizer() {
+  const pathPoints = useAtomValue(pathPointsAtom);
+  const effectData = useAtomValue(effectDataAtom);
+  const playback = useAtomValue(effectPlaybackAtom);
+  const markerRef = useRef<THREE.Mesh>(null);
+
+
+thinking
+**Surveying keyboard handlers**
+exec
+/bin/zsh -lc "rg -n \"window\\.addEventListener\\(\\s*\\\"keydown\\\"|window\\.addEventListener\\(\\s*'keydown'|addEventListener\\(\\s*\\\"keydown\\\"|addEventListener\\(\\s*'keydown'\" src | head -n 200" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+src/features/effect/KeyframeProperties.tsx:138:    window.addEventListener("keydown", onKeyDown);
+src/features/effect/EffectWorkbench.tsx:189:    window.addEventListener("keydown", onKeyDown);
+src/features/effect/EffectViewport.tsx:86:    window.addEventListener("keydown", onKeyDown);
+src/components/ui/sidebar.tsx:109:      window.addEventListener("keydown", handleKeyDown)
+
+thinking
+**Analyzing playback state impact**
+exec
+/bin/zsh -lc "sed -n '1,260p' src/features/effect/useEffectModel.ts" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+import { useEffect, useState } from "react";
+import * as THREE from "three";
+import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+import { loadEffectModel } from "@/commands/effect";
+
+const geometryCache = new Map<string, THREE.BufferGeometry>();
+const loader = new GLTFLoader();
+
+function parseGltfJson(json: string): Promise<THREE.BufferGeometry | null> {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(json);
+
+  return new Promise((resolve, reject) => {
+    loader.parse(
+      data.buffer,
+      "",
+      (gltf) => {
+        let found: THREE.BufferGeometry | null = null;
+        gltf.scene.traverse((child) => {
+          if (!found && (child as THREE.Mesh).isMesh) {
+
+thinking
+**Inspecting preserveDrawingBuffer usage**
+exec
+/bin/zsh -lc "sed -n '1,260p' src/features/effect/useCanvasCapture.ts" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+import { useCallback, useRef, useState } from "react";
+
+export function useCanvasCapture() {
+  const [isRecording, setIsRecording] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<number>(0);
+
+  const startRecording = useCallback(
+    (canvas: HTMLCanvasElement, durationMs: number, fps = 30): Promise<Blob> => {
+      return new Promise((resolve, reject) => {
+        try {
+          const stream = canvas.captureStream(fps);
+          const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+            ? "video/webm;codecs=vp9"
+            : "video/webm";
+
+          const recorder = new MediaRecorder(stream, { mimeType });
+          recorderRef.current = recorder;
+
+thinking
+**Inspecting export dialog usage**
+exec
+/bin/zsh -lc "sed -n '1,260p' src/features/effect/ExportDialog.tsx" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { effectPlaybackAtom, selectedFrameIndexAtom } from "@/store/effect";
+import { useAtom } from "jotai";
+import { Download, Video, Square } from "lucide-react";
+import React from "react";
+import { useCallback, useState } from "react";
+import { useCanvasCapture } from "@/features/effect/useCanvasCapture";
+
+interface ExportDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Total effect duration in seconds. */
+
+thinking
+**Inspecting data loaders and app context**
+exec
+/bin/zsh -lc "sed -n '1,280p' src/App.tsx" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,260p' src/store/workbench.ts" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc 'ls -la src/pages && rg -n "activeWorkbench|route|pathname|workbench|sidebar|navigator" src/pages src/App.tsx src/store | head -n 200' in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+import {
+  Routes,
+  Route,
+  useNavigate,
+} from "react-router";
+
+import "./assets/index.css";
+import SideNav from "./components/SideNav/SideNav";
+import { SidebarProvider } from "./components/ui/sidebar";
+import { getCurrentProject, getProjectList } from "./commands/project";
+import { useAtom } from "jotai";
+import { currentProjectAtom, projectListAtom } from "./store/project";
+import { useEffect } from "react";
+import StatusBar from "./components/StatusBar/StatusBar";
+import CharacterPage from "./pages/characters";
+import EffectsPage from "./pages/effects";
+import ItemsPage from "./pages/items";
+import MapsPage from "./pages/maps";
+import BuildingsPage from "./pages/buildings";
+import WorkspaceNavigator from "./components/WorkspaceNavigator/WorkspaceNavigator";
+ succeeded in 52ms:
+import { WorkbenchState, WorkbenchSummary } from "@/types/item";
+import { atom } from "jotai";
+
+/** The currently active workbench being edited */
+export const activeWorkbenchAtom = atom<WorkbenchState | null>(null);
+
+/** List of all workbenches for the navigator */
+export const workbenchListAtom = atom<WorkbenchSummary[]>([]);
+
+/** Whether we're in workbench mode (editing an imported item) */
+export const isWorkbenchModeAtom = atom<boolean>(false);
+
+/** Currently selected dummy for editing */
+export const editingDummyAtom = atom<number | null>(null);
+
+/** Whether click-to-place mode is active */
+export const dummyPlacementModeAtom = atom<boolean>(false);
+ succeeded in 51ms:
+total 0
+drwxr-xr-x@  8 anirudh  staff  256 Feb 12 14:33 .
+drwxr-xr-x@ 15 anirudh  staff  480 Feb 12 14:33 ..
+drwxr-xr-x   3 anirudh  staff   96 Feb 12 14:33 buildings
+drwxr-xr-x@  3 anirudh  staff   96 Jan  5 06:14 characters
+drwxr-xr-x   3 anirudh  staff   96 Feb  1 18:38 effects
+drwxr-xr-x   3 anirudh  staff   96 Feb  2 20:39 items
+drwxr-xr-x   3 anirudh  staff   96 Feb 12 14:33 maps
+drwxr-xr-x@  3 anirudh  staff   96 Jan  5 06:14 project-creator
+src/App.tsx:5:} from "react-router";
+src/App.tsx:9:import { SidebarProvider } from "./components/ui/sidebar";
+src/store/workbench.ts:4:/** The currently active workbench being edited */
+src/store/workbench.ts:5:export const activeWorkbenchAtom = atom<WorkbenchState | null>(null);
+src/store/workbench.ts:7:/** List of all workbenches for the navigator */
+src/store/workbench.ts:8:export const workbenchListAtom = atom<WorkbenchSummary[]>([]);
+src/store/workbench.ts:10:/** Whether we're in workbench mode (editing an imported item) */
+src/pages/project-creator/ProjectCreator.tsx:15:import { useNavigate } from "react-router";
+src/pages/effects/index.tsx:16:            No project selected. Please select a project from the sidebar.
+src/store/character.ts:16:/** Whether dummy editing mode is active in the character workbench. */
+src/pages/characters/index.tsx:16:            No project selected. Please select a project from the sidebar.
+
+thinking
+**Inspecting page composition**
+exec
+/bin/zsh -lc "sed -n '1,220p' src/pages/effects/index.tsx" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,220p' src/pages/maps/index.tsx" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "sed -n '1,220p' src/pages/items/index.tsx" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import EffectWorkbench from "@/features/effect/EffectWorkbench";
+import { currentProjectAtom } from "@/store/project";
+import { useAtomValue } from "jotai";
+import { AlertCircle } from "lucide-react";
+
+export default function EffectsPage() {
+  const currentProject = useAtomValue(currentProjectAtom);
+  if (!currentProject) {
+    return (
+      <div className="flex h-full w-full items-center justify-center">
+        <Alert variant="destructive" className="max-w-96">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>
+            No project selected. Please select a project from the sidebar.
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+ succeeded in 52ms:
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import ItemWorkbench from "@/features/item/ItemWorkbench";
+import { currentProjectAtom } from "@/store/project";
+import { useAtomValue } from "jotai";
+import { AlertCircle } from "lucide-react";
+
+export default function ItemsPage() {
+  const currentProject = useAtomValue(currentProjectAtom);
+  if (!currentProject) {
+    return (
+      <div className="flex justify-center items-center h-full w-full">
+        <Alert variant="destructive" className="max-w-96">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>
+            No project selected. Please select a project from the sidebar.
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+ succeeded in 52ms:
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import MapWorkbench from "@/features/map/MapWorkbench";
+import { currentProjectAtom } from "@/store/project";
+import { useAtomValue } from "jotai";
+import { AlertCircle } from "lucide-react";
+
+export default function MapsPage() {
+  const currentProject = useAtomValue(currentProjectAtom);
+  if (!currentProject) {
+    return (
+      <div className="flex justify-center items-center h-full w-full">
+        <Alert variant="destructive" className="max-w-96">
+          <AlertCircle className="h-4 w-4" />
+          <AlertTitle>Error</AlertTitle>
+          <AlertDescription>
+            No project selected. Please select a project from the sidebar.
+          </AlertDescription>
+        </Alert>
+      </div>
+    );
+
+thinking
+**Inspecting keyboard navigation components**
+exec
+/bin/zsh -lc "sed -n '1,280p' src/components/WorkspaceNavigator/WorkspaceNavigator.tsx" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+import CharacterNavigator from "@/features/character/CharacterNavigator";
+import EffectNavigator from "@/features/effect/EffectNavigator";
+import ItemNavigator from "@/features/item/ItemNavigator";
+import MapNavigator from "@/features/map/MapNavigator";
+import BuildingsNavigator from "@/features/buildings/BuildingsNavigator";
+import { Route, Routes } from "react-router";
+import { Sidebar, SidebarContent } from "../ui/sidebar";
+
+export default function WorkspaceNavigator() {
+  return (
+    <Sidebar side="right">
+      <SidebarContent>
+        <Routes>
+          <Route path="/" element={<div></div>} />
+          <Route path="/characters" element={<CharacterNavigator/>} />
+          <Route path="/effects" element={<EffectNavigator />} />
+          <Route path="/items" element={<ItemNavigator />} />
+          <Route path="/maps" element={<MapNavigator />} />
+          <Route path="/buildings" element={<BuildingsNavigator />} />
+          <Route path="*" element={<div />} />
+exec
+/bin/zsh -lc "sed -n '1,320p' src/components/SideNav/SideNav.tsx" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+import { ChevronsUpDown, GalleryVerticalEnd } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+} from "../ui/sidebar";
+import { useAtom } from "jotai";
+import { currentProjectAtom, projectListAtom } from "@/store/project";
+exec
+/bin/zsh -lc "sed -n '1,260p' src/features/item/ItemWorkbench.tsx" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+import {
+  itemEffectConfigAtom,
+  itemGltfJsonAtom,
+  itemLitInfoAtom,
+  itemMetadataAtom,
+  selectedItemAtom,
+  forgeEffectPreviewAtom,
+  itemCharTypeAtom,
+  itemEffectCategoryAtom,
+  itemCategoryAvailabilityAtom,
+  itemDebugConfigAtom,
+} from "@/store/item";
+import { currentProjectAtom } from "@/store/project";
+import { isWorkbenchModeAtom, activeWorkbenchAtom, dummyPlacementModeAtom, editingDummyAtom } from "@/store/workbench";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { Canvas } from "@react-three/fiber";
+import { Environment, OrbitControls } from "@react-three/drei";
+import * as THREE from "three";
+import ItemModelViewer from "./ItemModelViewer";
+
+thinking
+**Inspecting state usage and versioning**
+exec
+/bin/zsh -lc "rg -n \"useAtomValue\\(effectPlaybackAtom\\)|useAtom\\(effectPlaybackAtom\\)\" src/features/effect src/store | head -n 200" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+src/features/effect/EffectViewport.tsx:29:  const playback = useAtomValue(effectPlaybackAtom);
+src/features/effect/EffectViewport.tsx:65:  const playback = useAtomValue(effectPlaybackAtom);
+src/features/effect/ExportDialog.tsx:30:  const [playback, setPlayback] = useAtom(effectPlaybackAtom);
+src/features/effect/PathVisualizer.tsx:18:  const playback = useAtomValue(effectPlaybackAtom);
+src/features/effect/KeyframeTimeline.tsx:17:  const [playback, setPlayback] = useAtom(effectPlaybackAtom);
+src/features/effect/EffectPlaybackDriver.tsx:13:  const [playback, setPlayback] = useAtom(effectPlaybackAtom);
+src/features/effect/EffectSubRenderer.tsx:67:  const playback = useAtomValue(effectPlaybackAtom);
+src/features/effect/particle/ParticleSimulator.tsx:85:  const playback = useAtomValue(effectPlaybackAtom);
+
+thinking
+**Inspecting keyframe timeline updates**
+exec
+/bin/zsh -lc "sed -n '1,260p' src/features/effect/KeyframeTimeline.tsx" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+import { Button } from "@/components/ui/button";
+import {
+  effectDataAtom,
+  effectPlaybackAtom,
+  selectedFrameIndexAtom,
+  selectedSubEffectIndexAtom,
+} from "@/store/effect";
+import { useAtom } from "jotai";
+import { Pause, Play, Repeat, Square } from "lucide-react";
+import React from "react";
+import { useMemo } from "react";
+
+export default function KeyframeTimeline() {
+  const [selectedFrame, setSelectedFrame] = useAtom(selectedFrameIndexAtom);
+  const [selectedSubEffectIndex] = useAtom(selectedSubEffectIndexAtom);
+  const [effectData] = useAtom(effectDataAtom);
+  const [playback, setPlayback] = useAtom(effectPlaybackAtom);
+
+  const { frameCount, frameDurations, frameTextures } = useMemo(() => {
+    if (!effectData || selectedSubEffectIndex === null) {
+
+thinking
+**Inspecting command palette presence**
+exec
+/bin/zsh -lc 'cat package.json' in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc 'rg -n "cmdk|Command|command palette|CommandDialog|kbar" src package.json' in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc 'ls -la src/components/ui | head -n 200' in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+{
+  "name": "pko-tools",
+  "private": true,
+  "version": "0.1.4",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "tauri": "tauri",
+    "kaitai:sync": "node scripts/sync-kaitai-formats.mjs"
+  },
+  "dependencies": {
+    "@radix-ui/react-dialog": "^1.1.4",
+    "@radix-ui/react-dropdown-menu": "^2.1.4",
+    "@radix-ui/react-label": "^2.1.1",
+    "@radix-ui/react-progress": "^1.1.1",
+    "@radix-ui/react-scroll-area": "^1.2.2",
+ succeeded in 51ms:
+src/commands/item.ts:101:// Workbench Commands
+ succeeded in 51ms:
+total 224
+drwxr-xr-x@ 22 anirudh  staff    704 Feb  1 18:38 .
+drwxr-xr-x@  6 anirudh  staff    192 Jan  5 06:14 ..
+-rw-r--r--@  1 anirudh  staff   1598 Jan  5 06:14 alert.tsx
+-rw-r--r--@  1 anirudh  staff   2712 Jan  5 06:14 breadcrumb.tsx
+-rw-r--r--@  1 anirudh  staff   1902 Jan  5 06:14 button.tsx
+-rw-r--r--   1 anirudh  staff   1828 Jan 23 07:12 card.tsx
+-rw-r--r--@  1 anirudh  staff   3835 Jan  5 06:14 dialog.tsx
+-rw-r--r--@  1 anirudh  staff   3021 Jan  5 06:14 drawer.tsx
+-rw-r--r--@  1 anirudh  staff   7402 Jan  5 06:14 dropdown-menu.tsx
+-rw-r--r--@  1 anirudh  staff    768 Jan  5 06:14 input.tsx
+-rw-r--r--@  1 anirudh  staff    710 Jan  5 06:14 label.tsx
+-rw-r--r--@  1 anirudh  staff    788 Jan  5 06:14 progress.tsx
+-rw-r--r--@  1 anirudh  staff   1690 Jan  5 06:14 scroll-area-virtualizable.tsx
+-rw-r--r--@  1 anirudh  staff   1642 Jan  5 06:14 scroll-area.tsx
+-rw-r--r--@  1 anirudh  staff    756 Jan  5 06:14 separator.tsx
+-rw-r--r--@  1 anirudh  staff   4280 Jan  5 06:14 sheet.tsx
+-rw-r--r--@  1 anirudh  staff  23367 Jan  5 06:14 sidebar.tsx
+-rw-r--r--@  1 anirudh  staff    266 Jan  5 06:14 skeleton.tsx
+-rw-r--r--   1 anirudh  staff   1877 Feb  1 18:38 tabs.tsx
+
+thinking
+**Assessing existing test coverage**
+exec
+/bin/zsh -lc 'rg --files src/features | rg "__tests__|test" | head -n 300' in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+src/features/effect/particle/__tests__/particleRotation.test.ts
+src/features/effect/particle/__tests__/particlePlayTime.test.ts
+src/features/effect/particle/__tests__/hitEffect.test.ts
+src/features/effect/particle/__tests__/particlePool.test.ts
+src/features/effect/particle/__tests__/particleTypeCoverage.test.ts
+src/features/effect/particle/__tests__/particleTypePhysics.test.ts
+src/features/effect/particle/__tests__/particleBlendMode.test.ts
+src/features/effect/particle/__tests__/particleTexture.test.ts
+src/features/effect/particle/__tests__/particle.test.ts
+src/features/effect/__tests__/stripBlendMode.test.ts
+src/features/effect/__tests__/useCanvasCapture.test.ts
+src/features/effect/__tests__/pixelDiff.ts
+src/features/effect/__tests__/EffectRendering.test.ts
+src/features/effect/__tests__/KeyframeTimeline.test.tsx
+src/features/effect/__tests__/materialProperties.test.ts
+src/features/effect/__tests__/CurveEditor.test.ts
+src/features/effect/__tests__/textureFactory.test.ts
+src/features/effect/__tests__/pixelDiff.test.ts
+src/features/effect/__tests__/CurveEditor.test.tsx
+src/features/effect/__tests__/useEffectModel.test.ts
+
+thinking
+**Planning precise code referencing**
+codex
+I have enough context to draft a high-confidence critique. I’m pulling exact line references now so each recommendation is tied to concrete code locations.
+exec
+/bin/zsh -lc "nl -ba src/features/character/CharacterNavigator.tsx | sed -n '40,140p'" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+    40	      characters.filter((character) =>
+    41	        character.name.toLowerCase().includes(query.toLowerCase())
+    42	      )
+    43	    );
+    44	  }, [query, characters]);
+    45	
+    46	
+    47	
+    48	  const parentRef = React.useRef(null);
+    49	  let rowVirtualizer: Virtualizer<Element, Element> = useVirtualizer({
+    50	    count: filteredCharacters.length,
+    51	    getScrollElement: () => parentRef.current,
+    52	    estimateSize: () => 40,
+    53	  });
+    54	
+    55	  async function selectCharacter(character: Character) {
+    56	    if (!character) {
+    57	      return;
+    58	    }
+    59	
+exec
+/bin/zsh -lc "nl -ba src/features/effect/EffectPlaybackDriver.tsx | sed -n '1,140p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "nl -ba src/features/effect/EffectViewport.tsx | sed -n '60,140p'" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+     1	import {
+     2	  effectDataAtom,
+     3	  effectPlaybackAtom,
+     4	} from "@/store/effect";
+     5	import { useFrame } from "@react-three/fiber";
+     6	import { useAtom } from "jotai";
+     7	import { useMemo } from "react";
+     8	
+     9	const DEFAULT_FRAME_DURATION = 1 / 30;
+    10	
+    11	export default function EffectPlaybackDriver() {
+    12	  const [effectData] = useAtom(effectDataAtom);
+    13	  const [playback, setPlayback] = useAtom(effectPlaybackAtom);
+    14	
+    15	  // Compute total duration as the MAX across all sub-effects (PKO plays them all simultaneously)
+    16	  const totalDuration = useMemo(() => {
+    17	    if (!effectData || effectData.subEffects.length === 0) {
+    18	      return 0;
+    19	    }
+    20	
+ succeeded in 52ms:
+    60	  { mode: "off", icon: MousePointer, label: "No gizmo (Esc)", key: "escape" },
+    61	];
+    62	
+    63	export default function EffectViewport() {
+    64	  const effectData = useAtomValue(effectDataAtom);
+    65	  const playback = useAtomValue(effectPlaybackAtom);
+    66	  const selectedSubEffectIndex = useAtomValue(selectedSubEffectIndexAtom);
+    67	  const textureStatus = useAtomValue(effectTextureStatusAtom);
+    68	  const [, setReloadToken] = useAtom(effectTextureReloadAtom);
+    69	  const [gizmoMode, setGizmoMode] = useAtom(gizmoModeAtom);
+    70	  const [compositePreview, setCompositePreview] = useAtom(compositePreviewAtom);
+    71	
+    72	  useEffect(() => {
+    73	    function onKeyDown(event: KeyboardEvent) {
+    74	      // Skip if user is typing in an input
+    75	      const tag = (event.target as HTMLElement)?.tagName;
+    76	      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+    77	
+    78	      const key = event.key.toLowerCase();
+    79	      if (key === "t") setGizmoMode("translate");
+
+thinking
+**Planning multi-file line gathering**
+exec
+/bin/zsh -lc "nl -ba src/features/effect/EffectWorkbench.tsx | sed -n '150,230p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "nl -ba src/features/effect/KeyframeProperties.tsx | sed -n '100,170p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "nl -ba src/components/ui/sidebar.tsx | sed -n '90,130p'" in /Users/anirudh/gamedev/pko-tools succeeded in 51ms:
+   150	      setIsSaving(false);
+   151	    }
+   152	  }, [
+   153	    currentProject,
+   154	    effectData,
+   155	    saveAsName,
+   156	    setDirty,
+   157	    setEffectData,
+   158	    setOriginalEffect,
+   159	    setSelectedEffect,
+   160	    toast,
+   161	  ]);
+   162	
+   163	  useEffect(() => {
+   164	    function onKeyDown(event: KeyboardEvent) {
+   165	      const mod = event.metaKey || event.ctrlKey;
+   166	      if (mod && event.key.toLowerCase() === "s") {
+   167	        event.preventDefault();
+   168	        if (!isDirty) {
+   169	          toast({
+ succeeded in 51ms:
+   100	    if (!frameData) return;
+   101	    setClipboard({
+   102	      size: [...frameData.size] as [number, number, number],
+   103	      angle: [...frameData.angle] as [number, number, number],
+   104	      position: [...frameData.position] as [number, number, number],
+   105	      color: [...frameData.color] as [number, number, number, number],
+   106	    });
+   107	  }, [frameData, setClipboard]);
+   108	
+   109	  const handlePaste = useCallback(() => {
+   110	    if (!clipboard || !frameData) return;
+   111	    pushSnapshot();
+   112	    updateFrameVector("frameSizes", clipboard.size);
+   113	    updateFrameVector("frameAngles", clipboard.angle);
+   114	    updateFrameVector("framePositions", clipboard.position);
+   115	    updateFrameVector("frameColors", clipboard.color);
+   116	  }, [clipboard, frameData, pushSnapshot]);
+   117	
+   118	  useEffect(() => {
+   119	    function onKeyDown(event: KeyboardEvent) {
+ succeeded in 51ms:
+    90	    // Helper to toggle the sidebar.
+    91	    const toggleSidebar = React.useCallback(() => {
+    92	      return isMobile
+    93	        ? setOpenMobile((open) => !open)
+    94	        : setOpen((open) => !open)
+    95	    }, [isMobile, setOpen, setOpenMobile])
+    96	
+    97	    // Adds a keyboard shortcut to toggle the sidebar.
+    98	    React.useEffect(() => {
+    99	      const handleKeyDown = (event: KeyboardEvent) => {
+   100	        if (
+   101	          event.key === SIDEBAR_KEYBOARD_SHORTCUT &&
+   102	          (event.metaKey || event.ctrlKey)
+   103	        ) {
+   104	          event.preventDefault()
+   105	          toggleSidebar()
+   106	        }
+   107	      }
+   108	
+   109	      window.addEventListener("keydown", handleKeyDown)
+
+thinking
+**Gathering reference lines for duplicates and allocations**
+exec
+/bin/zsh -lc "nl -ba src/features/map/MapTerrainViewer.tsx | sed -n '1,220p'" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+     1	import { useEffect, useMemo, useState } from "react";
+     2	import { useGLTF } from "@react-three/drei";
+     3	import * as THREE from "three";
+     4	import { MapViewConfig } from "@/types/map";
+     5	
+     6	function jsonToDataURI(json: string): Promise<string> {
+     7	  return new Promise((resolve, reject) => {
+     8	    try {
+     9	      if (!json) {
+    10	        reject(new Error("No JSON provided"));
+    11	        return;
+    12	      }
+    13	      const blob = new Blob([json], { type: "application/json" });
+    14	      const reader = new FileReader();
+    15	      reader.onload = () => resolve(reader.result as string);
+    16	      reader.onerror = (error) => reject(error);
+    17	      reader.readAsDataURL(blob);
+    18	    } catch (error) {
+    19	      reject(error);
+    20	    }
+exec
+/bin/zsh -lc "nl -ba src/features/item/ItemModelViewer.tsx | sed -n '1,120p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "nl -ba src/features/buildings/BuildingsModelViewer.tsx | sed -n '1,120p'" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+     1	import { useEffect, useMemo, useState } from "react";
+     2	import { useGLTF } from "@react-three/drei";
+     3	import * as THREE from "three";
+     4	import { ItemLitInfo, WorkbenchDummy } from "@/types/item";
+     5	import { ItemEffectConfig, ItemDebugConfig } from "@/store/item";
+     6	import { ItemLitRenderer } from "./ItemLitRenderer";
+     7	import { ForgeEffectPreview } from "@/types/item";
+     8	import { ItemParticleRenderer } from "./ItemParticleRenderer";
+     9	import { ItemEffectRenderer } from "./ItemEffectRenderer";
+    10	import {
+    11	  extractItemBoundingSpheres,
+    12	  extractItemMeshes,
+    13	  ItemBoundingSphereIndicators,
+    14	  ItemMeshHighlights,
+    15	  ItemDummyHelpers,
+    16	  ItemWorkbenchDummyHelpers,
+    17	} from "./ItemDebugOverlays";
+    18	
+    19	function jsonToDataURI(json: string): Promise<string> {
+    20	  return new Promise((resolve, reject) => {
+ succeeded in 52ms:
+     1	import { useEffect, useState } from "react";
+     2	import { useGLTF, useAnimations } from "@react-three/drei";
+     3	import * as THREE from "three";
+     4	
+     5	function jsonToDataURI(json: string): Promise<string> {
+     6	  return new Promise((resolve, reject) => {
+     7	    try {
+     8	      if (!json) {
+     9	        reject(new Error("No JSON provided"));
+    10	        return;
+    11	      }
+    12	      const blob = new Blob([json], { type: "application/json" });
+    13	      const reader = new FileReader();
+    14	      reader.onload = () => resolve(reader.result as string);
+    15	      reader.onerror = (error) => reject(error);
+    16	      reader.readAsDataURL(blob);
+    17	    } catch (error) {
+    18	      reject(error);
+    19	    }
+    20	  });
+
+thinking
+**Locating character workbench references**
+exec
+/bin/zsh -lc "nl -ba src/features/character/CharacterWorkbench.tsx | sed -n '1,270p'" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+     1	import { characterGltfJsonAtom, characterMetadataAtom, dummyEditModeAtom } from "@/store/character";
+     2	import { useAtomValue, useSetAtom } from "jotai";
+     3	import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+     4	import { useGLTF, OrbitControls,  CameraControls,  Environment, useAnimations } from '@react-three/drei';
+     5	import { Canvas, useFrame} from '@react-three/fiber';
+     6	import * as THREE from 'three';
+     7	import { useControls, Leva } from 'leva';
+     8	import { extractBoundingSpheres, BoundingSphereIndicators } from './BoundingSphereIndicators';
+     9	import { SkeletonDebugHelpers } from './SkeletonDebugHelpers';
+    10	import { CharacterMetadataPanel } from './CharacterMetadataPanel';
+    11	import { extractMeshes, MeshHighlights, getUniqueMeshIndices } from './MeshHighlights';
+    12	
+    13	function jsonToDataURI(json: string): Promise<string> {
+    14	  return new Promise((resolve, reject) => {
+    15	    try {
+    16	
+    17	      if (!json) {
+    18	        reject(new Error('No JSON provided'));
+    19	        return;
+    20	      }
+
+thinking
+**Requesting line references**
+exec
+/bin/zsh -lc "nl -ba src/features/item/ItemNavigator.tsx | sed -n '90,220p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "nl -ba src/features/map/MapNavigator.tsx | sed -n '40,170p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "nl -ba src/features/buildings/BuildingsNavigator.tsx | sed -n '50,170p'" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+    90	      case "carsise":
+    91	        return item.model_carsise;
+    92	      case "phyllis":
+    93	        return item.model_phyllis;
+    94	      case "ami":
+    95	        return item.model_ami;
+    96	    }
+    97	  }
+    98	
+    99	  async function loadModel(item: Item, variant: ModelVariant) {
+   100	    if (!item || !currentProject) return;
+   101	
+   102	    const modelId = getModelId(item, variant);
+   103	
+   104	    setItemLoading(true);
+   105	    setItemGltfJson(null);
+   106	    setItemMetadata(null);
+   107	    setItemLitInfo(null);
+   108	
+   109	    try {
+ succeeded in 51ms:
+    40	
+    41	  useEffect(() => {
+    42	    setFilteredMaps(
+    43	      maps.filter((m) =>
+    44	        m.name.toLowerCase().includes(query.toLowerCase()) ||
+    45	        m.display_name.toLowerCase().includes(query.toLowerCase())
+    46	      )
+    47	    );
+    48	  }, [query, maps]);
+    49	
+    50	  const parentRef = React.useRef(null);
+    51	  const rowVirtualizer: Virtualizer<Element, Element> = useVirtualizer({
+    52	    count: filteredMaps.length,
+    53	    getScrollElement: () => parentRef.current,
+    54	    estimateSize: () => 48,
+    55	    overscan: 5,
+    56	  });
+    57	
+    58	  async function selectMap(map: MapEntry) {
+    59	    if (!currentProject) return;
+ succeeded in 51ms:
+    50	          b.filename.toLowerCase().includes(query.toLowerCase()) ||
+    51	          String(b.id).includes(query)
+    52	      )
+    53	    );
+    54	  }, [query, buildings]);
+    55	
+    56	  const parentRef = React.useRef(null);
+    57	  const rowVirtualizer: Virtualizer<Element, Element> = useVirtualizer({
+    58	    count: filteredBuildings.length,
+    59	    getScrollElement: () => parentRef.current,
+    60	    estimateSize: () => 48,
+    61	    overscan: 5,
+    62	  });
+    63	
+    64	  async function selectBuilding(building: BuildingEntry) {
+    65	    if (!currentProject) return;
+    66	    setSelectedBuilding(building);
+    67	    setBuildingGltfJson(null);
+    68	    setBuildingLoading(true);
+    69	
+
+thinking
+**Gathering load and reset line references**
+exec
+/bin/zsh -lc "nl -ba src/features/effect/EffectNavigator.tsx | sed -n '45,120p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "nl -ba src/features/effect/useEffectHistory.ts | sed -n '1,120p'" in /Users/anirudh/gamedev/pko-toolsexec
+/bin/zsh -lc "nl -ba src/features/effect/EffectSubRenderer.tsx | sed -n '360,470p'" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+    45	    if (!query) {
+    46	      return effectFiles;
+    47	    }
+    48	
+    49	    return effectFiles.filter((name) =>
+    50	      name.toLowerCase().includes(query.toLowerCase())
+    51	    );
+    52	  }, [effectFiles, query]);
+    53	
+    54	  async function selectEffect(effectName: string) {
+    55	    if (!currentProject) {
+    56	      return;
+    57	    }
+    58	
+    59	    if (isDirty) {
+    60	      setPendingEffect(effectName);
+    61	      return;
+    62	    }
+    63	
+    64	    await loadEffectData(effectName);
+ succeeded in 51ms:
+     1	import { useCallback } from "react";
+     2	import { useAtom } from "jotai";
+     3	import { effectDataAtom, effectDirtyAtom } from "@/store/effect";
+     4	import { effectHistoryAtom } from "@/store/effectHistory";
+     5	
+     6	/**
+     7	 * Hook providing undo/redo actions for effect data.
+     8	 *
+     9	 * Usage:
+    10	 *   const { undo, redo, pushSnapshot, canUndo, canRedo } = useEffectHistory();
+    11	 *   // Before mutating effect data:
+    12	 *   pushSnapshot();
+    13	 *   setEffectData(newData);
+    14	 */
+    15	export function useEffectHistory() {
+    16	  const [effectData, setEffectData] = useAtom(effectDataAtom);
+    17	  const [history, setHistory] = useAtom(effectHistoryAtom);
+    18	  const [, setDirty] = useAtom(effectDirtyAtom);
+    19	
+    20	  const canUndo = history.past.length > 0;
+ succeeded in 50ms:
+   360	      if (uvResult && meshRef.current.geometry) {
+   361	        const uvAttr = meshRef.current.geometry.getAttribute("uv");
+   362	        if (uvAttr && uvAttr.count === uvResult.uvs.length) {
+   363	          for (let v = 0; v < uvResult.uvs.length; v++) {
+   364	            uvAttr.setXY(v, uvResult.uvs[v][0], uvResult.uvs[v][1]);
+   365	          }
+   366	          uvAttr.needsUpdate = true;
+   367	        }
+   368	      }
+   369	    }
+   370	
+   371	    // UV animation for effectType 3 (EFFECT_MODELTEXTURE) — snapped UV sets
+   372	    if (subEffect && playback.isPlaying && subEffect.effectType === 3 && subEffect.texList.length > 0) {
+   373	      const texIdx = getTexListFrameIndex(subEffect, playback.currentTime, playback.isLooping);
+   374	      if (texIdx !== null && subEffect.texList[texIdx] && meshRef.current.geometry) {
+   375	        const uvAttr = meshRef.current.geometry.getAttribute("uv");
+   376	        const texUVs = subEffect.texList[texIdx];
+   377	        if (uvAttr && uvAttr.count === texUVs.length) {
+   378	          for (let v = 0; v < texUVs.length; v++) {
+   379	            uvAttr.setXY(v, texUVs[v][0], texUVs[v][1]);
+
+thinking
+**Extracting frame allocation lines**
+exec
+/bin/zsh -lc "nl -ba src/features/effect/StripEffectRenderer.tsx | sed -n '300,430p'" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+   300	      transparent: true,
+   301	      depthWrite: false,
+   302	      side: THREE.DoubleSide,
+   303	      blending: blendState.blending,
+   304	      uniforms: {
+   305	        uColor: { value: new THREE.Color(stripData.color[0], stripData.color[1], stripData.color[2]) },
+   306	        uOpacity: { value: stripData.color[3] },
+   307	        uTexture: { value: null },
+   308	        uHasTexture: { value: false },
+   309	      },
+   310	    });
+   311	    if (blendState.blending === THREE.CustomBlending && "blendSrc" in blendState) {
+   312	      mat.blendSrc = blendState.blendSrc!;
+   313	      mat.blendDst = blendState.blendDst!;
+   314	    }
+   315	    return mat;
+   316	  }, [stripData, blendState]);
+   317	
+   318	  // Update texture uniform
+   319	  useEffect(() => {
+
+thinking
+**Identifying line references for playback atoms**
+exec
+/bin/zsh -lc "nl -ba src/features/effect/CharacterBinder.tsx | sed -n '100,150p'" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+   100	    const id = Number(charIdInput.trim());
+   101	    if (Number.isNaN(id) || id <= 0) return;
+   102	
+   103	    setBinding((prev) => ({ ...prev, status: "loading", characterId: id }));
+   104	
+   105	    try {
+   106	      const gltfJson = await invoke<string>("load_character", {
+   107	        projectId: currentProject.id,
+   108	        characterId: id,
+   109	      });
+   110	
+   111	      const parsed = JSON.parse(gltfJson) as Record<string, unknown>;
+   112	      setGltfParsed(parsed);
+   113	
+   114	      // Create data URI for Three.js rendering
+   115	      const dataUri = `data:model/gltf+json;base64,${btoa(gltfJson)}`;
+   116	      setBinding((prev) => ({
+   117	        ...prev,
+   118	        characterId: id,
+   119	        gltfDataUri: dataUri,
+
+thinking
+**Planning line-number gathering**
+exec
+/bin/zsh -lc "nl -ba package.json | sed -n '1,120p'" in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+     1	{
+     2	  "name": "pko-tools",
+     3	  "private": true,
+     4	  "version": "0.1.4",
+     5	  "type": "module",
+     6	  "scripts": {
+     7	    "dev": "vite",
+     8	    "build": "tsc && vite build",
+     9	    "preview": "vite preview",
+    10	    "test": "vitest",
+    11	    "test:run": "vitest run",
+    12	    "tauri": "tauri",
+    13	    "kaitai:sync": "node scripts/sync-kaitai-formats.mjs"
+    14	  },
+    15	  "dependencies": {
+    16	    "@radix-ui/react-dialog": "^1.1.4",
+    17	    "@radix-ui/react-dropdown-menu": "^2.1.4",
+    18	    "@radix-ui/react-label": "^2.1.1",
+    19	    "@radix-ui/react-progress": "^1.1.1",
+    20	    "@radix-ui/react-scroll-area": "^1.2.2",
+
+thinking
+**Checking existing action model**
+exec
+/bin/zsh -lc 'rg -n "ActionContext|ActionRegistry|KeyboardRouter|CommandPalette|AppAction|ActionSurface" src | head -n 100' in /Users/anirudh/gamedev/pko-tools succeeded in 52ms:
+
+
+thinking
+**Critically reviewing implementation plan**
+codex
+1. **Critical gaps / missing decisions**
+- The action system is not decision-complete yet on conflict resolution and priority. You currently have multiple global `keydown` owners ([EffectWorkbench.tsx](/Users/anirudh/gamedev/pko-tools/src/features/effect/EffectWorkbench.tsx):163, [KeyframeProperties.tsx](/Users/anirudh/gamedev/pko-tools/src/features/effect/KeyframeProperties.tsx):118, [EffectViewport.tsx](/Users/anirudh/gamedev/pko-tools/src/features/effect/EffectViewport.tsx):72, [sidebar.tsx](/Users/anirudh/gamedev/pko-tools/src/components/ui/sidebar.tsx):98). The plan should explicitly define precedence (`modal > text-input > focused surface > global`) and shortcut collision policy.
+- Async race handling is under-scoped. It calls out navigators in general, but concrete risk exists in multiple places now: [ItemNavigator.tsx](/Users/anirudh/gamedev/pko-tools/src/features/item/ItemNavigator.tsx):99, [MapNavigator.tsx](/Users/anirudh/gamedev/pko-tools/src/features/map/MapNavigator.tsx):58, [BuildingsNavigator.tsx](/Users/anirudh/gamedev/pko-tools/src/features/buildings/BuildingsNavigator.tsx):64, and selection updates in [CharacterNavigator.tsx](/Users/anirudh/gamedev/pko-tools/src/features/character/CharacterNavigator.tsx):55.
+- Render-state split needs a concrete synchronization contract. Right now `currentTime` is updated every frame in global atom state ([EffectPlaybackDriver.tsx](/Users/anirudh/gamedev/pko-tools/src/features/effect/EffectPlaybackDriver.tsx):35), and several components subscribe directly ([EffectViewport.tsx](/Users/anirudh/gamedev/pko-tools/src/features/effect/EffectViewport.tsx):65). The plan should define how UI samples clock state without frame-rate rerender pressure.
+- glTF resource unification is missing ownership semantics for `useGLTF` cache and URL lifecycle. Repeated converters exist ([ItemModelViewer.tsx](/Users/anirudh/gamedev/pko-tools/src/features/item/ItemModelViewer.tsx):19, [MapTerrainViewer.tsx](/Users/anirudh/gamedev/pko-tools/src/features/map/MapTerrainViewer.tsx):6, [BuildingsModelViewer.tsx](/Users/anirudh/gamedev/pko-tools/src/features/buildings/BuildingsModelViewer.tsx):5, [CharacterWorkbench.tsx](/Users/anirudh/gamedev/pko-tools/src/features/character/CharacterWorkbench.tsx):13), plus ad-hoc base64 URI creation ([CharacterBinder.tsx](/Users/anirudh/gamedev/pko-tools/src/features/effect/CharacterBinder.tsx):115). You need explicit ref-counting/dispose/`useGLTF.clear` rules.
+- `preserveDrawingBuffer` gating is risky without a rendering-context decision. It is always on now ([EffectViewport.tsx](/Users/anirudh/gamedev/pko-tools/src/features/effect/EffectViewport.tsx):92), but capture currently uses `canvas.captureStream` ([ExportDialog.tsx](/Users/anirudh/gamedev/pko-tools/src/features/effect/ExportDialog.tsx):35) which does not require preserving the draw buffer. The plan should choose one capture model and lock it.
+- Undo lifecycle reset is listed, but boundary behavior is not defined (when to preserve history vs clear). `resetHistory` exists ([useEffectHistory.ts](/Users/anirudh/gamedev/pko-tools/src/features/effect/useEffectHistory.ts):59) and is not called on effect switch ([EffectNavigator.tsx](/Users/anirudh/gamedev/pko-tools/src/features/effect/EffectNavigator.tsx):67). Decide behavior for switch, save-as, import, and discard.
+- The plan assumes `cmdk`, but dependency and integration surface are not in execution details. `cmdk` is not in deps ([package.json](/Users/anirudh/gamedev/pko-tools/package.json):15).
+
+2. **Sequencing or dependency risks**
+- Phase 1 says race guards in navigators, but if implemented narrowly (character-only), stale writes will remain in map/item/buildings. This should be an all-navigator invariant before moving on.
+- Doing `preserveDrawingBuffer` changes before capture-path decisions can cause export regressions.
+- Putting action kernel and keyboard centralization late means you will edit the same files twice (once for stabilization, again for key migration), increasing churn and regression risk.
+- Phase 2 combines multiple broad perf changes (state split + loader refactor + marker instancing). That is too much blast radius for one gate.
+- Hot-path allocation fixes need method-level specificity. Current allocs are in both [EffectSubRenderer.tsx](/Users/anirudh/gamedev/pko-tools/src/features/effect/EffectSubRenderer.tsx):400 and [StripEffectRenderer.tsx](/Users/anirudh/gamedev/pko-tools/src/features/effect/StripEffectRenderer.tsx):326; grouping them without isolated benchmarks obscures wins/regressions.
+
+3. **Architecture adjustments (with rationale)**
+- Add a shared `LatestOnlyRequest` utility (token/version + optional abort) and mandate it for every navigator load path. Rationale: same race class appears across three workbenches.
+- Introduce a `PlaybackClockStore` (external mutable store + subscribe) and keep Jotai for control state only (`isPlaying`, `speed`, loop, scrub target). Rationale: remove frame-frequency atom writes while preserving UI control semantics.
+- Define action architecture as two layers: pure descriptors (`id`, `title`, `enabled`, `reason`) + effectful executors (`run(ctx)`), with a single `KeyboardRouter` consuming descriptors. Rationale: deterministic parity across shortcuts/palette/toolbar/context menus.
+- Create one `gltfResource` service with object-URL cache + ref counting + explicit `release()` and optional LRU. Rationale: remove duplicate JSON→DataURI logic and make cache disposal testable.
+- For renderer hot paths, use reusable typed-array pools and prebuilt geometries instead of per-frame `new` patterns. Rationale: current frame loop allocates vectors/geometries repeatedly in strip and sub-effect deformation.
+- Make capture behavior explicit: if only video capture is required, disable default `preserveDrawingBuffer`; if still needed for screenshot workflows, isolate screenshot path from live canvas. Rationale: avoid global GPU penalty.
+
+4. **Testing/rollout hardening suggestions**
+- Add targeted tests for listener cleanup and leak prevention in character loads (assert unlisten called and callback count stable) around [CharacterNavigator.tsx](/Users/anirudh/gamedev/pko-tools/src/features/character/CharacterNavigator.tsx):61.
+- Add race tests for map/item/building selectors: late response must not commit state after a newer selection.
+- Add action parity tests: one matrix that verifies each action ID behaves identically from shortcut, toolbar, and palette.
+- Add keyboard precedence tests for conflicting shortcuts (`Cmd+B`, `Cmd+S`, `Cmd+Z`, text-input focus).
+- Add numeric perf gates, not qualitative ones: e.g., max React commits/sec during playback, p95 frame time, JS heap delta over 30s playback, max allocation rate in strip/effect renderers.
+- Use two feature flags, not one: `actionKernelEnabled` and `cmdkUIEnabled`. Keep kill switches until parity and perf pass.
+
+5. **Revised execution order**
+1. Phase 0: Lock decisions (action precedence, playback store contract, glTF ownership, capture strategy) and capture baseline metrics.
+2. Phase 1: Correctness fixes only (character listener cleanup, all-navigator race guards, history reset on document switch, error boundaries).
+3. Phase 2: Introduce action kernel + keyboard router without Cmd+K UI; migrate legacy shortcuts to action IDs first.
+4. Phase 3: Render/perf refactor (playback clock split, frame-write removal, hot-path allocation fixes).
+5. Phase 4: Shared glTF resource migration across character/item/map/buildings + map marker instancing.
+6. Phase 5: Cmd+K UI and contextual surfaces (toolbar/context menus) on top of existing action IDs.
+7. Phase 6: Hardening and rollout (threshold gates, feature-flag canary, legacy key-handler removal).
+
+6. **Ship confidence score**
+- **6.5/10**
+- Why: strong diagnosis and sensible direction, but execution is not yet decision-complete on keyboard precedence, playback-store contract, glTF ownership lifecycle, and capture strategy. With those decisions locked and sequence adjusted, this can move to ~8.5/10 confidence.
+tokens used
+1,18,102

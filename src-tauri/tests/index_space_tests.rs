@@ -3,8 +3,8 @@
 // - Bug #1: parent_id stores array positions, not node indices
 // - Bug #3: bone_index_seq stores LAB array indices, not enumerate indices
 
-use binrw::BinReaderExt;
-use pko_tools_lib::animation::character::{LwBoneFile, LW_INVALID_INDEX};
+use pko_tools_lib::animation::character::LW_INVALID_INDEX;
+use pko_tools_lib::animation::lab_loader::load_lab;
 use pko_tools_lib::character::model::CharacterGeometricModel;
 use std::collections::HashSet;
 use std::fs;
@@ -30,8 +30,7 @@ fn parent_id_is_array_position_not_node_index() {
             lab_path.file_name().unwrap().to_string_lossy()
         );
 
-        let mut file = fs::File::open(lab_path).expect("Failed to open LAB file");
-        let lab: LwBoneFile = file.read_le().expect("Failed to parse LAB file");
+        let lab = load_lab(lab_path).expect("Failed to parse LAB file");
 
         // Core invariant: parent_id < child's index (depth-first ordering)
         for (idx, bone) in lab.base_seq.iter().enumerate() {
@@ -62,8 +61,7 @@ fn bone_ids_are_sequential_array_indices() {
     let lab_files = common::get_known_good_lab_files();
 
     for lab_path in lab_files.iter().take(5) {
-        let mut file = fs::File::open(lab_path).expect("Failed to open LAB file");
-        let lab: LwBoneFile = file.read_le().expect("Failed to parse LAB file");
+        let lab = load_lab(lab_path).expect("Failed to parse LAB file");
 
         for (array_pos, bone) in lab.base_seq.iter().enumerate() {
             assert_eq!(
@@ -95,8 +93,7 @@ fn bone_index_seq_references_lab_array_not_enumerate_index() {
         return;
     }
 
-    let mut lab_file = fs::File::open(&lab_path).expect("Failed to open LAB");
-    let lab: LwBoneFile = lab_file.read_le().expect("Failed to parse LAB");
+    let lab = load_lab(&lab_path).expect("Failed to parse LAB");
 
     // Find corresponding LGO files
     let lgo_files: Vec<_> = fs::read_dir(&known_good_path)
@@ -121,8 +118,7 @@ fn bone_index_seq_references_lab_array_not_enumerate_index() {
             lgo_path.file_name().unwrap().to_string_lossy()
         );
 
-        let mut lgo_file = fs::File::open(&lgo_path).expect("Failed to open LGO");
-        let lgo_model: CharacterGeometricModel = lgo_file.read_le().expect("Failed to parse LGO");
+        let lgo_model = CharacterGeometricModel::from_file(lgo_path.clone()).expect("Failed to parse LGO");
 
         // Extract mesh_info from the model
         let lgo = match &lgo_model.mesh_info {
@@ -169,8 +165,7 @@ fn no_circular_parent_chains() {
     let lab_files = common::get_known_good_lab_files();
 
     for lab_path in lab_files.iter().take(5) {
-        let mut file = fs::File::open(lab_path).expect("Failed to open LAB");
-        let lab: LwBoneFile = file.read_le().expect("Failed to parse LAB");
+        let lab = load_lab(lab_path).expect("Failed to parse LAB");
 
         // Follow parent chain for each bone
         for start_idx in 0..lab.base_seq.len() {
@@ -209,8 +204,7 @@ fn exactly_one_root_bone() {
     let lab_files = common::get_known_good_lab_files();
 
     for lab_path in lab_files.iter().take(5) {
-        let mut file = fs::File::open(lab_path).expect("Failed to open LAB");
-        let lab: LwBoneFile = file.read_le().expect("Failed to parse LAB");
+        let lab = load_lab(lab_path).expect("Failed to parse LAB");
 
         let root_count = lab
             .base_seq
@@ -238,8 +232,7 @@ fn inverse_bind_matrices_match_bone_count() {
     let lab_files = common::get_known_good_lab_files();
 
     for lab_path in lab_files.iter().take(5) {
-        let mut file = fs::File::open(lab_path).expect("Failed to open LAB");
-        let lab: LwBoneFile = file.read_le().expect("Failed to parse LAB");
+        let lab = load_lab(lab_path).expect("Failed to parse LAB");
 
         assert_eq!(
             lab.invmat_seq.len(),

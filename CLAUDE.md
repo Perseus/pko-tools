@@ -40,18 +40,17 @@ tsc --noEmit
 
 ### Rust Backend
 ```bash
-# Build Rust code
 cd src-tauri
-cargo build
+cargo build          # Kaitai regeneration disabled by .cargo/config.toml
+cargo test           # Includes golden reference snapshot tests
+cargo test test_name # Run specific test
+cargo check          # Fast compilation check
 
-# Run Rust tests
-cargo test
+# Inspect a PKO binary file as JSON
+cargo run --bin pko_inspect -- <path-to-file>
 
-# Run specific test
-cargo test test_name
-
-# Check for compilation errors
-cargo check
+# Regenerate Kaitai code from .ksy specs (only when specs change)
+PKO_KAITAI_BUILD=1 cargo build
 ```
 
 ### Production Build
@@ -108,7 +107,7 @@ The Tauri backend is organized into domain modules:
 
 **Key Architecture Patterns:**
 
-1. **Binary File Parsing:** Uses `binrw` crate for declarative binary format parsing with `#[binrw]` attributes
+1. **Binary File Parsing:** PKO formats (`.lmo`, `.lgo`, `.lab`, `.map`, `.obj`, `.eff`) are parsed through **Kaitai Struct** adapters (`*_loader.rs` modules). Domain type structs still use `binrw` derive macros for binary serialization on export.
 2. **glTF Conversion:** Character/mesh/animation modules each implement `to_gltf_*` and `from_gltf` methods
 3. **Field Aggregation:** `GLTFFieldsToAggregate` struct accumulates glTF components (buffers, accessors, textures, etc.) as models are processed
 4. **Tauri Commands:** All backend functions exposed to frontend via `#[tauri::command]` attribute in `*/commands.rs` files
@@ -120,6 +119,37 @@ The Tauri backend is organized into domain modules:
 3. User selects character → `load_character` command retrieves model data
 4. **Export:** Rust reads `.lgo` + `.lab` files → converts to glTF JSON → frontend downloads file
 5. **Import:** User selects glTF file → Rust parses glTF → writes `.lgo`, `.lab`, `.bmp` files to `imports/` folder
+
+## Kaitai Binary Parsers
+
+All PKO binary formats are parsed through **Kaitai Struct** adapters. The pipeline is:
+
+1. `.ksy` spec in `formats/` describes the binary layout
+2. `ksc` (Kaitai compiler) generates Rust code into `src-tauri/gen/kaitai/`
+3. Adapter modules convert Kaitai types → domain types with `Serialize`
+
+**Adapter modules:**
+
+| Format | Adapter | Domain Type | Loader Function |
+|--------|---------|-------------|-----------------|
+| `.lmo` | `map/lmo_loader.rs` | `LmoModel` | `load_lmo(path)` |
+| `.lgo` | `character/lgo_loader.rs` | `CharacterGeometricModel` | `load_lgo(path)` |
+| `.lab` | `animation/lab_loader.rs` | `LwBoneFile` | `load_lab(path)` |
+| `.map` | `map/map_loader.rs` | `ParsedMap` | `load_map(data)` |
+| `.obj` | `map/obj_loader.rs` | `ParsedObjFile` | `load_obj(data)` |
+| `.eff` | `effect/eff_loader.rs` | `EffFile` | `load_eff(data)` |
+| `.lit` | `map/lit.rs` (text, not Kaitai) | `Vec<LitEntry>` | `parse_lit_tx(path)` |
+
+**Not yet fully migrated:**
+- `terrain_info` — has a `.ksy` spec and generated code (`gen/kaitai/terrain_info.rs`) but parsing still uses the hand-written parser in `map/texture.rs::parse_terrain_info()`.
+
+**Key patterns:**
+- Domain types live separately from adapters (e.g., `lmo_types.rs`)
+- All domain types derive `serde::Serialize` for JSON inspection
+- Kaitai regeneration is disabled by default (`.cargo/config.toml`). Set `PKO_KAITAI_BUILD=1` to regenerate from `.ksy` specs.
+- Golden reference snapshots in `tests/golden_reference_tests.rs` catch parser regressions
+
+**CLI Inspector:** `cargo run --bin pko_inspect -- <file>` parses any supported format and prints JSON.
 
 ## 3D/Engine Conventions
 

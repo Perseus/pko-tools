@@ -28,11 +28,10 @@ struct MinimalBone {
     _type: u8,
 }
 
-use binrw::{binrw, BinRead, BinResult, BinWrite, VecArgs};
-use std::io::{Read, Seek};
+use binrw::{BinRead, BinResult, BinWrite};
+use std::io::Seek;
 
 use crate::{
-    broadcast::BroadcastMessage,
     character::GLTFFieldsToAggregate,
     math::{self, matrix4_to_quaternion, LwMatrix43, LwMatrix44, LwQuaternion, LwVector3},
 };
@@ -73,8 +72,7 @@ struct BoneAnimationData {
     rotation: Option<AnimationChannelData<LwQuaternion>>,
 }
 
-#[binrw]
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, serde::Serialize, BinRead, BinWrite)]
 #[br(little)]
 #[bw(little)]
 pub struct LwBoneInfoHeader {
@@ -84,20 +82,19 @@ pub struct LwBoneInfoHeader {
     pub key_type: u32,
 }
 
-#[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, BinRead, BinWrite)]
 #[br(little)]
+#[bw(little)]
 pub struct LwBoneBaseInfo {
     #[br(map = |raw_name: [u8; LW_MAX_NAME]| {
         let end = raw_name.iter().position(|&b| b == 0).unwrap_or(LW_MAX_NAME);
         String::from_utf8_lossy(&raw_name[..end]).to_string()
     })]
     #[bw(map = |name: &String| {
-        let mut raw_name = [0; LW_MAX_NAME];
+        let mut raw_name = [0u8; LW_MAX_NAME];
         let bytes = name.as_bytes();
         raw_name[..bytes.len()].copy_from_slice(bytes);
         raw_name[bytes.len()] = b'\0';
-
         raw_name
     })]
     pub name: String,
@@ -112,143 +109,27 @@ pub struct LwBoneBaseInfo {
     pub original_node_index: u32,
 }
 
-#[binrw]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, BinRead, BinWrite)]
 #[br(little)]
+#[bw(little)]
 pub struct LwBoneDummyInfo {
     pub id: u32,
     pub parent_bone_id: u32,
     pub mat: LwMatrix44,
 }
 
-#[binrw]
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize, BinWrite)]
 pub struct LwBoneKeyInfo {
-    #[br(default)]
     pub mat43_seq: Option<Vec<LwMatrix43>>,
 
-    #[br(default)]
     pub mat44_seq: Option<Vec<LwMatrix44>>,
 
-    #[br(default)]
-    #[bw()]
     pub pos_seq: Option<Vec<LwVector3>>,
 
-    #[br(default)]
-    #[bw()]
     pub quat_seq: Option<Vec<LwQuaternion>>,
 }
 
-impl LwBoneKeyInfo {
-    pub fn read_key_data<R: Read + Seek>(
-        reader: &mut R,
-        args: (u32, u32, u32, u32),
-    ) -> BinResult<Self> {
-        let (frame_num, key_type, version, parent_id) = args;
-
-        let mut info = LwBoneKeyInfo {
-            mat43_seq: None,
-            mat44_seq: None,
-            pos_seq: None,
-            quat_seq: None,
-        };
-
-        match key_type {
-            BONE_KEY_TYPE_MAT43 => {
-                let mat43_vec: Vec<LwMatrix43> = BinRead::read_options(
-                    reader,
-                    binrw::Endian::Little,
-                    binrw::VecArgs {
-                        count: frame_num as usize,
-                        inner: (),
-                    },
-                )?;
-                info.mat43_seq = Some(mat43_vec);
-            }
-
-            BONE_KEY_TYPE_MAT44 => {
-                let mat44_vec: Vec<LwMatrix44> = BinRead::read_options(
-                    reader,
-                    binrw::Endian::Little,
-                    binrw::VecArgs {
-                        count: frame_num as usize,
-                        inner: (),
-                    },
-                )?;
-                info.mat44_seq = Some(mat44_vec);
-            }
-
-            BONE_KEY_TYPE_QUAT => {
-                let exp_obj_version_1_0_0_3 = 0x1003;
-                if version >= exp_obj_version_1_0_0_3 {
-                    let pos_vec: Vec<LwVector3> = BinRead::read_options(
-                        reader,
-                        binrw::Endian::Little,
-                        VecArgs {
-                            count: frame_num as usize,
-                            inner: (),
-                        },
-                    )?;
-
-                    let quat_vec: Vec<LwQuaternion> = BinRead::read_options(
-                        reader,
-                        binrw::Endian::Little,
-                        VecArgs {
-                            count: frame_num as usize,
-                            inner: (),
-                        },
-                    )?;
-
-                    info.pos_seq = Some(pos_vec);
-                    info.quat_seq = Some(quat_vec);
-                } else {
-                    let pos_num = if parent_id == LW_INVALID_INDEX {
-                        frame_num
-                    } else {
-                        1
-                    };
-
-                    let mut partial_pos: Vec<LwVector3> = BinRead::read_options(
-                        reader,
-                        binrw::Endian::Little,
-                        VecArgs {
-                            count: pos_num as usize,
-                            inner: (),
-                        },
-                    )?;
-
-                    if pos_num == 1 && !partial_pos.is_empty() {
-                        let first_val = partial_pos[0].clone();
-                        partial_pos.resize(frame_num as usize, first_val);
-                    }
-
-                    let quat_vec: Vec<LwQuaternion> = BinRead::read_options(
-                        reader,
-                        binrw::Endian::Little,
-                        VecArgs {
-                            count: frame_num as usize,
-                            inner: (),
-                        },
-                    )?;
-
-                    info.pos_seq = Some(partial_pos);
-                    info.quat_seq = Some(quat_vec);
-                }
-            }
-
-            _ => {
-                return Err(binrw::Error::AssertFail {
-                    pos: 0,
-                    message: format!("Unknown key type: {}", key_type),
-                })
-            }
-        };
-
-        Ok(info)
-    }
-}
-
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 pub struct LwBoneFile {
     pub version: u32,
 
@@ -262,135 +143,6 @@ pub struct LwBoneFile {
 
     pub dummy_seq: Vec<LwBoneDummyInfo>,
     pub key_seq: Vec<LwBoneKeyInfo>,
-}
-
-impl BinRead for LwBoneFile {
-    type Args<'a> = ();
-
-    fn read_options<R: Read + Seek>(
-        reader: &mut R,
-        opts: binrw::Endian,
-        _args: Self::Args<'_>,
-    ) -> BinResult<Self> {
-        let mut this = LwBoneFile {
-            version: 0,
-            old_version: 0,
-            header: LwBoneInfoHeader {
-                bone_num: 0,
-                frame_num: 0,
-                dummy_num: 0,
-                key_type: 0,
-            },
-            base_seq: Vec::new(),
-            invmat_seq: Vec::new(),
-            dummy_seq: Vec::new(),
-            key_seq: Vec::new(),
-        };
-
-        let total_parsing_steps = 6;
-        let mut current_step = 1;
-
-        let _ = crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate(
-            "Loading animations".to_string(),
-            "Fetching version".to_string(),
-            current_step,
-            total_parsing_steps,
-        ));
-        this.version = u32::read_options(reader, opts, ())?;
-
-        if this.version == 0 {
-            this.old_version = u32::read_options(reader, opts, ())?;
-        }
-
-        current_step += 1;
-
-        let _ = crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate(
-            "Loading animations".to_string(),
-            "Reading header".to_string(),
-            current_step,
-            total_parsing_steps,
-        ));
-        this.header = LwBoneInfoHeader::read_options(reader, opts, ())?;
-
-        current_step += 1;
-        let _ = crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate(
-            "Loading animations".to_string(),
-            "Reading bone hierarchy".to_string(),
-            current_step,
-            total_parsing_steps,
-        ));
-
-        this.base_seq = Vec::read_options(
-            reader,
-            opts,
-            binrw::VecArgs {
-                count: this.header.bone_num as usize,
-                inner: (),
-            },
-        )?;
-
-        current_step += 1;
-        let _ = crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate(
-            "Loading animations".to_string(),
-            "Reading inverse bind matrices".to_string(),
-            current_step,
-            total_parsing_steps,
-        ));
-
-        this.invmat_seq = Vec::read_options(
-            reader,
-            opts,
-            binrw::VecArgs {
-                count: this.header.bone_num as usize,
-                inner: (),
-            },
-        )?;
-
-        current_step += 1;
-        let _ = crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate(
-            "Loading animations".to_string(),
-            "Reading dummy information".to_string(),
-            current_step,
-            total_parsing_steps,
-        ));
-
-        this.dummy_seq = Vec::read_options(
-            reader,
-            opts,
-            binrw::VecArgs {
-                count: this.header.dummy_num as usize,
-                inner: (),
-            },
-        )?;
-
-        current_step += 1;
-        let _ = crate::broadcast::get_broadcaster().send(BroadcastMessage::ModelLoadingUpdate(
-            "Loading animations".to_string(),
-            "Reading animation keyframe data".to_string(),
-            current_step,
-            total_parsing_steps,
-        ));
-
-        let mut key_infos = Vec::with_capacity(this.header.bone_num as usize);
-        for i in 0..this.header.bone_num {
-            let parent_id = this.base_seq[i as usize].parent_id;
-            let one_key_info = LwBoneKeyInfo::read_key_data(
-                reader,
-                (
-                    this.header.frame_num,
-                    this.header.key_type,
-                    this.version,
-                    parent_id,
-                ),
-            )?;
-
-            key_infos.push(one_key_info);
-        }
-
-        this.key_seq = key_infos;
-
-        Ok(this)
-    }
 }
 
 impl BinWrite for LwBoneFile {
@@ -1262,32 +1014,315 @@ impl LwBoneFile {
 
         fields_to_aggregate.animation.push(animation);
     }
+
+    /// Export split named animations — one glTF Animation per ActionRange.
+    ///
+    /// Each action gets its own keyframe timings, translation/rotation buffers,
+    /// and named Animation entry. Actions with start==0 && end==0 are skipped.
+    pub fn to_gltf_animations_split(
+        &self,
+        fields_to_aggregate: &mut GLTFFieldsToAggregate,
+        actions: &[super::action_table::ActionRange],
+        pose_table: Option<&super::pose_info::PoseTable>,
+        y_up: bool,
+    ) {
+        use super::pose_info::sanitize_action_name;
+
+        const FRAME_RATE: f32 = 30.0;
+        const FRAME_DURATION: f32 = 1.0 / FRAME_RATE;
+
+        let total_frames = self.header.frame_num;
+
+        for action in actions {
+            if action.start_frame == 0 && action.end_frame == 0 {
+                continue;
+            }
+
+            let start = action.start_frame as usize;
+            let end = (action.end_frame as usize).min(total_frames as usize - 1);
+            if start > end {
+                continue;
+            }
+            let frame_count = end - start + 1;
+
+            // Determine animation name
+            let anim_name = if let Some(table) = pose_table {
+                if let Some((entry, weapon_idx)) = table.get_base_pose(action.action_id) {
+                    let base = sanitize_action_name(&entry.name);
+                    if entry.weapon_variants.iter().filter(|&&v| v != 0).count() > 1 {
+                        format!("{}_{}", base, super::pose_info::WEAPON_MODES[weapon_idx])
+                    } else {
+                        base
+                    }
+                } else if let Some(name) = table.get_pose_name(action.action_id) {
+                    sanitize_action_name(name)
+                } else {
+                    format!("action_{}", action.action_id)
+                }
+            } else {
+                format!("action_{}", action.action_id)
+            };
+
+            // Build keyframe timings for this action's frame range
+            let keyframe_timings: Vec<f32> = (0..frame_count)
+                .map(|i| i as f32 * FRAME_DURATION)
+                .collect();
+
+            let keyframe_buffer_index = fields_to_aggregate.buffer.len();
+            let keyframe_buffer_view_index = fields_to_aggregate.buffer_view.len();
+            let keyframe_accessor_index = fields_to_aggregate.accessor.len();
+
+            let mut keyframe_timings_buffer_data: Vec<u8> = Vec::with_capacity(frame_count * 4);
+            for t in &keyframe_timings {
+                keyframe_timings_buffer_data.extend_from_slice(&t.to_le_bytes());
+            }
+
+            let keyframe_max = keyframe_timings.last().copied().unwrap_or(0.0);
+
+            fields_to_aggregate.buffer.push(Buffer {
+                byte_length: USize64(keyframe_timings_buffer_data.len() as u64),
+                uri: Some(format!(
+                    "data:application/octet-stream;base64,{}",
+                    BASE64_STANDARD.encode(&keyframe_timings_buffer_data)
+                )),
+                extensions: None,
+                extras: None,
+                name: Some(format!("TimingsBuf_{}", anim_name)),
+            });
+
+            fields_to_aggregate
+                .buffer_view
+                .push(gltf::json::buffer::View {
+                    buffer: Index::new(keyframe_buffer_index as u32),
+                    byte_length: USize64(keyframe_timings_buffer_data.len() as u64),
+                    byte_offset: Some(USize64(0)),
+                    byte_stride: None,
+                    target: None,
+                    extensions: None,
+                    extras: None,
+                    name: Some(format!("TimingsView_{}", anim_name)),
+                });
+
+            fields_to_aggregate.accessor.push(Accessor {
+                buffer_view: Some(Index::new(keyframe_buffer_view_index as u32)),
+                byte_offset: Some(USize64(0)),
+                component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
+                count: USize64(frame_count as u64),
+                extensions: None,
+                extras: None,
+                max: Some(json!([keyframe_max])),
+                min: Some(json!([0.0])),
+                name: Some(format!("TimingsAcc_{}", anim_name)),
+                normalized: false,
+                sparse: None,
+                type_: Checked::Valid(Type::Scalar),
+            });
+
+            let mut channels: Vec<Channel> = Vec::new();
+            let mut samplers: Vec<Sampler> = Vec::new();
+
+            for bone_i in 0..self.header.bone_num {
+                let keyframe_seq = &self.key_seq[bone_i as usize];
+                let (translation, rotation) = match self.header.key_type {
+                    BONE_KEY_TYPE_QUAT => {
+                        let translation = keyframe_seq.pos_seq.as_ref().unwrap();
+                        let rotation: Vec<LwQuaternion> = keyframe_seq
+                            .quat_seq
+                            .as_ref()
+                            .unwrap()
+                            .iter()
+                            .map(|r| LwQuaternion(r.0.normalize()))
+                            .collect();
+                        (translation.clone(), rotation)
+                    }
+                    BONE_KEY_TYPE_MAT43 => {
+                        let animation_mat = keyframe_seq.mat43_seq.as_ref().unwrap();
+                        let mut translation_vec = vec![];
+                        let mut rotation_vec = vec![];
+                        for mat in animation_mat {
+                            let (t, r, _) = mat.to_translation_rotation_scale();
+                            translation_vec.push(t);
+                            rotation_vec.push(r);
+                        }
+                        (translation_vec, rotation_vec)
+                    }
+                    _ => continue,
+                };
+
+                // Slice to action's frame range
+                let t_slice = &translation[start..=end.min(translation.len() - 1)];
+                let r_slice = &rotation[start..=end.min(rotation.len() - 1)];
+
+                let mut trans_buf: Vec<u8> = Vec::with_capacity(t_slice.len() * 12);
+                let mut rot_buf: Vec<u8> = Vec::with_capacity(r_slice.len() * 16);
+
+                for t in t_slice {
+                    let v = [t.0.x, t.0.y, t.0.z];
+                    let v = if y_up { math::z_up_to_y_up_vec3(v) } else { v };
+                    trans_buf.extend_from_slice(&v[0].to_le_bytes());
+                    trans_buf.extend_from_slice(&v[1].to_le_bytes());
+                    trans_buf.extend_from_slice(&v[2].to_le_bytes());
+                }
+
+                for r in r_slice {
+                    let q = [r.0.v.x, r.0.v.y, r.0.v.z, r.0.s];
+                    let q = if y_up { math::z_up_to_y_up_quat(q) } else { q };
+                    rot_buf.extend_from_slice(&q[0].to_le_bytes());
+                    rot_buf.extend_from_slice(&q[1].to_le_bytes());
+                    rot_buf.extend_from_slice(&q[2].to_le_bytes());
+                    rot_buf.extend_from_slice(&q[3].to_le_bytes());
+                }
+
+                // Translation buffer/view/accessor
+                let trans_buf_idx = fields_to_aggregate.buffer.len();
+                let trans_view_idx = fields_to_aggregate.buffer_view.len();
+                let trans_acc_idx = fields_to_aggregate.accessor.len();
+
+                fields_to_aggregate.buffer.push(Buffer {
+                    byte_length: USize64(trans_buf.len() as u64),
+                    uri: Some(format!(
+                        "data:application/octet-stream;base64,{}",
+                        BASE64_STANDARD.encode(&trans_buf)
+                    )),
+                    extensions: None,
+                    extras: None,
+                    name: Some(format!("TransBuf_{}_{}", anim_name, bone_i)),
+                });
+                fields_to_aggregate
+                    .buffer_view
+                    .push(gltf::json::buffer::View {
+                        buffer: Index::new(trans_buf_idx as u32),
+                        byte_length: USize64(trans_buf.len() as u64),
+                        byte_offset: Some(USize64(0)),
+                        byte_stride: None,
+                        target: None,
+                        extensions: None,
+                        extras: None,
+                        name: Some(format!("TransView_{}_{}", anim_name, bone_i)),
+                    });
+                fields_to_aggregate.accessor.push(Accessor {
+                    buffer_view: Some(Index::new(trans_view_idx as u32)),
+                    byte_offset: Some(USize64(0)),
+                    component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
+                    count: USize64(t_slice.len() as u64),
+                    extensions: None,
+                    extras: None,
+                    max: None,
+                    min: None,
+                    name: Some(format!("TransAcc_{}_{}", anim_name, bone_i)),
+                    normalized: false,
+                    sparse: None,
+                    type_: Checked::Valid(Type::Vec3),
+                });
+
+                // Rotation buffer/view/accessor
+                let rot_buf_idx = fields_to_aggregate.buffer.len();
+                let rot_view_idx = fields_to_aggregate.buffer_view.len();
+                let rot_acc_idx = fields_to_aggregate.accessor.len();
+
+                fields_to_aggregate.buffer.push(Buffer {
+                    byte_length: USize64(rot_buf.len() as u64),
+                    uri: Some(format!(
+                        "data:application/octet-stream;base64,{}",
+                        BASE64_STANDARD.encode(&rot_buf)
+                    )),
+                    extensions: None,
+                    extras: None,
+                    name: Some(format!("RotBuf_{}_{}", anim_name, bone_i)),
+                });
+                fields_to_aggregate
+                    .buffer_view
+                    .push(gltf::json::buffer::View {
+                        buffer: Index::new(rot_buf_idx as u32),
+                        byte_length: USize64(rot_buf.len() as u64),
+                        byte_offset: Some(USize64(0)),
+                        byte_stride: None,
+                        target: None,
+                        extensions: None,
+                        extras: None,
+                        name: Some(format!("RotView_{}_{}", anim_name, bone_i)),
+                    });
+                fields_to_aggregate.accessor.push(Accessor {
+                    buffer_view: Some(Index::new(rot_view_idx as u32)),
+                    byte_offset: Some(USize64(0)),
+                    component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
+                    count: USize64(r_slice.len() as u64),
+                    extensions: None,
+                    extras: None,
+                    max: None,
+                    min: None,
+                    name: Some(format!("RotAcc_{}_{}", anim_name, bone_i)),
+                    normalized: false,
+                    sparse: None,
+                    type_: Checked::Valid(Type::Vec4),
+                });
+
+                // Samplers
+                let trans_sampler_idx = samplers.len();
+                samplers.push(Sampler {
+                    input: Index::new(keyframe_accessor_index as u32),
+                    interpolation: Checked::Valid(json::animation::Interpolation::Linear),
+                    extensions: None,
+                    extras: None,
+                    output: Index::new(trans_acc_idx as u32),
+                });
+
+                let rot_sampler_idx = samplers.len();
+                samplers.push(Sampler {
+                    input: Index::new(keyframe_accessor_index as u32),
+                    interpolation: Checked::Valid(json::animation::Interpolation::Linear),
+                    extensions: None,
+                    extras: None,
+                    output: Index::new(rot_acc_idx as u32),
+                });
+
+                // Channels
+                channels.push(Channel {
+                    extensions: None,
+                    extras: None,
+                    sampler: Index::new(trans_sampler_idx as u32),
+                    target: Target {
+                        node: Index::new(bone_i),
+                        path: Checked::Valid(Property::Translation),
+                        extensions: None,
+                        extras: None,
+                    },
+                });
+                channels.push(Channel {
+                    extensions: None,
+                    extras: None,
+                    sampler: Index::new(rot_sampler_idx as u32),
+                    target: Target {
+                        node: Index::new(bone_i),
+                        path: Checked::Valid(Property::Rotation),
+                        extensions: None,
+                        extras: None,
+                    },
+                });
+            }
+
+            // Build extras with key_frames if present
+            let extras = if !action.key_frames.is_empty() {
+                let kf_json = json!({"key_frames": action.key_frames});
+                Some(RawValue::from_string(kf_json.to_string()).unwrap())
+            } else {
+                None
+            };
+
+            let animation = Animation {
+                channels,
+                extensions: None,
+                extras,
+                name: Some(anim_name),
+                samplers,
+            };
+
+            fields_to_aggregate.animation.push(animation);
+        }
+    }
+
     pub fn from_file(file_path: PathBuf) -> anyhow::Result<Self> {
-        use std::io::{Seek, SeekFrom};
-
-        let file = File::open(&file_path).map_err(|e| {
-            anyhow::anyhow!("Failed to open LAB file '{}': {}", file_path.display(), e)
-        })?;
-
-        let file_size = file.metadata().map(|m| m.len()).unwrap_or(0);
-
-        let mut reader = std::io::BufReader::new(file);
-
-        let anim: LwBoneFile = BinRead::read_options(&mut reader, binrw::Endian::Little, ())
-            .map_err(|e| {
-                let bytes_read = reader.stream_position().unwrap_or(0);
-                anyhow::anyhow!(
-                    "Failed to parse LAB file '{}': {}\n\
-                     File size: {} bytes, bytes read before error: {} bytes\n\
-                     This may indicate a corrupted or truncated file.",
-                    file_path.display(),
-                    e,
-                    file_size,
-                    bytes_read
-                )
-            })?;
-
-        Ok(anim)
+        super::lab_loader::load_lab(&file_path)
     }
 
     // debugging fn, creates a tree of gltf nodes

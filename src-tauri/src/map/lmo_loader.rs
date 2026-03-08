@@ -2,52 +2,27 @@ use std::path::Path;
 
 use anyhow::{Context, Result, bail};
 
-use super::lmo::{
-    LmoAnimData, LmoGeomObject, LmoMaterial, LmoModel, LmoMtlOpacAnim, LmoOpacityKeyframe,
+use super::lmo_types::{
+    LmoAnimData, LmoBoneAnimData, LmoBoneInfo, LmoBoneKeyframes, BoneKeyType,
+    LmoGeomObject, LmoMaterial, LmoModel, LmoMtlOpacAnim, LmoOpacityKeyframe,
     LmoSubset, LmoTexImgAnim, LmoTexUvAnim, MaterialRenderState,
     D3DRS_ALPHATESTENABLE, D3DRS_SRCBLEND, D3DRS_DESTBLEND, D3DRS_ALPHAREF,
-    D3DRS_CULLMODE, D3DRS_ALPHAFUNC, D3DCMP_GREATER, TRANSP_FILTER, TRANSP_SUBTRACTIVE,
-    decompose_matrix43,
+    D3DRS_CULLMODE, D3DRS_ALPHAFUNC, D3DCMP_GREATER, LW_INVALID_INDEX,
+    TRANSP_FILTER, TRANSP_SUBTRACTIVE, decompose_matrix43,
 };
 
 use crate::kaitai_gen::pko_lmo::*;
 use kaitai::*;
 
-const ENV_LMO_PARSER: &str = "PKO_LMO_PARSER";
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum LmoParserBackend {
-    Native,
-    Kaitai,
-}
-
-fn parse_lmo_backend(raw: Option<&str>) -> LmoParserBackend {
-    match raw.map(|v| v.trim().to_ascii_lowercase()) {
-        Some(v) if v == "kaitai" || v == "ksy" => LmoParserBackend::Kaitai,
-        _ => LmoParserBackend::Native,
-    }
-}
-
-pub fn selected_lmo_backend() -> LmoParserBackend {
-    let raw = std::env::var(ENV_LMO_PARSER).ok();
-    parse_lmo_backend(raw.as_deref())
-}
-
 pub fn load_lmo(path: &Path) -> Result<LmoModel> {
-    match selected_lmo_backend() {
-        LmoParserBackend::Native => super::lmo::load_lmo(path),
-        LmoParserBackend::Kaitai => load_lmo_kaitai(path, true),
-    }
+    load_lmo_impl(path, true)
 }
 
 pub fn load_lmo_no_animation(path: &Path) -> Result<LmoModel> {
-    // Always use native for no-animation path (perf-critical batch map loading).
-    // Kaitai parser eagerly parses animation data; keeping this on native avoids
-    // that overhead until the .ksy is modified with lazy animation instances.
-    super::lmo::load_lmo_no_animation(path)
+    load_lmo_impl(path, false)
 }
 
-fn load_lmo_kaitai(path: &Path, parse_animations: bool) -> Result<LmoModel> {
+fn load_lmo_impl(path: &Path, parse_animations: bool) -> Result<LmoModel> {
     let data = std::fs::read(path)
         .with_context(|| format!("Failed to read LMO file: {}", path.display()))?;
     kaitai_to_lmo(&data, parse_animations)
@@ -150,11 +125,11 @@ fn convert_geometry_chunk(
     // Parse mesh
     let mesh_size = *header.mesh_size()
         .map_err(|e| anyhow::anyhow!("header.mesh_size error: {:?}", e))?;
-    let (vertices, normals, texcoords, vertex_colors, mut indices, subsets, mesh_alpha) = if mesh_size > 0 {
+    let (vertices, normals, texcoords, vertex_colors, mut indices, subsets, mesh_alpha, blend_weights, bone_indices) = if mesh_size > 0 {
         let mesh_section = chunk.mesh().clone();
         convert_mesh_section(&mesh_section, file_version)?
     } else {
-        (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), MaterialRenderState::default())
+        (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), MaterialRenderState::default(), Vec::new(), Vec::new())
     };
 
     // Workaround: Kaitai runtime BytesReader clone bug — _io.pos() returns 0
@@ -218,12 +193,12 @@ fn convert_geometry_chunk(
     // Parse animations
     let anim_size = *header.anim_size()
         .map_err(|e| anyhow::anyhow!("header.anim_size error: {:?}", e))?;
-    let (animation, texuv_anims, teximg_anims, mtlopac_anims) =
+    let (animation, bone_animation, texuv_anims, teximg_anims, mtlopac_anims) =
         if parse_animations && anim_size > 0 {
             let anim_section = chunk.anim().clone();
             convert_anim_section(&anim_section, file_version)?
         } else {
-            (None, Vec::new(), Vec::new(), Vec::new())
+            (None, None, Vec::new(), Vec::new(), Vec::new())
         };
 
     Ok(LmoGeomObject {
@@ -239,6 +214,9 @@ fn convert_geometry_chunk(
         subsets,
         materials,
         animation,
+        bone_animation,
+        blend_weights,
+        bone_indices,
         texuv_anims,
         teximg_anims,
         mtlopac_anims,
@@ -413,7 +391,7 @@ fn read_old_format_render_state(
         let state = *val_rc.state();
         let value = *val_rc.value();
 
-        if state == super::lmo::LW_INVALID_INDEX {
+        if state == LW_INVALID_INDEX {
             continue; // end sentinel
         }
 
@@ -514,7 +492,7 @@ fn extract_tex_filename_current(stages: &[OptRc<PkoLmo_TexInfoCurrent>]) -> Opti
 fn convert_mesh_section(
     section: &OptRc<PkoLmo_MeshSection>,
     _file_version: u32,
-) -> Result<(Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<u32>, Vec<u32>, Vec<LmoSubset>, MaterialRenderState)> {
+) -> Result<(Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<u32>, Vec<u32>, Vec<LmoSubset>, MaterialRenderState, Vec<[f32; 4]>, Vec<[u8; 4]>)> {
     let vertex_num = *section.vertex_num()
         .map_err(|e| anyhow::anyhow!("vertex_num error: {:?}", e))? as usize;
     let _fvf = *section.fvf()
@@ -581,10 +559,63 @@ fn convert_mesh_section(
         extract_subsets(&section.subset_seq_old().clone())
     };
 
+    // Blend weights and bone indices (for skinned meshes)
+    let has_blend = *section.has_blend_data()
+        .map_err(|e| anyhow::anyhow!("has_blend_data error: {:?}", e))?;
+    let mut blend_weights = Vec::new();
+    let mut bone_indices = Vec::new();
+    if has_blend {
+        // Read bone_index_seq lookup table — maps blend indices to actual bone positions
+        let bone_index_lut: Vec<u32> = if header_kind == 2 {
+            section.bone_index_seq_u4().clone()
+        } else {
+            section.bone_index_seq_u1().iter().map(|&v| v as u32).collect()
+        };
+
+        let blend_seq = section.blend_seq().clone();
+        blend_weights.reserve(vertex_num);
+        bone_indices.reserve(vertex_num);
+        for b in &blend_seq {
+            let idx_dword = *b.index_dword();
+            // Bone indices packed as 4 bytes in a u32
+            let raw_bi = [
+                (idx_dword & 0xFF) as u8,
+                ((idx_dword >> 8) & 0xFF) as u8,
+                ((idx_dword >> 16) & 0xFF) as u8,
+                ((idx_dword >> 24) & 0xFF) as u8,
+            ];
+
+            let w = b.weight().clone();
+
+            // Remap through bone_index_seq: raw index → actual bone array position
+            let bi = if !bone_index_lut.is_empty() {
+                let mut remapped = [0u8; 4];
+                for i in 0..4 {
+                    if w[i] > 0.0 {
+                        let raw_idx = raw_bi[i] as usize;
+                        remapped[i] = if raw_idx < bone_index_lut.len() {
+                            let mapped = bone_index_lut[raw_idx];
+                            debug_assert!(mapped < 256, "bone index {} exceeds u8 range", mapped);
+                            mapped as u8
+                        } else {
+                            0
+                        };
+                    }
+                }
+                remapped
+            } else {
+                raw_bi
+            };
+
+            bone_indices.push(bi);
+            blend_weights.push([w[0], w[1], w[2], w[3]]);
+        }
+    }
+
     // Mesh-level render states
     let mesh_alpha = extract_mesh_render_state(section, header_kind as i32)?;
 
-    Ok((vertices, normals, texcoords, vertex_colors, indices, subsets, mesh_alpha))
+    Ok((vertices, normals, texcoords, vertex_colors, indices, subsets, mesh_alpha, blend_weights, bone_indices))
 }
 
 fn extract_subsets(subset_seq: &[OptRc<PkoLmo_SubsetInfo>]) -> Vec<LmoSubset> {
@@ -638,7 +669,7 @@ fn parse_old_rs_from_raw_bytes(raw: &[u8]) -> MaterialRenderState {
         let state = u32::from_le_bytes([raw[offset], raw[offset+1], raw[offset+2], raw[offset+3]]);
         let value = u32::from_le_bytes([raw[offset+4], raw[offset+5], raw[offset+6], raw[offset+7]]);
 
-        if state == super::lmo::LW_INVALID_INDEX { continue; }
+        if state == LW_INVALID_INDEX { continue; }
 
         match state {
             D3DRS_ALPHATESTENABLE => { rs.alpha_enabled = value != 0; }
@@ -662,8 +693,21 @@ fn parse_old_rs_from_raw_bytes(raw: &[u8]) -> MaterialRenderState {
 fn convert_anim_section(
     section: &OptRc<PkoLmo_AnimSection>,
     file_version: u32,
-) -> Result<(Option<LmoAnimData>, Vec<LmoTexUvAnim>, Vec<LmoTexImgAnim>, Vec<LmoMtlOpacAnim>)> {
-    // Matrix animation (bone data is skipped, same as native parser)
+) -> Result<(Option<LmoAnimData>, Option<LmoBoneAnimData>, Vec<LmoTexUvAnim>, Vec<LmoTexImgAnim>, Vec<LmoMtlOpacAnim>)> {
+    // Bone animation
+    let data_bone_size = *section.data_bone_size();
+    let bone_animation = if data_bone_size > 0 {
+        let anim_bone_opt = section.anim_bone().clone();
+        if !anim_bone_opt.is_none() {
+            convert_bone_animation(&anim_bone_opt, file_version)?
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Matrix animation
     let data_mat_size = *section.data_mat_size();
     let animation = if data_mat_size > 0 {
         let anim_mat_opt = section.anim_mat().clone();
@@ -761,7 +805,133 @@ fn convert_anim_section(
         }
     }
 
-    Ok((animation, texuv_anims, teximg_anims, mtlopac_anims))
+    Ok((animation, bone_animation, texuv_anims, teximg_anims, mtlopac_anims))
+}
+
+/// Convert Kaitai bone animation data to domain types.
+/// Matches lwAnimDataBone::Load() and lwAnimDataBone::GetValue() from the PKO engine.
+fn convert_bone_animation(
+    anim_bone: &OptRc<PkoLmo_AnimDataBone>,
+    file_version: u32,
+) -> Result<Option<LmoBoneAnimData>> {
+    let header = anim_bone.header().clone();
+    let bone_num = *header.bone_num() as usize;
+    let frame_num = *header.frame_num();
+    let dummy_num = *header.dummy_num();
+    let key_type_raw = *header.key_type();
+
+    if bone_num == 0 || frame_num == 0 || frame_num > 100_000 {
+        return Ok(None);
+    }
+
+    let key_type = match key_type_raw {
+        1 => BoneKeyType::Mat43,
+        2 => BoneKeyType::Mat44,
+        3 => BoneKeyType::Quat,
+        _ => return Ok(None),
+    };
+
+    // Parse bone hierarchy
+    let base_seq = anim_bone.base_seq().clone();
+    let mut bones = Vec::with_capacity(bone_num);
+    for b in &base_seq {
+        let name_bytes = b.name().clone();
+        let end = name_bytes.iter().position(|&c| c == 0).unwrap_or(name_bytes.len());
+        let name = String::from_utf8_lossy(&name_bytes[..end]).to_string();
+        bones.push(LmoBoneInfo {
+            name,
+            id: *b.id(),
+            parent_id: *b.parent_id(),
+        });
+    }
+
+    // Parse inverse bind matrices
+    let invmat_seq = anim_bone.invmat_seq().clone();
+    let mut inv_bind_matrices = Vec::with_capacity(bone_num);
+    for m in &invmat_seq {
+        inv_bind_matrices.push(extract_matrix44(m));
+    }
+
+    if inv_bind_matrices.len() != bone_num {
+        anyhow::bail!(
+            "bone animation IBM count ({}) != bone_num ({})",
+            inv_bind_matrices.len(),
+            bone_num
+        );
+    }
+
+    // Parse per-bone keyframes and decompose to translation + rotation
+    let key_seq = anim_bone.key_seq().clone();
+    let mut keyframes = Vec::with_capacity(bone_num);
+
+    for (bone_idx, key_rc) in key_seq.iter().enumerate() {
+        let mut translations = Vec::with_capacity(frame_num as usize);
+        let mut rotations = Vec::with_capacity(frame_num as usize);
+
+        match key_type {
+            BoneKeyType::Mat43 => {
+                let mat_seq = key_rc.mat43_seq().clone();
+                for mat_rc in &mat_seq {
+                    let raw = extract_matrix43_array(mat_rc);
+                    let (t, q) = decompose_matrix43(&raw);
+                    translations.push(t);
+                    rotations.push(q);
+                }
+            }
+            BoneKeyType::Mat44 => {
+                let mat_seq = key_rc.mat44_seq().clone();
+                for mat_rc in &mat_seq {
+                    let raw = extract_matrix44(mat_rc);
+                    let (t, q) = decompose_matrix44_to_tq(&raw);
+                    translations.push(t);
+                    rotations.push(q);
+                }
+            }
+            BoneKeyType::Quat => {
+                // Position: for version >= 4099, pos_num == frame_num for all bones.
+                // For older versions, only root bones (parent_id == INVALID) get
+                // per-frame positions; child bones get a single position.
+                let pos_seq = key_rc.pos_seq().clone();
+                let quat_seq = key_rc.quat_seq().clone();
+                let parent_id = bones[bone_idx].parent_id;
+                let has_per_frame_pos = file_version >= 4099 || parent_id == LW_INVALID_INDEX;
+
+                for f in 0..frame_num as usize {
+                    // Position
+                    let pos_idx = if has_per_frame_pos { f } else { 0 };
+                    if pos_idx < pos_seq.len() {
+                        let p = &pos_seq[pos_idx];
+                        translations.push([*p.x(), *p.y(), *p.z()]);
+                    } else {
+                        translations.push([0.0, 0.0, 0.0]);
+                    }
+
+                    // Rotation (quaternion)
+                    if f < quat_seq.len() {
+                        let q = &quat_seq[f];
+                        rotations.push([*q.x(), *q.y(), *q.z(), *q.w()]);
+                    } else {
+                        rotations.push([0.0, 0.0, 0.0, 1.0]);
+                    }
+                }
+            }
+        }
+
+        keyframes.push(LmoBoneKeyframes {
+            translations,
+            rotations,
+        });
+    }
+
+    Ok(Some(LmoBoneAnimData {
+        bone_num: bone_num as u32,
+        frame_num,
+        dummy_num,
+        key_type,
+        bones,
+        inv_bind_matrices,
+        keyframes,
+    }))
 }
 
 fn convert_matrix_animation(
@@ -807,6 +977,21 @@ fn extract_matrix44_array(mat: &OptRc<PkoLmo_Matrix44>) -> [[f32; 4]; 4] {
     extract_matrix44(mat)
 }
 
+/// Decompose a 4×4 matrix into translation + quaternion.
+fn decompose_matrix44_to_tq(raw: &[[f32; 4]; 4]) -> ([f32; 3], [f32; 4]) {
+    // Translation from row 3 (row-major) = column 3 (column-major)
+    let translation = [raw[3][0], raw[3][1], raw[3][2]];
+    // Convert to flat 12-element array for decompose_matrix43
+    let flat: [f32; 12] = [
+        raw[0][0], raw[0][1], raw[0][2],
+        raw[1][0], raw[1][1], raw[1][2],
+        raw[2][0], raw[2][1], raw[2][2],
+        raw[3][0], raw[3][1], raw[3][2],
+    ];
+    let (_, q) = decompose_matrix43(&flat);
+    (translation, q)
+}
+
 fn extract_matrix43_array(mat: &OptRc<PkoLmo_Matrix43>) -> [f32; 12] {
     [
         *mat.m11(), *mat.m12(), *mat.m13(),
@@ -824,292 +1009,9 @@ fn extract_matrix43_array(mat: &OptRc<PkoLmo_Matrix43>) -> [f32; 12] {
 mod tests {
     use super::*;
 
+    /// Regression test: verify Kaitai adapter can parse all .lmo files.
     #[test]
-    fn backend_defaults_to_native() {
-        assert_eq!(parse_lmo_backend(None), LmoParserBackend::Native);
-        assert_eq!(parse_lmo_backend(Some("")), LmoParserBackend::Native);
-    }
-
-    #[test]
-    fn backend_accepts_kaitai_markers() {
-        assert_eq!(
-            parse_lmo_backend(Some("kaitai")),
-            LmoParserBackend::Kaitai
-        );
-        assert_eq!(parse_lmo_backend(Some("KSY")), LmoParserBackend::Kaitai);
-    }
-
-    #[test]
-    fn backend_ignores_unknown_values() {
-        assert_eq!(parse_lmo_backend(Some("manual")), LmoParserBackend::Native);
-        assert_eq!(parse_lmo_backend(Some("foo")), LmoParserBackend::Native);
-    }
-
-    /// TDD: Verify kaitai adapter produces identical output to native parser
-    /// on a single known .lmo file.
-    #[test]
-    fn kaitai_matches_native_on_single_file() {
-        let test_dirs = [
-            std::path::Path::new("../top-client/model/scene"),
-            std::path::Path::new("../top-client/corsairs-online-public/client/model/scene"),
-        ];
-
-        let mut found_file = None;
-        for dir in &test_dirs {
-            if !dir.exists() { continue; }
-            for entry in std::fs::read_dir(dir).unwrap() {
-                let path = entry.unwrap().path();
-                if path.extension() == Some("lmo".as_ref()) {
-                    found_file = Some(path);
-                    break;
-                }
-            }
-            if found_file.is_some() { break; }
-        }
-
-        let path = match found_file {
-            Some(p) => p,
-            None => {
-                eprintln!("Skipping kaitai parity test: no .lmo files found");
-                return;
-            }
-        };
-
-        let data = std::fs::read(&path).unwrap();
-
-        // Parse with native
-        let native = super::super::lmo::parse_lmo(&data);
-        // Parse with kaitai
-        let kaitai = kaitai_to_lmo(&data, true);
-
-        match (native, kaitai) {
-            (Ok(n), Ok(k)) => {
-                assert_eq!(
-                    n, k,
-                    "Parity mismatch on file: {}",
-                    path.display()
-                );
-            }
-            (Err(e), Ok(_)) => {
-                panic!("Native failed ({}) but kaitai succeeded on {}", e, path.display());
-            }
-            (Ok(_), Err(e)) => {
-                panic!("Kaitai failed ({}) but native succeeded on {}", e, path.display());
-            }
-            (Err(_), Err(_)) => {
-                // Both fail — acceptable
-            }
-        }
-
-        eprintln!("Parity test passed on: {}", path.display());
-    }
-
-    // ========================================================================
-    // Exhaustive equivalence test — all .lmo files in both client dirs
-    // ========================================================================
-
-    const FLOAT_EPSILON: f32 = 1e-6;
-
-    fn floats_eq(a: f32, b: f32) -> bool {
-        if a.is_nan() && b.is_nan() { return true; }
-        (a - b).abs() < FLOAT_EPSILON
-    }
-
-    fn vec3_eq(a: &[f32; 3], b: &[f32; 3]) -> bool {
-        floats_eq(a[0], b[0]) && floats_eq(a[1], b[1]) && floats_eq(a[2], b[2])
-    }
-
-    fn vec2_eq(a: &[f32; 2], b: &[f32; 2]) -> bool {
-        floats_eq(a[0], b[0]) && floats_eq(a[1], b[1])
-    }
-
-    /// Quaternion equality with sign ambiguity: q == -q
-    fn quat_eq(a: &[f32; 4], b: &[f32; 4]) -> bool {
-        let direct = floats_eq(a[0], b[0]) && floats_eq(a[1], b[1])
-            && floats_eq(a[2], b[2]) && floats_eq(a[3], b[3]);
-        if direct { return true; }
-        // Try negated
-        floats_eq(a[0], -b[0]) && floats_eq(a[1], -b[1])
-            && floats_eq(a[2], -b[2]) && floats_eq(a[3], -b[3])
-    }
-
-    fn mat44_eq(a: &[[f32; 4]; 4], b: &[[f32; 4]; 4]) -> bool {
-        for r in 0..4 {
-            for c in 0..4 {
-                if !floats_eq(a[r][c], b[r][c]) { return false; }
-            }
-        }
-        true
-    }
-
-    /// Field-by-field comparison with float epsilon and quat sign handling.
-    /// Returns Ok(()) on match, Err(description) on first divergence.
-    fn assert_models_equal(n: &LmoModel, k: &LmoModel) -> Result<(), String> {
-        if n.version != k.version {
-            return Err(format!("version: {} vs {}", n.version, k.version));
-        }
-        if n.geom_objects.len() != k.geom_objects.len() {
-            return Err(format!(
-                "geom_objects count: {} vs {}",
-                n.geom_objects.len(), k.geom_objects.len()
-            ));
-        }
-
-        for (i, (ng, kg)) in n.geom_objects.iter().zip(k.geom_objects.iter()).enumerate() {
-            let ctx = format!("geom_object[{}]", i);
-
-            if ng.id != kg.id {
-                return Err(format!("{}.id: {} vs {}", ctx, ng.id, kg.id));
-            }
-            if ng.parent_id != kg.parent_id {
-                return Err(format!("{}.parent_id: {} vs {}", ctx, ng.parent_id, kg.parent_id));
-            }
-            if ng.obj_type != kg.obj_type {
-                return Err(format!("{}.obj_type: {} vs {}", ctx, ng.obj_type, kg.obj_type));
-            }
-            if !mat44_eq(&ng.mat_local, &kg.mat_local) {
-                return Err(format!("{}.mat_local differs", ctx));
-            }
-
-            // Vertices
-            if ng.vertices.len() != kg.vertices.len() {
-                return Err(format!("{}.vertices count: {} vs {}", ctx, ng.vertices.len(), kg.vertices.len()));
-            }
-            for (j, (nv, kv)) in ng.vertices.iter().zip(kg.vertices.iter()).enumerate() {
-                if !vec3_eq(nv, kv) {
-                    return Err(format!("{}.vertices[{}]: {:?} vs {:?}", ctx, j, nv, kv));
-                }
-            }
-
-            // Normals
-            if ng.normals.len() != kg.normals.len() {
-                return Err(format!("{}.normals count: {} vs {}", ctx, ng.normals.len(), kg.normals.len()));
-            }
-            for (j, (nn, kn)) in ng.normals.iter().zip(kg.normals.iter()).enumerate() {
-                if !vec3_eq(nn, kn) {
-                    return Err(format!("{}.normals[{}]: {:?} vs {:?}", ctx, j, nn, kn));
-                }
-            }
-
-            // Texcoords
-            if ng.texcoords.len() != kg.texcoords.len() {
-                return Err(format!("{}.texcoords count: {} vs {}", ctx, ng.texcoords.len(), kg.texcoords.len()));
-            }
-            for (j, (nt, kt)) in ng.texcoords.iter().zip(kg.texcoords.iter()).enumerate() {
-                if !vec2_eq(nt, kt) {
-                    return Err(format!("{}.texcoords[{}]: {:?} vs {:?}", ctx, j, nt, kt));
-                }
-            }
-
-            // Vertex colors
-            if ng.vertex_colors != kg.vertex_colors {
-                return Err(format!("{}.vertex_colors differ", ctx));
-            }
-
-            // Indices
-            if ng.indices != kg.indices {
-                if ng.indices.len() != kg.indices.len() {
-                    return Err(format!("{}.indices count: {} vs {}", ctx, ng.indices.len(), kg.indices.len()));
-                }
-                // Find first divergent index
-                for (j, (ni, ki)) in ng.indices.iter().zip(kg.indices.iter()).enumerate() {
-                    if ni != ki {
-                        return Err(format!("{}.indices[{}]: {} vs {} (of {})", ctx, j, ni, ki, ng.indices.len()));
-                    }
-                }
-            }
-
-            // Subsets
-            if ng.subsets != kg.subsets {
-                return Err(format!("{}.subsets differ", ctx));
-            }
-
-            // Materials
-            if ng.materials.len() != kg.materials.len() {
-                return Err(format!("{}.materials count: {} vs {}", ctx, ng.materials.len(), kg.materials.len()));
-            }
-            for (j, (nm, km)) in ng.materials.iter().zip(kg.materials.iter()).enumerate() {
-                if nm != km {
-                    return Err(format!("{}.materials[{}] differs:\n  native:  {:?}\n  kaitai:  {:?}", ctx, j, nm, km));
-                }
-            }
-
-            // Animation
-            match (&ng.animation, &kg.animation) {
-                (Some(na), Some(ka)) => {
-                    if na.frame_num != ka.frame_num {
-                        return Err(format!("{}.anim.frame_num: {} vs {}", ctx, na.frame_num, ka.frame_num));
-                    }
-                    if na.translations.len() != ka.translations.len() {
-                        return Err(format!("{}.anim.translations count: {} vs {}", ctx, na.translations.len(), ka.translations.len()));
-                    }
-                    for (j, (nt, kt)) in na.translations.iter().zip(ka.translations.iter()).enumerate() {
-                        if !vec3_eq(nt, kt) {
-                            return Err(format!("{}.anim.translations[{}]: {:?} vs {:?}", ctx, j, nt, kt));
-                        }
-                    }
-                    if na.rotations.len() != ka.rotations.len() {
-                        return Err(format!("{}.anim.rotations count: {} vs {}", ctx, na.rotations.len(), ka.rotations.len()));
-                    }
-                    for (j, (nr, kr)) in na.rotations.iter().zip(ka.rotations.iter()).enumerate() {
-                        if !quat_eq(nr, kr) {
-                            return Err(format!("{}.anim.rotations[{}]: {:?} vs {:?}", ctx, j, nr, kr));
-                        }
-                    }
-                }
-                (None, None) => {}
-                (Some(_), None) => return Err(format!("{}.animation: native has Some, kaitai has None", ctx)),
-                (None, Some(_)) => return Err(format!("{}.animation: native has None, kaitai has Some", ctx)),
-            }
-
-            // Texture UV animations
-            if ng.texuv_anims.len() != kg.texuv_anims.len() {
-                return Err(format!("{}.texuv_anims count: {} vs {}", ctx, ng.texuv_anims.len(), kg.texuv_anims.len()));
-            }
-            for (j, (na, ka)) in ng.texuv_anims.iter().zip(kg.texuv_anims.iter()).enumerate() {
-                if na.subset != ka.subset || na.stage != ka.stage
-                    || na.frame_num != ka.frame_num
-                {
-                    return Err(format!("{}.texuv_anims[{}] header differs", ctx, j));
-                }
-                if na.matrices.len() != ka.matrices.len() {
-                    return Err(format!("{}.texuv_anims[{}].matrices count: {} vs {}", ctx, j, na.matrices.len(), ka.matrices.len()));
-                }
-                for (f, (nm, km)) in na.matrices.iter().zip(ka.matrices.iter()).enumerate() {
-                    if !mat44_eq(nm, km) {
-                        return Err(format!("{}.texuv_anims[{}].matrices[{}] differs", ctx, j, f));
-                    }
-                }
-            }
-
-            // Texture image animations
-            if ng.teximg_anims.len() != kg.teximg_anims.len() {
-                return Err(format!("{}.teximg_anims count: {} vs {}", ctx, ng.teximg_anims.len(), kg.teximg_anims.len()));
-            }
-            for (j, (na, ka)) in ng.teximg_anims.iter().zip(kg.teximg_anims.iter()).enumerate() {
-                if na != ka {
-                    return Err(format!("{}.teximg_anims[{}] differs", ctx, j));
-                }
-            }
-
-            // Material opacity animations
-            if ng.mtlopac_anims.len() != kg.mtlopac_anims.len() {
-                return Err(format!("{}.mtlopac_anims count: {} vs {}", ctx, ng.mtlopac_anims.len(), kg.mtlopac_anims.len()));
-            }
-            for (j, (na, ka)) in ng.mtlopac_anims.iter().zip(kg.mtlopac_anims.iter()).enumerate() {
-                if na != ka {
-                    return Err(format!("{}.mtlopac_anims[{}] differs", ctx, j));
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Exhaustive parity test: both backends must produce identical output
-    /// on ALL .lmo files across both client directories.
-    #[test]
-    fn kaitai_matches_native_on_all_lmo_files() {
+    fn load_all_lmo_files() {
         let client_dirs = [
             std::path::Path::new("../top-client/model/scene"),
             std::path::Path::new("../top-client/corsairs-online-public/client/model/scene"),
@@ -1118,7 +1020,6 @@ mod tests {
         ];
 
         let mut tested = 0u32;
-        let mut both_failed = 0u32;
         let mut failed = Vec::new();
 
         for dir in &client_dirs {
@@ -1128,31 +1029,8 @@ mod tests {
                 if path.extension() != Some("lmo".as_ref()) { continue; }
 
                 let data = std::fs::read(&path).unwrap();
-
-                let native = super::super::lmo::parse_lmo(&data);
-                let kaitai_result = kaitai_to_lmo(&data, true);
-
-                match (native, kaitai_result) {
-                    (Ok(n), Ok(k)) => {
-                        if let Err(diff) = assert_models_equal(&n, &k) {
-                            failed.push(format!("{}: {}", path.display(), diff));
-                        }
-                    }
-                    (Err(e), Ok(_)) => {
-                        failed.push(format!(
-                            "{}: native failed ({}) but kaitai succeeded",
-                            path.display(), e
-                        ));
-                    }
-                    (Ok(_), Err(e)) => {
-                        failed.push(format!(
-                            "{}: kaitai failed ({}) but native succeeded",
-                            path.display(), e
-                        ));
-                    }
-                    (Err(_), Err(_)) => {
-                        both_failed += 1;
-                    }
+                if let Err(e) = kaitai_to_lmo(&data, true) {
+                    failed.push(format!("{}: {}", path.display(), e));
                 }
                 tested += 1;
             }
@@ -1161,12 +1039,9 @@ mod tests {
         assert!(tested > 0, "no .lmo files found — check top-client paths");
         assert!(
             failed.is_empty(),
-            "PARITY FAILURES ({}/{} files):\n{}",
+            "FAILURES ({}/{} files):\n{}",
             failed.len(), tested, failed.join("\n")
         );
-        eprintln!(
-            "All {} .lmo files parsed identically by both backends ({} both-failed, skipped)",
-            tested, both_failed
-        );
+        eprintln!("All {} .lmo files parsed successfully", tested);
     }
 }

@@ -1,7 +1,7 @@
 {
   "name": "pko-tools",
   "private": true,
-  "version": "0.1.4",
+  "version": "0.1.9",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,6 +10,7 @@
     "test": "vitest",
     "test:run": "vitest run",
     "tauri": "tauri",
+    "tauri:dev:mcp": "tauri dev --config src-tauri/tauri.dev.conf.json",
     "kaitai:sync": "node scripts/sync-kaitai-formats.mjs"
   },
   "dependencies": {
@@ -33,6 +34,7 @@
     "@types/three": "^0.172.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "cmdk": "^1.1.1",
     "jotai": "^2.11.0",
     "leva": "^0.10.0",
     "lucide-react": "^0.469.0",

@@ -10,17 +10,18 @@ import { SidebarProvider } from "./components/ui/sidebar";
 import { getCurrentProject, getProjectList } from "./commands/project";
 import { useAtom } from "jotai";
 import { currentProjectAtom, projectListAtom } from "./store/project";
-import { useEffect } from "react";
-import StatusBar from "./components/StatusBar/StatusBar";
-import CharacterPage from "./pages/characters";
-import EffectsPage from "./pages/effects";
-import ItemsPage from "./pages/items";
-import MapsPage from "./pages/maps";
-import BuildingsPage from "./pages/buildings";
+import { lazy, Suspense, useEffect } from "react";
 import WorkspaceNavigator from "./components/WorkspaceNavigator/WorkspaceNavigator";
-import ProjectCreator from "./pages/project-creator/ProjectCreator";
 import { Toaster } from "./components/ui/toaster";
 import { ImportWizard } from "./features/import/ImportWizard";
+import { ActionKernelProvider, CommandPalette } from "./features/actions";
+
+const CharacterPage = lazy(() => import("./pages/characters"));
+const EffectsPage = lazy(() => import("./pages/effects"));
+const ItemsPage = lazy(() => import("./pages/items"));
+const MapsPage = lazy(() => import("./pages/maps"));
+const BuildingsPage = lazy(() => import("./pages/buildings"));
+const ProjectCreator = lazy(() => import("./pages/project-creator/ProjectCreator"));
 
 function App() {
   const [, setCurrentProject] = useAtom(currentProjectAtom);
@@ -47,25 +48,29 @@ function App() {
 
   return (
     <SidebarProvider>
-      <div className="grid h-screen w-screen">
-        <main className="grid grid-cols-[auto,1fr,auto] h-full">
-          <SideNav />
-          <Routes>
-            <Route path="/" element={<div />} />
-            <Route path="/project-creator" element={<ProjectCreator />} />
-            <Route path="/characters" element={<CharacterPage/>} />
-            <Route path="/effects" element={<EffectsPage />} />
-            <Route path="/items" element={<ItemsPage />} />
-            <Route path="/maps" element={<MapsPage />} />
-            <Route path="/buildings" element={<BuildingsPage />} />
-            <Route path="*" element={<div />} />
-          </Routes>
-          <WorkspaceNavigator />
-        </main>
-        <ImportWizard />
-        <Toaster />
-        <StatusBar className="fixed bottom-0 z-20" />
-      </div>
+      <ActionKernelProvider>
+        <div className="grid h-screen w-screen">
+          <main className="grid grid-cols-[auto,1fr,auto] h-full">
+            <SideNav />
+            <Suspense fallback={<div className="h-full w-full bg-background" />}>
+              <Routes>
+                <Route path="/" element={<div />} />
+                <Route path="/project-creator" element={<ProjectCreator />} />
+                <Route path="/characters" element={<CharacterPage/>} />
+                <Route path="/effects" element={<EffectsPage />} />
+                <Route path="/items" element={<ItemsPage />} />
+                <Route path="/maps" element={<MapsPage />} />
+                <Route path="/buildings" element={<BuildingsPage />} />
+                <Route path="*" element={<div />} />
+              </Routes>
+            </Suspense>
+            <WorkspaceNavigator />
+          </main>
+          <ImportWizard />
+          <CommandPalette />
+          <Toaster />
+        </div>
+      </ActionKernelProvider>
     </SidebarProvider>
   );
 }

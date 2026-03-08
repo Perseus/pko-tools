@@ -2,8 +2,8 @@ name: "publish"
 
 on:
   push:
-    branches:
-      - master
+    tags:
+      - "pko-tools-v*"
 
 jobs:
   create-release:
@@ -30,12 +30,38 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
+            const fs = require('fs');
+            const version = process.env.PACKAGE_VERSION;
+            const tag = `pko-tools-v${version}`;
+            const rawBase = `https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/${tag}`;
+
+            // Extract the section for this version from CHANGELOG.md
+            const changelog = fs.readFileSync('CHANGELOG.md', 'utf8');
+            const escapedVersion = version.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const sectionRegex = new RegExp(
+              `^## \\[${escapedVersion}\\][^\\n]*\\n([\\s\\S]*?)(?=^## \\[|$)`,
+              'm'
+            );
+            const match = changelog.match(sectionRegex);
+            let body = match ? match[1].replace(/---\s*$/, '').trim() : '';
+
+            if (!body) {
+              body = 'Take a look at the assets to download and install this app.';
+            } else {
+              // Rewrite relative image paths to absolute raw GitHub URLs
+              // Matches ![alt](relative/path) but not ![alt](https://...)
+              body = body.replace(
+                /!\[([^\]]*)\]\((?!https?:\/\/)([^)]+)\)/g,
+                (_, alt, path) => `![${alt}](${rawBase}/${path})`
+              );
+            }
+
             const { data } = await github.rest.repos.createRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              tag_name: `pko-tools-v${process.env.PACKAGE_VERSION}`,
-              name: `pko-tools v${process.env.PACKAGE_VERSION}`,
-              body: 'Take a look at the assets to download and install this app.',
+              tag_name: tag,
+              name: `pko-tools v${version}`,
+              body,
               draft: true,
               prerelease: false
             })
@@ -108,7 +134,7 @@ jobs:
           release_id: ${{ needs.create-release.outputs.release_id }}
         with:
           script: |
-            github.rest.repos.updateRelease({
+            await github.rest.repos.updateRelease({
               owner: context.repo.owner,
               repo: context.repo.repo,
               release_id: process.env.release_id,

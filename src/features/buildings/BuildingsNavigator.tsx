@@ -1,20 +1,23 @@
 import { currentProjectAtom } from "@/store/project";
 import { useAtom, useAtomValue } from "jotai";
 import { useVirtualizer, Virtualizer } from "@tanstack/react-virtual";
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ScrollAreaVirtualizable } from "@/components/ui/scroll-area-virtualizable";
 import { SidebarHeader } from "@/components/ui/sidebar";
 import { BuildingEntry } from "@/types/buildings";
-import { getBuildingList, loadBuildingModel, exportBuildingToGltf } from "@/commands/buildings";
+import { getBuildingList, loadBuildingModel, exportBuildingToGltf, getBuildingMetadata } from "@/commands/buildings";
 import {
   buildingGltfJsonAtom,
   buildingLoadingAtom,
+  buildingMetadataAtom,
   selectedBuildingAtom,
 } from "@/store/buildings";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Download, Loader2 } from "lucide-react";
 import { toast } from "@/hooks/use-toast";
+import { LatestOnly } from "@/lib/latestOnly";
+import { actionIds, useRegisterActionRuntime } from "@/features/actions";
 
 export default function BuildingsNavigator() {
   const [buildings, setBuildings] = useState<BuildingEntry[]>([]);
@@ -25,21 +28,37 @@ export default function BuildingsNavigator() {
   const currentProject = useAtomValue(currentProjectAtom);
   const [, setBuildingGltfJson] = useAtom(buildingGltfJsonAtom);
   const [, setBuildingLoading] = useAtom(buildingLoadingAtom);
+  const [, setBuildingMetadata] = useAtom(buildingMetadataAtom);
   const [query, setQuery] = useState("");
   const [selectedBuilding, setSelectedBuilding] = useAtom(selectedBuildingAtom);
+  const listRequestGuard = useRef(new LatestOnly());
+  const loadRequestGuard = useRef(new LatestOnly());
 
   useEffect(() => {
     async function fetchBuildings() {
-      if (currentProject) {
-        try {
-          const list = await getBuildingList(currentProject.id);
-          setBuildings(list);
-        } catch (err) {
+      const requestVersion = listRequestGuard.current.begin();
+      if (!currentProject) {
+        setBuildings([]);
+        return;
+      }
+
+      try {
+        const list = await getBuildingList(currentProject.id);
+        if (!listRequestGuard.current.isLatest(requestVersion)) {
+          return;
+        }
+        setBuildings(list);
+      } catch (err) {
+        if (listRequestGuard.current.isLatest(requestVersion)) {
           console.error("Failed to load building list:", err);
         }
       }
     }
     fetchBuildings();
+
+    return () => {
+      listRequestGuard.current.invalidate();
+    };
   }, [currentProject]);
 
   useEffect(() => {
@@ -63,27 +82,43 @@ export default function BuildingsNavigator() {
 
   async function selectBuilding(building: BuildingEntry) {
     if (!currentProject) return;
+    const requestVersion = loadRequestGuard.current.begin();
     setSelectedBuilding(building);
     setBuildingGltfJson(null);
+    setBuildingMetadata(null);
     setBuildingLoading(true);
 
     try {
-      const gltfJson = await loadBuildingModel(
-        currentProject.id,
-        building.id
-      );
+      const [gltfJson, metadata] = await Promise.all([
+        loadBuildingModel(currentProject.id, building.id),
+        getBuildingMetadata(currentProject.id, building.id),
+      ]);
+      if (!loadRequestGuard.current.isLatest(requestVersion)) {
+        return;
+      }
       setBuildingGltfJson(gltfJson);
+      setBuildingMetadata(metadata);
     } catch (err) {
-      console.error("Failed to load building:", err);
-      toast({
-        title: "Failed to load building",
-        description: String(err),
-        variant: "destructive",
-      });
+      if (loadRequestGuard.current.isLatest(requestVersion)) {
+        console.error("Failed to load building:", err);
+        toast({
+          title: "Failed to load building",
+          description: String(err),
+          variant: "destructive",
+        });
+      }
     } finally {
-      setBuildingLoading(false);
+      if (loadRequestGuard.current.isLatest(requestVersion)) {
+        setBuildingLoading(false);
+      }
     }
   }
+
+  useEffect(() => {
+    return () => {
+      loadRequestGuard.current.invalidate();
+    };
+  }, []);
 
   async function handleExport() {
     if (!currentProject || !selectedBuilding) return;
@@ -109,6 +144,26 @@ export default function BuildingsNavigator() {
       setExporting(false);
     }
   }
+
+  const buildingExportActionRuntime = useMemo(
+    () => ({
+      run: () => {
+        if (!exporting) {
+          void handleExport();
+        }
+      },
+      isEnabled: () => Boolean(currentProject && selectedBuilding && !exporting),
+      disabledReason: () => {
+        if (!currentProject) return "No project selected";
+        if (!selectedBuilding) return "No building selected";
+        if (exporting) return "Export already in progress";
+        return undefined;
+      },
+    }),
+    [currentProject, exporting, selectedBuilding],
+  );
+
+  useRegisterActionRuntime(actionIds.buildingExportGltf, buildingExportActionRuntime);
 
   return (
     <>

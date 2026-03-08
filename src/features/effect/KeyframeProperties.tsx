@@ -11,8 +11,9 @@ import { keyframeClipboardAtom } from "@/store/keyframeClipboard";
 import { useAtom } from "jotai";
 import { Clipboard, ClipboardPaste } from "lucide-react";
 import React from "react";
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useMemo } from "react";
 import { useEffectHistory } from "@/features/effect/useEffectHistory";
+import { actionIds, useRegisterActionRuntime } from "@/features/actions";
 
 function formatVector(values: number[], precision = 2) {
   return values.map((value) => value.toFixed(precision)).join(", ");
@@ -115,29 +116,33 @@ export default function KeyframeProperties() {
     updateFrameVector("frameColors", clipboard.color);
   }, [clipboard, frameData, pushSnapshot]);
 
-  useEffect(() => {
-    function onKeyDown(event: KeyboardEvent) {
-      if (!frameData) return;
-      const mod = event.metaKey || event.ctrlKey;
-      if (mod && event.key.toLowerCase() === "c" && !event.shiftKey) {
-        // Only intercept when not in a text input
-        const tag = (event.target as HTMLElement)?.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA") return;
-        event.preventDefault();
+  const copyActionRuntime = useMemo(
+    () => ({
+      run: () => {
         handleCopy();
-      }
-      if (mod && event.key.toLowerCase() === "v" && !event.shiftKey) {
-        const tag = (event.target as HTMLElement)?.tagName;
-        if (tag === "INPUT" || tag === "TEXTAREA") return;
-        if (!clipboard) return;
-        event.preventDefault();
+      },
+      isEnabled: () => Boolean(frameData),
+      disabledReason: () => (frameData ? undefined : "No keyframe selected"),
+    }),
+    [frameData, handleCopy],
+  );
+  const pasteActionRuntime = useMemo(
+    () => ({
+      run: () => {
         handlePaste();
-      }
-    }
+      },
+      isEnabled: () => Boolean(frameData && clipboard),
+      disabledReason: () => {
+        if (!frameData) return "No keyframe selected";
+        if (!clipboard) return "Clipboard is empty";
+        return undefined;
+      },
+    }),
+    [clipboard, frameData, handlePaste],
+  );
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [frameData, clipboard, handleCopy, handlePaste]);
+  useRegisterActionRuntime(actionIds.effectKeyframeCopy, copyActionRuntime);
+  useRegisterActionRuntime(actionIds.effectKeyframePaste, pasteActionRuntime);
 
   return (
     <div className="flex h-full flex-col gap-4 rounded-xl border border-border bg-background/70 p-4">

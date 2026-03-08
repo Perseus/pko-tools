@@ -3,8 +3,9 @@
 // This test verifies that multi-part models are correctly exported and imported
 
 use base64::Engine;
-use binrw::{BinReaderExt, BinWrite};
+use binrw::BinWrite;
 use pko_tools_lib::animation::character::LwBoneFile;
+use pko_tools_lib::animation::lab_loader::load_lab;
 use pko_tools_lib::character::model::CharacterGeometricModel;
 use pko_tools_lib::character::Character;
 use serde::Deserialize;
@@ -162,8 +163,7 @@ fn test_black_dragon_has_two_parts() {
 
     // Load LAB file
     let lab_path = test_dir.join("0725.lab");
-    let mut lab_file = fs::File::open(&lab_path).expect("Failed to open 0725.lab");
-    let lab: LwBoneFile = lab_file.read_le().expect("Failed to parse 0725.lab");
+    let lab = load_lab(&lab_path).expect("Failed to parse 0725.lab");
 
     println!(
         "  ✓ LAB file: {} bones, {} frames, {} dummies",
@@ -172,11 +172,8 @@ fn test_black_dragon_has_two_parts() {
 
     // Load Part 0 (main body)
     let lgo_part0_path = test_dir.join("0725000000.lgo");
-    let mut lgo_part0_file =
-        fs::File::open(&lgo_part0_path).expect("Failed to open 0725000000.lgo");
-    let lgo_part0: CharacterGeometricModel = lgo_part0_file
-        .read_le()
-        .expect("Failed to parse 0725000000.lgo");
+    let lgo_part0 =
+        CharacterGeometricModel::from_file(lgo_part0_path).expect("Failed to parse 0725000000.lgo");
 
     if let Some(ref mesh) = lgo_part0.mesh_info {
         println!(
@@ -188,11 +185,8 @@ fn test_black_dragon_has_two_parts() {
 
     // Load Part 1 (second part - likely front/head)
     let lgo_part1_path = test_dir.join("0725000001.lgo");
-    let mut lgo_part1_file =
-        fs::File::open(&lgo_part1_path).expect("Failed to open 0725000001.lgo");
-    let lgo_part1: CharacterGeometricModel = lgo_part1_file
-        .read_le()
-        .expect("Failed to parse 0725000001.lgo");
+    let lgo_part1 =
+        CharacterGeometricModel::from_file(lgo_part1_path).expect("Failed to parse 0725000001.lgo");
 
     if let Some(ref mesh) = lgo_part1.mesh_info {
         println!(
@@ -227,23 +221,16 @@ fn test_black_dragon_multipart_export() {
 
     // Load LAB file
     let lab_path = test_dir.join("0725.lab");
-    let mut lab_file = fs::File::open(&lab_path).expect("Failed to open 0725.lab");
-    let lab: LwBoneFile = lab_file.read_le().expect("Failed to parse 0725.lab");
+    let lab = load_lab(&lab_path).expect("Failed to parse 0725.lab");
 
     // Load both LGO parts
     let lgo_part0_path = test_dir.join("0725000000.lgo");
-    let mut lgo_part0_file =
-        fs::File::open(&lgo_part0_path).expect("Failed to open 0725000000.lgo");
-    let lgo_part0: CharacterGeometricModel = lgo_part0_file
-        .read_le()
-        .expect("Failed to parse 0725000000.lgo");
+    let lgo_part0 =
+        CharacterGeometricModel::from_file(lgo_part0_path).expect("Failed to parse 0725000000.lgo");
 
     let lgo_part1_path = test_dir.join("0725000001.lgo");
-    let mut lgo_part1_file =
-        fs::File::open(&lgo_part1_path).expect("Failed to open 0725000001.lgo");
-    let lgo_part1: CharacterGeometricModel = lgo_part1_file
-        .read_le()
-        .expect("Failed to parse 0725000001.lgo");
+    let lgo_part1 =
+        CharacterGeometricModel::from_file(lgo_part1_path).expect("Failed to parse 0725000001.lgo");
 
     let part0_vertices = lgo_part0.mesh_info.as_ref().unwrap().vertex_seq.len();
     let part1_vertices = lgo_part1.mesh_info.as_ref().unwrap().vertex_seq.len();
@@ -407,10 +394,7 @@ fn roundtrip_725_lab() {
     println!("📂 Step 1: Loading original LAB file...");
     let lab_path = test_dir.join("0725.lab");
 
-    let mut original_lab_file = fs::File::open(&lab_path).expect("Failed to open original LAB");
-    let original_lab: LwBoneFile = original_lab_file
-        .read_le()
-        .expect("Failed to parse original LAB");
+    let original_lab = load_lab(&lab_path).expect("Failed to parse original LAB");
 
     println!("  ✓ Original LAB: {} bones", original_lab.base_seq.len());
     println!("    header.bone_num = {}", original_lab.header.bone_num);
@@ -586,12 +570,11 @@ fn roundtrip_725_lgo_part0() {
 
     // Load original files
     let lab_path = test_dir.join("0725.lab");
-    let mut lab_file = fs::File::open(&lab_path).expect("Failed to open LAB");
-    let original_lab: LwBoneFile = lab_file.read_le().expect("Failed to parse LAB");
+    let original_lab = load_lab(&lab_path).expect("Failed to parse LAB");
 
     let lgo_path = test_dir.join("0725000000.lgo");
-    let mut lgo_file = fs::File::open(&lgo_path).expect("Failed to open LGO");
-    let original_lgo: CharacterGeometricModel = lgo_file.read_le().expect("Failed to parse LGO");
+    let original_lgo =
+        CharacterGeometricModel::from_file(lgo_path).expect("Failed to parse LGO");
 
     let orig_mesh = original_lgo.mesh_info.as_ref().expect("No mesh info");
     println!(
@@ -766,20 +749,15 @@ fn test_multipart_import_creates_two_lgo_files() {
     println!("\n📂 Step 1: Loading original LAB and both LGO parts...");
 
     let lab_path = test_dir.join("0725.lab");
-    let mut lab_file = fs::File::open(&lab_path).expect("Failed to open LAB");
-    let original_lab: LwBoneFile = lab_file.read_le().expect("Failed to parse LAB");
+    let original_lab = load_lab(&lab_path).expect("Failed to parse LAB");
 
     let lgo_part0_path = test_dir.join("0725000000.lgo");
-    let mut lgo_part0_file = fs::File::open(&lgo_part0_path).expect("Failed to open LGO part 0");
-    let original_lgo_part0: CharacterGeometricModel = lgo_part0_file
-        .read_le()
-        .expect("Failed to parse LGO part 0");
+    let original_lgo_part0 =
+        CharacterGeometricModel::from_file(lgo_part0_path.clone()).expect("Failed to parse LGO part 0");
 
     let lgo_part1_path = test_dir.join("0725000001.lgo");
-    let mut lgo_part1_file = fs::File::open(&lgo_part1_path).expect("Failed to open LGO part 1");
-    let original_lgo_part1: CharacterGeometricModel = lgo_part1_file
-        .read_le()
-        .expect("Failed to parse LGO part 1");
+    let original_lgo_part1 =
+        CharacterGeometricModel::from_file(lgo_part1_path.clone()).expect("Failed to parse LGO part 1");
 
     let orig_part0_vertices = original_lgo_part0
         .mesh_info
@@ -1024,15 +1002,11 @@ fn test_multipart_import_creates_two_lgo_files() {
     println!("    - 0725000001.lgo");
 
     // Re-read and verify
-    let mut reread_part0_file = fs::File::open(&part0_path).expect("Failed to open re-read part 0");
-    let reread_part0: CharacterGeometricModel = reread_part0_file
-        .read_le()
-        .expect("Failed to parse re-read part 0");
+    let reread_part0 =
+        CharacterGeometricModel::from_file(part0_path.clone()).expect("Failed to parse re-read part 0");
 
-    let mut reread_part1_file = fs::File::open(&part1_path).expect("Failed to open re-read part 1");
-    let reread_part1: CharacterGeometricModel = reread_part1_file
-        .read_le()
-        .expect("Failed to parse re-read part 1");
+    let reread_part1 =
+        CharacterGeometricModel::from_file(part1_path.clone()).expect("Failed to parse re-read part 1");
 
     let reread_part0_vertices = reread_part0.mesh_info.as_ref().unwrap().vertex_seq.len();
     let reread_part1_vertices = reread_part1.mesh_info.as_ref().unwrap().vertex_seq.len();
@@ -1133,8 +1107,7 @@ fn test_read_game_client_lgo_files() {
     let part1_path = game_client_path.join("model/character/0725000001.lgo");
 
     println!("  Reading part 0: {:?}", part0_path);
-    let mut file0 = fs::File::open(&part0_path).expect("Failed to open part 0");
-    let result0: Result<CharacterGeometricModel, _> = file0.read_le();
+    let result0 = CharacterGeometricModel::from_file(part0_path.clone());
 
     match &result0 {
         Ok(model) => {
@@ -1148,8 +1121,7 @@ fn test_read_game_client_lgo_files() {
     }
 
     println!("  Reading part 1: {:?}", part1_path);
-    let mut file1 = fs::File::open(&part1_path).expect("Failed to open part 1");
-    let result1: Result<CharacterGeometricModel, _> = file1.read_le();
+    let result1 = CharacterGeometricModel::from_file(part1_path.clone());
 
     match &result1 {
         Ok(model) => {

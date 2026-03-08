@@ -19,7 +19,7 @@ use gltf_json::{
 
 use crate::item::model::decode_pko_texture;
 
-use super::lmo::{self, D3DCULL_NONE, LmoGeomObject, LmoModel};
+use super::lmo_types::{self as lmo, D3DCULL_NONE, LmoGeomObject, LmoModel};
 use super::lmo_loader;
 use super::scene_obj::SceneObject;
 use super::scene_obj_info::SceneObjModelInfo;
@@ -246,6 +246,60 @@ impl GltfBuilder {
             normalized: false,
             sparse: None,
             type_: Checked::Valid(gltf_json::accessor::Type::Scalar),
+        });
+
+        acc_idx as u32
+    }
+
+    /// Add an accessor backed by u8 data (e.g. for JOINTS_0).
+    fn add_accessor_u8(
+        &mut self,
+        data: &[u8],
+        name: &str,
+        acc_type: gltf_json::accessor::Type,
+        components_per_element: usize,
+    ) -> u32 {
+        let buf_idx = self.buffers.len();
+        let bv_idx = self.buffer_views.len();
+        let acc_idx = self.accessors.len();
+
+        let count = data.len() / components_per_element;
+
+        self.buffers.push(gltf_json::Buffer {
+            byte_length: USize64(data.len() as u64),
+            extensions: None,
+            extras: None,
+            name: Some(format!("{}_buffer", name)),
+            uri: Some(format!(
+                "data:application/octet-stream;base64,{}",
+                BASE64_STANDARD.encode(data)
+            )),
+        });
+
+        self.buffer_views.push(gltf_json::buffer::View {
+            buffer: gltf_json::Index::new(buf_idx as u32),
+            byte_length: USize64(data.len() as u64),
+            byte_offset: Some(USize64(0)),
+            target: Some(Checked::Valid(gltf_json::buffer::Target::ArrayBuffer)),
+            byte_stride: None,
+            extensions: None,
+            extras: None,
+            name: Some(format!("{}_view", name)),
+        });
+
+        self.accessors.push(gltf_json::Accessor {
+            buffer_view: Some(gltf_json::Index::new(bv_idx as u32)),
+            byte_offset: Some(USize64(0)),
+            component_type: Checked::Valid(GenericComponentType(ComponentType::U8)),
+            count: USize64(count as u64),
+            extensions: None,
+            extras: None,
+            max: None,
+            min: None,
+            name: Some(format!("{}_accessor", name)),
+            normalized: false,
+            sparse: None,
+            type_: Checked::Valid(acc_type),
         });
 
         acc_idx as u32
@@ -620,8 +674,11 @@ fn build_geom_primitives(
     }
 
     // Apply mat_local transform if not identity — skip for animated objects
-    // (animated objects get their transform from animation keyframes instead)
+    // (animated objects get their transform from animation keyframes instead).
     let use_local_mat = !skip_local_transform && !is_identity(&geom.mat_local);
+    // The Z-up→Y-up mapping (x,y,z)→(x,z,y) is a reflection (det=-1),
+    // so winding must always be reversed to restore correct front-face (CCW).
+    let should_reverse_winding = true;
 
     let positions: Vec<f32> = geom
         .vertices
@@ -632,8 +689,7 @@ fn build_geom_primitives(
             } else {
                 *v
             };
-            let t = transform_position(p);
-            t.into_iter()
+            transform_position(p).into_iter()
         })
         .collect();
 
@@ -646,8 +702,7 @@ fn build_geom_primitives(
                 } else {
                     *n
                 };
-                let t = transform_normal(n2);
-                t.into_iter()
+                transform_normal(n2).into_iter()
             })
             .collect()
     } else {
@@ -732,11 +787,50 @@ fn build_geom_primitives(
         None
     };
 
+    // Export skinning data (JOINTS_0, WEIGHTS_0) if present.
+    let joints_acc = if !geom.bone_indices.is_empty() {
+        let joints_data: Vec<u8> = geom
+            .bone_indices
+            .iter()
+            .flat_map(|bi| bi.iter().copied())
+            .collect();
+        Some(builder.add_accessor_u8(
+            &joints_data,
+            &format!("{}_joints", prefix),
+            gltf_json::accessor::Type::Vec4,
+            4,
+        ))
+    } else {
+        None
+    };
+
+    let weights_acc = if !geom.blend_weights.is_empty() {
+        let weights_data: Vec<f32> = geom
+            .blend_weights
+            .iter()
+            .flat_map(|w| w.iter().copied())
+            .collect();
+        Some(builder.add_accessor_f32(
+            &weights_data,
+            &format!("{}_weights", prefix),
+            gltf_json::accessor::Type::Vec4,
+            4,
+            None,
+            None,
+        ))
+    } else {
+        None
+    };
+
     // Build primitives per subset (each subset maps to a material)
     if geom.subsets.is_empty() {
         // No subsets — single primitive with all indices
-        let reversed = reverse_winding(&geom.indices);
-        let idx_acc = builder.add_index_accessor(&reversed, &format!("{}_idx", prefix));
+        let prim_indices = if should_reverse_winding {
+            reverse_winding(&geom.indices)
+        } else {
+            geom.indices.clone()
+        };
+        let idx_acc = builder.add_index_accessor(&prim_indices, &format!("{}_idx", prefix));
 
         let mut attributes = std::collections::BTreeMap::new();
         attributes.insert(
@@ -761,6 +855,18 @@ fn build_geom_primitives(
                 gltf_json::Index::new(ca),
             );
         }
+        if let Some(ja) = joints_acc {
+            attributes.insert(
+                Checked::Valid(gltf_json::mesh::Semantic::Joints(0)),
+                gltf_json::Index::new(ja),
+            );
+        }
+        if let Some(wa) = weights_acc {
+            attributes.insert(
+                Checked::Valid(gltf_json::mesh::Semantic::Weights(0)),
+                gltf_json::Index::new(wa),
+            );
+        }
 
         vec![gltf_json::mesh::Primitive {
             attributes,
@@ -783,7 +889,11 @@ fn build_geom_primitives(
                 continue;
             }
 
-            let sub_indices = reverse_winding(&geom.indices[start..end]);
+            let sub_indices = if should_reverse_winding {
+                reverse_winding(&geom.indices[start..end])
+            } else {
+                geom.indices[start..end].to_vec()
+            };
             let idx_acc =
                 builder.add_index_accessor(&sub_indices, &format!("{}_idx_s{}", prefix, si));
 
@@ -808,6 +918,18 @@ fn build_geom_primitives(
                 attributes.insert(
                     Checked::Valid(gltf_json::mesh::Semantic::Colors(0)),
                     gltf_json::Index::new(ca),
+                );
+            }
+            if let Some(ja) = joints_acc {
+                attributes.insert(
+                    Checked::Valid(gltf_json::mesh::Semantic::Joints(0)),
+                    gltf_json::Index::new(ja),
+                );
+            }
+            if let Some(wa) = weights_acc {
+                attributes.insert(
+                    Checked::Valid(gltf_json::mesh::Semantic::Weights(0)),
+                    gltf_json::Index::new(wa),
                 );
             }
 
@@ -965,14 +1087,19 @@ fn build_anim_extras(geom: &LmoGeomObject, geom_index: usize) -> gltf_json::extr
 const FRAME_RATE: f32 = 30.0;
 
 /// Transform a position vector from Z-up game space to Y-up glTF space.
+/// Uses the same mapping as `transform_position`: (x,y,z) → (x,z,y).
 fn z_up_to_y_up_vec3(v: [f32; 3]) -> [f32; 3] {
-    [v[0], v[2], -v[1]]
+    [v[0], v[2], v[1]]
 }
 
 /// Transform a quaternion from Z-up game space to Y-up glTF space.
 /// Input/output in glTF [x, y, z, w] order.
+///
+/// The Y↔Z axis swap is a reflection (det = -1). For quaternions representing
+/// rotations, this means: swap Y↔Z components AND negate the rotation angle.
+/// Negating the angle negates the vector part: (qx,qy,qz,qw) → (-qx,-qz,-qy,qw).
 fn z_up_to_y_up_quat(q: [f32; 4]) -> [f32; 4] {
-    [q[0], q[2], -q[1], q[3]]
+    [-q[0], -q[2], -q[1], q[3]]
 }
 
 // ============================================================================
@@ -1116,30 +1243,273 @@ fn build_animations(
 }
 
 // ============================================================================
-// Public API: build glTF from a single LMO file (standalone building viewer)
+// Bone skinning: joint hierarchy, Skin, and bone animation channels
 // ============================================================================
 
-/// Build a complete glTF JSON string for a single LMO building model.
-pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String> {
-    let model = lmo_loader::load_lmo(lmo_path)?;
+/// Result of building bone skinning data for a geometry object.
+struct BoneSkinData {
+    /// glTF Skin object referencing joint nodes and inverse bind matrices.
+    skin: gltf_json::Skin,
+    /// Node indices of the joint nodes (in bone order).
+    joint_node_indices: Vec<u32>,
+    /// Bone animation samplers and channels (to be merged into a single Animation).
+    bone_samplers: Vec<Sampler>,
+    bone_channels: Vec<Channel>,
+}
 
-    if model.geom_objects.is_empty() {
-        return Err(anyhow!("LMO file has no geometry objects"));
+/// Build glTF skinning data for a geometry object with bone animation.
+///
+/// Creates joint nodes in the builder's node list, arranged in parent-child
+/// hierarchy matching the PKO bone tree. Creates inverse bind matrix accessor
+/// and per-bone animation channels (translation + rotation at 30fps).
+///
+/// PKO bone keyframes are LOCAL-space transforms (relative to parent bone),
+/// which matches glTF's joint animation channel semantics exactly.
+fn build_bone_skin(
+    builder: &mut GltfBuilder,
+    geom: &LmoGeomObject,
+    prefix: &str,
+) -> Option<BoneSkinData> {
+    let bone_anim = geom.bone_animation.as_ref()?;
+    if bone_anim.bones.is_empty() {
+        return None;
     }
 
-    let mut builder = GltfBuilder::new();
+    let bone_num = bone_anim.bone_num as usize;
+
+    // Create joint nodes. We need to track their indices in the global node list.
+    let first_joint_node_idx = builder.nodes.len() as u32;
+    let mut joint_node_indices: Vec<u32> = Vec::with_capacity(bone_num);
+
+    // First pass: create all joint nodes (without children, we'll set those after)
+    for (bi, bone) in bone_anim.bones.iter().enumerate() {
+        let node_idx = builder.nodes.len() as u32;
+        joint_node_indices.push(node_idx);
+
+        // Set initial transform from frame 0 keyframes (if available)
+        let (translation, rotation) = if bi < bone_anim.keyframes.len()
+            && !bone_anim.keyframes[bi].translations.is_empty()
+        {
+            let t = z_up_to_y_up_vec3(bone_anim.keyframes[bi].translations[0]);
+            let r = z_up_to_y_up_quat(bone_anim.keyframes[bi].rotations[0]);
+            (Some(t), Some(r))
+        } else {
+            (None, None)
+        };
+
+        builder.nodes.push(gltf_json::Node {
+            name: Some(format!("{}_{}", prefix, bone.name)),
+            translation: translation.map(|t| t.into()),
+            rotation: rotation.map(|r| gltf_json::scene::UnitQuaternion(r)),
+            ..Default::default()
+        });
+
+        let _ = bone;
+    }
+
+    // Second pass: set up parent-child relationships
+    // Build children lists per bone
+    let mut children_map: Vec<Vec<u32>> = vec![vec![]; bone_num];
+    for (bi, bone) in bone_anim.bones.iter().enumerate() {
+        if bone.parent_id != 0xFFFFFFFF {
+            let parent_idx = bone.parent_id as usize;
+            if parent_idx < bone_num {
+                children_map[parent_idx].push(first_joint_node_idx + bi as u32);
+            }
+        }
+    }
+
+    for (bi, children) in children_map.iter().enumerate() {
+        if !children.is_empty() {
+            let node_idx = (first_joint_node_idx + bi as u32) as usize;
+            builder.nodes[node_idx].children = Some(
+                children
+                    .iter()
+                    .map(|&c| gltf_json::Index::new(c))
+                    .collect(),
+            );
+        }
+    }
+
+    // Build inverse bind matrices accessor.
+    // PKO IBMs are 4×4 row-major, row-vector convention (v' = v * M) in Z-up.
+    // glTF IBMs are 4×4 column-major, column-vector convention (v' = M * v) in Y-up.
+    // Conversion: IBM_gltf = S * IBM_pko^T * S, where S swaps Y↔Z.
+    // In element form: IBM_gltf[row][col] = IBM_pko[ymap[col]][ymap[row]]
+    // Writing column-major: iterate col outer, row inner.
+    let ymap = [0usize, 2, 1, 3]; // Y↔Z swap index mapping
+    let mut ibm_data: Vec<f32> = Vec::with_capacity(bone_num * 16);
+    for ibm in &bone_anim.inv_bind_matrices {
+        for col in 0..4 {
+            for row in 0..4 {
+                ibm_data.push(ibm[ymap[col]][ymap[row]]);
+            }
+        }
+    }
+
+    let ibm_acc = builder.add_accessor_f32(
+        &ibm_data,
+        &format!("{}_ibm", prefix),
+        gltf_json::accessor::Type::Mat4,
+        16,
+        None,
+        None,
+    );
+
+    let skin = gltf_json::Skin {
+        inverse_bind_matrices: Some(gltf_json::Index::new(ibm_acc)),
+        joints: joint_node_indices
+            .iter()
+            .map(|&i| gltf_json::Index::new(i))
+            .collect(),
+        skeleton: Some(gltf_json::Index::new(first_joint_node_idx)),
+        extensions: None,
+        extras: None,
+        name: Some(format!("{}_skin", prefix)),
+    };
+
+    // Build bone animation channels
+    let (bone_samplers, bone_channels) = if bone_anim.frame_num > 1 {
+        let frame_num = bone_anim.frame_num as usize;
+        let mut channels: Vec<Channel> = Vec::new();
+        let mut samplers: Vec<Sampler> = Vec::new();
+
+        // Shared time accessor for all bones
+        let timings: Vec<f32> = (0..frame_num).map(|f| f as f32 / FRAME_RATE).collect();
+        let time_max = timings.last().copied().unwrap_or(0.0);
+        let time_acc = builder.add_accessor_f32(
+            &timings,
+            &format!("{}_bone_time", prefix),
+            gltf_json::accessor::Type::Scalar,
+            1,
+            Some(serde_json::json!([0.0f32])),
+            Some(serde_json::json!([time_max])),
+        );
+
+        for (bi, kf) in bone_anim.keyframes.iter().enumerate() {
+            if bi >= bone_num {
+                break;
+            }
+            let joint_node = joint_node_indices[bi];
+
+            // Translation channel
+            let trans_data: Vec<f32> = kf
+                .translations
+                .iter()
+                .flat_map(|t| z_up_to_y_up_vec3(*t).into_iter())
+                .collect();
+            let trans_acc = builder.add_accessor_f32(
+                &trans_data,
+                &format!("{}_bone{}_trans", prefix, bi),
+                gltf_json::accessor::Type::Vec3,
+                3,
+                None,
+                None,
+            );
+
+            let trans_sampler_idx = samplers.len() as u32;
+            samplers.push(Sampler {
+                input: gltf_json::Index::new(time_acc),
+                interpolation: Checked::Valid(gltf_json::animation::Interpolation::Linear),
+                output: gltf_json::Index::new(trans_acc),
+                extensions: None,
+                extras: None,
+            });
+            channels.push(Channel {
+                sampler: gltf_json::Index::new(trans_sampler_idx),
+                target: Target {
+                    node: gltf_json::Index::new(joint_node),
+                    path: Checked::Valid(gltf_json::animation::Property::Translation),
+                    extensions: None,
+                    extras: None,
+                },
+                extensions: None,
+                extras: None,
+            });
+
+            // Rotation channel
+            let rot_data: Vec<f32> = kf
+                .rotations
+                .iter()
+                .flat_map(|r| z_up_to_y_up_quat(*r).into_iter())
+                .collect();
+            let rot_acc = builder.add_accessor_f32(
+                &rot_data,
+                &format!("{}_bone{}_rot", prefix, bi),
+                gltf_json::accessor::Type::Vec4,
+                4,
+                None,
+                None,
+            );
+
+            let rot_sampler_idx = samplers.len() as u32;
+            samplers.push(Sampler {
+                input: gltf_json::Index::new(time_acc),
+                interpolation: Checked::Valid(gltf_json::animation::Interpolation::Linear),
+                output: gltf_json::Index::new(rot_acc),
+                extensions: None,
+                extras: None,
+            });
+            channels.push(Channel {
+                sampler: gltf_json::Index::new(rot_sampler_idx),
+                target: Target {
+                    node: gltf_json::Index::new(joint_node),
+                    path: Checked::Valid(gltf_json::animation::Property::Rotation),
+                    extensions: None,
+                    extras: None,
+                },
+                extensions: None,
+                extras: None,
+            });
+        }
+
+        (samplers, channels)
+    } else {
+        (Vec::new(), Vec::new())
+    };
+
+    Some(BoneSkinData {
+        skin,
+        joint_node_indices,
+        bone_samplers,
+        bone_channels,
+    })
+}
+
+// ============================================================================
+// Shared geometry processing for both glTF and GLB export paths
+// ============================================================================
+
+/// Intermediate result from processing all geometry objects in an LMO model.
+struct LmoGeomResult {
+    /// Root node index (building_root).
+    root_idx: u32,
+    /// All glTF animations (matrix + bone).
+    animations: Vec<gltf_json::Animation>,
+    /// All glTF skins (one per skinned geometry object).
+    skins: Vec<gltf_json::Skin>,
+}
+
+/// Process all geometry objects from an LMO model into the GltfBuilder.
+/// Shared by both `build_gltf_from_lmo` and `build_glb_from_lmo`.
+fn process_lmo_geometry<'a>(
+    builder: &mut GltfBuilder,
+    model: &'a LmoModel,
+    project_dir: &Path,
+) -> Result<LmoGeomResult> {
     let mut child_indices = Vec::new();
-    let mut animated_nodes: Vec<(u32, &LmoGeomObject)> = Vec::new();
+    let mut animated_nodes: Vec<(u32, &'a LmoGeomObject)> = Vec::new();
+    let mut skins: Vec<gltf_json::Skin> = Vec::new();
+    let mut all_bone_samplers: Vec<Sampler> = Vec::new();
+    let mut all_bone_channels: Vec<Channel> = Vec::new();
 
     for (gi, geom) in model.geom_objects.iter().enumerate() {
         let prefix = format!("geom{}", gi);
         let material_base_idx = builder.materials.len() as u32;
 
-        // Add materials for this geometry object (with textures for standalone viewer)
         if geom.materials.is_empty() {
-            // Default material
             build_lmo_material(
-                &mut builder,
+                builder,
                 &lmo::LmoMaterial {
                     diffuse: [0.7, 0.7, 0.7, 1.0],
                     ambient: [0.3, 0.3, 0.3, 1.0],
@@ -1160,7 +1530,7 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         } else {
             for (mi, mat) in geom.materials.iter().enumerate() {
                 build_lmo_material(
-                    &mut builder,
+                    builder,
                     mat,
                     &format!("{}_mat{}", prefix, mi),
                     project_dir,
@@ -1170,12 +1540,13 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         }
 
         let has_animation = geom.animation.is_some();
+        let has_bone_animation = geom.bone_animation.is_some();
         let primitives = build_geom_primitives(
-            &mut builder,
+            builder,
             geom,
             &prefix,
             material_base_idx,
-            has_animation,
+            has_animation || has_bone_animation,
         );
 
         if primitives.is_empty() {
@@ -1191,19 +1562,52 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
             extras: None,
         });
 
+        let skin_data = if has_bone_animation {
+            build_bone_skin(builder, geom, &prefix)
+        } else {
+            None
+        };
+
         let node_idx = builder.nodes.len() as u32;
         let anim_extras = build_anim_extras(geom, gi);
         builder.nodes.push(gltf_json::Node {
             mesh: Some(gltf_json::Index::new(mesh_idx)),
             name: Some(format!("geom_node_{}", gi)),
             extras: anim_extras,
+            skin: skin_data
+                .as_ref()
+                .map(|_| gltf_json::Index::new(skins.len() as u32)),
             ..Default::default()
         });
         child_indices.push(gltf_json::Index::new(node_idx));
 
-        // Track animated objects for glTF animation generation
+        if let Some(ref sd) = skin_data {
+            if let Some(ref bone_anim) = geom.bone_animation {
+                let root_joints: Vec<gltf_json::Index<gltf_json::Node>> = bone_anim
+                    .bones
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, b)| b.parent_id == 0xFFFFFFFF)
+                    .map(|(bi, _)| gltf_json::Index::new(sd.joint_node_indices[bi]))
+                    .collect();
+                if !root_joints.is_empty() {
+                    builder.nodes[node_idx as usize].children = Some(root_joints);
+                }
+            }
+        }
+
         if has_animation {
             animated_nodes.push((node_idx, geom));
+        }
+
+        if let Some(sd) = skin_data {
+            let sampler_offset = all_bone_samplers.len() as u32;
+            all_bone_samplers.extend(sd.bone_samplers);
+            for mut ch in sd.bone_channels {
+                ch.sampler = gltf_json::Index::new(ch.sampler.value() as u32 + sampler_offset);
+                all_bone_channels.push(ch);
+            }
+            skins.push(sd.skin);
         }
     }
 
@@ -1211,16 +1615,46 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         return Err(anyhow!("No renderable geometry in LMO file"));
     }
 
-    // Build animation if any objects are animated
-    let animations = build_animations(&mut builder, &animated_nodes);
+    let mut animations = build_animations(builder, &animated_nodes);
 
-    // Root node
+    if !all_bone_channels.is_empty() {
+        animations.push(gltf_json::Animation {
+            name: Some("BoneAnimation".to_string()),
+            channels: all_bone_channels,
+            samplers: all_bone_samplers,
+            extensions: None,
+            extras: None,
+        });
+    }
+
     let root_idx = builder.nodes.len() as u32;
     builder.nodes.push(gltf_json::Node {
         name: Some("building_root".to_string()),
         children: Some(child_indices),
         ..Default::default()
     });
+
+    Ok(LmoGeomResult {
+        root_idx,
+        animations,
+        skins,
+    })
+}
+
+// ============================================================================
+// Public API: build glTF from a single LMO file (standalone building viewer)
+// ============================================================================
+
+/// Build a complete glTF JSON string for a single LMO building model.
+pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String> {
+    let model = lmo_loader::load_lmo(lmo_path)?;
+
+    if model.geom_objects.is_empty() {
+        return Err(anyhow!("LMO file has no geometry objects"));
+    }
+
+    let mut builder = GltfBuilder::new();
+    let geom_result = process_lmo_geometry(&mut builder, &model, project_dir)?;
 
     let root = gltf_json::Root {
         asset: gltf_json::Asset {
@@ -1230,7 +1664,7 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         },
         nodes: builder.nodes,
         scenes: vec![gltf_json::Scene {
-            nodes: vec![gltf_json::Index::new(root_idx)],
+            nodes: vec![gltf_json::Index::new(geom_result.root_idx)],
             name: Some("BuildingScene".to_string()),
             extensions: None,
             extras: None,
@@ -1244,7 +1678,8 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         images: builder.images,
         samplers: builder.samplers,
         textures: builder.textures,
-        animations,
+        animations: geom_result.animations,
+        skins: geom_result.skins,
         ..Default::default()
     };
 
@@ -1262,96 +1697,8 @@ pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String
         return Err(anyhow!("LMO file has no geometry objects"));
     }
 
-    // Build using the same GltfBuilder approach as build_gltf_from_lmo
     let mut builder = GltfBuilder::new();
-    let mut child_indices = Vec::new();
-    let mut animated_nodes: Vec<(u32, &LmoGeomObject)> = Vec::new();
-
-    for (gi, geom) in model.geom_objects.iter().enumerate() {
-        let prefix = format!("geom{}", gi);
-        let material_base_idx = builder.materials.len() as u32;
-
-        if geom.materials.is_empty() {
-            build_lmo_material(
-                &mut builder,
-                &lmo::LmoMaterial {
-                    diffuse: [0.7, 0.7, 0.7, 1.0],
-                    ambient: [0.3, 0.3, 0.3, 1.0],
-                    emissive: [0.0, 0.0, 0.0, 0.0],
-                    opacity: 1.0,
-                    transp_type: 0,
-                    alpha_test_enabled: false,
-                    alpha_ref: 0,
-                    src_blend: None,
-                    dest_blend: None,
-                    cull_mode: None,
-                    tex_filename: None,
-                },
-                &format!("{}_default_mat", prefix),
-                project_dir,
-                true,
-            );
-        } else {
-            for (mi, mat) in geom.materials.iter().enumerate() {
-                build_lmo_material(
-                    &mut builder,
-                    mat,
-                    &format!("{}_mat{}", prefix, mi),
-                    project_dir,
-                    true,
-                );
-            }
-        }
-
-        let has_animation = geom.animation.is_some();
-        let primitives = build_geom_primitives(
-            &mut builder,
-            geom,
-            &prefix,
-            material_base_idx,
-            has_animation,
-        );
-
-        if primitives.is_empty() {
-            continue;
-        }
-
-        let mesh_idx = builder.meshes.len() as u32;
-        builder.meshes.push(gltf_json::Mesh {
-            name: Some(format!("geom_{}", gi)),
-            primitives,
-            weights: None,
-            extensions: None,
-            extras: None,
-        });
-
-        let node_idx = builder.nodes.len() as u32;
-        let anim_extras = build_anim_extras(geom, gi);
-        builder.nodes.push(gltf_json::Node {
-            mesh: Some(gltf_json::Index::new(mesh_idx)),
-            name: Some(format!("geom_node_{}", gi)),
-            extras: anim_extras,
-            ..Default::default()
-        });
-        child_indices.push(gltf_json::Index::new(node_idx));
-
-        if has_animation {
-            animated_nodes.push((node_idx, geom));
-        }
-    }
-
-    if child_indices.is_empty() {
-        return Err(anyhow!("No renderable geometry in LMO file"));
-    }
-
-    let animations = build_animations(&mut builder, &animated_nodes);
-
-    let root_idx = builder.nodes.len() as u32;
-    builder.nodes.push(gltf_json::Node {
-        name: Some("building_root".to_string()),
-        children: Some(child_indices),
-        ..Default::default()
-    });
+    let geom_result = process_lmo_geometry(&mut builder, &model, project_dir)?;
 
     // Convert data-URI buffers into a single GLB binary buffer, then append
     // image data as additional buffer views.
@@ -1412,7 +1759,7 @@ pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String
         },
         nodes: builder.nodes,
         scenes: vec![gltf_json::Scene {
-            nodes: vec![gltf_json::Index::new(root_idx)],
+            nodes: vec![gltf_json::Index::new(geom_result.root_idx)],
             name: Some("BuildingScene".to_string()),
             extensions: None,
             extras: None,
@@ -1426,7 +1773,8 @@ pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String
         images: images_out,
         samplers: builder.samplers,
         textures: builder.textures,
-        animations,
+        animations: geom_result.animations,
+        skins: geom_result.skins,
         ..Default::default()
     };
 
@@ -1703,6 +2051,9 @@ mod tests {
                     tex_filename: Some("wall.bmp".to_string()),
                 }],
                 animation: None,
+                bone_animation: None,
+                blend_weights: Vec::new(),
+                bone_indices: Vec::new(),
                 texuv_anims: Vec::new(),
                 teximg_anims: Vec::new(),
                 mtlopac_anims: Vec::new(),
@@ -1715,8 +2066,39 @@ mod tests {
         // Game: Z-up → glTF: Y-up: (x, y, z) → (x, z, y)
         // Y is NOT negated so building Z matches terrain Z (south = positive).
         assert_eq!(transform_position([1.0, 2.0, 3.0]), [1.0, 3.0, 2.0]);
+        // z_up_to_y_up_vec3 must match transform_position for consistency
+        assert_eq!(z_up_to_y_up_vec3([1.0, 2.0, 3.0]), [1.0, 3.0, 2.0]);
         assert_eq!(transform_position([0.0, 0.0, 0.0]), [0.0, 0.0, 0.0]);
         assert_eq!(transform_normal([0.0, 0.0, 1.0]), [0.0, 1.0, 0.0]);
+    }
+
+    #[test]
+    fn z_up_to_y_up_vec3_matches_static_transform() {
+        // z_up_to_y_up_vec3 (used for animations) must produce the same Z component
+        // as transform_position (used for static geometry) for any PKO Y value.
+        for y in [-5.0f32, -1.0, 0.0, 1.0, 5.0, 100.0] {
+            let p = [0.0, y, 0.0];
+            assert_eq!(
+                z_up_to_y_up_vec3(p)[2],
+                transform_position(p)[2],
+                "Z mismatch for PKO Y={y}"
+            );
+        }
+    }
+
+    #[test]
+    fn animated_static_z_consistency() {
+        // For a mixed model where animated and static geom share the same PKO Y offset,
+        // the resulting glTF Z components must have the same sign.
+        let pko_y = 5.0f32;
+        let static_z = transform_position([0.0, pko_y, 0.0])[2];
+        let anim_z = z_up_to_y_up_vec3([0.0, pko_y, 0.0])[2];
+        assert_eq!(
+            static_z.signum(),
+            anim_z.signum(),
+            "Static Z ({static_z}) and animated Z ({anim_z}) must have the same sign"
+        );
+        assert_eq!(static_z, anim_z, "Static and animated Z must be equal");
     }
 
     #[test]
@@ -2276,6 +2658,9 @@ mod tests {
                 tex_filename: None,
             }],
             animation: None,
+            bone_animation: None,
+            blend_weights: Vec::new(),
+            bone_indices: Vec::new(),
             texuv_anims: Vec::new(),
             teximg_anims: Vec::new(),
             mtlopac_anims: Vec::new(),
@@ -2999,6 +3384,9 @@ mod tests {
                     tex_filename: None,
                 }],
                 animation: None,
+                bone_animation: None,
+                blend_weights: Vec::new(),
+                bone_indices: Vec::new(),
                 texuv_anims: Vec::new(),
                 teximg_anims: Vec::new(),
                 mtlopac_anims: Vec::new(),
@@ -3203,7 +3591,7 @@ mod tests {
             return;
         };
 
-        let model = lmo::load_lmo(lmo_path).unwrap();
+        let model = super::lmo_loader::load_lmo(lmo_path).unwrap();
         for (gi, geom) in model.geom_objects.iter().enumerate() {
             let vert_count = geom.vertices.len();
             let max_idx = geom.indices.iter().copied().max().unwrap_or(0);
@@ -3570,5 +3958,45 @@ mod tests {
         // Count: exactly 16 transparent pixels (one 4x4 block)
         let transparent_count = rgba.pixels().filter(|p| p.0[3] == 0).count();
         assert_eq!(transparent_count, 16, "exactly one block should be transparent");
+    }
+
+    #[test]
+    fn build_glb_with_bone_animation() {
+        let lmo_path =
+            std::path::Path::new("../top-client/model/scene/nml-bd199.lmo");
+        if !lmo_path.exists() {
+            eprintln!("Skipping bone animation test: nml-bd199.lmo not found");
+            return;
+        }
+        let project_dir = std::path::Path::new("../top-client");
+        let (json, bin) = build_glb_from_lmo(lmo_path, project_dir)
+            .expect("GLB export should succeed for nml-bd199");
+
+        let root: serde_json::Value = serde_json::from_str(&json).unwrap();
+
+        // Should have 5 skins (one per butterfly geometry)
+        let skins = root["skins"].as_array().expect("should have skins array");
+        assert_eq!(skins.len(), 5, "bd199 has 5 butterflies = 5 skins");
+
+        // Each skin should have 4 joints
+        for (i, skin) in skins.iter().enumerate() {
+            let joints = skin["joints"].as_array().unwrap();
+            assert_eq!(joints.len(), 4, "skin {} should have 4 joints", i);
+        }
+
+        // Should have 1 merged bone animation with all channels
+        let animations = root["animations"].as_array().expect("should have animations");
+        assert_eq!(animations.len(), 1, "all bone animations merged into one");
+
+        // Single animation should have 40 channels (5 butterflies × 4 bones × 2 properties)
+        let channels = animations[0]["channels"].as_array().unwrap();
+        assert_eq!(
+            channels.len(),
+            40,
+            "merged animation should have 40 channels (5×4 bones × T+R)"
+        );
+
+        // Binary buffer should be non-trivial
+        assert!(bin.len() > 10000, "binary buffer should have substantial data");
     }
 }

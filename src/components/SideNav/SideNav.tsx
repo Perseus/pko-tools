@@ -1,4 +1,5 @@
 import { ChevronsUpDown, GalleryVerticalEnd } from "lucide-react";
+import { modLabel } from "@/lib/platform";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -8,6 +9,7 @@ import {
 import {
   Sidebar,
   SidebarContent,
+  SidebarFooter,
   SidebarGroup,
   SidebarGroupContent,
   SidebarGroupLabel,
@@ -16,20 +18,26 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "../ui/sidebar";
+import CharacterStatusBar from "@/features/character/CharacterStatusBar";
 import { useAtom } from "jotai";
 import { currentProjectAtom, projectListAtom } from "@/store/project";
-import { NavLink, useLocation } from "react-router";
-import { invoke } from "@tauri-apps/api/core";
+import { NavLink, useLocation, useNavigate } from "react-router";
+import { invokeTimed as invoke } from "@/commands/invokeTimed";
 import { Project } from "@/types/project";
 
 export default function SideNav() {
   const [projectList] = useAtom(projectListAtom);
   const [currentProject, setCurrentProject] = useAtom(currentProjectAtom);
+  const navigate = useNavigate();
   const pathname = useLocation().pathname;
 
   async function selectProject(project: Project) {
     setCurrentProject(project);
     await invoke('select_project', { projectId: project.id });
+  }
+
+  function navToProjectCreator() {
+    navigate("/project-creator", { state: { ts: Date.now() } });
   }
 
   const navigationData = {
@@ -110,6 +118,13 @@ export default function SideNav() {
                     {project.name}
                   </DropdownMenuItem>
                 ))}
+                <DropdownMenuItem
+                  key={"project-creator"}
+                  onSelect={() => navToProjectCreator()}
+                  className="hover:cursor-pointer"
+                >
+                  Create a new project
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarMenuItem>
@@ -136,6 +151,16 @@ export default function SideNav() {
           ))}
         </SidebarContent>
       )}
+
+      <SidebarFooter>
+        {pathname.startsWith("/characters") && <CharacterStatusBar />}
+        <div className="flex items-center justify-between text-sm text-sidebar-foreground/80">
+          <span>pko-tools {__APP_VERSION__} by Perseus</span>
+          <kbd className="pointer-events-none select-none rounded border border-sidebar-border bg-sidebar-accent px-1.5 py-0.5 font-mono text-xs text-sidebar-foreground">
+            {modLabel}K
+          </kbd>
+        </div>
+      </SidebarFooter>
     </Sidebar>
   );
 }

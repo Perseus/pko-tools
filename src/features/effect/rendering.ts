@@ -1,5 +1,38 @@
-import { EffectFile, SubEffect } from "@/types/effect";
+import type { EffectFile, SubEffect } from "@/types/effect";
 import * as THREE from "three";
+
+// D3D8-accurate sub-effect shaders — shared between EffectSubRenderer and HitSubEffect.
+// ALPHAOP = MODULATE(TEXTURE, DIFFUSE): textureAlpha × vertexAlpha per fragment.
+
+export const subEffectVertexShader = /* glsl */ `
+varying vec2 vUv;
+void main() {
+  vUv = uv;
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+}
+`;
+
+export const subEffectFragmentShader = /* glsl */ `
+uniform vec3 uColor;
+uniform float uOpacity;
+uniform sampler2D uTexture;
+uniform bool uHasTexture;
+uniform float uAlphaTest;
+
+varying vec2 vUv;
+
+void main() {
+  if (uHasTexture) {
+    vec4 texColor = texture2D(uTexture, vUv);
+    float finalAlpha = texColor.a * uOpacity;
+    if (finalAlpha < uAlphaTest) discard;
+    gl_FragColor = vec4(uColor * texColor.rgb, finalAlpha);
+  } else {
+    if (uOpacity < uAlphaTest) discard;
+    gl_FragColor = vec4(uColor, uOpacity);
+  }
+}
+`;
 
 export type FrameRenderData = {
   subEffect: SubEffect;
@@ -40,7 +73,7 @@ export function resolveFrameData(
 }
 
 export type GeometryConfig = {
-  type: "plane" | "rect" | "rectZ" | "triangle" | "triangleZ" | "cylinder" | "sphere" | "model";
+  type: "plane" | "rect" | "rectPlane" | "rectZ" | "triangle" | "trianglePlane" | "triangleZ" | "cylinder" | "sphere" | "model";
   topRadius?: number;
   botRadius?: number;
   height?: number;
@@ -98,46 +131,51 @@ export function resolveGeometry(subEffect: SubEffect, frameIndex?: number): Geom
     return { type: "model", modelName };
   }
 
-  // PKO built-in geometry types with specific vertex layouts
+  // PKO built-in geometry types with specific vertex layouts.
+  // C++ I_Effect.cpp: Rect=XZ, RectPlane=XY, RectZ=YZ, Triangle=XZ, TrianglePlane=XY
   if (modelName === "Rect") {
     return { type: "rect" };
   }
-  if (modelName === "RectZ" || modelName === "RectPlane") {
+  if (modelName === "RectPlane") {
+    return { type: "rectPlane" };
+  }
+  if (modelName === "RectZ") {
     return { type: "rectZ" };
   }
   if (modelName === "Triangle") {
     return { type: "triangle" };
   }
   if (modelName === "TrianglePlane") {
-    return { type: "triangleZ" };
+    return { type: "trianglePlane" };
   }
 
-  // Empty modelName → default XY rect (same as "Rect" in PKO)
+  // Empty modelName → default rect (same as "Rect" in PKO)
   return { type: "rect" };
 }
 
 /**
- * Create a BufferGeometry for the PKO "Rect" type — XY plane, normal +Z.
- * 4 vertices: (-0.5,-0.5,0) to (0.5,0.5,0), UVs (0,1)→(1,0).
+ * Create a BufferGeometry for the PKO "Rect" type — XZ plane, normal +Y.
+ * C++ CreateRect(): (-0.5,0,0), (-0.5,0,1), (0.5,0,1), (0.5,0,0)
+ * Z range [0,1] (not centered). UVs: (0,1),(0,0),(1,0),(1,1).
  */
 export function createRectGeometry(): THREE.BufferGeometry {
   const positions = new Float32Array([
-    -0.5, -0.5, 0, // bottom-left
-     0.5, -0.5, 0, // bottom-right
-     0.5,  0.5, 0, // top-right
-    -0.5,  0.5, 0, // top-left
+    -0.5, 0, 0, // v0
+    -0.5, 0, 1, // v1
+     0.5, 0, 1, // v2
+     0.5, 0, 0, // v3
   ]);
   const normals = new Float32Array([
-    0, 0, 1,
-    0, 0, 1,
-    0, 0, 1,
-    0, 0, 1,
+    0, 1, 0,
+    0, 1, 0,
+    0, 1, 0,
+    0, 1, 0,
   ]);
   const uvs = new Float32Array([
-    0, 1, // bottom-left
-    1, 1, // bottom-right
-    1, 0, // top-right
-    0, 0, // top-left
+    0, 1, // v0
+    0, 0, // v1
+    1, 0, // v2
+    1, 1, // v3
   ]);
   const indices = new Uint16Array([0, 1, 2, 0, 2, 3]);
 
@@ -150,27 +188,62 @@ export function createRectGeometry(): THREE.BufferGeometry {
 }
 
 /**
- * Create a BufferGeometry for the PKO "RectZ"/"RectPlane" type — XZ plane, normal +Y.
- * 4 vertices: (-0.5,0,-0.5) to (0.5,0,0.5).
+ * Create a BufferGeometry for the PKO "RectPlane" type — XY plane, normal +Z.
+ * C++ CreatePlaneRect(): (-0.5,-0.5,0), (-0.5,0.5,0), (0.5,0.5,0), (0.5,-0.5,0)
+ * Centered on both axes. UVs: (0,1),(0,0),(1,0),(1,1).
+ */
+export function createRectPlaneGeometry(): THREE.BufferGeometry {
+  const positions = new Float32Array([
+    -0.5, -0.5, 0, // v0
+    -0.5,  0.5, 0, // v1
+     0.5,  0.5, 0, // v2
+     0.5,-0.5, 0, // v3
+  ]);
+  const normals = new Float32Array([
+    0, 0, 1,
+    0, 0, 1,
+    0, 0, 1,
+    0, 0, 1,
+  ]);
+  const uvs = new Float32Array([
+    0, 1, // v0
+    0, 0, // v1
+    1, 0, // v2
+    1, 1, // v3
+  ]);
+  const indices = new Uint16Array([0, 1, 2, 0, 2, 3]);
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geo.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
+  geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
+  geo.setIndex(new THREE.BufferAttribute(indices, 1));
+  return geo;
+}
+
+/**
+ * Create a BufferGeometry for the PKO "RectZ" type — YZ plane, normal +X.
+ * C++ CreateRectZ(): (0,0,0), (0,0,1), (0,1,1), (0,1,0)
+ * Y/Z range [0,1]. UVs: (0,1),(0,0),(1,0),(1,1).
  */
 export function createRectZGeometry(): THREE.BufferGeometry {
   const positions = new Float32Array([
-    -0.5, 0, -0.5, // back-left
-     0.5, 0, -0.5, // back-right
-     0.5, 0,  0.5, // front-right
-    -0.5, 0,  0.5, // front-left
+    0, 0, 0, // v0
+    0, 0, 1, // v1
+    0, 1, 1, // v2
+    0, 1, 0, // v3
   ]);
   const normals = new Float32Array([
-    0, 1, 0,
-    0, 1, 0,
-    0, 1, 0,
-    0, 1, 0,
+    1, 0, 0,
+    1, 0, 0,
+    1, 0, 0,
+    1, 0, 0,
   ]);
   const uvs = new Float32Array([
-    0, 0, // back-left
-    1, 0, // back-right
-    1, 1, // front-right
-    0, 1, // front-left
+    0, 1, // v0
+    0, 0, // v1
+    1, 0, // v2
+    1, 1, // v3
   ]);
   const indices = new Uint16Array([0, 1, 2, 0, 2, 3]);
 
@@ -183,24 +256,25 @@ export function createRectZGeometry(): THREE.BufferGeometry {
 }
 
 /**
- * Create a BufferGeometry for the PKO "Triangle" type — XY plane.
- * 3 vertices: (0,0.5,0), (-0.5,-0.5,0), (0.5,-0.5,0).
+ * Create a BufferGeometry for the PKO "Triangle" type — XZ plane, normal +Y.
+ * C++ CreateTriangle(): (0,0,0.5), (-0.5,0,0), (0.5,0,0)
+ * Tip at Z=0.5, base at Z=0. UVs: (0.5,0),(0,1),(1,1).
  */
 export function createTriangleGeometry(): THREE.BufferGeometry {
   const positions = new Float32Array([
-     0,    0.5,  0, // top
-    -0.5, -0.5,  0, // bottom-left
-     0.5, -0.5,  0, // bottom-right
+     0,    0,  0.5, // tip
+    -0.5,  0,  0,   // base-left
+     0.5,  0,  0,   // base-right
   ]);
   const normals = new Float32Array([
-    0, 0, 1,
-    0, 0, 1,
-    0, 0, 1,
+    0, 1, 0,
+    0, 1, 0,
+    0, 1, 0,
   ]);
   const uvs = new Float32Array([
-    0.5, 0, // top
-    0,   1, // bottom-left
-    1,   1, // bottom-right
+    0.5, 0, // tip
+    0,   1, // base-left
+    1,   1, // base-right
   ]);
   const indices = new Uint16Array([0, 1, 2]);
 
@@ -213,24 +287,25 @@ export function createTriangleGeometry(): THREE.BufferGeometry {
 }
 
 /**
- * Create a BufferGeometry for the PKO "TrianglePlane" type — XZ plane.
- * 3 vertices: (0,0,0.5), (-0.5,0,-0.5), (0.5,0,-0.5).
+ * Create a BufferGeometry for the PKO "TrianglePlane" type — XY plane, normal +Z.
+ * C++ CreatePlaneTriangle(): (0,0.5,0), (-0.5,-0.5,0), (0.5,-0.5,0)
+ * Tip at Y=0.5, base at Y=-0.5. UVs: (0.5,0),(0,1),(1,1).
  */
-export function createTriangleZGeometry(): THREE.BufferGeometry {
+export function createTrianglePlaneGeometry(): THREE.BufferGeometry {
   const positions = new Float32Array([
-     0,   0,  0.5, // front
-    -0.5, 0, -0.5, // back-left
-     0.5, 0, -0.5, // back-right
+     0,    0.5,  0, // tip
+    -0.5, -0.5,  0, // base-left
+     0.5, -0.5,  0, // base-right
   ]);
   const normals = new Float32Array([
-    0, 1, 0,
-    0, 1, 0,
-    0, 1, 0,
+    0, 0, 1,
+    0, 0, 1,
+    0, 0, 1,
   ]);
   const uvs = new Float32Array([
-    0.5, 0, // front
-    0,   1, // back-left
-    1,   1, // back-right
+    0.5, 0, // tip
+    0,   1, // base-left
+    1,   1, // base-right
   ]);
   const indices = new Uint16Array([0, 1, 2]);
 
@@ -239,6 +314,26 @@ export function createTriangleZGeometry(): THREE.BufferGeometry {
   geo.setAttribute("normal", new THREE.BufferAttribute(normals, 3));
   geo.setAttribute("uv", new THREE.BufferAttribute(uvs, 2));
   geo.setIndex(new THREE.BufferAttribute(indices, 1));
+  return geo;
+}
+
+/**
+ * Create a BufferGeometry for the PKO Cylinder/Cone — Z-axis, base at Z=0.
+ * C++ CreateCylinder(): base Z=0, top Z=h, extends along Z-axis.
+ * Wraps THREE.CylinderGeometry (Y-axis) + rotateX(-π/2) + translateZ(h/2).
+ */
+export function createCylinderGeometry(
+  topRadius = 0.5,
+  botRadius = 0.5,
+  height = 1.0,
+  segments = 16,
+): THREE.BufferGeometry {
+  const geo = new THREE.CylinderGeometry(topRadius, botRadius, height, Math.max(segments, 3));
+  // THREE.CylinderGeometry extends along Y, centered at origin.
+  // Rotate to Z-axis: rotateX(-π/2) maps Y→Z
+  // Then translate +Z by h/2 so base is at Z=0, top at Z=h
+  geo.rotateX(-Math.PI / 2);
+  geo.translate(0, 0, height / 2);
   return geo;
 }
 

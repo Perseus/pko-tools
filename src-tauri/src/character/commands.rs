@@ -15,6 +15,16 @@ use super::{
     info::get_all_characters, Character, CharacterMetadata,
 };
 
+#[derive(serde::Serialize)]
+pub struct CharacterAction {
+    pub action_id: u16,
+    pub name: String,
+    pub start_frame: u32,
+    pub end_frame: u32,
+    pub key_frames: Vec<u32>,
+    pub weapon_mode: Option<String>,
+}
+
 #[tauri::command]
 pub async fn get_character_list(project_id: String) -> Result<Vec<Character>, String> {
     if let Ok(proj_id) = uuid::Uuid::from_str(&project_id) {
@@ -218,6 +228,64 @@ pub async fn invalidate_character_cache(
     }
 
     Ok(())
+}
+
+#[tauri::command]
+pub async fn get_character_actions(
+    app_state: tauri::State<'_, AppState>,
+    project_id: String,
+    char_type_id: u16,
+) -> Result<Vec<CharacterAction>, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = crate::projects::project::Project::get_project(project_id)
+        .map_err(|e| e.to_string())?;
+    let project_dir = project.project_directory.as_ref();
+
+    let action_table_path = project_dir.join("scripts/txt/CharacterAction.tx");
+    let poseinfo_path = project_dir.join("scripts/table/characterposeinfo.bin");
+
+    let action_table = crate::animation::action_table::load_action_table(&action_table_path)
+        .map_err(|e| e.to_string())?;
+    let pose_table = crate::animation::pose_info::load_poseinfo(&poseinfo_path)
+        .map_err(|e| e.to_string())?;
+
+    let actions = action_table
+        .get(&char_type_id)
+        .cloned()
+        .unwrap_or_default();
+
+    let result: Vec<CharacterAction> = actions
+        .into_iter()
+        .filter(|a| !(a.start_frame == 0 && a.end_frame == 0))
+        .map(|a| {
+            let (name, weapon_mode) =
+                if let Some((entry, weapon_idx)) = pose_table.get_base_pose(a.action_id) {
+                    let base = entry.name.clone();
+                    let wm = if entry.weapon_variants.iter().filter(|&&v| v != 0).count() > 1 {
+                        Some(crate::animation::pose_info::WEAPON_MODES[weapon_idx].to_string())
+                    } else {
+                        None
+                    };
+                    (base, wm)
+                } else if let Some(name) = pose_table.get_pose_name(a.action_id) {
+                    (name.to_string(), None)
+                } else {
+                    (format!("Action {}", a.action_id), None)
+                };
+
+            CharacterAction {
+                action_id: a.action_id,
+                name,
+                start_frame: a.start_frame,
+                end_frame: a.end_frame,
+                key_frames: a.key_frames,
+                weapon_mode,
+            }
+        })
+        .collect();
+
+    Ok(result)
 }
 
 #[tauri::command]

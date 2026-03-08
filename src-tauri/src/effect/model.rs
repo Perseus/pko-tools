@@ -1,4 +1,4 @@
-use std::io::{Read, Write};
+use std::io::Write;
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -75,46 +75,13 @@ pub struct CylinderParams {
 
 impl EffFile {
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        let mut reader = std::io::Cursor::new(bytes);
-        Self::read_from(&mut reader)
+        super::eff_loader::load_eff(bytes)
     }
 
     pub fn to_bytes(&self) -> Result<Vec<u8>> {
         let mut buffer = Vec::new();
         self.write_to(&mut buffer)?;
         Ok(buffer)
-    }
-
-    pub fn read_from<R: Read>(reader: &mut R) -> Result<Self> {
-        let version = read_u32(reader)?;
-        let idx_tech = read_i32(reader)?;
-        let use_path = read_bool(reader)?;
-        let path_name = read_fixed_string(reader)?;
-        let use_sound = read_bool(reader)?;
-        let sound_name = read_fixed_string(reader)?;
-        let rotating = read_bool(reader)?;
-        let rota_vec = read_vec3(reader)?;
-        let rota_vel = read_f32(reader)?;
-        let eff_num = read_i32(reader)?;
-
-        let mut sub_effects = Vec::with_capacity(eff_num.max(0) as usize);
-        for _ in 0..eff_num.max(0) {
-            sub_effects.push(SubEffect::read_from(reader, version)?);
-        }
-
-        Ok(Self {
-            version,
-            idx_tech,
-            use_path,
-            path_name,
-            use_sound,
-            sound_name,
-            rotating,
-            rota_vec,
-            rota_vel,
-            eff_num,
-            sub_effects,
-        })
     }
 
     pub fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
@@ -138,159 +105,6 @@ impl EffFile {
 }
 
 impl SubEffect {
-    fn read_from<R: Read>(reader: &mut R, version: u32) -> Result<Self> {
-        let effect_name = read_fixed_string(reader)?;
-        let effect_type = read_i32(reader)?;
-        let src_blend = read_blend(reader)?;
-        let dest_blend = read_blend(reader)?;
-        let length = read_f32(reader)?;
-        let frame_count = read_u16(reader)?;
-
-        let mut frame_times = Vec::with_capacity(frame_count as usize);
-        for _ in 0..frame_count {
-            frame_times.push(read_f32(reader)?);
-        }
-
-        let mut frame_sizes = Vec::with_capacity(frame_count as usize);
-        let mut frame_angles = Vec::with_capacity(frame_count as usize);
-        let mut frame_positions = Vec::with_capacity(frame_count as usize);
-        let mut frame_colors = Vec::with_capacity(frame_count as usize);
-        for _ in 0..frame_count {
-            frame_sizes.push(read_vec3(reader)?);
-        }
-        for _ in 0..frame_count {
-            frame_angles.push(read_vec3(reader)?);
-        }
-        for _ in 0..frame_count {
-            frame_positions.push(read_vec3(reader)?);
-        }
-        for _ in 0..frame_count {
-            frame_colors.push(read_vec4(reader)?);
-        }
-
-        let ver_count = read_u16(reader)?;
-        let coord_count = read_u16(reader)?;
-        let coord_frame_time = read_f32(reader)?;
-        let coord_list = read_coord_list(reader, coord_count, ver_count)?;
-
-        let tex_count = read_u16(reader)?;
-        let tex_frame_time = read_f32(reader)?;
-        let tex_name = read_fixed_string(reader)?;
-        let tex_list = read_coord_list(reader, tex_count, ver_count)?;
-
-        let model_name = read_fixed_string(reader)?;
-        let billboard = read_bool(reader)?;
-        let vs_index = read_i32(reader)?;
-
-        let (segments, height, top_radius, bot_radius) = if version > 1 {
-            (
-                read_i32(reader)?,
-                read_f32(reader)?,
-                read_f32(reader)?,
-                read_f32(reader)?,
-            )
-        } else {
-            (0, 0.0, 0.0, 0.0)
-        };
-
-        let (frame_tex_count, frame_tex_time, frame_tex_names, frame_tex_time2) = if version > 2 {
-            let frame_tex_count = read_u16(reader)?;
-            let frame_tex_time = read_f32(reader)?;
-            let mut frame_tex_names = Vec::with_capacity(frame_tex_count as usize);
-            for _ in 0..frame_tex_count {
-                frame_tex_names.push(read_fixed_string(reader)?);
-            }
-            let frame_tex_time2 = read_f32(reader)?;
-
-            (
-                frame_tex_count,
-                frame_tex_time,
-                frame_tex_names,
-                frame_tex_time2,
-            )
-        } else {
-            (0, 0.0, Vec::new(), 0.0)
-        };
-
-        let (use_param, per_frame_cylinder) = if version > 3 {
-            let use_param = read_i32(reader)?;
-            let mut per_frame_cylinder = Vec::new();
-            if use_param > 0 {
-                per_frame_cylinder.reserve(frame_count as usize);
-                for _ in 0..frame_count {
-                    per_frame_cylinder.push(CylinderParams {
-                        segments: read_i32(reader)?,
-                        height: read_f32(reader)?,
-                        top_radius: read_f32(reader)?,
-                        bot_radius: read_f32(reader)?,
-                    });
-                }
-            }
-
-            (use_param, per_frame_cylinder)
-        } else {
-            (0, Vec::new())
-        };
-
-        let (rota_loop, rota_loop_vec) = if version > 4 {
-            let rota_loop = read_bool(reader)?;
-            let rota_loop_vec = read_vec4(reader)?;
-            (rota_loop, rota_loop_vec)
-        } else {
-            (false, [0.0, 0.0, 0.0, 0.0])
-        };
-
-        let alpha = if version > 5 {
-            read_bool(reader)?
-        } else {
-            false
-        };
-        let rota_board = if version > 6 {
-            read_bool(reader)?
-        } else {
-            false
-        };
-
-        Ok(Self {
-            effect_name,
-            effect_type,
-            src_blend,
-            dest_blend,
-            length,
-            frame_count,
-            frame_times,
-            frame_sizes,
-            frame_angles,
-            frame_positions,
-            frame_colors,
-            ver_count,
-            coord_count,
-            coord_frame_time,
-            coord_list,
-            tex_count,
-            tex_frame_time,
-            tex_name,
-            tex_list,
-            model_name,
-            billboard,
-            vs_index,
-            segments,
-            height,
-            top_radius,
-            bot_radius,
-            frame_tex_count,
-            frame_tex_time,
-            frame_tex_names,
-            frame_tex_time2,
-            use_param,
-            per_frame_cylinder,
-            rota_loop,
-            rota_loop_vec,
-            alpha,
-            rota_board,
-        })
-    }
-
     fn write_to<W: Write>(&self, writer: &mut W, version: u32) -> Result<()> {
         write_fixed_string(writer, &self.effect_name)?;
         write_i32(writer, self.effect_type)?;
@@ -374,23 +188,6 @@ impl SubEffect {
     }
 }
 
-fn read_coord_list<R: Read>(
-    reader: &mut R,
-    count: u16,
-    ver_count: u16,
-) -> Result<Vec<Vec<[f32; 2]>>> {
-    let mut coord_list = Vec::with_capacity(count as usize);
-    for _ in 0..count {
-        let mut frame = Vec::with_capacity(ver_count as usize);
-        for _ in 0..ver_count {
-            frame.push(read_vec2(reader)?);
-        }
-        coord_list.push(frame);
-    }
-
-    Ok(coord_list)
-}
-
 fn write_coord_list<W: Write>(
     writer: &mut W,
     coord_list: &[Vec<[f32; 2]>],
@@ -413,13 +210,6 @@ fn write_coord_list<W: Write>(
     Ok(())
 }
 
-fn read_fixed_string<R: Read>(reader: &mut R) -> Result<String> {
-    let mut buffer = [0u8; FIXED_NAME_LEN];
-    reader.read_exact(&mut buffer)?;
-    let end = buffer.iter().position(|b| *b == 0).unwrap_or(buffer.len());
-    Ok(String::from_utf8_lossy(&buffer[..end]).to_string())
-}
-
 fn write_fixed_string<W: Write>(writer: &mut W, value: &str) -> Result<()> {
     let mut buffer = [0u8; FIXED_NAME_LEN];
     let bytes = value.as_bytes();
@@ -427,62 +217,6 @@ fn write_fixed_string<W: Write>(writer: &mut W, value: &str) -> Result<()> {
     buffer[..len].copy_from_slice(&bytes[..len]);
     writer.write_all(&buffer)?;
     Ok(())
-}
-
-fn read_u8<R: Read>(reader: &mut R) -> Result<u8> {
-    let mut buffer = [0u8; 1];
-    reader.read_exact(&mut buffer)?;
-    Ok(buffer[0])
-}
-
-fn read_u16<R: Read>(reader: &mut R) -> Result<u16> {
-    let mut buffer = [0u8; 2];
-    reader.read_exact(&mut buffer)?;
-    Ok(u16::from_le_bytes(buffer))
-}
-
-fn read_u32<R: Read>(reader: &mut R) -> Result<u32> {
-    let mut buffer = [0u8; 4];
-    reader.read_exact(&mut buffer)?;
-    Ok(u32::from_le_bytes(buffer))
-}
-
-fn read_i32<R: Read>(reader: &mut R) -> Result<i32> {
-    let mut buffer = [0u8; 4];
-    reader.read_exact(&mut buffer)?;
-    Ok(i32::from_le_bytes(buffer))
-}
-
-fn read_f32<R: Read>(reader: &mut R) -> Result<f32> {
-    let mut buffer = [0u8; 4];
-    reader.read_exact(&mut buffer)?;
-    Ok(f32::from_le_bytes(buffer))
-}
-
-fn read_bool<R: Read>(reader: &mut R) -> Result<bool> {
-    Ok(read_u8(reader)? != 0)
-}
-
-fn read_vec2<R: Read>(reader: &mut R) -> Result<[f32; 2]> {
-    Ok([read_f32(reader)?, read_f32(reader)?])
-}
-
-fn read_vec3<R: Read>(reader: &mut R) -> Result<[f32; 3]> {
-    Ok([read_f32(reader)?, read_f32(reader)?, read_f32(reader)?])
-}
-
-fn read_vec4<R: Read>(reader: &mut R) -> Result<[f32; 4]> {
-    Ok([
-        read_f32(reader)?,
-        read_f32(reader)?,
-        read_f32(reader)?,
-        read_f32(reader)?,
-    ])
-}
-
-fn read_blend<R: Read>(reader: &mut R) -> Result<D3DBlend> {
-    let value = read_u32(reader)?;
-    D3DBlend::try_from(value).map_err(|e| anyhow::anyhow!(e))
 }
 
 fn write_u8<W: Write>(writer: &mut W, value: u8) -> Result<()> {
@@ -530,6 +264,285 @@ fn write_vec4<W: Write>(writer: &mut W, value: [f32; 4]) -> Result<()> {
     write_f32(writer, value[1])?;
     write_f32(writer, value[2])?;
     write_f32(writer, value[3])
+}
+
+// ── .par domain types ────────────────────────────────────────────────────────
+
+/// Parsed .par particle controller file.
+/// Matches the frontend `ParticleController` TypeScript interface.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParFile {
+    pub version: u32,
+    pub name: String,
+    pub length: f32,
+    pub systems: Vec<ParSystem>,
+    pub strips: Vec<ParStrip>,
+    pub models: Vec<ParChaModel>,
+}
+
+/// A single particle emitter system within a .par file.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParSystem {
+    pub r#type: i32,
+    pub name: String,
+    pub particle_count: i32,
+    pub texture_name: String,
+    pub model_name: String,
+    pub range: [f32; 3],
+    pub frame_count: u16,
+    pub frame_sizes: Vec<f32>,
+    pub frame_angles: Vec<[f32; 3]>,
+    pub frame_colors: Vec<[f32; 4]>,
+    pub billboard: bool,
+    pub src_blend: i32,
+    pub dest_blend: i32,
+    pub min_filter: i32,
+    pub mag_filter: i32,
+    pub life: f32,
+    pub velocity: f32,
+    pub direction: [f32; 3],
+    pub acceleration: [f32; 3],
+    pub step: f32,
+    // v4+
+    pub model_range_flag: bool,
+    pub model_range_name: String,
+    // v5+
+    pub offset: [f32; 3],
+    // v6+
+    pub delay_time: f32,
+    pub play_time: f32,
+    // v9+
+    pub use_path: bool,
+    pub path: Option<ParEffPath>,
+    // v10+
+    pub shade: bool,
+    // v11+
+    pub hit_effect: String,
+    // v12+ (only when model_range_flag)
+    pub point_ranges: Vec<[f32; 3]>,
+    // v13+
+    pub random_mode: i32,
+    // v14+
+    pub model_dir: bool,
+    // v15+
+    pub media_y: bool,
+}
+
+/// Spline path for path-following particles.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParEffPath {
+    pub velocity: f32,
+    pub points: Vec<[f32; 3]>,
+    pub directions: Vec<[f32; 3]>,
+    pub distances: Vec<f32>,
+}
+
+/// Strip/ribbon trail definition.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParStrip {
+    pub max_len: i32,
+    pub dummy: [i32; 2],
+    pub color: [f32; 4],
+    pub life: f32,
+    pub step: f32,
+    pub texture_name: String,
+    pub src_blend: i32,
+    pub dest_blend: i32,
+}
+
+/// Character model emitter.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ParChaModel {
+    pub id: i32,
+    pub velocity: f32,
+    pub play_type: i32,
+    pub cur_pose: i32,
+    pub src_blend: i32,
+    pub dest_blend: i32,
+    pub color: [f32; 4],
+}
+
+impl ParFile {
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        super::par_loader::load_par(bytes)
+    }
+
+    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+        let mut buffer = Vec::new();
+        self.write_to(&mut buffer)?;
+        Ok(buffer)
+    }
+
+    pub fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
+        write_u32(writer, self.version)?;
+        write_fixed_string(writer, &self.name)?;
+        write_i32(writer, self.systems.len() as i32)?;
+
+        if self.version >= 3 {
+            write_f32(writer, self.length)?;
+        }
+
+        for sys in &self.systems {
+            sys.write_to(writer, self.version)?;
+        }
+
+        if self.version >= 7 {
+            write_i32(writer, self.strips.len() as i32)?;
+            for strip in &self.strips {
+                strip.write_to(writer)?;
+            }
+        }
+
+        if self.version >= 8 {
+            write_i32(writer, self.models.len() as i32)?;
+            for model in &self.models {
+                model.write_to(writer)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl ParSystem {
+    fn write_to<W: Write>(&self, writer: &mut W, version: u32) -> Result<()> {
+        write_i32(writer, self.r#type)?;
+        write_fixed_string(writer, &self.name)?;
+        write_i32(writer, self.particle_count)?;
+        write_fixed_string(writer, &self.texture_name)?;
+        write_fixed_string(writer, &self.model_name)?;
+        write_f32(writer, self.range[0])?;
+        write_f32(writer, self.range[1])?;
+        write_f32(writer, self.range[2])?;
+        write_u16(writer, self.frame_count)?;
+
+        for size in &self.frame_sizes {
+            write_f32(writer, *size)?;
+        }
+        for angle in &self.frame_angles {
+            write_vec3(writer, *angle)?;
+        }
+        for color in &self.frame_colors {
+            write_vec4(writer, *color)?;
+        }
+
+        write_u8(writer, if self.billboard { 1 } else { 0 })?;
+        write_i32(writer, self.src_blend)?;
+        write_i32(writer, self.dest_blend)?;
+        write_i32(writer, self.min_filter)?;
+        write_i32(writer, self.mag_filter)?;
+        write_f32(writer, self.life)?;
+        write_f32(writer, self.velocity)?;
+        write_vec3(writer, self.direction)?;
+        write_vec3(writer, self.acceleration)?;
+        write_f32(writer, self.step)?;
+
+        if version > 3 {
+            write_u8(writer, if self.model_range_flag { 1 } else { 0 })?;
+            write_fixed_string(writer, &self.model_range_name)?;
+        }
+        if version > 4 {
+            write_vec3(writer, self.offset)?;
+        }
+        if version > 5 {
+            write_f32(writer, self.delay_time)?;
+            write_f32(writer, self.play_time)?;
+        }
+        if version > 8 {
+            write_u8(writer, if self.use_path { 1 } else { 0 })?;
+            if self.use_path {
+                if let Some(ref path) = self.path {
+                    path.write_to(writer)?;
+                }
+            }
+        }
+        if version > 9 {
+            write_u8(writer, if self.shade { 1 } else { 0 })?;
+        }
+        if version > 10 {
+            write_fixed_string(writer, &self.hit_effect)?;
+        }
+        if version > 11 && self.model_range_flag {
+            write_u16(writer, self.point_ranges.len() as u16)?;
+            for pr in &self.point_ranges {
+                write_vec3(writer, *pr)?;
+            }
+        }
+        if version > 12 {
+            write_i32(writer, self.random_mode)?;
+        }
+        if version > 13 {
+            write_u8(writer, if self.model_dir { 1 } else { 0 })?;
+        }
+        if version > 14 {
+            write_u8(writer, if self.media_y { 1 } else { 0 })?;
+        }
+
+        Ok(())
+    }
+}
+
+impl ParEffPath {
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
+        let frame_count = self.points.len() as i32;
+        write_i32(writer, frame_count)?;
+        write_f32(writer, self.velocity)?;
+
+        for p in &self.points {
+            write_vec3(writer, *p)?;
+        }
+
+        let segment_count = if frame_count > 0 {
+            (frame_count - 1) as usize
+        } else {
+            0
+        };
+
+        for i in 0..segment_count {
+            write_vec3(writer, self.directions[i])?;
+        }
+        for i in 0..segment_count {
+            // eff_path_dist_slot: value + 2 padding floats
+            write_f32(writer, self.distances[i])?;
+            write_f32(writer, 0.0)?;
+            write_f32(writer, 0.0)?;
+        }
+
+        Ok(())
+    }
+}
+
+impl ParStrip {
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
+        write_i32(writer, self.max_len)?;
+        write_i32(writer, self.dummy[0])?;
+        write_i32(writer, self.dummy[1])?;
+        write_vec4(writer, self.color)?;
+        write_f32(writer, self.life)?;
+        write_f32(writer, self.step)?;
+        write_fixed_string(writer, &self.texture_name)?;
+        write_i32(writer, self.src_blend)?;
+        write_i32(writer, self.dest_blend)?;
+        Ok(())
+    }
+}
+
+impl ParChaModel {
+    fn write_to<W: Write>(&self, writer: &mut W) -> Result<()> {
+        write_i32(writer, self.id)?;
+        write_f32(writer, self.velocity)?;
+        write_i32(writer, self.play_type)?;
+        write_i32(writer, self.cur_pose)?;
+        write_i32(writer, self.src_blend)?;
+        write_i32(writer, self.dest_blend)?;
+        write_vec4(writer, self.color)?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
-import { BuildingEntry } from "@/types/buildings";
-import { invoke } from "@tauri-apps/api/core";
+import { invokeTimed as invoke } from "@/commands/invokeTimed";
+import { BuildingEntry, BuildingMetadata } from "@/types/buildings";
 
 export const getBuildingList = async (
   projectId: string
@@ -20,4 +20,11 @@ export const exportBuildingToGltf = async (
   outputDir: string
 ): Promise<string> => {
   return invoke("export_building_to_gltf", { projectId, buildingId, outputDir });
+};
+
+export const getBuildingMetadata = async (
+  projectId: string,
+  buildingId: number
+): Promise<BuildingMetadata> => {
+  return invoke("get_building_metadata", { projectId, buildingId });
 };

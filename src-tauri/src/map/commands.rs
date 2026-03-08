@@ -3,6 +3,7 @@ use std::str::FromStr;
 use crate::projects::project::Project;
 
 use super::terrain;
+use super::lmo_types::BuildingMetadata;
 use super::{BuildingEntry, MapEntry, MapExportResult, MapForUnityExportResult, MapMetadata};
 
 #[tauri::command]
@@ -225,4 +226,29 @@ pub async fn export_building_to_gltf(
     std::fs::write(&gltf_path, gltf_json.as_bytes()).map_err(|e| e.to_string())?;
 
     Ok(gltf_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+pub async fn get_building_metadata(
+    project_id: String,
+    building_id: u32,
+) -> Result<BuildingMetadata, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+
+    let obj_info = super::scene_obj_info::load_scene_obj_info(project.project_directory.as_ref())
+        .map_err(|e| e.to_string())?;
+
+    let info = obj_info
+        .get(&building_id)
+        .ok_or_else(|| format!("Building ID {} not found in sceneobjinfo", building_id))?;
+
+    let lmo_path =
+        super::scene_model::find_lmo_path(project.project_directory.as_ref(), &info.filename)
+            .ok_or_else(|| format!("LMO file not found: {}", info.filename))?;
+
+    let lmo = super::lmo_loader::load_lmo(&lmo_path).map_err(|e| e.to_string())?;
+
+    Ok(super::lmo_types::build_metadata(&lmo, building_id, &info.filename))
 }

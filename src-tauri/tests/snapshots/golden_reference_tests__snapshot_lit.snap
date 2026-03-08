@@ -1,0 +1,94 @@
+---
+source: tests/golden_reference_tests.rs
+expression: entries
+---
+- obj_type: 1
+  anim_type: 4
+  file: 02010005.lgo
+  sub_id: 0
+  color_op: 9
+  overlay_texture: cobweb.TGA
+  textures:
+    - cobweb.TGA
+    - shlight.tga
+    - shlight.tga
+- obj_type: 2
+  anim_type: 4
+  file: 02010005.lgo
+  sub_id: 0
+  color_op: 9
+  overlay_texture: cobweb.TGA
+  textures:
+    - cobweb.TGA
+    - shlight.tga
+- obj_type: 0
+  anim_type: 0
+  file: 0000000002.lgo
+  sub_id: 0
+  color_op: 0
+  overlay_texture: eff0092.TGA
+  textures:
+    - eff0092.TGA
+    - shlight.tga
+    - xxx.tga
+    - ddd.bmp
+- obj_type: 0
+  anim_type: 0
+  file: 0002080003.lgo
+  sub_id: 0
+  color_op: 0
+  overlay_texture: eff0092.TGA
+  textures:
+    - eff0092.TGA
+- obj_type: 0
+  anim_type: 0
+  file: 0002080004.lgo
+  sub_id: 0
+  color_op: 0
+  overlay_texture: eff0092.TGA
+  textures:
+    - eff0092.TGA
+- obj_type: 0
+  anim_type: 0
+  file: 0030000000.lgo
+  sub_id: 0
+  color_op: 0
+  overlay_texture: eff0092.TGA
+  textures:
+    - eff0092.TGA
+- obj_type: 0
+  anim_type: 0
+  file: 0000060002.lgo
+  sub_id: 0
+  color_op: 0
+  overlay_texture: thunder01.TGA
+  textures:
+    - thunder01.TGA
+    - thunder02.TGA
+    - thunder03.TGA
+    - thunder04.TGA
+    - thunder05.TGA
+- obj_type: 0
+  anim_type: 0
+  file: 0000060003.lgo
+  sub_id: 0
+  color_op: 0
+  overlay_texture: thunder01.TGA
+  textures:
+    - thunder01.TGA
+    - thunder02.TGA
+    - thunder03.TGA
+    - thunder04.TGA
+    - thunder05.TGA
+- obj_type: 0
+  anim_type: 0
+  file: 0000060004.lgo
+  sub_id: 0
+  color_op: 0
+  overlay_texture: thunder01.TGA
+  textures:
+    - thunder01.TGA
+    - thunder02.TGA
+    - thunder03.TGA
+    - thunder04.TGA
+    - thunder05.TGA
