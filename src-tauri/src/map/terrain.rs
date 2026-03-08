@@ -2878,8 +2878,7 @@ fn copy_water_textures(project_dir: &Path, output_dir: &Path) -> Vec<String> {
 
 /// Export a map for Unity (or similar engines).
 ///
-/// When `options.manifest_version == 2` (legacy): binary grids + JSON glTF + v2 manifest.
-/// When `options.manifest_version == 3` (default): PNG grids + GLB terrain/buildings + slim v3 manifest.
+/// Outputs PNG grids + GLB terrain/buildings + slim v3 manifest.
 pub fn export_map_for_unity(
     project_dir: &Path,
     map_name: &str,
@@ -2887,8 +2886,6 @@ pub fn export_map_for_unity(
     options: &super::ExportOptions,
 ) -> Result<super::MapForUnityExportResult> {
     use std::collections::HashSet;
-
-    let v3 = options.manifest_version >= 3;
 
     // 1. Parse .map file
     eprintln!("[map] Parsing {}.map ...", map_name);
@@ -2960,13 +2957,12 @@ pub fn export_map_for_unity(
         })
         .unwrap_or_default();
 
-    // 7. Export buildings — glTF (v2) or GLB (v3)
+    // 7. Export buildings as GLB
     // When shared_assets_dir is set, buildings are in the shared dir — don't re-export.
     std::fs::create_dir_all(output_dir)?;
     let use_shared = options.shared_assets_dir.is_some();
 
     let mut building_entries = Vec::new();
-    let ext = if v3 { "glb" } else { "gltf" };
 
     if use_shared {
         // Build entries from obj_info without exporting — buildings live in shared dir
@@ -3006,23 +3002,14 @@ pub fn export_map_for_unity(
                 .strip_suffix(".lmo")
                 .or_else(|| info.filename.strip_suffix(".LMO"))
                 .unwrap_or(&info.filename);
-            let out_filename = format!("{}.{}", stem, ext);
+            let out_filename = format!("{}.glb", stem);
             let out_path = buildings_dir.join(&out_filename);
 
-            if v3 {
-                match super::scene_model::build_glb_from_lmo(&lmo_path, project_dir) {
-                    Ok((json, bin)) => {
-                        super::glb::write_glb(&json, &bin, &out_path)?;
-                    }
-                    Err(_) => continue,
+            match super::scene_model::build_glb_from_lmo(&lmo_path, project_dir) {
+                Ok((json, bin)) => {
+                    super::glb::write_glb(&json, &bin, &out_path)?;
                 }
-            } else {
-                match super::scene_model::build_gltf_from_lmo(&lmo_path, project_dir) {
-                    Ok(json) => {
-                        std::fs::write(&out_path, json.as_bytes())?;
-                    }
-                    Err(_) => continue,
-                }
+                Err(_) => continue,
             }
 
             building_entries.push(super::BuildingExportEntry {
@@ -3055,7 +3042,7 @@ pub fn export_map_for_unity(
             let shared_rel = compute_shared_rel_path(output_dir, shared_dir);
             format!("{}/buildings/{}.glb", shared_rel, stem)
         } else {
-            format!("buildings/{}.{}", stem, ext)
+            format!("buildings/{}.glb", stem)
         };
         let mut bldg_json = serde_json::json!({
             "glb": glb_path,
@@ -3128,8 +3115,8 @@ pub fn export_map_for_unity(
                     "scale": obj.scale,
                 }));
 
-                // For v3 terrain GLB: collect placement data for empty nodes
-                if v3 {
+                // Collect placement data for terrain GLB empty nodes
+                {
                     let info = obj_info.get(&(obj.obj_id as u32));
                     let stem = info
                         .map(|i| {
@@ -3180,31 +3167,20 @@ pub fn export_map_for_unity(
     let grids_dir = output_dir.join("grids");
     std::fs::create_dir_all(&grids_dir)?;
 
-    if v3 {
-        // Write PNG grids
-        super::grid_images::encode_all_grids(
-            &collision,
-            &obj_height,
-            &terrain_height,
-            &region_bytes,
-            &area_bytes,
-            &tile_tex_bytes,
-            &tile_color_bytes,
-            &tile_layer_bytes,
-            parsed_map.header.n_width,
-            parsed_map.header.n_height,
-            &grids_dir,
-        )?;
-    } else {
-        // Write binary grids (v2 legacy)
-        std::fs::write(grids_dir.join("collision.bin"), &collision.0)?;
-        std::fs::write(grids_dir.join("obj_height.bin"), &obj_height.0)?;
-        std::fs::write(grids_dir.join("region.bin"), &region_bytes)?;
-        std::fs::write(grids_dir.join("area.bin"), &area_bytes)?;
-        std::fs::write(grids_dir.join("tile_texture.bin"), &tile_tex_bytes)?;
-        std::fs::write(grids_dir.join("tile_color.bin"), &tile_color_bytes)?;
-        std::fs::write(grids_dir.join("tile_layer.bin"), &tile_layer_bytes)?;
-    }
+    // Write PNG grids
+    super::grid_images::encode_all_grids(
+        &collision,
+        &obj_height,
+        &terrain_height,
+        &region_bytes,
+        &area_bytes,
+        &tile_tex_bytes,
+        &tile_color_bytes,
+        &tile_layer_bytes,
+        parsed_map.header.n_width,
+        parsed_map.header.n_height,
+        &grids_dir,
+    )?;
 
     // 10. Build effect definitions
     let mut effect_definitions = serde_json::Map::new();
@@ -3249,88 +3225,81 @@ pub fn export_map_for_unity(
     let terrain_file_path;
     let mut terrain_sections_info: Option<serde_json::Value> = None;
 
-    if v3 {
-        let glb_metadata = TerrainGlbMetadata {
-            map_name,
-            areas_json: &areas_json,
-            spawn_point: spawn_point_tiles,
-            light_direction,
-            light_color,
-            ambient: [0.4, 0.4, 0.4],
-            background_color: [10, 10, 125],
-            building_placements: building_glb_placements,
-        };
+    let glb_metadata = TerrainGlbMetadata {
+        map_name,
+        areas_json: &areas_json,
+        spawn_point: spawn_point_tiles,
+        light_direction,
+        light_color,
+        ambient: [0.4, 0.4, 0.4],
+        background_color: [10, 10, 125],
+        building_placements: building_glb_placements,
+    };
 
-        let map_w = parsed_map.header.n_width;
-        let map_h = parsed_map.header.n_height;
-        let total_vertices = ((map_w + 1) as u64) * ((map_h + 1) as u64);
+    let map_w = parsed_map.header.n_width;
+    let map_h = parsed_map.header.n_height;
+    let total_vertices = ((map_w + 1) as u64) * ((map_h + 1) as u64);
 
-        // Large maps (>4M vertices) use per-section export to avoid OOM in Unity
-        if total_vertices > 4_000_000 {
-            let sec_size = EXPORT_SECTION_TILE_SIZE;
-            let sections_x = (map_w + sec_size - 1) / sec_size;
-            let sections_z = (map_h + sec_size - 1) / sec_size;
+    // Large maps (>4M vertices) use per-section export to avoid OOM in Unity
+    if total_vertices > 4_000_000 {
+        let sec_size = EXPORT_SECTION_TILE_SIZE;
+        let sections_x = (map_w + sec_size - 1) / sec_size;
+        let sections_z = (map_h + sec_size - 1) / sec_size;
 
-            eprintln!(
-                "Large map ({map_w}x{map_h}, {total_vertices} vertices): exporting {}x{} = {} terrain sections",
-                sections_x, sections_z, sections_x * sections_z
-            );
+        eprintln!(
+            "Large map ({map_w}x{map_h}, {total_vertices} vertices): exporting {}x{} = {} terrain sections",
+            sections_x, sections_z, sections_x * sections_z
+        );
 
-            // Step 1: Compute global normals (prevents seam artifacts at section boundaries)
-            eprintln!("  Computing global normals...");
-            let global_normals = compute_global_normals(&parsed_map);
+        // Step 1: Compute global normals (prevents seam artifacts at section boundaries)
+        eprintln!("  Computing global normals...");
+        let global_normals = compute_global_normals(&parsed_map);
 
-            // Step 2: Export per-section GLBs
-            let sections_dir = output_dir.join("terrain_sections");
-            std::fs::create_dir_all(&sections_dir)?;
+        // Step 2: Export per-section GLBs
+        let sections_dir = output_dir.join("terrain_sections");
+        std::fs::create_dir_all(&sections_dir)?;
 
-            let has_atlas = atlas.is_some();
-            let total_sections = sections_x * sections_z;
-            for sz in 0..sections_z {
-                for sx in 0..sections_x {
-                    let idx = sz * sections_x + sx;
-                    if idx % 100 == 0 || idx == total_sections - 1 {
-                        eprintln!("  Section {}/{}", idx + 1, total_sections);
-                    }
-                    let (json, bin) = build_terrain_section_glb(
-                        &parsed_map, has_atlas, &global_normals, sec_size, sx, sz,
-                    )?;
-                    let section_path = sections_dir.join(format!("section_{}_{}.glb", sx, sz));
-                    super::glb::write_glb(&json, &bin, &section_path)?;
+        let has_atlas = atlas.is_some();
+        let total_sections = sections_x * sections_z;
+        for sz in 0..sections_z {
+            for sx in 0..sections_x {
+                let idx = sz * sections_x + sx;
+                if idx % 100 == 0 || idx == total_sections - 1 {
+                    eprintln!("  Section {}/{}", idx + 1, total_sections);
                 }
+                let (json, bin) = build_terrain_section_glb(
+                    &parsed_map, has_atlas, &global_normals, sec_size, sx, sz,
+                )?;
+                let section_path = sections_dir.join(format!("section_{}_{}.glb", sx, sz));
+                super::glb::write_glb(&json, &bin, &section_path)?;
             }
-
-            // Step 3: Save atlas texture as standalone PNG (shared by all sections)
-            if let Some(ref atlas_img) = atlas {
-                let atlas_path = output_dir.join("terrain_atlas.png");
-                atlas_img.save(&atlas_path)
-                    .map_err(|e| anyhow!("Failed to save terrain atlas: {}", e))?;
-                eprintln!("  Saved terrain_atlas.png");
-            }
-
-            // Step 4: Build metadata-only terrain.glb (spawn, buildings, lights, scene extras)
-            let (meta_json, meta_bin) = build_metadata_only_glb(&parsed_map, &glb_metadata)?;
-            terrain_file_path = output_dir.join("terrain.glb");
-            super::glb::write_glb(&meta_json, &meta_bin, &terrain_file_path)?;
-            eprintln!("  Saved metadata-only terrain.glb");
-
-            terrain_sections_info = Some(serde_json::json!({
-                "export_section_tile_size": sec_size,
-                "sections_x": sections_x,
-                "sections_z": sections_z,
-                "path_pattern": "terrain_sections/section_{x}_{z}.glb"
-            }));
-        } else {
-            // Small map: monolithic terrain GLB (existing path)
-            let (json, bin) = build_terrain_glb(&parsed_map, atlas.as_ref(), &glb_metadata)?;
-            terrain_file_path = output_dir.join("terrain.glb");
-            super::glb::write_glb(&json, &bin, &terrain_file_path)?;
         }
+
+        // Step 3: Save atlas texture as standalone PNG (shared by all sections)
+        if let Some(ref atlas_img) = atlas {
+            let atlas_path = output_dir.join("terrain_atlas.png");
+            atlas_img.save(&atlas_path)
+                .map_err(|e| anyhow!("Failed to save terrain atlas: {}", e))?;
+            eprintln!("  Saved terrain_atlas.png");
+        }
+
+        // Step 4: Build metadata-only terrain.glb (spawn, buildings, lights, scene extras)
+        let (meta_json, meta_bin) = build_metadata_only_glb(&parsed_map, &glb_metadata)?;
+        terrain_file_path = output_dir.join("terrain.glb");
+        super::glb::write_glb(&meta_json, &meta_bin, &terrain_file_path)?;
+        eprintln!("  Saved metadata-only terrain.glb");
+
+        terrain_sections_info = Some(serde_json::json!({
+            "export_section_tile_size": sec_size,
+            "sections_x": sections_x,
+            "sections_z": sections_z,
+            "path_pattern": "terrain_sections/section_{x}_{z}.glb"
+        }));
     } else {
-        // Build terrain JSON glTF (v2 legacy)
-        let terrain_gltf_json = build_terrain_gltf(&parsed_map, None, atlas.as_ref(), None)?;
-        terrain_file_path = output_dir.join("terrain.gltf");
-        std::fs::write(&terrain_file_path, terrain_gltf_json.as_bytes())?;
+        // Small map: monolithic terrain GLB
+        let (json, bin) = build_terrain_glb(&parsed_map, atlas.as_ref(), &glb_metadata)?;
+        terrain_file_path = output_dir.join("terrain.glb");
+        super::glb::write_glb(&json, &bin, &terrain_file_path)?;
     }
 
     // 11b. Copy teximg animation textures for buildings (skip when using shared assets)
@@ -3415,202 +3384,113 @@ pub fn export_map_for_unity(
     // 13. Build manifest
     let mut manifest_map = serde_json::Map::new();
 
-    if v3 {
-        // ----- Manifest v3 (slim) -----
-        manifest_map.insert("version".into(), serde_json::json!(3));
-        manifest_map.insert(
-            "unit_scale_contract".into(),
-            serde_json::json!("pko_1unit_to_unity_1unit_v1"),
-        );
-        manifest_map.insert("terrain_glb".into(), serde_json::json!("terrain.glb"));
-        manifest_map.insert("terrain_gltf".into(), serde_json::json!("terrain.glb")); // alias for ManifestShell compat
-        if let Some(ref sections_info) = terrain_sections_info {
-            manifest_map.insert("terrain_sections".into(), sections_info.clone());
-        }
-        if use_shared {
-            let shared_dir = options.shared_assets_dir.as_ref().unwrap();
-            let shared_rel = compute_shared_rel_path(output_dir, shared_dir);
-            manifest_map.insert("shared_assets".into(), serde_json::json!(shared_rel));
-        }
-        manifest_map.insert("map_name".into(), serde_json::json!(map_name));
-        manifest_map.insert("coordinate_system".into(), serde_json::json!("y_up"));
-        manifest_map.insert("world_scale".into(), serde_json::json!(MAP_VISUAL_SCALE));
-        manifest_map.insert(
-            "map_width_tiles".into(),
-            serde_json::json!(parsed_map.header.n_width),
-        );
-        manifest_map.insert(
-            "map_height_tiles".into(),
-            serde_json::json!(parsed_map.header.n_height),
-        );
-        manifest_map.insert(
-            "section_width".into(),
-            serde_json::json!(parsed_map.header.n_section_width),
-        );
-        manifest_map.insert(
-            "section_height".into(),
-            serde_json::json!(parsed_map.header.n_section_height),
-        );
-
-        // Grid file references with format metadata
-        manifest_map.insert(
-            "grids".into(),
-            serde_json::json!({
-                "collision": {
-                    "file": "grids/collision.png", "scale": 2,
-                    "format": "u8_threshold128",
-                    "decode": "pixel < 128 = walkable, >= 128 = blocked"
-                },
-                "obj_height": {
-                    "file": "grids/obj_height.png", "scale": 2,
-                    "format": "i16_rgb8_offset"
-                },
-                "region": {
-                    "file": "grids/region.png", "scale": 1,
-                    "format": "i16_rgb8_offset"
-                },
-                "area": {
-                    "file": "grids/area.png", "scale": 1,
-                    "format": "u8_direct"
-                },
-                "tile_texture": {
-                    "file": "grids/tile_texture.png", "scale": 1,
-                    "format": "u8_direct"
-                },
-                "tile_color": {
-                    "file": "grids/tile_color.png", "scale": 1,
-                    "format": "rgb8_color"
-                },
-                "tile_layer_tex": {
-                    "file": "grids/tile_layer_tex.png", "scale": 1,
-                    "format": "rgba8_indices"
-                },
-                "tile_layer_alpha": {
-                    "file": "grids/tile_layer_alpha.png", "scale": 1,
-                    "format": "rgb8_indices"
-                },
-                "terrain_height": {
-                    "file": "grids/terrain_height.png", "scale": 1,
-                    "format": "i16_rgb8_offset"
-                }
-            }),
-        );
-
-        // Buildings (GLB paths)
-        manifest_map.insert(
-            "buildings".into(),
-            serde_json::Value::Object(buildings_map),
-        );
-
-        // Placements, areas, and map settings (also embedded in GLB scene.extras)
-        manifest_map.insert("placements".into(), serde_json::json!(placements));
-        manifest_map.insert("areas".into(), areas_json.clone());
-        manifest_map.insert(
-            "spawn_point".into(),
-            serde_json::json!(spawn_point_tiles.map(|sp| serde_json::json!({
-                "tile_x": sp[0], "tile_y": sp[1]
-            }))),
-        );
-        manifest_map.insert(
-            "light_direction".into(),
-            serde_json::json!(light_direction),
-        );
-        manifest_map.insert("light_color".into(), serde_json::json!(light_color));
-        manifest_map.insert("ambient".into(), serde_json::json!([0.4, 0.4, 0.4]));
-        manifest_map.insert(
-            "background_color".into(),
-            serde_json::json!([10, 10, 125]),
-        );
-    } else {
-        // ----- Manifest v2 (full, legacy) -----
-        manifest_map.insert("version".into(), serde_json::json!(2));
-        manifest_map.insert("map_name".into(), serde_json::json!(map_name));
-        manifest_map.insert("coordinate_system".into(), serde_json::json!("y_up"));
-        manifest_map.insert("world_scale".into(), serde_json::json!(MAP_VISUAL_SCALE));
-        manifest_map.insert(
-            "unit_scale_contract".into(),
-            serde_json::json!("pko_1unit_to_unity_1unit_v1"),
-        );
-        manifest_map.insert(
-            "map_width_tiles".into(),
-            serde_json::json!(parsed_map.header.n_width),
-        );
-        manifest_map.insert(
-            "map_height_tiles".into(),
-            serde_json::json!(parsed_map.header.n_height),
-        );
-        manifest_map.insert(
-            "section_width".into(),
-            serde_json::json!(parsed_map.header.n_section_width),
-        );
-        manifest_map.insert(
-            "section_height".into(),
-            serde_json::json!(parsed_map.header.n_section_height),
-        );
-        manifest_map.insert("terrain_gltf".into(), serde_json::json!("terrain.gltf"));
-
-        // Binary grid metadata
-        let (coll_w, coll_h) = (collision.1, collision.2);
-        let (obj_h_w, obj_h_h) = (obj_height.1, obj_height.2);
-        manifest_map.insert("collision_grid".into(), serde_json::json!({
-            "width": coll_w, "height": coll_h, "tile_size": 0.5,
-            "file": "grids/collision.bin",
-        }));
-        manifest_map.insert("obj_height_grid".into(), serde_json::json!({
-            "width": obj_h_w, "height": obj_h_h, "tile_size": 0.5,
-            "encoding": "i16_le_millimeters",
-            "file": "grids/obj_height.bin",
-        }));
-        manifest_map.insert("region_grid".into(), serde_json::json!({
-            "width": parsed_map.header.n_width, "height": parsed_map.header.n_height,
-            "file": "grids/region.bin",
-        }));
-        manifest_map.insert("area_grid".into(), serde_json::json!({
-            "width": parsed_map.header.n_width, "height": parsed_map.header.n_height,
-            "file": "grids/area.bin",
-        }));
-        manifest_map.insert("tile_texture_grid".into(), serde_json::json!({
-            "width": parsed_map.header.n_width, "height": parsed_map.header.n_height,
-            "file": "grids/tile_texture.bin",
-        }));
-        manifest_map.insert("tile_color_grid".into(), serde_json::json!({
-            "width": parsed_map.header.n_width, "height": parsed_map.header.n_height,
-            "file": "grids/tile_color.bin",
-        }));
-        manifest_map.insert("tile_layer_grid".into(), serde_json::json!({
-            "width": parsed_map.header.n_width, "height": parsed_map.header.n_height,
-            "bytes_per_tile": 7,
-            "file": "grids/tile_layer.bin",
-        }));
-
-        // Buildings + placements (in manifest for v2)
-        manifest_map.insert(
-            "buildings".into(),
-            serde_json::Value::Object(buildings_map),
-        );
-        manifest_map.insert("placements".into(), serde_json::json!(placements));
-
-        // Areas + map settings (in manifest for v2; in GLB scene.extras for v3)
-        manifest_map.insert("areas".into(), areas_json);
-        manifest_map.insert(
-            "spawn_point".into(),
-            serde_json::json!(spawn_point_tiles.map(|sp| serde_json::json!({
-                "tile_x": sp[0], "tile_y": sp[1]
-            }))),
-        );
-        manifest_map.insert(
-            "light_direction".into(),
-            serde_json::json!(light_direction),
-        );
-        manifest_map.insert("light_color".into(), serde_json::json!(light_color));
-        manifest_map.insert("ambient".into(), serde_json::json!([0.4, 0.4, 0.4]));
-        manifest_map.insert(
-            "background_color".into(),
-            serde_json::json!([10, 10, 125]),
-        );
+    // ----- Manifest v3 -----
+    manifest_map.insert("version".into(), serde_json::json!(3));
+    manifest_map.insert(
+        "unit_scale_contract".into(),
+        serde_json::json!("pko_1unit_to_unity_1unit_v1"),
+    );
+    manifest_map.insert("terrain_glb".into(), serde_json::json!("terrain.glb"));
+    manifest_map.insert("terrain_gltf".into(), serde_json::json!("terrain.glb")); // alias for ManifestShell compat
+    if let Some(ref sections_info) = terrain_sections_info {
+        manifest_map.insert("terrain_sections".into(), sections_info.clone());
     }
+    if use_shared {
+        let shared_dir = options.shared_assets_dir.as_ref().unwrap();
+        let shared_rel = compute_shared_rel_path(output_dir, shared_dir);
+        manifest_map.insert("shared_assets".into(), serde_json::json!(shared_rel));
+    }
+    manifest_map.insert("map_name".into(), serde_json::json!(map_name));
+    manifest_map.insert("coordinate_system".into(), serde_json::json!("y_up"));
+    manifest_map.insert("world_scale".into(), serde_json::json!(MAP_VISUAL_SCALE));
+    manifest_map.insert(
+        "map_width_tiles".into(),
+        serde_json::json!(parsed_map.header.n_width),
+    );
+    manifest_map.insert(
+        "map_height_tiles".into(),
+        serde_json::json!(parsed_map.header.n_height),
+    );
+    manifest_map.insert(
+        "section_width".into(),
+        serde_json::json!(parsed_map.header.n_section_width),
+    );
+    manifest_map.insert(
+        "section_height".into(),
+        serde_json::json!(parsed_map.header.n_section_height),
+    );
 
-    // Shared manifest entries (both v2 and v3)
+    // Grid file references with format metadata
+    manifest_map.insert(
+        "grids".into(),
+        serde_json::json!({
+            "collision": {
+                "file": "grids/collision.png", "scale": 2,
+                "format": "u8_threshold128",
+                "decode": "pixel < 128 = walkable, >= 128 = blocked"
+            },
+            "obj_height": {
+                "file": "grids/obj_height.png", "scale": 2,
+                "format": "i16_rgb8_offset"
+            },
+            "region": {
+                "file": "grids/region.png", "scale": 1,
+                "format": "i16_rgb8_offset"
+            },
+            "area": {
+                "file": "grids/area.png", "scale": 1,
+                "format": "u8_direct"
+            },
+            "tile_texture": {
+                "file": "grids/tile_texture.png", "scale": 1,
+                "format": "u8_direct"
+            },
+            "tile_color": {
+                "file": "grids/tile_color.png", "scale": 1,
+                "format": "rgb8_color"
+            },
+            "tile_layer_tex": {
+                "file": "grids/tile_layer_tex.png", "scale": 1,
+                "format": "rgba8_indices"
+            },
+            "tile_layer_alpha": {
+                "file": "grids/tile_layer_alpha.png", "scale": 1,
+                "format": "rgb8_indices"
+            },
+            "terrain_height": {
+                "file": "grids/terrain_height.png", "scale": 1,
+                "format": "i16_rgb8_offset"
+            }
+        }),
+    );
+
+    // Buildings (GLB paths)
+    manifest_map.insert(
+        "buildings".into(),
+        serde_json::Value::Object(buildings_map),
+    );
+
+    // Placements, areas, and map settings (also embedded in GLB scene.extras)
+    manifest_map.insert("placements".into(), serde_json::json!(placements));
+    manifest_map.insert("areas".into(), areas_json.clone());
+    manifest_map.insert(
+        "spawn_point".into(),
+        serde_json::json!(spawn_point_tiles.map(|sp| serde_json::json!({
+            "tile_x": sp[0], "tile_y": sp[1]
+        }))),
+    );
+    manifest_map.insert(
+        "light_direction".into(),
+        serde_json::json!(light_direction),
+    );
+    manifest_map.insert("light_color".into(), serde_json::json!(light_color));
+    manifest_map.insert("ambient".into(), serde_json::json!([0.4, 0.4, 0.4]));
+    manifest_map.insert(
+        "background_color".into(),
+        serde_json::json!([10, 10, 125]),
+    );
+
+    // Shared manifest entries
     manifest_map.insert(
         "effect_placements".into(),
         serde_json::json!(effect_placements),

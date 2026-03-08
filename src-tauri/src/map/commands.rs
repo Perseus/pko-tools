@@ -57,7 +57,7 @@ pub async fn export_map_to_gltf(
 pub async fn export_map_for_unity(
     project_id: String,
     map_name: String,
-    format: Option<String>,
+    _format: Option<String>,
     shared_dir: Option<String>,
 ) -> Result<MapForUnityExportResult, String> {
     let project_id =
@@ -71,10 +71,7 @@ pub async fn export_map_for_unity(
         .join("map")
         .join(&map_name);
 
-    let mut options = match format.as_deref() {
-        Some("v2") => super::ExportOptions { manifest_version: 2, ..Default::default() },
-        _ => super::ExportOptions::default(),
-    };
+    let mut options = super::ExportOptions::default();
     if let Some(dir) = shared_dir {
         options.shared_assets_dir = Some(std::path::PathBuf::from(dir));
     }
@@ -86,7 +83,7 @@ pub async fn export_map_for_unity(
 #[tauri::command]
 pub async fn batch_export_maps_for_unity(
     project_id: String,
-    format: Option<String>,
+    _format: Option<String>,
 ) -> Result<super::terrain::BatchExportResult, String> {
     let project_id =
         uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
@@ -98,10 +95,7 @@ pub async fn batch_export_maps_for_unity(
         .join("exports")
         .join("map");
 
-    let options = match format.as_deref() {
-        Some("v2") => super::ExportOptions { manifest_version: 2, ..Default::default() },
-        _ => super::ExportOptions::default(),
-    };
+    let options = super::ExportOptions::default();
 
     terrain::batch_export_for_unity(project.project_directory.as_ref(), &output_base_dir, &options)
         .map_err(|e| e.to_string())

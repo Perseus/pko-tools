@@ -74,14 +74,13 @@ fn main() {
 
     if args.len() < 4 {
         eprintln!("Usage:");
-        eprintln!("  export_cli <client_dir> <output_dir> <map_name> [--format v2|v3] [--shared-dir <path>]");
+        eprintln!("  export_cli <client_dir> <output_dir> <map_name> [--shared-dir <path>]");
         eprintln!("  export_cli <client_dir> <output_dir> --shared");
         eprintln!("  export_cli <client_dir> <output_dir> --characters [--no-split-animations] [--char-id <id>]");
         eprintln!("  export_cli --dump-scene-obj-info <client_dir> [map_name]");
         eprintln!();
         eprintln!("Examples:");
         eprintln!("  export_cli ./top-client ./unity-export 07xmas2");
-        eprintln!("  export_cli ./top-client ./unity-export 07xmas2 --format v2");
         eprintln!("  export_cli ./top-client ./unity-export/Shared --shared");
         eprintln!("  export_cli ./top-client ./unity-export 07xmas2 --shared-dir ./unity-export/Shared");
         eprintln!("  export_cli ./top-client ./unity-export --characters");
@@ -100,22 +99,6 @@ fn main() {
     let mut i = 4;
     while i < args.len() {
         match args[i].as_str() {
-            "--format" => {
-                if let Some(val) = args.get(i + 1) {
-                    match val.as_str() {
-                        "v2" => options.manifest_version = 2,
-                        "v3" => options.manifest_version = 3,
-                        other => {
-                            eprintln!("Unknown format '{}', expected v2 or v3", other);
-                            std::process::exit(1);
-                        }
-                    }
-                    i += 2;
-                } else {
-                    eprintln!("--format requires a value (v2 or v3)");
-                    std::process::exit(1);
-                }
-            }
             "--shared-dir" => {
                 if let Some(val) = args.get(i + 1) {
                     let shared_path = PathBuf::from(val);
@@ -135,7 +118,7 @@ fn main() {
         }
     }
 
-    eprintln!("Exporting map '{}' (manifest v{}) ...", map_name, options.manifest_version);
+    eprintln!("Exporting map '{}' ...", map_name);
     eprintln!("  Client dir: {}", client_dir.display());
     eprintln!("  Output dir: {}", output_dir.display());
 

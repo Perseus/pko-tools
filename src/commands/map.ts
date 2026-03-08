@@ -30,8 +30,7 @@ export const exportMapToGltf = async (
 
 export const exportMapForUnity = async (
   projectId: string,
-  mapName: string,
-  format?: string
+  mapName: string
 ): Promise<MapForUnityExportResult> => {
-  return invoke("export_map_for_unity", { projectId, mapName, format });
+  return invoke("export_map_for_unity", { projectId, mapName });
 };
