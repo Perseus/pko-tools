@@ -1,7 +1,9 @@
 pub mod commands;
 pub mod eff_loader;
+pub mod export;
 pub mod model;
 pub mod par_loader;
+pub mod texture_export;
 
 use std::path::Path;
 
