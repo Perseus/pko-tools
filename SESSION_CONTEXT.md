@@ -1,36 +1,38 @@
 # Session Context
 
 ## Plan
-- **File:** plans/area-transition-banner.md
-- **Branch:** pko-182-area-banner-phase-a
-- **Linear Parent Issue:** PKO-181
-- **Started:** 2026-03-07
+- **File:** `../docs/plans/effect-pipeline-port.md`
+- **Branch:** `feat/effect-pipeline-phase-a`
+- **Linear Parent Issue:** PKO-222
+- **Started:** 2026-03-10
 
 ## Progress
 | Phase | Branch | Linear Issue | Status | Tests Added | Commit |
 |-------|--------|-------------|--------|-------------|--------|
-| Phase 1: Export area names | pko-182-area-banner-phase-a | PKO-182 | in-progress | - | - |
-| Phase 2: Import area names | (client-unity) | PKO-183 | pending | - | - |
-| Phase 3: Banner textures | (client-unity) | PKO-184 | pending | - | - |
-| Phase 4: AreaTracker | (client-unity) | PKO-185 | pending | - | - |
-| Phase 5-6: Banner widget | (client-unity) | PKO-186 | pending | - | - |
-| Phase 7: Tests | both repos | PKO-187 | pending | - | - |
+| Phase 1: Effect Data Export | feat/effect-pipeline-phase-a | PKO-223 | done | 12 Rust | pending |
+| Phase 2: Unity Data Layer | feat/effect-pipeline-phase-b | - | pending | - | - |
+| Phase 3: Runtime Table Loading | feat/effect-pipeline-phase-c | - | pending | - | - |
+| Phase 4: Render State Mapping | feat/effect-pipeline-phase-d | - | pending | - | - |
+| Phase 4B: BlendVisualizer | feat/effect-pipeline-phase-4b | - | pending | - | - |
+| Phase 5: Particle System | feat/effect-pipeline-phase-e | - | pending | - | - |
+| Phase 6: Effect Runtime | feat/effect-pipeline-phase-f | - | pending | - | - |
+| Phase 7: Effect Browser | feat/effect-pipeline-phase-g | - | pending | - | - |
+| Phase 8: Effect Resolution | feat/effect-pipeline-phase-h | - | pending | - | - |
+| Phase 9: Skeleton Attachment | feat/effect-pipeline-phase-i | - | pending | - | - |
+| Phase 10: Skill Dispatcher | feat/effect-pipeline-phase-j | - | pending | - | - |
+| Phase 11: Item Refine + Polish | feat/effect-pipeline-phase-k | - | pending | - | - |
 
 ## Test Summary
-- **Total tests passing:** TBD
-- **Tests added this session:** 0
+- **Total tests passing:** 347
+- **Tests added this session:** 12 (7 export, 5 texture_export)
 
 ## Decisions
-<none yet>
+- **CSF parser skipped:** Corpus sweep shows usePath=0 across all 1152 .eff files. No CSF files exist in the client corpus. Step 1.2 is deferred — will add if path-using .eff files appear in future corpus updates.
+- **Linear MCP connected:** Using Linear for issue tracking (PKO-222 parent, PKO-223 Phase 1).
 
 ## Known Issues
-<none yet>
+- **27 paletted TGA textures fail to decode** (3% of corpus): These are 8-bit color-mapped TGA files (type 1) that the `image` crate v0.25 doesn't handle. Acceptable for now — all are edge-case effect textures. Can be fixed later with a custom paletted TGA decoder.
 
 ## Linear Issues Created
-- PKO-181: Area Transition Banner — full implementation (In Progress)
-- PKO-182: Phase 1: Export area names from pko-tools (In Progress)
-- PKO-183: Phase 2: Import area names in Unity
-- PKO-184: Phase 3: Prepare banner textures
-- PKO-185: Phase 4: Centralized AreaTracker + AreaChangedEvent
-- PKO-186: Phase 5-6: Area Banner UI widget + wiring
-- PKO-187: Phase 7: Area banner tests
+- PKO-222: Effect & Particle Pipeline Port to Unity (In Progress)
+- PKO-223: Phase 1: Effect Data Export (In Progress)
