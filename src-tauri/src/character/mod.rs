@@ -291,8 +291,9 @@ impl Character {
             let pose_table =
                 super::animation::pose_info::load_poseinfo(&poseinfo_path)?;
 
-            // Action table key is char_type_id (matches Character.id), not model number
-            if let Some(actions) = action_table.get(&(self.id as u16)) {
+            // Action table is keyed by Action ID (CharacterInfo column 20), not character ID.
+            // C++ source: SMallMap.cpp:1688 uses sActionID for LoadPose.
+            if let Some(actions) = action_table.get(&self.action_id) {
                 animation.to_gltf_animations_split(
                     &mut fields_to_aggregate,
                     actions,
