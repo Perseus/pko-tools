@@ -1,5 +1,6 @@
 import CharacterNavigator from "@/features/character/CharacterNavigator";
 import EffectNavigator from "@/features/effect/EffectNavigator";
+import EffectV2Navigator from "@/features/effect-v2/EffectV2Navigator";
 import ItemNavigator from "@/features/item/ItemNavigator";
 import MapNavigator from "@/features/map/MapNavigator";
 import BuildingsNavigator from "@/features/buildings/BuildingsNavigator";
@@ -14,6 +15,7 @@ export default function WorkspaceNavigator() {
           <Route path="/" element={<div></div>} />
           <Route path="/characters" element={<CharacterNavigator/>} />
           <Route path="/effects" element={<EffectNavigator />} />
+          <Route path="/effects-v2" element={<EffectV2Navigator />} />
           <Route path="/items" element={<ItemNavigator />} />
           <Route path="/maps" element={<MapNavigator />} />
           <Route path="/buildings" element={<BuildingsNavigator />} />
