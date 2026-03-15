@@ -59,6 +59,13 @@ pub struct SceneObjModelInfo {
     pub env_color: [u8; 3],
     pub point_range: i32,
     pub point_attenuation: f32,
+    // Fade fields (offsets 204-275) — overhead fade for roofs/ceilings
+    /// Number of fadeable mesh subsets (0 = no fade)
+    pub fade_obj_num: i32,
+    /// Primitive/subset IDs within the LMO that should fade (up to 16)
+    pub fade_obj_seq: Vec<i32>,
+    /// Minimum opacity floor during fade (e.g., 0.3 = fade to 30%)
+    pub fade_coefficient: f32,
 }
 
 // CRawDataInfo layout constants (same as sceneffect.rs)
@@ -86,9 +93,14 @@ const SCENE_OBJ_NSIZE_FLAG_OFFSET: usize = 172;
 // const SCENE_OBJ_SZENVSOUND_OFFSET: usize = 176; // Parsed but not exported
 const SCENE_OBJ_BSHADE_FLAG_OFFSET: usize = 196;
 const SCENE_OBJ_BIS_REALLY_BIG_OFFSET: usize = 200;
+const SCENE_OBJ_NFADE_OBJ_NUM_OFFSET: usize = 204;
+const SCENE_OBJ_NFADE_OBJ_SEQ_OFFSET: usize = 208; // i32 × 16
+const SCENE_OBJ_FFADE_COEFFICIENT_OFFSET: usize = 272;
 
 /// Minimum entry size needed to parse all CSceneObjInfo fields (through bIsReallyBig)
 const MIN_DERIVED_SIZE: usize = 204;
+/// Minimum entry size needed to parse fade fields (through fFadeCoefficent)
+const MIN_FADE_SIZE: usize = 276;
 
 fn read_u32(data: &[u8], offset: usize) -> u32 {
     u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap())
@@ -127,6 +139,7 @@ pub fn parse_scene_obj_info_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, Scen
     }
 
     let has_derived_fields = entry_size >= MIN_DERIVED_SIZE;
+    let has_fade_fields = entry_size >= MIN_FADE_SIZE;
 
     let data = &data[4..];
     let entry_count = data.len() / entry_size;
@@ -233,6 +246,19 @@ pub fn parse_scene_obj_info_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, Scen
             )
         };
 
+        // Parse fade fields if the entry is large enough (offsets 204-275)
+        let (fade_obj_num, fade_obj_seq, fade_coefficient) = if has_fade_fields {
+            let num = read_i32(chunk, SCENE_OBJ_NFADE_OBJ_NUM_OFFSET);
+            let count = (num.max(0) as usize).min(16);
+            let seq: Vec<i32> = (0..count)
+                .map(|j| read_i32(chunk, SCENE_OBJ_NFADE_OBJ_SEQ_OFFSET + j * 4))
+                .collect();
+            let coeff = read_f32(chunk, SCENE_OBJ_FFADE_COEFFICIENT_OFFSET);
+            (num, seq, coeff)
+        } else {
+            (0, Vec::new(), 0.0)
+        };
+
         map.insert(
             id,
             SceneObjModelInfo {
@@ -253,6 +279,9 @@ pub fn parse_scene_obj_info_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, Scen
                 env_color,
                 point_range,
                 point_attenuation,
+                fade_obj_num,
+                fade_obj_seq,
+                fade_coefficient,
             },
         );
     }
@@ -344,6 +373,49 @@ mod tests {
             shaded,
             map.len()
         );
+    }
+
+    #[test]
+    fn parse_bin_fade_fields() {
+        let bin_path = std::path::PathBuf::from("../top-client/scripts/table/sceneobjinfo.bin");
+        if !bin_path.exists() {
+            return;
+        }
+
+        let data = std::fs::read(&bin_path).unwrap();
+        let map = parse_scene_obj_info_bin(&data).unwrap();
+
+        // Count entries with fade data
+        let fade_entries: Vec<_> = map
+            .values()
+            .filter(|v| v.fade_obj_num > 0)
+            .collect();
+
+        eprintln!(
+            "Buildings with fade data: {}/{} total entries",
+            fade_entries.len(),
+            map.len()
+        );
+
+        for entry in &fade_entries {
+            assert!(
+                entry.fade_obj_num as usize == entry.fade_obj_seq.len(),
+                "id={}: fade_obj_num={} but fade_obj_seq has {} elements",
+                entry.id,
+                entry.fade_obj_num,
+                entry.fade_obj_seq.len()
+            );
+            assert!(
+                entry.fade_coefficient >= 0.0 && entry.fade_coefficient <= 1.0,
+                "id={}: fade_coefficient={} should be in [0, 1]",
+                entry.id,
+                entry.fade_coefficient
+            );
+            eprintln!(
+                "  id={}, file={}, fade_num={}, seq={:?}, coeff={}",
+                entry.id, entry.filename, entry.fade_obj_num, entry.fade_obj_seq, entry.fade_coefficient
+            );
+        }
     }
 
     #[test]

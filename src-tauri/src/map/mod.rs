@@ -77,9 +77,6 @@ pub struct BuildingExportEntry {
 /// Options controlling the map export format.
 #[derive(Debug, Clone)]
 pub struct ExportOptions {
-    /// Manifest version: 2 = legacy binary grids + JSON glTF,
-    /// 3 = PNG grids + GLB terrain/buildings + slim manifest.
-    pub manifest_version: u32,
     /// Path to the shared assets directory (from `--shared` export).
     /// When set, per-map export skips buildings, textures, effects, and water,
     /// and the manifest references assets relative to this directory.
@@ -89,7 +86,6 @@ pub struct ExportOptions {
 impl Default for ExportOptions {
     fn default() -> Self {
         Self {
-            manifest_version: 3,
             shared_assets_dir: None,
         }
     }

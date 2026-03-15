@@ -175,7 +175,7 @@ export default function MapWorkbench() {
   const viewConfig = useAtomValue(mapViewConfigAtom);
 
   // Compute initial camera position — edge of map looking across the terrain
-  const mapScale = 5; // matches MAP_VISUAL_SCALE in terrain.rs
+  const mapScale = 1; // 1 tile = 1 world unit (no scale factor)
   const cameraPos: [number, number, number] = metadata
     ? [
         (metadata.width * mapScale) * 0.1,
