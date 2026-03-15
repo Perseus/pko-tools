@@ -21,6 +21,7 @@ const EffectsPage = lazy(() => import("./pages/effects"));
 const ItemsPage = lazy(() => import("./pages/items"));
 const MapsPage = lazy(() => import("./pages/maps"));
 const BuildingsPage = lazy(() => import("./pages/buildings"));
+const EffectsV2Page = lazy(() => import("./pages/effects-v2"));
 const ProjectCreator = lazy(() => import("./pages/project-creator/ProjectCreator"));
 
 function App() {
@@ -58,6 +59,7 @@ function App() {
                 <Route path="/project-creator" element={<ProjectCreator />} />
                 <Route path="/characters" element={<CharacterPage/>} />
                 <Route path="/effects" element={<EffectsPage />} />
+                <Route path="/effects-v2" element={<EffectsV2Page />} />
                 <Route path="/items" element={<ItemsPage />} />
                 <Route path="/maps" element={<MapsPage />} />
                 <Route path="/buildings" element={<BuildingsPage />} />
