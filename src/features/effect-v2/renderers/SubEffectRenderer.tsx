@@ -1,5 +1,8 @@
+import { useEffect, useRef } from "react";
+import * as THREE from "three";
 import { SubEffect } from "@/types/effect";
 import { RectPlane } from "./models/RectPlane";
+import { useFrame } from "@react-three/fiber";
 
 interface SubEffectRendererProps {
   subEffect: SubEffect;
@@ -11,14 +14,47 @@ function isExternalModel(modelName: string): boolean {
 
 /**
  * Routes a sub-effect to the correct model renderer based on its data.
- * - No modelName + has texName → RectPlane (textured billboard quad)
- * - Has modelName → 3D model (TODO)
- * - useParam > 0 → Cylinder mesh (TODO)
+ * Wraps everything in a group ref for per-sub-effect transforms (rotation, etc.)
  */
 export function SubEffectRenderer({ subEffect }: SubEffectRendererProps) {
+  const groupRef = useRef<THREE.Group>(null);
+
+  // Reset rotation when sub-effect changes
+  useEffect(() => {
+    if (groupRef.current) {
+      groupRef.current.quaternion.identity();
+    }
+  }, [subEffect]);
+
+  useFrame((_ctx, delta) => {
+    if (!groupRef.current) return;
+    if (subEffect.rotaLoop) {
+      const rotationAxis = new THREE.Vector3(
+        subEffect.rotaLoopVec[0],
+        subEffect.rotaLoopVec[2],
+        subEffect.rotaLoopVec[1],
+      ).normalize();
+      let rotation = subEffect.rotaLoopVec[3] * delta;
+      if (rotation >= Math.PI * 2) {
+        rotation -= Math.PI * 2;
+      }
+      groupRef.current.rotateOnAxis(rotationAxis, rotation);
+    }
+  });
+
+  const content = resolveModel(subEffect);
+  if (!content) return null;
+
+  return (
+    <group ref={groupRef}>
+      {content}
+    </group>
+  );
+}
+
+function resolveModel(subEffect: SubEffect) {
   const hasModel = subEffect.modelName.trim().length > 0;
   const hasCylinder = subEffect.useParam > 0;
-
 
   if (hasCylinder) {
     // TODO: CylinderMesh
@@ -33,16 +69,14 @@ export function SubEffectRenderer({ subEffect }: SubEffectRendererProps) {
 
     switch (subEffect.modelName) {
       case 'RectPlane':
-        return <RectPlane subEffect={subEffect} />
+        return <RectPlane subEffect={subEffect} />;
       default:
         console.log('Got unhandled subEffect with modelName - ', subEffect.modelName);
-
+        return null;
     }
-    return null;
   }
 
   if (subEffect.texName) {
-    console.log('subeffect has name', subEffect.texName);
     return <RectPlane subEffect={subEffect} />;
   }
 

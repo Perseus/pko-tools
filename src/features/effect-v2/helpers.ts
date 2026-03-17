@@ -1,4 +1,5 @@
 import { BlendingDstFactor, DstAlphaFactor, DstColorFactor, OneFactor, OneMinusDstAlphaFactor, OneMinusDstColorFactor, OneMinusSrcAlphaFactor, OneMinusSrcColorFactor, SrcAlphaFactor, SrcColorFactor, ZeroFactor } from "three";
+import type { Vec3 } from "@/types/effect";
 
 /*
   **
@@ -57,4 +58,45 @@ export function getMappedUVs(uvs: [number, number][]): [number, number][] {
   });
 
   return mappedUVs;
+}
+
+/**
+ * Derive the .par filename from an .eff filename.
+ * e.g. "runningattack.eff" → "runningattack.par"
+ */
+export function deriveParName(effName: string): string {
+  return effName.replace(/\.eff$/i, ".par");
+}
+
+/**
+ * Convert a PKO world-space vector (Z-up, right-handed) to Three.js space (Y-up, right-handed).
+ * Rule: (x, y, z) → (x, z, y)  — swap Y↔Z, leave X unchanged.
+ */
+export function pkoVec([x, y, z]: Vec3): Vec3 {
+  return [x, z, y];
+}
+
+/**
+ * Find the current keyframe for global playback time t.
+ * frameTimes contains individual frame durations (not cumulative timestamps).
+ * Returns the frame index and localT (time elapsed within that frame, 0..duration).
+ * Clamps to the last frame when t exceeds total animation length.
+ */
+export function findFrame(frameTimes: number[], t: number): { frameIdx: number; localT: number } {
+  let accumulated = 0;
+  for (let i = 0; i < frameTimes.length - 1; i++) {
+    const dur = frameTimes[i];
+    if (t < accumulated + dur) {
+      return { frameIdx: i, localT: t - accumulated };
+    }
+    accumulated += dur;
+  }
+  // Clamp to last frame, fully complete
+  const lastIdx = Math.max(frameTimes.length - 1, 0);
+  return { frameIdx: lastIdx, localT: frameTimes[lastIdx] ?? 0 };
+}
+
+/** Linear interpolation between a and b by factor t. */
+export function lerp(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
 }

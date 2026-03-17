@@ -47,6 +47,7 @@
     "vaul": "^1.1.2"
   },
   "devDependencies": {
+    "@react-three/test-renderer": "8",
     "@tauri-apps/cli": "^2.2.2",
     "@testing-library/jest-dom": "^6.6.3",
     "@testing-library/react": "^16.1.0",
