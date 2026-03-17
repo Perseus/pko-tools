@@ -36,7 +36,7 @@ export interface SubEffect {
   texFrameTime: number;
   texName: string;
   texList: Vec2[][];
-  modelName: 'RectPlane' | string;
+  modelName: 'RectPlane' | 'Cylinder' | string;
   billboard: boolean;
   vsIndex: number;
   segments: number;

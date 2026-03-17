@@ -102,6 +102,9 @@ importers:
         specifier: ^1.1.2
         version: 1.1.2(@types/react-dom@18.3.5(@types/react@18.3.18))(@types/react@18.3.18)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
     devDependencies:
+      '@react-three/test-renderer':
+        specifier: '8'
+        version: 8.2.4(@react-three/fiber@8.17.12(@types/react@18.3.18)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(three@0.172.0))(react@18.3.1)(three@0.172.0)
       '@tauri-apps/cli':
         specifier: ^2.2.2
         version: 2.2.2
@@ -1389,6 +1392,13 @@ packages:
         optional: true
       react-native:
         optional: true
+
+  '@react-three/test-renderer@8.2.4':
+    resolution: {integrity: sha512-igZWeGSkrz4HWxx5Dk3jSeCHRVUzvRn/fENlnDDpQGtJyEQyeGPGv8oRK8YdtMzc1VxAmlV5I5vVOKpixghObg==}
+    peerDependencies:
+      '@react-three/fiber': '>=8 < 9'
+      react: '>=18 <19'
+      three: '>=0.133'
 
   '@rollup/rollup-android-arm-eabi@4.30.1':
     resolution: {integrity: sha512-pSWY+EVt3rJ9fQ3IqlrEUtXh3cGqGtPDH1FQlNZehO2yYxCHEX1SPsz1M//NXwYfbTlcKr9WObLnJX9FsS9K1Q==}
@@ -4242,6 +4252,12 @@ snapshots:
       react-dom: 18.3.1(react@18.3.1)
     transitivePeerDependencies:
       - '@types/react'
+
+  '@react-three/test-renderer@8.2.4(@react-three/fiber@8.17.12(@types/react@18.3.18)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(three@0.172.0))(react@18.3.1)(three@0.172.0)':
+    dependencies:
+      '@react-three/fiber': 8.17.12(@types/react@18.3.18)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)(three@0.172.0)
+      react: 18.3.1
+      three: 0.172.0
 
   '@rollup/rollup-android-arm-eabi@4.30.1':
     optional: true

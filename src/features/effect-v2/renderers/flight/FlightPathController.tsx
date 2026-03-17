@@ -1,4 +1,4 @@
-import { ReactNode, useRef } from "react";
+import { ReactNode, useEffect, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useAtom } from "jotai";
 import * as THREE from "three";
@@ -50,11 +50,23 @@ const FLIGHT_PATHS: FlightPathFn[] = [
   flightDist2,    // 7
 ];
 
+/** Data captured at the moment the flight path completes. */
+export interface ArrivalInfo {
+  /** World position where the effect arrived. */
+  position: THREE.Vector3;
+  /** Normalized travel direction at moment of arrival. */
+  direction: THREE.Vector3;
+}
+
 interface FlightPathControllerProps {
   magicEntry: MagicSingleEntry | null;
   origin: THREE.Vector3;
   target: THREE.Vector3;
   children: ReactNode;
+  /** Called when the flight path signals done. Receives position + direction at impact. */
+  onArrival?: (info: ArrivalInfo) => void;
+  /** When true, the flight effect is hidden and loop/reset is deferred until resumeLoop() is called. */
+  awaitingHitEffect: boolean;
 }
 
 /**
@@ -66,15 +78,20 @@ export function FlightPathController({
   origin,
   target,
   children,
+  onArrival,
+  awaitingHitEffect,
 }: FlightPathControllerProps) {
   const groupRef = useRef<THREE.Group>(null);
   const flightState = useRef<Record<string, unknown>>({});
   const prevEntry = useRef(magicEntry);
   const [playback, setPlayback] = useAtom(effectV2PlaybackAtom);
+  const arrived = useRef(false);
+  const prevAwaiting = useRef(awaitingHitEffect);
 
   // Reset state when magic entry changes
   if (magicEntry !== prevEntry.current) {
     flightState.current = {};
+    arrived.current = false;
     prevEntry.current = magicEntry;
   }
 
@@ -82,19 +99,42 @@ export function FlightPathController({
   const prevTime = useRef(playback.time);
   if (playback.time < prevTime.current) {
     flightState.current = {};
+    arrived.current = false;
     if (groupRef.current) {
       groupRef.current.position.set(0, 0, 0);
       groupRef.current.quaternion.identity();
+      groupRef.current.visible = true;
     }
   }
   prevTime.current = playback.time;
+
+  // When awaitingHitEffect transitions from true → false, the hit effect just finished.
+  // Now we can do the actual loop restart. Must be in useEffect to avoid render-phase setState.
+  useEffect(() => {
+    if (prevAwaiting.current && !awaitingHitEffect && arrived.current) {
+      arrived.current = false;
+      if (groupRef.current) {
+        groupRef.current.position.set(0, 0, 0);
+        groupRef.current.quaternion.identity();
+        groupRef.current.visible = true;
+      }
+      flightState.current = {};
+
+      if (playback.loop) {
+        setPlayback((p) => ({ ...p, time: 0 }));
+      } else {
+        setPlayback((p) => ({ ...p, playing: false }));
+      }
+    }
+    prevAwaiting.current = awaitingHitEffect;
+  }, [awaitingHitEffect]);
 
   const renderIdx = magicEntry?.render_idx ?? -1;
   const velocity = magicEntry?.velocity ?? 0;
 
   useFrame((_, delta) => {
     if (!groupRef.current || renderIdx < 0 || renderIdx >= FLIGHT_PATHS.length) return;
-    if (!playback.playing) return;
+    if (!playback.playing || arrived.current) return;
 
     const ctx: FlightContext = {
       origin,
@@ -109,16 +149,16 @@ export function FlightPathController({
     FLIGHT_PATHS[renderIdx](ctx, groupRef.current);
 
     if (ctx.done) {
-      // Reset group transform
-      groupRef.current.position.set(0, 0, 0);
-      groupRef.current.quaternion.identity();
+      arrived.current = true;
 
-      if (playback.loop) {
-        flightState.current = {};
-        setPlayback((p) => ({ ...p, time: 0 }));
-      } else {
-        setPlayback((p) => ({ ...p, playing: false }));
-      }
+      // Capture position + direction before hiding
+      const arrivalPos = groupRef.current.position.clone();
+      const arrivalDir = target.clone().sub(origin).normalize();
+
+      // Hide flight effect while hit effect plays
+      groupRef.current.visible = false;
+
+      onArrival?.({ position: arrivalPos, direction: arrivalDir });
     }
   });
 

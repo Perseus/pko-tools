@@ -1,13 +1,11 @@
 import { Canvas } from "@react-three/fiber";
 import { GizmoHelper, GizmoViewport, OrbitControls } from "@react-three/drei";
 import { useAtom, useAtomValue } from "jotai";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { selectedMagicEffectAtom, effectV2PlaybackAtom } from "@/store/effect-v2";
-import { currentProjectAtom } from "@/store/project";
-import { loadEffect } from "@/commands/effect";
-import { EffectFile } from "@/types/effect";
 import { MagicEffectRenderer } from "./renderers/MagicEffectRenderer";
 import { PlaybackClock } from "./PlaybackClock";
+import { useLoadEffect } from "./useLoadEffect";
 import { Button } from "@/components/ui/button";
 import { Play, Square, RotateCcw, Repeat } from "lucide-react";
 
@@ -118,35 +116,9 @@ function EffectInfoPanel() {
 
 export default function EffectV2Workbench() {
   const selected = useAtomValue(selectedMagicEffectAtom);
-  const currentProject = useAtomValue(currentProjectAtom);
-  const [effFiles, setEffFiles] = useState<EffectFile[]>([]);
   const [, setPlayback] = useAtom(effectV2PlaybackAtom);
-
-  useEffect(() => {
-    if (!selected || !currentProject || selected.models.length === 0) {
-      setEffFiles([]);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function fetchEffData() {
-      const results: EffectFile[] = [];
-      for (const model of selected!.models) {
-        try {
-          const effData = await loadEffect(currentProject!.id, model);
-          if (cancelled) return;
-          results.push(effData);
-        } catch (err) {
-          console.warn(`[EffectV2] Failed to load ${model}:`, err);
-        }
-      }
-      if (!cancelled) setEffFiles(results);
-    }
-
-    fetchEffData();
-    return () => { cancelled = true; };
-  }, [selected, currentProject]);
+  const effectNames = useMemo(() => selected?.models ?? [], [selected]);
+  const effFiles = useLoadEffect(effectNames);
 
   // Reset playback when switching effects
   useEffect(() => {
@@ -176,8 +148,8 @@ export default function EffectV2Workbench() {
             <ambientLight intensity={1} />
             <directionalLight position={[5, 5, 5]} />
             <PlaybackClock />
-            <MagicEffectRenderer effFiles={effFiles} />
-            <OrbitControls />
+            <MagicEffectRenderer key={selected?.id ?? "none"} effFiles={effFiles} />
+            <OrbitControls makeDefault />
             <gridHelper args={[40, 40, "#2f3239", "#1b1d22"]} />
             <GizmoHelper alignment="top-right" margin={[80, 80]}>
               <GizmoViewport axisColors={["#f73b3b", "#3bf751", "#3b8ef7"]} labelColor="white" />

@@ -5,7 +5,7 @@ import { useAtomValue } from "jotai";
 import * as THREE from "three";
 import { effectV2PlaybackAtom } from "@/store/effect-v2";
 import { useEffectTexture } from "../../useEffectTexture";
-import { getMappedUVs, getThreeJSBlendFromD3D } from "../../helpers";
+import { getMappedUVs, getThreeJSBlendFromD3D, findFrame, lerp, pkoVec } from "../../helpers";
 
 interface RectPlaneProps {
   subEffect: SubEffect;
@@ -18,7 +18,7 @@ export function RectPlane({ subEffect }: RectPlaneProps) {
   const groupRef = useRef<THREE.Group>(null);
   const playback = useAtomValue(effectV2PlaybackAtom);
 
-  const { frameTimes, frameSizes, framePositions, frameColors, texList, verCount } = subEffect;
+  const { frameCount, frameTimes, frameSizes, framePositions, frameColors, texList, verCount } = subEffect;
   const totalLength = subEffect.length;
 
   // Build UV attribute from first texList frame (or full-quad default)
@@ -33,10 +33,10 @@ export function RectPlane({ subEffect }: RectPlaneProps) {
   const geometry = useMemo(() => {
     const geo = new THREE.BufferGeometry();
     const positions = new Float32Array([
-      -0.5, -0.5, 0,
-      0.5, -0.5, 0,
-      0.5, 0.5, 0,
-      -0.5, 0.5, 0,
+      -0.5, 0, -0.5,
+      0.5, 0, -0.5,
+      0.5, 0, 0.5,
+      -0.5, 0, 0.5,
     ]);
     const indices = new Uint16Array([0, 1, 2, 0, 2, 3]);
     geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
@@ -45,30 +45,42 @@ export function RectPlane({ subEffect }: RectPlaneProps) {
     return geo;
   }, [uvAttr]);
 
+  let totalAnimationDurationSeconds = 0;
+  for (let i = 0; i < frameCount; i++) {
+    totalAnimationDurationSeconds += frameTimes[i];
+  }
+
   useFrame(({ camera }) => {
     if (!meshRef.current || !matRef.current || frameTimes.length === 0) return;
 
-    if (groupRef.current && subEffect.billboard) {
-      groupRef.current.quaternion.copy(camera.quaternion);
+    if (groupRef.current) {
+      if (subEffect.billboard) {
+        const correction = new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(1, 0, 0), Math.PI / 2
+        );
+        groupRef.current.quaternion.copy(camera.quaternion).multiply(correction);
+      } else {
+        groupRef.current.quaternion.identity();
+      }
     }
 
     // Use shared playback time, loop if enabled
     let t = playback.time;
-    if (totalLength > 0 && playback.loop) {
-      t = t % totalLength;
-    } else if (totalLength > 0) {
-      t = Math.min(t, totalLength);
+    if (totalAnimationDurationSeconds > 0) {
+      if (playback.loop) {
+        t = t % totalAnimationDurationSeconds;
+      } else {
+        t = Math.min(t, totalAnimationDurationSeconds);
+      }
     }
-    const frameIdx = findFrame(frameTimes, t);
+    const { frameIdx, localT } = findFrame(frameTimes, t);
     const nextIdx = Math.min(frameIdx + 1, frameTimes.length - 1);
-    const frac = frameTimes[nextIdx] !== frameTimes[frameIdx]
-      ? (t - frameTimes[frameIdx]) / (frameTimes[nextIdx] - frameTimes[frameIdx])
-      : 0;
+    const frac = frameTimes[frameIdx] > 0 ? localT / frameTimes[frameIdx] : 0;
 
     // Interpolate position
     if (framePositions.length > frameIdx) {
-      const p0 = framePositions[frameIdx];
-      const p1 = framePositions[nextIdx] ?? p0;
+      const p0 = pkoVec(framePositions[frameIdx]);
+      const p1 = pkoVec(framePositions[nextIdx] ?? p0);
       meshRef.current.position.set(
         lerp(p0[0], p1[0], frac),
         lerp(p0[1], p1[1], frac),
@@ -78,8 +90,8 @@ export function RectPlane({ subEffect }: RectPlaneProps) {
 
     // Interpolate scale
     if (frameSizes.length > frameIdx) {
-      const s0 = frameSizes[frameIdx];
-      const s1 = frameSizes[nextIdx] ?? s0;
+      const s0 = pkoVec(frameSizes[frameIdx]);
+      const s1 = pkoVec(frameSizes[nextIdx] ?? s0);
       meshRef.current.scale.set(
         lerp(s0[0], s1[0], frac),
         lerp(s0[1], s1[1], frac),
@@ -126,14 +138,3 @@ export function RectPlane({ subEffect }: RectPlaneProps) {
   );
 }
 
-/** Find the keyframe index for time t (last frame where frameTimes[i] <= t). */
-function findFrame(frameTimes: number[], t: number): number {
-  for (let i = frameTimes.length - 1; i >= 0; i--) {
-    if (frameTimes[i] <= t) return i;
-  }
-  return 0;
-}
-
-function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
-}

@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue } from "jotai";
 import { useGLTF } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
@@ -6,9 +6,10 @@ import { invoke } from "@tauri-apps/api/core";
 import * as THREE from "three";
 import { EffectFile } from "@/types/effect";
 import { currentProjectAtom } from "@/store/project";
-import { selectedMagicEffectAtom } from "@/store/effect-v2";
-import { FlightPathController } from "./flight/FlightPathController";
+import { effectV2PlaybackAtom, selectedMagicEffectAtom } from "@/store/effect-v2";
+import { FlightPathController, ArrivalInfo } from "./flight/FlightPathController";
 import { EffectRenderer } from "./EffectRenderer";
+import { HitEffectRenderer } from "./HitEffectRenderer";
 
 const TARGET_CHARACTER_ID = 52;
 const TARGET_OFFSET: THREE.Vector3Tuple = [0, 0, 8];
@@ -23,6 +24,10 @@ export function MagicEffectRenderer({ effFiles }: MagicEffectRendererProps) {
   const selected = useAtomValue(selectedMagicEffectAtom);
   const [targetGltfUri, setTargetGltfUri] = useState<string | null>(null);
   const prevUri = useRef<string | null>(null);
+
+  // Hit effect state
+  const [hitActive, setHitActive] = useState(false);
+  const [arrivalInfo, setArrivalInfo] = useState<ArrivalInfo | null>(null);
 
   // Load target character model
   useEffect(() => {
@@ -40,7 +45,6 @@ export function MagicEffectRenderer({ effFiles }: MagicEffectRendererProps) {
         const blob = new Blob([gltfJson], { type: "model/gltf+json" });
         const uri = URL.createObjectURL(blob);
 
-        // Clean up previous URI
         if (prevUri.current) {
           useGLTF.clear(prevUri.current);
           URL.revokeObjectURL(prevUri.current);
@@ -53,12 +57,9 @@ export function MagicEffectRenderer({ effFiles }: MagicEffectRendererProps) {
     }
 
     loadTarget();
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [currentProject]);
 
-  // Clean up on unmount
   useEffect(() => {
     return () => {
       if (prevUri.current) {
@@ -72,13 +73,37 @@ export function MagicEffectRenderer({ effFiles }: MagicEffectRendererProps) {
   const origin = useMemo(() => new THREE.Vector3(0, 0, 0), []);
   const target = useMemo(() => new THREE.Vector3(...TARGET_OFFSET), []);
 
-  // Move target back and forth on X axis
-  useFrame(({ clock }) => {
+  const playback = useAtomValue(effectV2PlaybackAtom);
+
+  useFrame(() => {
     if (!targetGroupRef.current) return;
-    const x = Math.sin(clock.getElapsedTime() * 1.2) * 8;
+    if (!playback.playing) return;
+    const x = Math.sin(playback.time * 1.2) * 8;
     targetGroupRef.current.position.set(x, TARGET_OFFSET[1], TARGET_OFFSET[2]);
     target.set(x, TARGET_OFFSET[1], TARGET_OFFSET[2]);
   });
+
+  // Flight arrived at target — show hit effect
+  const handleArrival = useCallback((info: ArrivalInfo) => {
+    const hasHitEffect = selected?.result_effect &&
+      selected.result_effect !== "0" &&
+      selected.result_effect.trim() !== "";
+
+    setArrivalInfo(info);
+
+    if (hasHitEffect) {
+      setHitActive(true);
+    } else {
+      // No hit effect — signal completion immediately
+      setHitActive(false);
+    }
+  }, [selected]);
+
+  // Hit effect finished playing
+  const handleHitComplete = useCallback(() => {
+    setHitActive(false);
+    setArrivalInfo(null);
+  }, []);
 
   return (
     <group>
@@ -96,11 +121,22 @@ export function MagicEffectRenderer({ effFiles }: MagicEffectRendererProps) {
         magicEntry={selected}
         origin={origin}
         target={target}
+        onArrival={handleArrival}
+        awaitingHitEffect={hitActive}
       >
         {effFiles.map((eff, i) => (
           <EffectRenderer key={i} effect={eff} />
         ))}
       </FlightPathController>
+
+      {/* Hit/result effect — rendered at arrival position when active */}
+      {hitActive && arrivalInfo && (
+        <HitEffectRenderer
+          particleEffectName={selected!.result_effect}
+          arrival={arrivalInfo}
+          onComplete={handleHitComplete}
+        />
+      )}
     </group>
   );
 }

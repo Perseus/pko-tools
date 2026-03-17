@@ -1,12 +1,16 @@
 import "@testing-library/jest-dom";
 import { vi } from "vitest";
 
+// Enable React act() environment for R3F test renderer
+(globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
+
 const suppressedPatterns = [
   "is using incorrect casing",
   "is unrecognized in this browser",
   "React does not recognize the",
   "Received `true` for a non-boolean attribute",
   "non-boolean attribute",
+  "Multiple instances of Three.js",
 ];
 
 const shouldSuppress = (args: unknown[]) => {
