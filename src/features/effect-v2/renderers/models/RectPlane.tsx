@@ -1,5 +1,5 @@
 import { SubEffect } from "@/types/effect";
-import { useRef, useMemo } from "react";
+import { useRef, useMemo, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useAtomValue } from "jotai";
 import * as THREE from "three";
@@ -9,17 +9,23 @@ import { getMappedUVs, getThreeJSBlendFromD3D, findFrame, lerp, pkoVec } from ".
 
 interface RectPlaneProps {
   subEffect: SubEffect;
+  onComplete?: () => void;
 }
 
 /** A textured quad driven by a sub-effect's keyframe data. */
-export function RectPlane({ subEffect }: RectPlaneProps) {
+export function RectPlane({ subEffect, onComplete }: RectPlaneProps) {
   const meshRef = useRef<THREE.Mesh>(null);
   const matRef = useRef<THREE.MeshBasicMaterial>(null);
   const groupRef = useRef<THREE.Group>(null);
   const playback = useAtomValue(effectV2PlaybackAtom);
 
+  // Always point to the latest onComplete without re-subscribing useFrame
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+  // Guard: fire onComplete only once per mount
+  const firedRef = useRef(false);
+
   const { frameCount, frameTimes, frameSizes, framePositions, frameColors, texList, verCount } = subEffect;
-  const totalLength = subEffect.length;
 
   // Build UV attribute from first texList frame (or full-quad default)
   const uvAttr = useMemo(() => {
@@ -50,6 +56,14 @@ export function RectPlane({ subEffect }: RectPlaneProps) {
     totalAnimationDurationSeconds += frameTimes[i];
   }
 
+  // No keyframes — signal immediately
+  useEffect(() => {
+    if (frameTimes.length === 0 && !firedRef.current) {
+      firedRef.current = true;
+      onCompleteRef.current?.();
+    }
+  }, [frameTimes.length]);
+
   useFrame(({ camera }) => {
     if (!meshRef.current || !matRef.current || frameTimes.length === 0) return;
 
@@ -73,6 +87,13 @@ export function RectPlane({ subEffect }: RectPlaneProps) {
         t = Math.min(t, totalAnimationDurationSeconds);
       }
     }
+
+    // Signal completion once when the non-looping animation reaches its end
+    if (!playback.loop && !firedRef.current && playback.time >= totalAnimationDurationSeconds && totalAnimationDurationSeconds > 0) {
+      firedRef.current = true;
+      onCompleteRef.current?.();
+    }
+
     const { frameIdx, localT } = findFrame(frameTimes, t);
     const nextIdx = Math.min(frameIdx + 1, frameTimes.length - 1);
     const frac = frameTimes[frameIdx] > 0 ? localT / frameTimes[frameIdx] : 0;
@@ -137,4 +158,3 @@ export function RectPlane({ subEffect }: RectPlaneProps) {
     </group>
   );
 }
-

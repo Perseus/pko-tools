@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ReactNode, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAtomValue } from "jotai";
 import { useGLTF } from "@react-three/drei";
 import { useFrame } from "@react-three/fiber";
@@ -111,7 +111,17 @@ export function MagicEffectRenderer({ effFiles }: MagicEffectRendererProps) {
       {targetGltfUri && (
         <Suspense fallback={null}>
           <group ref={targetGroupRef} position={TARGET_OFFSET}>
-            <TargetModel uri={targetGltfUri} />
+            <TargetModel uri={targetGltfUri}>
+              {hitActive && arrivalInfo && (
+                <HitEffectRenderer
+                  particleEffectName={selected!.result_effect}
+                  arrival={arrivalInfo}
+                  loop={false}
+                  onComplete={handleHitComplete}
+                />
+              )}
+            </TargetModel>
+            {/* Hit/result effect — rendered at arrival position when active */}
           </group>
         </Suspense>
       )}
@@ -129,20 +139,15 @@ export function MagicEffectRenderer({ effFiles }: MagicEffectRendererProps) {
         ))}
       </FlightPathController>
 
-      {/* Hit/result effect — rendered at arrival position when active */}
-      {hitActive && arrivalInfo && (
-        <HitEffectRenderer
-          particleEffectName={selected!.result_effect}
-          arrival={arrivalInfo}
-          onComplete={handleHitComplete}
-        />
-      )}
     </group>
   );
 }
 
 /** Simple glTF model renderer for the target character, rotated from Z-up to Y-up. */
-function TargetModel({ uri }: { uri: string }) {
+function TargetModel({ uri, children }: { uri: string, children: ReactNode }) {
   const { scene } = useGLTF(uri);
-  return <primitive object={scene} rotation={[-Math.PI / 2, 0, 0]} />;
+  return <group>
+    <primitive object={scene} rotation={[-Math.PI / 2, 0, 0]} />
+    {children}
+  </group>
 }

@@ -11,24 +11,30 @@ doc: |
 seq:
   - id: version
     type: u4
+    doc: "LMO format version"
   - id: obj_num
     type: u4
+    doc: "Number of object entries in the table"
   - id: model_info_descriptor
     size: 64
     if: is_model_info_tree
+    doc: "64-byte descriptor string for lwModelInfo tree variant"
   - id: model_info_obj_num
     type: u4
     if: is_model_info_tree
+    doc: "Number of model nodes in the tree"
   - id: model_nodes
     type: model_node_info(tree_version)
     repeat: expr
     repeat-expr: tree_obj_num
     if: is_model_info_tree
+    doc: "Array of model tree nodes"
   - id: objects
     type: object_entry
     repeat: expr
     repeat-expr: obj_num
     if: not is_model_info_tree
+    doc: "Array of object table entries (geometry or helper chunks)"
 
 instances:
   descriptor_magic:
@@ -49,25 +55,252 @@ instances:
     value: model_info_obj_num
     if: is_model_info_tree
 
+enums:
+  model_node_type:
+    1:
+      id: primitive
+      doc: "Renderable geometry mesh"
+    2:
+      id: bonectrl
+      doc: "Skeleton bone controller"
+    3:
+      id: dummy
+      doc: "Named attachment point (e.g., weapon slot)"
+    4:
+      id: helper
+      doc: "Helper objects (collision boxes, bounding volumes)"
+
+  object_entry_type:
+    1:
+      id: geometry
+      doc: "Geometry chunk (mesh vertices, indices, materials)"
+    2:
+      id: helper
+      doc: "Helper objects (collision meshes, bounding volumes, dummies)"
+
+  geom_obj_type:
+    0:
+      id: generic
+      doc: "Standard visual geometry (no collision)"
+    1:
+      id: check_bb
+      doc: "Bounding box collision (direction-agnostic)"
+    2:
+      id: check_bb2
+      doc: "Directional bounding box collision (valid dir = 0,1,0)"
+
+  colorkey_type:
+    0:
+      id: none
+      doc: "No transparency key"
+    1:
+      id: color
+      doc: "RGB color used as transparent"
+    2:
+      id: pixel
+      doc: "1-bit alpha (punch-through) transparency"
+
+  tex_type:
+    0:
+      id: file
+      doc: "Loaded from file (filename field used)"
+    1:
+      id: size
+      doc: "Created at runtime by dimensions (width/height used)"
+    2:
+      id: data
+      doc: "Embedded data pointer"
+
+  transp_type:
+    0:
+      id: filter
+      doc: "Standard alpha blend (src*alpha + dst*(1-alpha))"
+    1:
+      id: additive
+      doc: "Additive blend"
+    2:
+      id: additive1
+      doc: "Additive blend variant 1"
+    3:
+      id: additive2
+      doc: "Additive blend variant 2"
+    4:
+      id: additive3
+      doc: "Additive blend variant 3"
+    5:
+      id: subtractive
+      doc: "Subtractive blend"
+    6:
+      id: subtractive1
+      doc: "Subtractive blend variant 1"
+    7:
+      id: subtractive2
+      doc: "Subtractive blend variant 2"
+    8:
+      id: subtractive3
+      doc: "Subtractive blend variant 3"
+
+  d3d_primitive_type:
+    1:
+      id: point_list
+      doc: "Point list"
+    2:
+      id: line_list
+      doc: "Line list"
+    3:
+      id: line_strip
+      doc: "Line strip"
+    4:
+      id: triangle_list
+      doc: "Triangle list (most common)"
+    5:
+      id: triangle_strip
+      doc: "Triangle strip"
+    6:
+      id: triangle_fan
+      doc: "Triangle fan"
+
+  bone_key_type:
+    1:
+      id: mat43
+      doc: "4x3 matrix per frame"
+    2:
+      id: mat44
+      doc: "Full 4x4 matrix per frame"
+    3:
+      id: quat
+      doc: "Quaternion + position (compact)"
+
+  dummy_parent_type:
+    0:
+      id: default
+      doc: "No bone parent"
+    1:
+      id: bone_parent
+      doc: "Attached to skeletal bone"
+    2:
+      id: bone_dummy_parent
+      doc: "Attached to bone dummy helper point"
+
+  slerp_type:
+    0:
+      id: invalid
+      doc: "Invalid/unset interpolation"
+    1:
+      id: linear
+      doc: "Linear interpolation (constant speed)"
+    2:
+      id: sin1
+      doc: "Sine curve 0-90 degrees (ease-in)"
+    3:
+      id: sin2
+      doc: "Sine curve 90-180 degrees"
+    4:
+      id: sin3
+      doc: "Sine curve 180-270 degrees"
+    5:
+      id: sin4
+      doc: "Sine curve 270-360 degrees (ease-out)"
+    6:
+      id: cos1
+      doc: "Cosine curve 0-90 degrees"
+    7:
+      id: cos2
+      doc: "Cosine curve 90-180 degrees"
+    8:
+      id: cos3
+      doc: "Cosine curve 180-270 degrees"
+    9:
+      id: cos4
+      doc: "Cosine curve 270-360 degrees"
+    10:
+      id: tan1
+      doc: "Tangent curve 0-45 degrees"
+    11:
+      id: ctan1
+      doc: "Cotangent curve 0-45 degrees"
+
+  vertex_decl_usage:
+    0:
+      id: position
+      doc: "Vertex position"
+    1:
+      id: blend_weight
+      doc: "Blend weight for skinning"
+    2:
+      id: blend_indices
+      doc: "Blend indices for skinning"
+    3:
+      id: normal
+      doc: "Vertex normal"
+    4:
+      id: psize
+      doc: "Point size"
+    5:
+      id: texcoord
+      doc: "Texture coordinate"
+    6:
+      id: tangent
+      doc: "Tangent vector"
+    7:
+      id: binormal
+      doc: "Binormal vector"
+    8:
+      id: tessfactor
+      doc: "Tessellation factor"
+    9:
+      id: positiont
+      doc: "Transformed position"
+    10:
+      id: color
+      doc: "Vertex color"
+
+  vertex_decl_type:
+    0:
+      id: float1
+      doc: "1 float (4 bytes)"
+    1:
+      id: float2
+      doc: "2 floats (8 bytes)"
+    2:
+      id: float3
+      doc: "3 floats (12 bytes)"
+    3:
+      id: float4
+      doc: "4 floats (16 bytes)"
+    4:
+      id: d3dcolor
+      doc: "D3D color (4 bytes BGRA)"
+    5:
+      id: ubyte4
+      doc: "4 unsigned bytes"
+
 types:
   model_node_head_info:
     seq:
       - id: handle
         type: u4
-      - id: obj_type
+        doc: "Unique handle for this node in the tree"
+      - id: type
         type: u4
         valid:
           any-of: [1, 2, 3, 4]
+        doc: "Node type — determines which payload follows"
       - id: id
         type: u4
+        doc: "Node ID (unique within type)"
       - id: descriptor
         size: 64
+        doc: "64-byte name/description string"
       - id: parent_handle
         type: u4
+        doc: "Handle of parent node (0 = root)"
       - id: link_parent_id
         type: u4
+        doc: "Linked parent ID for cross-referencing"
       - id: link_id
         type: u4
+        doc: "Linked ID for cross-referencing"
 
   helper_dummy_obj_info:
     seq:
@@ -90,37 +323,40 @@ types:
         type: model_node_head_info
       - id: node_primitive
         type: geometry_chunk(file_version, 0)
-        if: head.obj_type == 1
+        if: head.type == 1
       - id: node_bonectrl
         type: anim_data_bone(file_version)
-        if: head.obj_type == 2
+        if: head.type == 2
       - id: node_dummy
         type: helper_dummy_obj_info
-        if: head.obj_type == 3
+        if: head.type == 3
       - id: node_helper
         type: helper_section(file_version)
-        if: head.obj_type == 4
+        if: head.type == 4
 
   object_entry:
     seq:
-      - id: obj_type
+      - id: type
         type: u4
         valid:
           any-of: [1, 2]
+        doc: "Chunk payload type"
       - id: addr
         type: u4
+        doc: "Absolute file offset to chunk data"
       - id: size
         type: u4
+        doc: "Size of chunk data in bytes"
     instances:
       body_geometry:
         pos: addr
         size: size
-        if: obj_type == 1
+        if: type == 1
         type: geometry_chunk(_root.version, 1)
       body_helper:
         pos: addr
         size: size
-        if: obj_type == 2
+        if: type == 2
         type: helper_section(_root.version)
 
   geometry_chunk:
@@ -315,6 +551,7 @@ types:
         if: file_version == 0
       - id: helper_type
         type: u4
+        doc: "Bitmask: bit 0=dummies, bit 1=boxes, bit 2=meshes, bit 4=bounding boxes, bit 5=bounding spheres"
       - id: dummy_num
         type: u4
         if: (helper_type & 1) != 0
@@ -473,59 +710,82 @@ types:
     seq:
       - id: id
         type: u4
+        doc: "Geometry object ID"
       - id: parent_id
         type: u4
+        doc: "Parent geometry object ID"
       - id: geom_type
         type: u4
+        enum: geom_obj_type
+        doc: "Collision detection type"
       - id: mat_local
         type: matrix44
+        doc: "Local-to-parent transform matrix"
       - id: mtl_size
         type: u4
+        doc: "Size of the material section in bytes"
       - id: mesh_size
         type: u4
+        doc: "Size of the mesh section in bytes"
       - id: helper_size
         type: u4
+        doc: "Size of the helper section in bytes"
       - id: anim_size
         type: u4
+        doc: "Size of the animation section in bytes"
 
   geom_obj_info_header_modern:
     seq:
       - id: id
         type: u4
+        doc: "Geometry object ID"
       - id: parent_id
         type: u4
+        doc: "Parent geometry object ID"
       - id: geom_type
         type: u4
+        enum: geom_obj_type
+        doc: "Collision detection type"
       - id: mat_local
         type: matrix44
+        doc: "Local-to-parent transform matrix"
       - id: rcci
         type: render_ctrl_create_info
       - id: state_ctrl
         type: state_ctrl
       - id: mtl_size
         type: u4
+        doc: "Size of the material section in bytes"
       - id: mesh_size
         type: u4
+        doc: "Size of the mesh section in bytes"
       - id: helper_size
         type: u4
+        doc: "Size of the helper section in bytes"
       - id: anim_size
         type: u4
+        doc: "Size of the animation section in bytes"
 
   render_ctrl_create_info:
     seq:
       - id: ctrl_id
         type: u4
+        doc: "Render control procedure ID"
       - id: decl_id
         type: u4
+        doc: "D3D vertex declaration ID"
       - id: vs_id
         type: u4
+        doc: "Vertex shader ID"
       - id: ps_id
         type: u4
+        doc: "Pixel shader ID"
 
   state_ctrl:
     seq:
       - id: state_seq
         size: 8
+        doc: "8-byte state flags: [visible, enabled, unused, update_transp, transparent, culling, unused, unused]"
 
   render_state_atom:
     seq:
@@ -576,47 +836,68 @@ types:
     seq:
       - id: dif
         type: color_value_4f
+        doc: "Diffuse color"
       - id: amb
         type: color_value_4f
+        doc: "Ambient color"
       - id: spe
         type: color_value_4f
+        doc: "Specular color"
       - id: emi
         type: color_value_4f
+        doc: "Emissive color"
       - id: power
         type: f4
+        doc: "Specular power/shininess exponent"
 
   tex_info_current:
     seq:
       - id: stage
         type: u4
+        doc: "Texture stage index (0-3) for multi-texturing"
       - id: level
         type: u4
+        doc: "Mipmap level count"
       - id: usage
         type: u4
+        doc: "D3D texture usage flags"
       - id: format
         type: u4
+        doc: "D3D pixel format code (e.g., 21=A8R8G8B8, DXT1/3/5)"
       - id: pool
         type: u4
+        doc: "D3D memory pool (0=default, 1=managed, 2=system)"
       - id: byte_alignment_flag
         type: u4
+        doc: "Byte alignment flag for texture data"
       - id: tex_type
         type: u4
+        enum: tex_type
+        doc: "Texture source type"
       - id: width
         type: u4
+        doc: "Texture width in pixels"
       - id: height
         type: u4
+        doc: "Texture height in pixels"
       - id: colorkey_type
         type: u4
+        enum: colorkey_type
+        doc: "Transparency key type"
       - id: colorkey
         type: color_value_4b
+        doc: "Transparency key color value"
       - id: file_name
         size: 64
+        doc: "Texture filename (null-padded to 64 bytes)"
       - id: data_ptr
         type: u4
+        doc: "Runtime data pointer (always 0 in file)"
       - id: tss_set
         type: render_state_atom
         repeat: expr
         repeat-expr: 8
+        doc: "8 texture stage state entries (state + 2 values each)"
 
   tex_info_0000:
     seq:
@@ -624,6 +905,7 @@ types:
         type: u4
       - id: colorkey_type
         type: u4
+        enum: colorkey_type
       - id: colorkey
         type: color_value_4b
       - id: format
@@ -649,12 +931,14 @@ types:
         type: u4
       - id: tex_type
         type: u4
+        enum: tex_type
       - id: width
         type: u4
       - id: height
         type: u4
       - id: colorkey_type
         type: u4
+        enum: colorkey_type
       - id: colorkey
         type: color_value_4b
       - id: file_name
@@ -668,8 +952,11 @@ types:
     seq:
       - id: opacity
         type: f4
+        doc: "Material opacity (0.0 = transparent, 1.0 = opaque)"
       - id: transp_type
         type: u4
+        enum: transp_type
+        doc: "Transparency blend mode"
       - id: mtl
         type: material
       - id: rs_set
@@ -698,6 +985,7 @@ types:
         type: f4
       - id: transp_type
         type: u4
+        enum: transp_type
       - id: mtl
         type: material
       - id: rs_set
@@ -726,16 +1014,23 @@ types:
     seq:
       - id: fvf
         type: u4
+        doc: "D3D Flexible Vertex Format flags. Encodes vertex layout: position, normals, texcoords, colors, blend weights"
       - id: pt_type
         type: u4
+        enum: d3d_primitive_type
+        doc: "D3D primitive type for DrawPrimitive calls"
       - id: vertex_num
         type: u4
+        doc: "Number of vertices in the mesh"
       - id: index_num
         type: u4
+        doc: "Number of indices in the index buffer"
       - id: subset_num
         type: u4
+        doc: "Number of material subsets (draw call batches)"
       - id: bone_index_num
         type: u4
+        doc: "Number of bone indices for skinning"
       - id: rs_set
         size: 128
 
@@ -743,16 +1038,23 @@ types:
     seq:
       - id: fvf
         type: u4
+        doc: "D3D Flexible Vertex Format flags. Encodes vertex layout: position, normals, texcoords, colors, blend weights"
       - id: pt_type
         type: u4
+        enum: d3d_primitive_type
+        doc: "D3D primitive type for DrawPrimitive calls"
       - id: vertex_num
         type: u4
+        doc: "Number of vertices in the mesh"
       - id: index_num
         type: u4
+        doc: "Number of indices in the index buffer"
       - id: subset_num
         type: u4
+        doc: "Number of material subsets (draw call batches)"
       - id: bone_index_num
         type: u4
+        doc: "Number of bone indices for skinning"
       - id: rs_set
         type: render_state_atom
         repeat: expr
@@ -762,20 +1064,29 @@ types:
     seq:
       - id: fvf
         type: u4
+        doc: "D3D Flexible Vertex Format flags. Encodes vertex layout: position, normals, texcoords, colors, blend weights"
       - id: pt_type
         type: u4
+        enum: d3d_primitive_type
+        doc: "D3D primitive type for DrawPrimitive calls"
       - id: vertex_num
         type: u4
+        doc: "Number of vertices in the mesh"
       - id: index_num
         type: u4
+        doc: "Number of indices in the index buffer"
       - id: subset_num
         type: u4
+        doc: "Number of material subsets (draw call batches)"
       - id: bone_index_num
         type: u4
+        doc: "Number of bone indices for skinning"
       - id: bone_infl_factor
         type: u4
+        doc: "Maximum bone influences per vertex"
       - id: vertex_element_num
         type: u4
+        doc: "Number of vertex declaration elements"
       - id: rs_set
         type: render_state_atom
         repeat: expr
@@ -873,36 +1184,50 @@ types:
     seq:
       - id: index_dword
         type: u4
+        doc: "Packed bone indices (4 x u8)"
       - id: weight
         type: f4
         repeat: expr
         repeat-expr: 4
+        doc: "Blend weights for up to 4 bones"
 
   subset_info:
     seq:
       - id: primitive_num
         type: u4
+        doc: "Number of primitives (triangles) in this subset"
       - id: start_index
         type: u4
+        doc: "Starting index in the index buffer"
       - id: vertex_num
         type: u4
+        doc: "Number of vertices used by this subset"
       - id: min_index
         type: u4
+        doc: "Minimum vertex index in this subset"
 
   vertex_element:
     seq:
       - id: stream
         type: u2
+        doc: "Vertex stream index"
       - id: offset
         type: u2
+        doc: "Byte offset within vertex"
       - id: elem_type
         type: u1
+        enum: vertex_decl_type
+        doc: "Vertex element data type"
       - id: method
         type: u1
+        doc: "Tessellation method (usually 0 = DEFAULT)"
       - id: usage
         type: u1
+        enum: vertex_decl_usage
+        doc: "Vertex attribute semantic"
       - id: usage_index
         type: u1
+        doc: "Usage index for multiple attributes of same type"
 
   quaternion:
     seq:
@@ -926,7 +1251,7 @@ types:
       - id: d
         type: f4
 
-  aabb:
+  box:
     seq:
       - id: center
         type: vector3
@@ -963,29 +1288,41 @@ types:
     seq:
       - id: id
         type: u4
+        doc: "Dummy point ID"
       - id: mat
         type: matrix44
+        doc: "World-space transform matrix"
       - id: mat_local
         type: matrix44
+        doc: "Local-space transform matrix relative to parent"
       - id: parent_type
         type: u4
+        enum: dummy_parent_type
+        doc: "Type of parent node this dummy attaches to"
       - id: parent_id
         type: u4
+        doc: "ID of parent bone or dummy"
 
   helper_box_info:
     seq:
       - id: id
         type: u4
-      - id: obj_type
+        doc: "Box ID"
+      - id: type
         type: u4
+        doc: "Box collision subtype"
       - id: state
         type: u4
-      - id: bbox
-        type: aabb
+        doc: "Box state flags"
+      - id: box
+        type: box
+        doc: "Axis-aligned bounding box (center + half-extents)"
       - id: mat
         type: matrix44
+        doc: "Box transform matrix"
       - id: name
         size: 32
+        doc: "Box name (null-padded to 32 bytes)"
 
   helper_mesh_face_info:
     seq:
@@ -1006,18 +1343,23 @@ types:
     seq:
       - id: id
         type: u4
-      - id: obj_type
+        doc: "Collision mesh ID"
+      - id: type
         type: u4
+        doc: "Mesh collision type"
       - id: sub_type
         type: u4
+        doc: "Mesh collision subtype"
       - id: name
         size: 32
+        doc: "Mesh name (null-padded to 32 bytes)"
       - id: state
         type: u4
+        doc: "Mesh state flags (1 = enabled)"
       - id: mat
         type: matrix44
-      - id: bbox
-        type: aabb
+      - id: box
+        type: box
       - id: vertex_num
         type: u4
       - id: face_num
@@ -1035,8 +1377,8 @@ types:
     seq:
       - id: id
         type: u4
-      - id: bbox
-        type: aabb
+      - id: box
+        type: box
       - id: mat
         type: matrix44
 
@@ -1053,12 +1395,16 @@ types:
     seq:
       - id: bone_num
         type: u4
+        doc: "Number of bones in skeleton"
       - id: frame_num
         type: u4
+        doc: "Total animation frames"
       - id: dummy_num
         type: u4
+        doc: "Number of dummy attachment points"
       - id: key_type
         type: u4
+        doc: "Keyframe data format: 1=mat43, 2=mat44, 3=quaternion+position"
 
   bone_base_info:
     seq:
@@ -1144,19 +1490,25 @@ types:
     seq:
       - id: frame_num
         type: u4
+        doc: "Number of animation frames"
       - id: mat_seq
         type: matrix43
         repeat: expr
         repeat-expr: frame_num
+        doc: "4x3 transform matrix per frame"
 
   key_float:
     seq:
       - id: key
         type: u4
+        doc: "Keyframe index/time"
       - id: slerp_type
         type: u4
+        enum: slerp_type
+        doc: "Interpolation curve type"
       - id: data
         type: f4
+        doc: "Keyframe float value (e.g., opacity)"
 
   anim_data_mtl_opacity:
     seq:

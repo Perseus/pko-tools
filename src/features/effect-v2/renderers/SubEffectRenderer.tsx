@@ -2,10 +2,12 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { SubEffect } from "@/types/effect";
 import { RectPlane } from "./models/RectPlane";
+import { Cylinder } from "./models/Cylinder";
 import { useFrame } from "@react-three/fiber";
 
 interface SubEffectRendererProps {
   subEffect: SubEffect;
+  onComplete?: () => void;
 }
 
 function isExternalModel(modelName: string): boolean {
@@ -16,8 +18,14 @@ function isExternalModel(modelName: string): boolean {
  * Routes a sub-effect to the correct model renderer based on its data.
  * Wraps everything in a group ref for per-sub-effect transforms (rotation, etc.)
  */
-export function SubEffectRenderer({ subEffect }: SubEffectRendererProps) {
+export function SubEffectRenderer({ subEffect, onComplete }: SubEffectRendererProps) {
   const groupRef = useRef<THREE.Group>(null);
+
+  // Always point to the latest onComplete without re-subscribing useFrame
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+
+  const content = resolveModel(subEffect, onComplete);
 
   // Reset rotation when sub-effect changes
   useEffect(() => {
@@ -25,6 +33,15 @@ export function SubEffectRenderer({ subEffect }: SubEffectRendererProps) {
       groupRef.current.quaternion.identity();
     }
   }, [subEffect]);
+
+  // No renderable content — sub-effect is a no-op, signal completion immediately
+  useEffect(() => {
+    if (!content) {
+      onCompleteRef.current?.();
+    }
+  // content identity changes every render (JSX), so check once on mount only
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useFrame((_ctx, delta) => {
     if (!groupRef.current) return;
@@ -42,7 +59,6 @@ export function SubEffectRenderer({ subEffect }: SubEffectRendererProps) {
     }
   });
 
-  const content = resolveModel(subEffect);
   if (!content) return null;
 
   return (
@@ -52,12 +68,11 @@ export function SubEffectRenderer({ subEffect }: SubEffectRendererProps) {
   );
 }
 
-function resolveModel(subEffect: SubEffect) {
+function resolveModel(subEffect: SubEffect, onComplete?: () => void) {
   const hasModel = subEffect.modelName.trim().length > 0;
   const hasCylinder = subEffect.useParam > 0;
 
   if (hasCylinder) {
-    // TODO: CylinderMesh
     return null;
   }
 
@@ -69,7 +84,9 @@ function resolveModel(subEffect: SubEffect) {
 
     switch (subEffect.modelName) {
       case 'RectPlane':
-        return <RectPlane subEffect={subEffect} />;
+        return <RectPlane subEffect={subEffect} onComplete={onComplete} />;
+      case 'Cylinder':
+        return <Cylinder subEffect={subEffect} onComplete={onComplete} />;
       default:
         console.log('Got unhandled subEffect with modelName - ', subEffect.modelName);
         return null;
@@ -77,7 +94,7 @@ function resolveModel(subEffect: SubEffect) {
   }
 
   if (subEffect.texName) {
-    return <RectPlane subEffect={subEffect} />;
+    return <RectPlane subEffect={subEffect} onComplete={onComplete} />;
   }
 
   return null;

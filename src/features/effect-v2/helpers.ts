@@ -100,3 +100,13 @@ export function findFrame(frameTimes: number[], t: number): { frameIdx: number; 
 export function lerp(a: number, b: number, t: number): number {
   return a + (b - a) * t;
 }
+
+/** Random float in [0, max). Equivalent to PKO's Randf(float max). */
+export function randf(max: number): number {
+  return Math.random() * max;
+}
+
+/** Random float in [min, max). Equivalent to PKO's Randf(float min, float max). */
+export function randfRange(min: number, max: number): number {
+  return min + Math.random() * (max - min);
+}

@@ -1,10 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { useAtomValue } from "jotai";
 import * as THREE from "three";
 import { currentProjectAtom } from "@/store/project";
 import { effectV2PlaybackAtom } from "@/store/effect-v2";
-import { ParFile, ParSystem } from "@/types/effect-v2";
+import { ParFile } from "@/types/effect-v2";
 import { loadParFile } from "@/commands/effect";
 import { ParticleSystemProps, ParticleType } from "./particles/types";
 import { SnowSystem } from "./particles/SnowSystem";
@@ -25,25 +25,32 @@ import { Range2System } from "./particles/Range2System";
 import { DummySystem } from "./particles/DummySystem";
 import { LineSingleSystem } from "./particles/LineSingleSystem";
 import { LineRoundSystem } from "./particles/LineRoundSystem";
-import { EffectRenderer } from "./EffectRenderer";
-import { useLoadEffect } from "../useLoadEffect";
 
 interface ParticleEffectRendererProps {
   /** The .par filename (without extension). */
   particleEffectName: string;
-
-  onComplete: () => void;
+  /** Whether the particle effect should loop. */
+  loop?: boolean;
+  /** Called once when all particle systems have completed (non-looping only). */
+  onComplete?: () => void;
 }
 
 /**
  * Loads and renders a .par particle file.
  * Routes each system to the correct particle type renderer.
  */
-export function ParticleEffectRenderer({ particleEffectName, onComplete }: ParticleEffectRendererProps) {
+export function ParticleEffectRenderer({ particleEffectName, loop = false, onComplete }: ParticleEffectRendererProps) {
   const currentProject = useAtomValue(currentProjectAtom);
   const playback = useAtomValue(effectV2PlaybackAtom);
   const groupRef = useRef<THREE.Group>(null);
   const [parData, setParData] = useState<ParFile | null>(null);
+
+  // Always point to the latest onComplete
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+
+  // Tracks which system indices have fired onComplete
+  const completedRef = useRef(new Set<number>());
 
   useEffect(() => {
     if (!currentProject || !particleEffectName) {
@@ -69,6 +76,26 @@ export function ParticleEffectRenderer({ particleEffectName, onComplete }: Parti
     return () => { cancelled = true; };
   }, [particleEffectName, currentProject]);
 
+  // Reset completion tracking when par data changes
+  useEffect(() => {
+    completedRef.current = new Set();
+  }, [parData]);
+
+  // Edge case: loaded but no systems
+  useEffect(() => {
+    if (parData && parData.systems.length === 0) {
+      onCompleteRef.current?.();
+    }
+  }, [parData]);
+
+  const handleSystemComplete = useCallback((idx: number) => {
+    if (!parData) return;
+    completedRef.current.add(idx);
+    if (completedRef.current.size >= parData.systems.length) {
+      onCompleteRef.current?.();
+    }
+  }, [parData]);
+
   useFrame(() => {
     if (!groupRef.current || !parData || !playback.playing) return;
   });
@@ -81,9 +108,7 @@ export function ParticleEffectRenderer({ particleEffectName, onComplete }: Parti
         const System = getSystemComponent(system.type);
         if (!System) return null;
         return (
-          <System key={i} system={system} index={i}>
-            <ParticleVisual system={system} />
-          </System>
+          <System key={i} system={system} index={i} loop={loop} onComplete={() => handleSystemComplete(i)} />
         );
       })}
     </group>
@@ -114,20 +139,4 @@ function getSystemComponent(type: number): React.ComponentType<ParticleSystemPro
       console.warn(`[ParticleEffect] Unknown particle type: ${type}`);
       return null;
   }
-}
-
-function ParticleVisual({ system }: { system: ParSystem }) {
-  const effFiles = useLoadEffect(
-    system.modelName.endsWith('.eff') ? [system.modelName] : []
-  );
-
-  if (effFiles.length > 0) {
-    if (effFiles.length > 1) {
-      console.error('has more than one effect, but rendering just one in ParticleEffectRenderer');
-    }
-
-    return <EffectRenderer effect={effFiles[0]} />;
-  }
-
-  return null;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import * as THREE from "three";
-import { getTextureName, getThreeJSBlendFromD3D, getMappedUVs, findFrame, lerp, pkoVec } from "../helpers";
+import { getTextureName, getThreeJSBlendFromD3D, getMappedUVs, findFrame, lerp, pkoVec, randf, randfRange } from "../helpers";
 
 describe("getTextureName", () => {
   it("strips .tga extension", () => {
@@ -154,5 +154,33 @@ describe("pkoVec", () => {
 
   it("handles negative values", () => {
     expect(pkoVec([-1, -2, -3])).toEqual([-1, -3, -2]);
+  });
+});
+
+describe("randf", () => {
+  it("returns values in [0, max)", () => {
+    for (let i = 0; i < 100; i++) {
+      const v = randf(5);
+      expect(v).toBeGreaterThanOrEqual(0);
+      expect(v).toBeLessThan(5);
+    }
+  });
+
+  it("returns 0 when max is 0", () => {
+    expect(randf(0)).toBe(0);
+  });
+});
+
+describe("randfRange", () => {
+  it("returns values in [min, max)", () => {
+    for (let i = 0; i < 100; i++) {
+      const v = randfRange(2, 8);
+      expect(v).toBeGreaterThanOrEqual(2);
+      expect(v).toBeLessThan(8);
+    }
+  });
+
+  it("returns min when min equals max", () => {
+    expect(randfRange(3, 3)).toBe(3);
   });
 });
