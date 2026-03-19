@@ -6,7 +6,8 @@ import { invoke } from "@tauri-apps/api/core";
 import * as THREE from "three";
 import { EffectFile } from "@/types/effect";
 import { currentProjectAtom } from "@/store/project";
-import { effectV2PlaybackAtom, selectedMagicEffectAtom } from "@/store/effect-v2";
+import { selectedMagicEffectAtom } from "@/store/effect-v2";
+import { useTimeSource } from "../TimeContext";
 import { FlightPathController, ArrivalInfo } from "./flight/FlightPathController";
 import { EffectRenderer } from "./EffectRenderer";
 import { HitEffectRenderer } from "./HitEffectRenderer";
@@ -24,6 +25,7 @@ export function MagicEffectRenderer({ effFiles }: MagicEffectRendererProps) {
   const selected = useAtomValue(selectedMagicEffectAtom);
   const [targetGltfUri, setTargetGltfUri] = useState<string | null>(null);
   const prevUri = useRef<string | null>(null);
+  const hasHitEffect = useRef<boolean>(selected?.result_effect !== '0' && selected?.result_effect.trim() !== '');
 
   // Hit effect state
   const [hitActive, setHitActive] = useState(false);
@@ -73,29 +75,25 @@ export function MagicEffectRenderer({ effFiles }: MagicEffectRendererProps) {
   const origin = useMemo(() => new THREE.Vector3(0, 0, 0), []);
   const target = useMemo(() => new THREE.Vector3(...TARGET_OFFSET), []);
 
-  const playback = useAtomValue(effectV2PlaybackAtom);
+  const timeSource = useTimeSource();
 
   useFrame(() => {
     if (!targetGroupRef.current) return;
-    if (!playback.playing) return;
-    const x = Math.sin(playback.time * 1.2) * 8;
+    if (!timeSource.playing) return;
+    const x = Math.sin(timeSource.getTime() * 1.2) * 8;
     targetGroupRef.current.position.set(x, TARGET_OFFSET[1], TARGET_OFFSET[2]);
     target.set(x, TARGET_OFFSET[1], TARGET_OFFSET[2]);
   });
 
   // Flight arrived at target — show hit effect
   const handleArrival = useCallback((info: ArrivalInfo) => {
-    const hasHitEffect = selected?.result_effect &&
-      selected.result_effect !== "0" &&
-      selected.result_effect.trim() !== "";
-
     setArrivalInfo(info);
 
     if (hasHitEffect) {
       setHitActive(true);
     } else {
       // No hit effect — signal completion immediately
-      setHitActive(false);
+      handleHitComplete();
     }
   }, [selected]);
 
@@ -133,6 +131,7 @@ export function MagicEffectRenderer({ effFiles }: MagicEffectRendererProps) {
         target={target}
         onArrival={handleArrival}
         awaitingHitEffect={hitActive}
+        hasHitEffect={hasHitEffect.current}
       >
         {effFiles.map((eff, i) => (
           <EffectRenderer key={i} effect={eff} />

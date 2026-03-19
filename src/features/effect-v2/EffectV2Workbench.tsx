@@ -5,6 +5,7 @@ import { useEffect, useMemo } from "react";
 import { selectedMagicEffectAtom, effectV2PlaybackAtom } from "@/store/effect-v2";
 import { MagicEffectRenderer } from "./renderers/MagicEffectRenderer";
 import { PlaybackClock } from "./PlaybackClock";
+import { GlobalTimeProvider } from "./TimeContext";
 import { useLoadEffect } from "./useLoadEffect";
 import { Button } from "@/components/ui/button";
 import { Play, Square, RotateCcw, Repeat } from "lucide-react";
@@ -148,7 +149,9 @@ export default function EffectV2Workbench() {
             <ambientLight intensity={1} />
             <directionalLight position={[5, 5, 5]} />
             <PlaybackClock />
-            <MagicEffectRenderer key={selected?.id ?? "none"} effFiles={effFiles} />
+            <GlobalTimeProvider>
+              <MagicEffectRenderer key={selected?.id ?? "none"} effFiles={effFiles} />
+            </GlobalTimeProvider>
             <OrbitControls makeDefault />
             <gridHelper args={[40, 40, "#2f3239", "#1b1d22"]} />
             <GizmoHelper alignment="top-right" margin={[80, 80]}>
