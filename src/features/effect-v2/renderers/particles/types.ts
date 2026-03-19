@@ -1,17 +1,18 @@
-import { ReactNode } from "react";
 import { ParSystem } from "@/types/effect-v2";
 
 /**
  * Common props for all particle system renderers.
- * Each system is a behavior controller — visual rendering is injected via children.
+ * Each system is a behavior controller that owns its visual rendering.
  */
 export interface ParticleSystemProps {
   /** The particle system data from the .par file. */
   system: ParSystem;
   /** Index of this system within the ParFile.systems array. */
   index: number;
-  /** Visual renderer to be controlled by this particle system's behavior. */
-  children?: ReactNode;
+  /** Whether the particle system should loop. */
+  loop?: boolean;
+  /** Called once when this system's animation is complete (non-looping only). */
+  onComplete?: () => void;
 }
 
 /**

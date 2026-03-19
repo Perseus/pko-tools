@@ -14,6 +14,8 @@ doc: |
 seq:
   - id: version
     type: u4
+    doc: "Geometry format version"
   - id: geometry
     size-eos: true
     type: pko_lmo::geometry_chunk(version, 0)
+    doc: "Geometry payload (delegated to pko_lmo geometry_chunk parser)"

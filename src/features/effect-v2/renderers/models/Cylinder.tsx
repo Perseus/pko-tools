@@ -1,5 +1,5 @@
 import { SubEffect } from '@/types/effect';
-import { useMemo, useRef } from 'react';
+import { useMemo, useRef, useEffect } from 'react';
 import * as THREE from 'three';
 import { getThreeJSBlendFromD3D, findFrame, lerp, pkoVec } from '../../helpers';
 import { useEffectTexture } from '../../useEffectTexture';
@@ -9,13 +9,21 @@ import { effectV2PlaybackAtom } from '@/store/effect-v2';
 
 interface CylinderProps {
   subEffect: SubEffect;
+  onComplete?: () => void;
 }
 
-export function Cylinder({ subEffect }: CylinderProps) {
+export function Cylinder({ subEffect, onComplete }: CylinderProps) {
   const meshRef = useRef<THREE.Mesh>(null);
   const groupRef = useRef<THREE.Group>(null);
   const matRef = useRef<THREE.MeshBasicMaterial>(null);
   const playback = useAtomValue(effectV2PlaybackAtom);
+
+  // Always point to the latest onComplete without re-subscribing useFrame
+  const onCompleteRef = useRef(onComplete);
+  onCompleteRef.current = onComplete;
+  // Guard: fire onComplete only once per mount
+  const firedRef = useRef(false);
+
   const {
     segments,
     height,
@@ -33,15 +41,15 @@ export function Cylinder({ subEffect }: CylinderProps) {
   const geometry = useMemo(() => {
     const geo = new THREE.BufferGeometry();
     const vertices = [];
-    let uvAttr = [];
+    const uvAttr = [];
     const indicesArr = [];
 
     for (let i = 0; i <= segments; i++) {
-      let xTop = topRadius * Math.sin(i * (2 * Math.PI) / segments);
-      let zTop = topRadius * Math.cos(i * (2 * Math.PI) / segments);
+      const xTop = topRadius * Math.sin(i * (2 * Math.PI) / segments);
+      const zTop = topRadius * Math.cos(i * (2 * Math.PI) / segments);
 
-      let xBot = botRadius * Math.sin(i * (2 * Math.PI) / segments);
-      let zBot = botRadius * Math.cos(i * (2 * Math.PI) / segments);
+      const xBot = botRadius * Math.sin(i * (2 * Math.PI) / segments);
+      const zBot = botRadius * Math.cos(i * (2 * Math.PI) / segments);
 
       vertices.push(xTop, height, zTop);
       vertices.push(xBot, 0.0, zBot);
@@ -59,16 +67,12 @@ export function Cylinder({ subEffect }: CylinderProps) {
       indicesArr.push(bottom, nextTop, nextBot);
     }
 
-    const positions = new Float32Array(vertices);
-    const uvs = new Float32Array(uvAttr);
-    const indices = new Uint16Array(indicesArr);
-
-    geo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    geo.setIndex(new THREE.BufferAttribute(indices, 1));
-    geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2));
+    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(vertices), 3));
+    geo.setIndex(new THREE.BufferAttribute(new Uint16Array(indicesArr), 1));
+    geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(uvAttr), 2));
 
     return geo;
-  }, [])
+  }, []);
 
   const texture = useEffectTexture(subEffect.texName);
   if (texture) {
@@ -77,13 +81,20 @@ export function Cylinder({ subEffect }: CylinderProps) {
   const blendSrc = getThreeJSBlendFromD3D(subEffect.srcBlend);
   const blendDst = getThreeJSBlendFromD3D(subEffect.destBlend);
 
-
   let totalAnimationDurationSeconds = 0;
   for (let i = 0; i < frameCount; i++) {
     totalAnimationDurationSeconds += frameTimes[i];
   }
 
-  useFrame(({ camera }, delta) => {
+  // No keyframes — signal immediately
+  useEffect(() => {
+    if (frameTimes.length === 0 && !firedRef.current) {
+      firedRef.current = true;
+      onCompleteRef.current?.();
+    }
+  }, [frameTimes.length]);
+
+  useFrame(() => {
     if (!meshRef.current || !matRef.current || frameTimes.length === 0) {
       return;
     }
@@ -95,6 +106,12 @@ export function Cylinder({ subEffect }: CylinderProps) {
       } else {
         t = Math.min(t, totalAnimationDurationSeconds);
       }
+    }
+
+    // Signal completion once when the non-looping animation reaches its end
+    if (!playback.loop && !firedRef.current && playback.time >= totalAnimationDurationSeconds && totalAnimationDurationSeconds > 0) {
+      firedRef.current = true;
+      onCompleteRef.current?.();
     }
 
     const { frameIdx, localT } = findFrame(frameTimes, t);
@@ -131,7 +148,6 @@ export function Cylinder({ subEffect }: CylinderProps) {
         lerp(c0[2], c1[2], frac),
       );
       matRef.current.opacity = lerp(c0[3], c1[3], frac);
-      console.log('set current opacity to ', matRef.current.opacity, ' for ', frac)
     }
 
     // Interpolate angles
@@ -159,5 +175,5 @@ export function Cylinder({ subEffect }: CylinderProps) {
         />
       </mesh>
     </group>
-  )
+  );
 }

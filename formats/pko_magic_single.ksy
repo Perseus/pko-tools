@@ -83,7 +83,7 @@ types:
           Only the first n_model_num slots are meaningful.
       - id: n_vel
         type: s4
-        doc: Effect velocity.
+        doc: "Effect velocity (units/frame, used for projectile speed)"
       - id: n_par_num
         type: s4
         doc: Number of particle part names (0–8).
@@ -100,15 +100,15 @@ types:
         type: s4
         repeat: expr
         repeat-expr: 8
-        doc: Dummy point indices (8 slots, -1 if unused).
+        doc: "Dummy point attachment indices (8 slots). -1 = unused slot. Binds effect models to character skeleton points"
       - id: n_render_idx
         type: s4
-        doc: Render mode index.
+        doc: "Render state configuration index (-1 = use defaults)"
       - id: n_light_id
         type: s4
-        doc: Light ID reference.
+        doc: "Light definition ID (-1 = no light)"
       - id: str_result
         type: str
         size: 24
         encoding: ASCII
-        doc: Result/hit effect name (null-terminated).
+        doc: "Result/hit effect name — effect spawned when skill hits target (e.g., damage flash)"
