@@ -1,9 +1,9 @@
 import { SubEffect } from "@/types/effect";
 import { useRef, useMemo, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
-import { useAtomValue } from "jotai";
+import { Billboard } from "@react-three/drei";
 import * as THREE from "three";
-import { effectV2PlaybackAtom } from "@/store/effect-v2";
+import { useTimeSource } from "../../TimeContext";
 import { useEffectTexture } from "../../useEffectTexture";
 import { getMappedUVs, getThreeJSBlendFromD3D, findFrame, lerp, pkoVec } from "../../helpers";
 
@@ -16,8 +16,7 @@ interface RectPlaneProps {
 export function RectPlane({ subEffect, onComplete }: RectPlaneProps) {
   const meshRef = useRef<THREE.Mesh>(null);
   const matRef = useRef<THREE.MeshBasicMaterial>(null);
-  const groupRef = useRef<THREE.Group>(null);
-  const playback = useAtomValue(effectV2PlaybackAtom);
+  const timeSource = useTimeSource();
 
   // Always point to the latest onComplete without re-subscribing useFrame
   const onCompleteRef = useRef(onComplete);
@@ -25,7 +24,7 @@ export function RectPlane({ subEffect, onComplete }: RectPlaneProps) {
   // Guard: fire onComplete only once per mount
   const firedRef = useRef(false);
 
-  const { frameCount, frameTimes, frameSizes, framePositions, frameColors, texList, verCount } = subEffect;
+  const { frameCount, frameTimes, frameSizes, framePositions, frameColors, texList, verCount, frameAngles } = subEffect;
 
   // Build UV attribute from first texList frame (or full-quad default)
   const uvAttr = useMemo(() => {
@@ -64,24 +63,13 @@ export function RectPlane({ subEffect, onComplete }: RectPlaneProps) {
     }
   }, [frameTimes.length]);
 
-  useFrame(({ camera }) => {
+  useFrame(() => {
     if (!meshRef.current || !matRef.current || frameTimes.length === 0) return;
 
-    if (groupRef.current) {
-      if (subEffect.billboard) {
-        const correction = new THREE.Quaternion().setFromAxisAngle(
-          new THREE.Vector3(1, 0, 0), Math.PI / 2
-        );
-        groupRef.current.quaternion.copy(camera.quaternion).multiply(correction);
-      } else {
-        groupRef.current.quaternion.identity();
-      }
-    }
-
-    // Use shared playback time, loop if enabled
-    let t = playback.time;
+    // Use time source (global or local depending on context), loop if enabled
+    let t = timeSource.getTime();
     if (totalAnimationDurationSeconds > 0) {
-      if (playback.loop) {
+      if (timeSource.loop) {
         t = t % totalAnimationDurationSeconds;
       } else {
         t = Math.min(t, totalAnimationDurationSeconds);
@@ -89,7 +77,7 @@ export function RectPlane({ subEffect, onComplete }: RectPlaneProps) {
     }
 
     // Signal completion once when the non-looping animation reaches its end
-    if (!playback.loop && !firedRef.current && playback.time >= totalAnimationDurationSeconds && totalAnimationDurationSeconds > 0) {
+    if (!timeSource.loop && !firedRef.current && timeSource.getTime() >= totalAnimationDurationSeconds && totalAnimationDurationSeconds > 0) {
       firedRef.current = true;
       onCompleteRef.current?.();
     }
@@ -131,30 +119,47 @@ export function RectPlane({ subEffect, onComplete }: RectPlaneProps) {
       );
       matRef.current.opacity = lerp(c0[3], c1[3], frac);
     }
+
+    if (frameAngles.length > frameIdx) {
+      const a0 = pkoVec(frameAngles[frameIdx]);
+      const a1 = pkoVec(frameAngles[nextIdx] ?? a0);
+      meshRef.current.rotation.set(
+        lerp(a0[0], a1[0], frac),
+        lerp(a0[1], a1[1], frac),
+        lerp(a0[2], a1[2], frac),
+      );
+    }
   });
 
   const texture = useEffectTexture(subEffect.texName);
   const blendSrc = getThreeJSBlendFromD3D(subEffect.srcBlend);
   const blendDst = getThreeJSBlendFromD3D(subEffect.destBlend);
 
-  return (
-    <group ref={groupRef}>
-      <mesh
-        ref={meshRef}
-        geometry={geometry}
-      >
-        <meshBasicMaterial
-          ref={matRef}
-          color="#ffffff"
-          transparent
-          depthWrite={false}
-          side={THREE.DoubleSide}
-          map={texture}
-          blending={THREE.CustomBlending}
-          blendSrc={blendSrc}
-          blendDst={blendDst}
-        />
-      </mesh>
-    </group>
+  const meshContent = (
+    <mesh ref={meshRef} geometry={geometry}>
+      <meshBasicMaterial
+        ref={matRef}
+        color="#ffffff"
+        transparent
+        depthWrite={false}
+        side={THREE.DoubleSide}
+        map={texture}
+        blending={THREE.CustomBlending}
+        blendSrc={blendSrc}
+        blendDst={blendDst}
+      />
+    </mesh>
   );
+
+  if (subEffect.billboard) {
+    return (
+      <Billboard>
+        <group rotation={[Math.PI / 2, 0, 0]}>
+          {meshContent}
+        </group>
+      </Billboard>
+    );
+  }
+
+  return <group>{meshContent}</group>;
 }

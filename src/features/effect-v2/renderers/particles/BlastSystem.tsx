@@ -1,75 +1,63 @@
-import { useRef, useEffect, RefObject } from "react";
-import { render, useFrame } from "@react-three/fiber";
-import * as THREE from "three";
 import { ParticleSystemProps } from "./types";
 import { ParticleVisual } from "./ParticleVisual";
-import { Vec3 } from "@/types/effect";
-import { randf } from "../../helpers"
-import { useAtomValue } from "jotai";
-import { effectV2PlaybackAtom } from "@/store/effect-v2";
+import { useParticleLifecycle, Particle } from "./useParticleLifecycle";
+import { randf } from "../../helpers";
+import { ParSystem } from "@/types/effect-v2";
 
-interface ParticleController {
-  velocity: THREE.Vector3,
-  acceleration: THREE.Vector3,
-  groupRef: RefObject<THREE.Group>,
-};
+/**
+ * Per-particle randomized direction at spawn.
+ * Matches C++ _CreateBlast in MPParticleSys.cpp:
+ * - velocity magnitude randomized per-particle per-axis
+ * - direction sign randomized per-particle for X/Z, always positive for Y
+ * - spawn position randomized within system range
+ * PKO→Three.js coordinate swap (Y↔Z) applied same as existing code.
+ */
+function initBlastParticle(p: Particle, _i: number, system: ParSystem) {
+  p.dir.set(
+    randf(system.velocity) * (Math.random() < 0.5 ? system.direction[0] : -system.direction[0]),
+    randf(system.velocity) * system.direction[2],
+    randf(system.velocity) * (Math.random() < 0.5 ? system.direction[1] : -system.direction[1]),
+  );
+  p.accel.set(system.acceleration[0], system.acceleration[2], system.acceleration[1]);
+  p.pos.set(
+    randf(system.range[0]),
+    randf(system.range[2]),
+    randf(system.range[1]),
+  );
+}
+
+/**
+ * Per-frame position update for blast particles.
+ * Matches C++ _FrameMoveBlast:
+ *   pos += dir * dt
+ *   dir += accel * dt  (acceleration curves trajectory over time)
+ */
+function moveBlastParticle(p: Particle, _i: number, dt: number) {
+  p.pos.addScaledVector(p.dir, dt);
+  p.dir.addScaledVector(p.accel, dt);
+}
 
 /** Type 3 — Blast particles exploding outward. */
 export function BlastSystem({ system, onComplete, loop }: ParticleSystemProps) {
-  const groupRef = useRef<THREE.Group>(null);
-  const particleContollers = useRef<Record<number, ParticleController>>({});
-  const playback = useAtomValue(effectV2PlaybackAtom);
-
-  for (let i = 0; i < system.particleCount; i++) {
-    const velocity = new THREE.Vector3(
-      randf(system.velocity),
-      randf(system.velocity),
-      -randf(system.velocity),
-    );
-
-    const dir = new THREE.Vector3(
-      randf(2) ? system.direction[0] : -system.direction[0],
-      system.direction[2],
-      randf(2) ? system.direction[1] : -system.direction[1],
-    );
-
-    velocity.multiply(dir);
-    const particleController: ParticleController = {
-      velocity,
-      acceleration: new THREE.Vector3(system.acceleration[0], system.acceleration[2], system.acceleration[1]),
-      groupRef: useRef(new THREE.Group()),
-    };
-
-    particleContollers.current[i] = particleController;
-  }
-
-  // just the velocity magnitude first
-  // TODO: use system.range
-
-  const totalAnimationDurationSeconds = system.playTime;
-
-  useFrame(() => {
-    if (!groupRef.current) return;
-    // TODO: implement blast particle simulation
-    //
-    let t = playback.time;
-
-    for (let i = 0; i < system.particleCount; i++) {
-      const renderGroup = particleContollers.current[i].groupRef;
-
-    }
+  const particlesRef = useParticleLifecycle({
+    system,
+    loop,
+    onComplete,
+    initParticle: initBlastParticle,
+    moveParticle: moveBlastParticle,
   });
 
-  const particleGroups = [];
-  for (let i = 0; i < system.particleCount; i++) {
-    particleGroups.push(
-      <group ref={particleContollers.current[i].groupRef}>
-        <ParticleVisual system={system} loop={loop} />
-      </group>
-    )
-  }
+  // particlesRef is mutated by useFrame without triggering re-renders.
+  // This filter may be stale between renders — acceptable for blast (fast transient).
+  const alive = particlesRef.current.filter((p) => p.alive);
 
-  return <group ref={groupRef}>
-    {particleGroups}
-  </group>
-}                     
+  return (
+    <group>
+      {alive.map((p) => (
+        <group key={p.index} position={p.pos} scale={p.size}>
+          <ParticleVisual system={system} particle={p} loop={loop} />
+        </group>
+      ))}
+    </group>
+  );
+}

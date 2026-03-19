@@ -4,8 +4,7 @@ import * as THREE from 'three';
 import { getThreeJSBlendFromD3D, findFrame, lerp, pkoVec } from '../../helpers';
 import { useEffectTexture } from '../../useEffectTexture';
 import { useFrame } from '@react-three/fiber';
-import { useAtomValue } from 'jotai';
-import { effectV2PlaybackAtom } from '@/store/effect-v2';
+import { useTimeSource } from '../../TimeContext';
 
 interface CylinderProps {
   subEffect: SubEffect;
@@ -16,7 +15,7 @@ export function Cylinder({ subEffect, onComplete }: CylinderProps) {
   const meshRef = useRef<THREE.Mesh>(null);
   const groupRef = useRef<THREE.Group>(null);
   const matRef = useRef<THREE.MeshBasicMaterial>(null);
-  const playback = useAtomValue(effectV2PlaybackAtom);
+  const timeSource = useTimeSource();
 
   // Always point to the latest onComplete without re-subscribing useFrame
   const onCompleteRef = useRef(onComplete);
@@ -99,9 +98,9 @@ export function Cylinder({ subEffect, onComplete }: CylinderProps) {
       return;
     }
 
-    let t = playback.time;
+    let t = timeSource.getTime();
     if (totalAnimationDurationSeconds > 0) {
-      if (playback.loop) {
+      if (timeSource.loop) {
         t = t % totalAnimationDurationSeconds;
       } else {
         t = Math.min(t, totalAnimationDurationSeconds);
@@ -109,7 +108,7 @@ export function Cylinder({ subEffect, onComplete }: CylinderProps) {
     }
 
     // Signal completion once when the non-looping animation reaches its end
-    if (!playback.loop && !firedRef.current && playback.time >= totalAnimationDurationSeconds && totalAnimationDurationSeconds > 0) {
+    if (!timeSource.loop && !firedRef.current && timeSource.getTime() >= totalAnimationDurationSeconds && totalAnimationDurationSeconds > 0) {
       firedRef.current = true;
       onCompleteRef.current?.();
     }

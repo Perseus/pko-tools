@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import ReactThreeTestRenderer from "@react-three/test-renderer";
 import { SubEffectRenderer } from "../renderers/SubEffectRenderer";
+import { TimeProvider, TimeSource } from "../TimeContext";
 import { baseSubEffect, rotatingSubEffect } from "./fixtures";
 
 // Mock the texture hook — no Tauri backend in tests
@@ -8,19 +9,24 @@ vi.mock("../useEffectTexture", () => ({
   useEffectTexture: () => null,
 }));
 
-// Mock jotai atoms
-vi.mock("jotai", async () => {
-  const actual = await vi.importActual("jotai");
-  return {
-    ...actual,
-    useAtomValue: () => ({ playing: true, loop: true, time: 0.5, fps: 0 }),
-  };
-});
+/** A static TimeSource for tests. */
+const testTimeSource: TimeSource = {
+  getTime: () => 0.5,
+  playing: true,
+  loop: true,
+};
+
+/** Wraps children in a TimeProvider for test rendering. */
+function TestTimeWrapper({ children }: { children: React.ReactNode }) {
+  return <TimeProvider value={testTimeSource}>{children}</TimeProvider>;
+}
 
 describe("SubEffectRenderer", () => {
   it("renders a group with a mesh for RectPlane", async () => {
     const renderer = await ReactThreeTestRenderer.create(
-      <SubEffectRenderer subEffect={baseSubEffect} />
+      <TestTimeWrapper>
+        <SubEffectRenderer subEffect={baseSubEffect} />
+      </TestTimeWrapper>
     );
 
     const groups = renderer.scene.findAll((node) => node.type === "Group");
@@ -33,7 +39,9 @@ describe("SubEffectRenderer", () => {
   it("returns null for cylinder sub-effects (not yet implemented)", async () => {
     const cylinderSubEffect = { ...baseSubEffect, useParam: 1 };
     const renderer = await ReactThreeTestRenderer.create(
-      <SubEffectRenderer subEffect={cylinderSubEffect} />
+      <TestTimeWrapper>
+        <SubEffectRenderer subEffect={cylinderSubEffect} />
+      </TestTimeWrapper>
     );
 
     const meshes = renderer.scene.findAll((node) => node.type === "Mesh");
@@ -43,7 +51,9 @@ describe("SubEffectRenderer", () => {
   it("returns null for external .lgo models (not yet implemented)", async () => {
     const lgoSubEffect = { ...baseSubEffect, modelName: "weapon.lgo" };
     const renderer = await ReactThreeTestRenderer.create(
-      <SubEffectRenderer subEffect={lgoSubEffect} />
+      <TestTimeWrapper>
+        <SubEffectRenderer subEffect={lgoSubEffect} />
+      </TestTimeWrapper>
     );
 
     const meshes = renderer.scene.findAll((node) => node.type === "Mesh");
@@ -53,7 +63,9 @@ describe("SubEffectRenderer", () => {
   it("renders when sub-effect has texName but no modelName", async () => {
     const texOnlySubEffect = { ...baseSubEffect, modelName: "" };
     const renderer = await ReactThreeTestRenderer.create(
-      <SubEffectRenderer subEffect={texOnlySubEffect} />
+      <TestTimeWrapper>
+        <SubEffectRenderer subEffect={texOnlySubEffect} />
+      </TestTimeWrapper>
     );
 
     const meshes = renderer.scene.findAll((node) => node.type === "Mesh");
@@ -62,7 +74,9 @@ describe("SubEffectRenderer", () => {
 
   it("applies rotation after advancing frames when rotaLoop is true", async () => {
     const renderer = await ReactThreeTestRenderer.create(
-      <SubEffectRenderer subEffect={rotatingSubEffect} />
+      <TestTimeWrapper>
+        <SubEffectRenderer subEffect={rotatingSubEffect} />
+      </TestTimeWrapper>
     );
 
     // Get the outer group (first group is the SubEffectRenderer group)

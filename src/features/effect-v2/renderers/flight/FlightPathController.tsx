@@ -4,6 +4,7 @@ import { useAtom } from "jotai";
 import * as THREE from "three";
 import { MagicSingleEntry } from "@/types/effect-v2";
 import { effectV2PlaybackAtom } from "@/store/effect-v2";
+import { useTimeSource } from "../../TimeContext";
 import { flightDrop } from "./paths/drop";
 import { flightFly } from "./paths/fly";
 import { flightTrace } from "./paths/trace";
@@ -67,6 +68,7 @@ interface FlightPathControllerProps {
   onArrival?: (info: ArrivalInfo) => void;
   /** When true, the flight effect is hidden and loop/reset is deferred until resumeLoop() is called. */
   awaitingHitEffect: boolean;
+  hasHitEffect: boolean;
 }
 
 /**
@@ -80,11 +82,15 @@ export function FlightPathController({
   children,
   onArrival,
   awaitingHitEffect,
+  hasHitEffect,
 }: FlightPathControllerProps) {
   const groupRef = useRef<THREE.Group>(null);
   const flightState = useRef<Record<string, unknown>>({});
   const prevEntry = useRef(magicEntry);
-  const [playback, setPlayback] = useAtom(effectV2PlaybackAtom);
+  // useTimeSource for reads, useAtom solely for write (loop restart / stop).
+  // Both are needed because TimeSource is a read-only interface.
+  const timeSource = useTimeSource();
+  const [, setPlayback] = useAtom(effectV2PlaybackAtom);
   const arrived = useRef(false);
   const prevAwaiting = useRef(awaitingHitEffect);
 
@@ -96,8 +102,8 @@ export function FlightPathController({
   }
 
   // Reset state and position when playback resets to 0
-  const prevTime = useRef(playback.time);
-  if (playback.time < prevTime.current) {
+  const prevTime = useRef(timeSource.getTime());
+  if (timeSource.getTime() < prevTime.current) {
     flightState.current = {};
     arrived.current = false;
     if (groupRef.current) {
@@ -106,25 +112,30 @@ export function FlightPathController({
       groupRef.current.visible = true;
     }
   }
-  prevTime.current = playback.time;
+  prevTime.current = timeSource.getTime();
+
+  const restartEffect = () => {
+    arrived.current = false;
+    if (groupRef.current) {
+      groupRef.current.position.set(0, 0, 0);
+      groupRef.current.quaternion.identity();
+      groupRef.current.visible = true;
+    }
+    flightState.current = {};
+
+    if (timeSource.loop) {
+      setPlayback((p) => ({ ...p, time: 0 }));
+    } else {
+      setPlayback((p) => ({ ...p, playing: false }));
+    }
+  };
 
   // When awaitingHitEffect transitions from true → false, the hit effect just finished.
   // Now we can do the actual loop restart. Must be in useEffect to avoid render-phase setState.
   useEffect(() => {
-    if (prevAwaiting.current && !awaitingHitEffect && arrived.current) {
-      arrived.current = false;
-      if (groupRef.current) {
-        groupRef.current.position.set(0, 0, 0);
-        groupRef.current.quaternion.identity();
-        groupRef.current.visible = true;
-      }
-      flightState.current = {};
-
-      if (playback.loop) {
-        setPlayback((p) => ({ ...p, time: 0 }));
-      } else {
-        setPlayback((p) => ({ ...p, playing: false }));
-      }
+    const hasHitEffectFinished = prevAwaiting.current && !awaitingHitEffect && arrived.current;
+    if (hasHitEffectFinished) {
+      restartEffect();
     }
     prevAwaiting.current = awaitingHitEffect;
   }, [awaitingHitEffect]);
@@ -134,18 +145,20 @@ export function FlightPathController({
 
   useFrame((_, delta) => {
     if (!groupRef.current || renderIdx < 0 || renderIdx >= FLIGHT_PATHS.length) return;
-    if (!playback.playing || arrived.current) return;
+    if (!timeSource.playing || arrived.current) return;
 
     const ctx: FlightContext = {
       origin,
       target,
       velocity,
-      elapsed: playback.time,
+      elapsed: timeSource.getTime(),
       delta,
       state: flightState.current,
       done: false,
     };
 
+    const targetDirection = target.clone().sub(target).normalize();
+    groupRef.current.lookAt(targetDirection);
     FLIGHT_PATHS[renderIdx](ctx, groupRef.current);
 
     if (ctx.done) {
@@ -159,6 +172,9 @@ export function FlightPathController({
       groupRef.current.visible = false;
 
       onArrival?.({ position: arrivalPos, direction: arrivalDir });
+      if (!hasHitEffect) {
+        restartEffect();
+      }
     }
   });
 

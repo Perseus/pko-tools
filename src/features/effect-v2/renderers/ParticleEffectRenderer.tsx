@@ -3,7 +3,7 @@ import { useFrame } from "@react-three/fiber";
 import { useAtomValue } from "jotai";
 import * as THREE from "three";
 import { currentProjectAtom } from "@/store/project";
-import { effectV2PlaybackAtom } from "@/store/effect-v2";
+import { useTimeSource } from "../TimeContext";
 import { ParFile } from "@/types/effect-v2";
 import { loadParFile } from "@/commands/effect";
 import { ParticleSystemProps, ParticleType } from "./particles/types";
@@ -41,7 +41,7 @@ interface ParticleEffectRendererProps {
  */
 export function ParticleEffectRenderer({ particleEffectName, loop = false, onComplete }: ParticleEffectRendererProps) {
   const currentProject = useAtomValue(currentProjectAtom);
-  const playback = useAtomValue(effectV2PlaybackAtom);
+  const timeSource = useTimeSource();
   const groupRef = useRef<THREE.Group>(null);
   const [parData, setParData] = useState<ParFile | null>(null);
 
@@ -65,7 +65,6 @@ export function ParticleEffectRenderer({ particleEffectName, loop = false, onCom
         const data = await loadParFile(currentProject!.id, `${particleEffectName}.par`) as ParFile;
         if (!cancelled) {
           setParData(data);
-          console.log(`[ParticleEffect] loaded ${particleEffectName}:`, data);
         }
       } catch {
         if (!cancelled) setParData(null);
@@ -97,7 +96,7 @@ export function ParticleEffectRenderer({ particleEffectName, loop = false, onCom
   }, [parData]);
 
   useFrame(() => {
-    if (!groupRef.current || !parData || !playback.playing) return;
+    if (!groupRef.current || !parData || !timeSource.playing) return;
   });
 
   if (!parData) return null;
