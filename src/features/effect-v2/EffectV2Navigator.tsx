@@ -12,6 +12,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { LatestOnly } from "@/lib/latestOnly";
 import { Wand2, Sparkles, Flame, Layers } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface ListItem {
   id: string;
@@ -174,20 +175,27 @@ export default function EffectV2Navigator() {
       <SidebarContent>
         <span className="text-md font-semibold">Effects V2</span>
 
-        <select
-          className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+        <Select
           value={viewMode}
-          onChange={(e) => {
-            setViewMode(e.target.value as EffectV2ViewMode);
+          onValueChange={(value) => {
+            setViewMode(value as EffectV2ViewMode);
             setQuery("");
           }}
         >
-          {(Object.keys(VIEW_MODE_LABELS) as EffectV2ViewMode[]).map((mode) => (
-            <option key={mode} value={mode}>
-              {VIEW_MODE_LABELS[mode]}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger className="w-full h-8 text-sm">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(Object.keys(VIEW_MODE_LABELS) as EffectV2ViewMode[]).map((mode) => (
+              <SelectItem key={mode} value={mode}>
+                <span className="flex items-center gap-2">
+                  {VIEW_MODE_ICONS[mode]}
+                  {VIEW_MODE_LABELS[mode]}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
 
         <Input
           id="effect-v2-search"
