@@ -33,3 +33,31 @@ pub struct MagicSingleTable {
     /// All active entries (records with b_exist == 1).
     pub entries: Vec<MagicSingleEntry>,
 }
+
+/// A single magic group record from MagicGroupInfo.bin.
+#[derive(Debug, Clone, Serialize)]
+pub struct MagicGroupEntry {
+    /// Magic group ID (primary key).
+    pub id: i32,
+    /// Data source / lookup name.
+    pub data_name: String,
+    /// Display name.
+    pub name: String,
+    /// MagicSingleInfo IDs referenced by this group (up to 8, -1 = unused).
+    pub type_ids: Vec<i32>,
+    /// Play count for each type ID.
+    pub counts: Vec<i32>,
+    /// Total play count (sum of counts).
+    pub total_count: i32,
+    /// Render state index (-1 = default).
+    pub render_idx: i32,
+}
+
+/// Parsed MagicGroupInfo.bin table.
+#[derive(Debug, Clone, Serialize)]
+pub struct MagicGroupTable {
+    /// Record size from file header (expected 216).
+    pub record_size: u32,
+    /// All active entries (records with b_exist == 1).
+    pub entries: Vec<MagicGroupEntry>,
+}
