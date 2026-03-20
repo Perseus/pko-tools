@@ -1,7 +1,7 @@
 import { Canvas } from "@react-three/fiber";
 import { GizmoHelper, GizmoViewport, OrbitControls } from "@react-three/drei";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { effectV2SelectionAtom, effectV2PlaybackAtom, magicSingleTableAtom } from "@/store/effect-v2";
 import { MagicEffectRenderer } from "./renderers/MagicEffectRenderer";
 import { MagicGroupRenderer } from "./renderers/MagicGroupRenderer";
@@ -12,7 +12,9 @@ import { GlobalTimeProvider } from "./TimeContext";
 import { useLoadEffect } from "./useLoadEffect";
 import { Button } from "@/components/ui/button";
 import { Play, Square, RotateCcw, Repeat } from "lucide-react";
-import { EffectV2Selection, MagicSingleEntry, MagicGroupEntry } from "@/types/effect-v2";
+import { EffectV2Selection, MagicSingleEntry, MagicGroupEntry, ParFile } from "@/types/effect-v2";
+import { loadParFile } from "@/commands/effect";
+import { currentProjectAtom } from "@/store/project";
 
 function PlaybackBar() {
   const [playback, setPlayback] = useAtom(effectV2PlaybackAtom);
@@ -187,23 +189,109 @@ function MagicGroupInfoPanel({ entry }: { entry: MagicGroupEntry }) {
 }
 
 function EffectFileInfoPanel({ fileName }: { fileName: string }) {
+  const effFiles = useLoadEffect([fileName]);
+  const eff = effFiles[0] ?? null;
+
   return (
     <div className="flex flex-col gap-3 text-sm">
       <div>
         <div className="text-xs text-muted-foreground">Effect File</div>
         <div className="font-mono text-xs">{fileName}</div>
       </div>
+      {eff && (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <div className="text-xs text-muted-foreground">Sub-effects</div>
+              <div>{eff.subEffects.length}</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">Version</div>
+              <div>{eff.version}</div>
+            </div>
+          </div>
+          {eff.usePath && (
+            <div>
+              <div className="text-xs text-muted-foreground">Path File</div>
+              <div className="font-mono text-xs">{eff.pathName}</div>
+            </div>
+          )}
+          {eff.useSound && (
+            <div>
+              <div className="text-xs text-muted-foreground">Sound</div>
+              <div className="font-mono text-xs">{eff.soundName}</div>
+            </div>
+          )}
+          {eff.subEffects.length > 0 && (
+            <div>
+              <div className="text-xs text-muted-foreground">Models</div>
+              {eff.subEffects.map((sub, i) => (
+                <div key={i} className="font-mono text-xs bg-muted px-2 py-1 rounded mt-1">
+                  {sub.modelName || "(texture-only)"}{sub.texName ? ` [${sub.texName}]` : ""}
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
 function ParticleFileInfoPanel({ fileName }: { fileName: string }) {
+  const [parData, setParData] = useState<ParFile | null>(null);
+  const currentProject = useAtomValue(currentProjectAtom);
+
+  useEffect(() => {
+    if (!currentProject) return;
+    const baseName = fileName.replace(/\.par$/i, "");
+    loadParFile(currentProject.id, `${baseName}.par`)
+      .then((data) => setParData(data as ParFile))
+      .catch(() => setParData(null));
+  }, [fileName, currentProject]);
+
   return (
     <div className="flex flex-col gap-3 text-sm">
       <div>
         <div className="text-xs text-muted-foreground">Particle File</div>
         <div className="font-mono text-xs">{fileName}</div>
       </div>
+      {parData && (
+        <>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <div className="text-xs text-muted-foreground">Systems</div>
+              <div>{parData.systems.length}</div>
+            </div>
+            <div>
+              <div className="text-xs text-muted-foreground">Duration</div>
+              <div>{parData.length.toFixed(2)}s</div>
+            </div>
+            {parData.strips.length > 0 && (
+              <div>
+                <div className="text-xs text-muted-foreground">Strips</div>
+                <div>{parData.strips.length}</div>
+              </div>
+            )}
+            {parData.models.length > 0 && (
+              <div>
+                <div className="text-xs text-muted-foreground">Models</div>
+                <div>{parData.models.length}</div>
+              </div>
+            )}
+          </div>
+          {parData.systems.length > 0 && (
+            <div>
+              <div className="text-xs text-muted-foreground">Particle Types</div>
+              {parData.systems.map((sys, i) => (
+                <div key={i} className="font-mono text-xs bg-muted px-2 py-1 rounded mt-1">
+                  {sys.name || `Type ${sys.type}`} ({sys.particleCount} particles)
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
