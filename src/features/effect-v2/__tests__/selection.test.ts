@@ -101,4 +101,39 @@ describe("MagicGroupEntry", () => {
     expect(phases).toEqual([10, 10, 11]);
     expect(phases.length).toBe(mockMagicGroup.totalCount);
   });
+
+  it("sequential scheduler advances through phases and returns -1 at end", () => {
+    // Simulates the PhaseScheduler logic from MagicGroupRenderer
+    const typeIds = mockMagicGroup.typeIds.filter((id) => id >= 0);
+    const counts = mockMagicGroup.counts.slice(0, typeIds.length);
+
+    // Expand into flat sequence
+    const phases: number[] = [];
+    for (let i = 0; i < typeIds.length; i++) {
+      for (let j = 0; j < counts[i]; j++) {
+        phases.push(typeIds[i]);
+      }
+    }
+
+    // advance(n) returns n+1 if < length, else -1
+    const advance = (current: number) => {
+      const next = current + 1;
+      return next < phases.length ? next : -1;
+    };
+
+    expect(advance(0)).toBe(1);  // phase 0 → 1
+    expect(advance(1)).toBe(2);  // phase 1 → 2
+    expect(advance(2)).toBe(-1); // phase 2 → done (3 phases total)
+  });
+
+  it("handles group with all unused typeIds", () => {
+    const emptyGroup: MagicGroupEntry = {
+      ...mockMagicGroup,
+      typeIds: [-1, -1, -1, -1, -1, -1, -1, -1],
+      counts: [0, 0, 0, 0, 0, 0, 0, 0],
+      totalCount: 0,
+    };
+    const phases = emptyGroup.typeIds.filter((id) => id >= 0);
+    expect(phases).toEqual([]);
+  });
 });
