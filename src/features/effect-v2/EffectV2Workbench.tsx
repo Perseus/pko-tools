@@ -2,13 +2,16 @@ import { Canvas } from "@react-three/fiber";
 import { GizmoHelper, GizmoViewport, OrbitControls } from "@react-three/drei";
 import { useAtom, useAtomValue } from "jotai";
 import { useEffect, useMemo } from "react";
-import { selectedMagicEffectAtom, effectV2PlaybackAtom } from "@/store/effect-v2";
+import { effectV2SelectionAtom, effectV2PlaybackAtom } from "@/store/effect-v2";
 import { MagicEffectRenderer } from "./renderers/MagicEffectRenderer";
+import { EffectRenderer } from "./renderers/EffectRenderer";
+import { ParticleEffectRenderer } from "./renderers/ParticleEffectRenderer";
 import { PlaybackClock } from "./PlaybackClock";
 import { GlobalTimeProvider } from "./TimeContext";
 import { useLoadEffect } from "./useLoadEffect";
 import { Button } from "@/components/ui/button";
 import { Play, Square, RotateCcw, Repeat } from "lucide-react";
+import { EffectV2Selection, MagicSingleEntry, MagicGroupEntry } from "@/types/effect-v2";
 
 function PlaybackBar() {
   const [playback, setPlayback] = useAtom(effectV2PlaybackAtom);
@@ -63,9 +66,9 @@ function PlaybackBar() {
 }
 
 function EffectInfoPanel() {
-  const selected = useAtomValue(selectedMagicEffectAtom);
+  const selection = useAtomValue(effectV2SelectionAtom);
 
-  if (!selected) {
+  if (!selection) {
     return (
       <div className="text-sm text-muted-foreground">
         Select an effect from the sidebar.
@@ -73,67 +76,181 @@ function EffectInfoPanel() {
     );
   }
 
+  switch (selection.type) {
+    case "magic_one":
+      return <MagicOneInfoPanel entry={selection.entry} />;
+    case "magic_group":
+      return <MagicGroupInfoPanel entry={selection.entry} />;
+    case "effect":
+      return <EffectFileInfoPanel fileName={selection.fileName} />;
+    case "particle":
+      return <ParticleFileInfoPanel fileName={selection.fileName} />;
+  }
+}
+
+function MagicOneInfoPanel({ entry }: { entry: MagicSingleEntry }) {
   return (
     <div className="flex flex-col gap-3 text-sm">
       <div>
         <div className="text-xs text-muted-foreground">Name</div>
-        <div className="font-medium">{selected.name}</div>
+        <div className="font-medium">{entry.name}</div>
       </div>
       <div className="grid grid-cols-2 gap-2">
         <div>
           <div className="text-xs text-muted-foreground">ID</div>
-          <div>{selected.id}</div>
+          <div>{entry.id}</div>
         </div>
         <div>
           <div className="text-xs text-muted-foreground">Velocity</div>
-          <div>{selected.velocity}</div>
+          <div>{entry.velocity}</div>
         </div>
         <div>
           <div className="text-xs text-muted-foreground">Render Mode</div>
-          <div>{selected.render_idx}</div>
+          <div>{entry.render_idx}</div>
         </div>
         <div>
           <div className="text-xs text-muted-foreground">Light ID</div>
-          <div>{selected.lightId}</div>
+          <div>{entry.lightId}</div>
         </div>
       </div>
-      {selected.models.length > 0 && (
+      {entry.models.length > 0 && (
         <div>
           <div className="text-xs text-muted-foreground">Models</div>
-          {selected.models.map((m, i) => (
+          {entry.models.map((m, i) => (
             <div key={i} className="font-mono text-xs bg-muted px-2 py-1 rounded mt-1">{m}</div>
           ))}
         </div>
       )}
-      {selected.result_effect && selected.result_effect !== "0" && (
+      {entry.result_effect && entry.result_effect !== "0" && (
         <div>
           <div className="text-xs text-muted-foreground">Result Effect</div>
-          <div className="font-mono text-xs">{selected.result_effect}</div>
+          <div className="font-mono text-xs">{entry.result_effect}</div>
         </div>
       )}
     </div>
   );
 }
 
-export default function EffectV2Workbench() {
-  const selected = useAtomValue(selectedMagicEffectAtom);
-  const [, setPlayback] = useAtom(effectV2PlaybackAtom);
-  const effectNames = useMemo(() => selected?.models ?? [], [selected]);
+function MagicGroupInfoPanel({ entry }: { entry: MagicGroupEntry }) {
+  return (
+    <div className="flex flex-col gap-3 text-sm">
+      <div>
+        <div className="text-xs text-muted-foreground">Group Name</div>
+        <div className="font-medium">{entry.name}</div>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <div className="text-xs text-muted-foreground">ID</div>
+          <div>{entry.id}</div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">Render Idx</div>
+          <div>{entry.renderIdx}</div>
+        </div>
+        <div>
+          <div className="text-xs text-muted-foreground">Total Count</div>
+          <div>{entry.totalCount}</div>
+        </div>
+      </div>
+      <div>
+        <div className="text-xs text-muted-foreground">Phases</div>
+        {entry.typeIds.map((typeId, i) => {
+          if (typeId < 0) return null;
+          return (
+            <div key={i} className="font-mono text-xs bg-muted px-2 py-1 rounded mt-1">
+              MagicOne #{typeId} x{entry.counts[i]}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function EffectFileInfoPanel({ fileName }: { fileName: string }) {
+  return (
+    <div className="flex flex-col gap-3 text-sm">
+      <div>
+        <div className="text-xs text-muted-foreground">Effect File</div>
+        <div className="font-mono text-xs">{fileName}</div>
+      </div>
+    </div>
+  );
+}
+
+function ParticleFileInfoPanel({ fileName }: { fileName: string }) {
+  return (
+    <div className="flex flex-col gap-3 text-sm">
+      <div>
+        <div className="text-xs text-muted-foreground">Particle File</div>
+        <div className="font-mono text-xs">{fileName}</div>
+      </div>
+    </div>
+  );
+}
+
+/** Standalone .eff viewer — renders effect at origin with no flight path or target. */
+function StandaloneEffectView({ fileName }: { fileName: string }) {
+  const effFiles = useLoadEffect([fileName]);
+  if (effFiles.length === 0) return null;
+  return <EffectRenderer effect={effFiles[0]} />;
+}
+
+/** Standalone .par viewer — renders particle system at origin, looping. */
+function StandaloneParticleView({ fileName }: { fileName: string }) {
+  const baseName = fileName.replace(/\.par$/i, "");
+  return <ParticleEffectRenderer particleEffectName={baseName} loop />;
+}
+
+/** Renders the appropriate 3D content based on the current selection. */
+function SceneContent({ selection }: { selection: EffectV2Selection | null }) {
+  // For magic_one, load the .eff files
+  const effectNames = useMemo(() => {
+    if (selection?.type === "magic_one") return selection.entry.models;
+    return [];
+  }, [selection]);
   const effFiles = useLoadEffect(effectNames);
 
-  // Reset playback when switching effects
+  if (!selection) return null;
+
+  switch (selection.type) {
+    case "magic_one":
+      return <MagicEffectRenderer key={selection.entry.id} effFiles={effFiles} magicEntry={selection.entry} />;
+    case "magic_group":
+      // Phase 4: MagicGroupRenderer will go here
+      return null;
+    case "effect":
+      return <StandaloneEffectView key={selection.fileName} fileName={selection.fileName} />;
+    case "particle":
+      return <StandaloneParticleView key={selection.fileName} fileName={selection.fileName} />;
+  }
+}
+
+function statusText(selection: EffectV2Selection | null): string {
+  if (!selection) return "Select an effect from the sidebar.";
+  switch (selection.type) {
+    case "magic_one": return `MagicOne #${selection.entry.id}: ${selection.entry.name}`;
+    case "magic_group": return `MagicGroup #${selection.entry.id}: ${selection.entry.name}`;
+    case "effect": return `Effect: ${selection.fileName}`;
+    case "particle": return `Particle: ${selection.fileName}`;
+  }
+}
+
+export default function EffectV2Workbench() {
+  const selection = useAtomValue(effectV2SelectionAtom);
+  const [, setPlayback] = useAtom(effectV2PlaybackAtom);
+
+  // Reset playback when switching selection
   useEffect(() => {
     setPlayback((p) => ({ ...p, playing: false, time: 0 }));
-  }, [selected]);
+  }, [selection]);
 
   return (
     <div className="flex h-full w-full flex-col gap-4 p-4">
       <div>
         <div className="text-lg font-semibold">Effects V2</div>
         <div className="text-sm text-muted-foreground">
-          {selected
-            ? `${effFiles.length} .eff file(s) loaded`
-            : "Select an effect from the sidebar."}
+          {statusText(selection)}
         </div>
       </div>
 
@@ -150,7 +267,7 @@ export default function EffectV2Workbench() {
             <directionalLight position={[5, 5, 5]} />
             <PlaybackClock />
             <GlobalTimeProvider>
-              <MagicEffectRenderer key={selected?.id ?? "none"} effFiles={effFiles} />
+              <SceneContent selection={selection} />
             </GlobalTimeProvider>
             <OrbitControls makeDefault />
             <gridHelper args={[40, 40, "#2f3239", "#1b1d22"]} />

@@ -3,22 +3,51 @@ import { Input } from "@/components/ui/input";
 import { SidebarContent, SidebarHeader } from "@/components/ui/sidebar";
 import { ScrollAreaVirtualizable } from "@/components/ui/scroll-area-virtualizable";
 import { loadMagicSingleTable } from "@/commands/effect-v2";
-import { magicSingleTableAtom, selectedMagicEffectAtom } from "@/store/effect-v2";
+import { listEffects, listParFiles } from "@/commands/effect";
+import { magicSingleTableAtom, selectedMagicEffectAtom, effectV2SelectionAtom } from "@/store/effect-v2";
 import { currentProjectAtom } from "@/store/project";
-import { MagicSingleEntry } from "@/types/effect-v2";
+import { EffectV2ViewMode } from "@/types/effect-v2";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { LatestOnly } from "@/lib/latestOnly";
+import { Wand2, Sparkles, Flame, Layers } from "lucide-react";
+
+interface ListItem {
+  id: string;
+  label: string;
+  icon: React.ReactNode;
+}
+
+const VIEW_MODE_LABELS: Record<EffectV2ViewMode, string> = {
+  magic_group: "MagicGroup",
+  magic_one: "MagicOne",
+  effect: "Effects",
+  particle: "Particles",
+};
+
+const VIEW_MODE_ICONS: Record<EffectV2ViewMode, React.ReactNode> = {
+  magic_group: <Layers className="h-3.5 w-3.5 shrink-0" />,
+  magic_one: <Wand2 className="h-3.5 w-3.5 shrink-0" />,
+  effect: <Sparkles className="h-3.5 w-3.5 shrink-0" />,
+  particle: <Flame className="h-3.5 w-3.5 shrink-0" />,
+};
 
 export default function EffectV2Navigator() {
   const currentProject = useAtomValue(currentProjectAtom);
   const [table, setTable] = useAtom(magicSingleTableAtom);
   const setSelectedEffect = useSetAtom(selectedMagicEffectAtom);
+  const setSelection = useSetAtom(effectV2SelectionAtom);
+  const [viewMode, setViewMode] = useState<EffectV2ViewMode>("magic_one");
   const [query, setQuery] = useState("");
   const loadGuard = useRef(new LatestOnly());
   const parentRef = React.useRef<HTMLDivElement>(null);
 
+  // File lists for effect/particle modes
+  const [effFileList, setEffFileList] = useState<string[]>([]);
+  const [parFileList, setParFileList] = useState<string[]>([]);
+
+  // Load MagicSingle table (used by magic_one and magic_group modes for cross-linking)
   useEffect(() => {
     async function fetchTable() {
       const ver = loadGuard.current.begin();
@@ -43,42 +72,119 @@ export default function EffectV2Navigator() {
     };
   }, [currentProject]);
 
-  const entries = table?.entries ?? [];
+  // Load file lists when switching to effect/particle mode
+  useEffect(() => {
+    if (!currentProject) return;
 
-  const filteredEntries = useMemo(() => {
-    if (!query) return entries;
+    if (viewMode === "effect" && effFileList.length === 0) {
+      listEffects(currentProject.id).then(setEffFileList).catch(console.error);
+    }
+    if (viewMode === "particle" && parFileList.length === 0) {
+      listParFiles(currentProject.id).then(setParFileList).catch(console.error);
+    }
+  }, [viewMode, currentProject]);
+
+  // Build list items based on view mode
+  const allItems: ListItem[] = useMemo(() => {
+    switch (viewMode) {
+      case "magic_one":
+        return (table?.entries ?? []).map((e) => ({
+          id: String(e.id),
+          label: `${e.id}: ${e.name}`,
+          icon: VIEW_MODE_ICONS.magic_one,
+        }));
+      case "magic_group":
+        // Placeholder until Phase 3 backend is done
+        return [];
+      case "effect":
+        return effFileList.map((f) => ({
+          id: f,
+          label: f,
+          icon: VIEW_MODE_ICONS.effect,
+        }));
+      case "particle":
+        return parFileList.map((f) => ({
+          id: f,
+          label: f,
+          icon: VIEW_MODE_ICONS.particle,
+        }));
+    }
+  }, [viewMode, table, effFileList, parFileList]);
+
+  const filteredItems = useMemo(() => {
+    if (!query) return allItems;
     const q = query.toLowerCase();
-    return entries.filter(
-      (e) =>
-        e.name.toLowerCase().includes(q) ||
-        e.id.toString().includes(q) ||
-        e.models.some((m) => m.toLowerCase().includes(q))
-    );
-  }, [entries, query]);
+    return allItems.filter((item) => item.label.toLowerCase().includes(q));
+  }, [allItems, query]);
 
   const rowVirtualizer = useVirtualizer({
-    count: filteredEntries.length,
+    count: filteredItems.length,
     getScrollElement: () => parentRef.current,
     estimateSize: () => 40,
   });
 
-  function selectEffect(entry: MagicSingleEntry) {
-    setSelectedEffect(entry);
+  function handleSelect(item: ListItem) {
+    switch (viewMode) {
+      case "magic_one": {
+        const entry = table?.entries.find((e) => String(e.id) === item.id);
+        if (entry) {
+          setSelectedEffect(entry);
+          setSelection({ type: "magic_one", entry });
+        }
+        break;
+      }
+      case "magic_group":
+        // Phase 3: will set magic_group selection here
+        break;
+      case "effect":
+        setSelectedEffect(null);
+        setSelection({ type: "effect", fileName: item.id });
+        break;
+      case "particle":
+        setSelectedEffect(null);
+        setSelection({ type: "particle", fileName: item.id });
+        break;
+    }
   }
+
+  // Allow external code to switch view mode (for cross-linking)
+  useEffect(() => {
+    (window as any).__effectV2SetViewMode = setViewMode;
+    return () => { delete (window as any).__effectV2SetViewMode; };
+  }, []);
+
+  const countLabel = viewMode === "magic_group" ? "groups" :
+    viewMode === "magic_one" ? "entries" :
+    viewMode === "effect" ? "effects" : "particles";
 
   return (
     <SidebarHeader>
       <SidebarContent>
         <span className="text-md font-semibold">Effects V2</span>
-        <label className="text-xs text-muted-foreground">Search</label>
+
+        <select
+          className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm"
+          value={viewMode}
+          onChange={(e) => {
+            setViewMode(e.target.value as EffectV2ViewMode);
+            setQuery("");
+          }}
+        >
+          {(Object.keys(VIEW_MODE_LABELS) as EffectV2ViewMode[]).map((mode) => (
+            <option key={mode} value={mode}>
+              {VIEW_MODE_LABELS[mode]}
+            </option>
+          ))}
+        </select>
+
         <Input
           id="effect-v2-search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          placeholder="Name, ID, or .eff file..."
+          placeholder="Search..."
         />
         <div className="text-xs text-muted-foreground">
-          {filteredEntries.length} effects
+          {filteredItems.length} {countLabel}
         </div>
 
         <ScrollAreaVirtualizable
@@ -93,7 +199,7 @@ export default function EffectV2Navigator() {
             }}
           >
             {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-              const entry = filteredEntries[virtualRow.index];
+              const item = filteredItems[virtualRow.index];
               return (
                 <div
                   key={virtualRow.index}
@@ -106,11 +212,12 @@ export default function EffectV2Navigator() {
                   }}
                 >
                   <Button
-                    className="text-sm w-full justify-start truncate"
+                    className="text-sm w-full justify-start truncate gap-2"
                     variant="link"
-                    onClick={() => selectEffect(entry)}
+                    onClick={() => handleSelect(item)}
                   >
-                    {entry.id}: {entry.name}
+                    {item.icon}
+                    {item.label}
                   </Button>
                 </div>
               );

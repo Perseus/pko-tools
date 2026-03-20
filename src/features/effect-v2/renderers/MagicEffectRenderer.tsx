@@ -5,8 +5,8 @@ import { useFrame } from "@react-three/fiber";
 import { invoke } from "@tauri-apps/api/core";
 import * as THREE from "three";
 import { EffectFile } from "@/types/effect";
+import { MagicSingleEntry } from "@/types/effect-v2";
 import { currentProjectAtom } from "@/store/project";
-import { selectedMagicEffectAtom } from "@/store/effect-v2";
 import { useTimeSource } from "../TimeContext";
 import { FlightPathController, ArrivalInfo } from "./flight/FlightPathController";
 import { EffectRenderer } from "./EffectRenderer";
@@ -17,12 +17,14 @@ const TARGET_OFFSET: THREE.Vector3Tuple = [0, 0, 8];
 
 interface MagicEffectRendererProps {
   effFiles: EffectFile[];
+  /** The magic entry to render. Passed as prop so MagicGroupRenderer can supply per-phase entries. */
+  magicEntry: MagicSingleEntry | null;
+  onComplete?: () => void;
 }
 
 /** Renders all .eff files associated with a magic effect entry, with flight path + target character. */
-export function MagicEffectRenderer({ effFiles }: MagicEffectRendererProps) {
+export function MagicEffectRenderer({ effFiles, magicEntry: selected, onComplete: _onComplete }: MagicEffectRendererProps) {
   const currentProject = useAtomValue(currentProjectAtom);
-  const selected = useAtomValue(selectedMagicEffectAtom);
   const [targetGltfUri, setTargetGltfUri] = useState<string | null>(null);
   const prevUri = useRef<string | null>(null);
   const hasHitEffect = useRef<boolean>(selected?.result_effect !== '0' && selected?.result_effect.trim() !== '');

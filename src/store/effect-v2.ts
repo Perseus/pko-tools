@@ -1,5 +1,5 @@
 import { atom } from "jotai";
-import { MagicSingleEntry, MagicSingleTable } from "@/types/effect-v2";
+import { MagicSingleEntry, MagicSingleTable, EffectV2Selection } from "@/types/effect-v2";
 
 /** Whether the v2 backend is reachable (set after ping). */
 export const effectV2ReadyAtom = atom(false);
@@ -7,8 +7,11 @@ export const effectV2ReadyAtom = atom(false);
 /** The loaded MagicSingleinfo table. */
 export const magicSingleTableAtom = atom<MagicSingleTable | null>(null);
 
-/** The currently selected magic effect entry. */
+/** The currently selected magic effect entry (legacy — prefer effectV2SelectionAtom). */
 export const selectedMagicEffectAtom = atom<MagicSingleEntry | null>(null);
+
+/** Unified selection: what is currently selected in the effect viewer. */
+export const effectV2SelectionAtom = atom<EffectV2Selection | null>(null);
 
 /** Shared playback state for the effects scene. */
 export interface EffectV2Playback {
