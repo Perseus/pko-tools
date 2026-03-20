@@ -1,9 +1,10 @@
 import { Canvas } from "@react-three/fiber";
 import { GizmoHelper, GizmoViewport, OrbitControls } from "@react-three/drei";
-import { useAtom, useAtomValue } from "jotai";
+import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useEffect, useMemo } from "react";
-import { effectV2SelectionAtom, effectV2PlaybackAtom } from "@/store/effect-v2";
+import { effectV2SelectionAtom, effectV2PlaybackAtom, magicSingleTableAtom } from "@/store/effect-v2";
 import { MagicEffectRenderer } from "./renderers/MagicEffectRenderer";
+import { MagicGroupRenderer } from "./renderers/MagicGroupRenderer";
 import { EffectRenderer } from "./renderers/EffectRenderer";
 import { ParticleEffectRenderer } from "./renderers/ParticleEffectRenderer";
 import { PlaybackClock } from "./PlaybackClock";
@@ -132,6 +133,18 @@ function MagicOneInfoPanel({ entry }: { entry: MagicSingleEntry }) {
 }
 
 function MagicGroupInfoPanel({ entry }: { entry: MagicGroupEntry }) {
+  const table = useAtomValue(magicSingleTableAtom);
+  const setSelection = useSetAtom(effectV2SelectionAtom);
+
+  const handlePhaseClick = (typeId: number) => {
+    const magicEntry = table?.entries.find((e) => e.id === typeId);
+    if (magicEntry) {
+      setSelection({ type: "magic_one", entry: magicEntry });
+      // Update navigator dropdown to match
+      (window as any).__effectV2SetViewMode?.("magic_one");
+    }
+  };
+
   return (
     <div className="flex flex-col gap-3 text-sm">
       <div>
@@ -153,13 +166,19 @@ function MagicGroupInfoPanel({ entry }: { entry: MagicGroupEntry }) {
         </div>
       </div>
       <div>
-        <div className="text-xs text-muted-foreground">Phases</div>
+        <div className="text-xs text-muted-foreground">Phases (click to view)</div>
         {entry.typeIds.map((typeId, i) => {
           if (typeId < 0) return null;
+          const magicEntry = table?.entries.find((e) => e.id === typeId);
+          const name = magicEntry?.name ?? `#${typeId}`;
           return (
-            <div key={i} className="font-mono text-xs bg-muted px-2 py-1 rounded mt-1">
-              MagicOne #{typeId} x{entry.counts[i]}
-            </div>
+            <button
+              key={i}
+              className="w-full text-left font-mono text-xs bg-muted hover:bg-accent px-2 py-1 rounded mt-1 cursor-pointer transition-colors"
+              onClick={() => handlePhaseClick(typeId)}
+            >
+              {name} x{entry.counts[i]}
+            </button>
           );
         })}
       </div>
@@ -217,8 +236,7 @@ function SceneContent({ selection }: { selection: EffectV2Selection | null }) {
     case "magic_one":
       return <MagicEffectRenderer key={selection.entry.id} effFiles={effFiles} magicEntry={selection.entry} />;
     case "magic_group":
-      // Phase 4: MagicGroupRenderer will go here
-      return null;
+      return <MagicGroupRenderer key={selection.entry.id} group={selection.entry} />;
     case "effect":
       return <StandaloneEffectView key={selection.fileName} fileName={selection.fileName} />;
     case "particle":
