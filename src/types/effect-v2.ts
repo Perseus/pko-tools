@@ -16,6 +16,31 @@ export interface MagicSingleTable {
   entries: MagicSingleEntry[];
 }
 
+export interface MagicGroupEntry {
+  id: number;
+  data_name: string;
+  name: string;
+  typeIds: number[];   // up to 8 MagicSingleInfo IDs (-1 = unused)
+  counts: number[];    // play count for each type
+  totalCount: number;
+  renderIdx: number;
+}
+
+export interface MagicGroupTable {
+  recordSize: number;
+  entries: MagicGroupEntry[];
+}
+
+/** Which content type is shown in the navigator. */
+export type EffectV2ViewMode = 'magic_group' | 'magic_one' | 'effect' | 'particle';
+
+/** Discriminated union for what is currently selected in the viewer. */
+export type EffectV2Selection =
+  | { type: 'magic_group'; entry: MagicGroupEntry }
+  | { type: 'magic_one';   entry: MagicSingleEntry }
+  | { type: 'effect';      fileName: string }
+  | { type: 'particle';    fileName: string }
+
 export interface ParFile {
   version: number;
   name: string;
