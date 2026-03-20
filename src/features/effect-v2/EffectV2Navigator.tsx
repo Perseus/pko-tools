@@ -2,11 +2,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { SidebarContent, SidebarHeader } from "@/components/ui/sidebar";
 import { ScrollAreaVirtualizable } from "@/components/ui/scroll-area-virtualizable";
-import { loadMagicSingleTable } from "@/commands/effect-v2";
+import { loadMagicSingleTable, loadMagicGroupTable } from "@/commands/effect-v2";
 import { listEffects, listParFiles } from "@/commands/effect";
 import { magicSingleTableAtom, selectedMagicEffectAtom, effectV2SelectionAtom } from "@/store/effect-v2";
 import { currentProjectAtom } from "@/store/project";
-import { EffectV2ViewMode } from "@/types/effect-v2";
+import { EffectV2ViewMode, MagicGroupTable } from "@/types/effect-v2";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -46,6 +46,7 @@ export default function EffectV2Navigator() {
   // File lists for effect/particle modes
   const [effFileList, setEffFileList] = useState<string[]>([]);
   const [parFileList, setParFileList] = useState<string[]>([]);
+  const [groupTable, setGroupTable] = useState<MagicGroupTable | null>(null);
 
   // Load MagicSingle table (used by magic_one and magic_group modes for cross-linking)
   useEffect(() => {
@@ -72,7 +73,7 @@ export default function EffectV2Navigator() {
     };
   }, [currentProject]);
 
-  // Load file lists when switching to effect/particle mode
+  // Load file lists / tables when switching modes
   useEffect(() => {
     if (!currentProject) return;
 
@@ -81,6 +82,9 @@ export default function EffectV2Navigator() {
     }
     if (viewMode === "particle" && parFileList.length === 0) {
       listParFiles(currentProject.id).then(setParFileList).catch(console.error);
+    }
+    if (viewMode === "magic_group" && !groupTable) {
+      loadMagicGroupTable(currentProject.id).then(setGroupTable).catch(console.error);
     }
   }, [viewMode, currentProject]);
 
@@ -94,8 +98,11 @@ export default function EffectV2Navigator() {
           icon: VIEW_MODE_ICONS.magic_one,
         }));
       case "magic_group":
-        // Placeholder until Phase 3 backend is done
-        return [];
+        return (groupTable?.entries ?? []).map((e) => ({
+          id: String(e.id),
+          label: `${e.id}: ${e.name}`,
+          icon: VIEW_MODE_ICONS.magic_group,
+        }));
       case "effect":
         return effFileList.map((f) => ({
           id: f,
@@ -109,7 +116,7 @@ export default function EffectV2Navigator() {
           icon: VIEW_MODE_ICONS.particle,
         }));
     }
-  }, [viewMode, table, effFileList, parFileList]);
+  }, [viewMode, table, effFileList, parFileList, groupTable]);
 
   const filteredItems = useMemo(() => {
     if (!query) return allItems;
@@ -133,9 +140,14 @@ export default function EffectV2Navigator() {
         }
         break;
       }
-      case "magic_group":
-        // Phase 3: will set magic_group selection here
+      case "magic_group": {
+        const entry = groupTable?.entries.find((e) => String(e.id) === item.id);
+        if (entry) {
+          setSelectedEffect(null);
+          setSelection({ type: "magic_group", entry });
+        }
         break;
+      }
       case "effect":
         setSelectedEffect(null);
         setSelection({ type: "effect", fileName: item.id });

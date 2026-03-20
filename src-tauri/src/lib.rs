@@ -111,6 +111,7 @@ pub fn run() {
             effect::commands::list_par_files,
             effect_v2::commands::effect_v2_ping,
             effect_v2::commands::load_magic_single_table,
+            effect_v2::commands::load_magic_group_table,
             item::commands::get_item_list,
             item::commands::load_item_model,
             item::commands::get_item_lit_info,
