@@ -2527,6 +2527,167 @@ fn build_tile_color_grid(map: &ParsedMap) -> Vec<u8> {
     data
 }
 
+// ============================================================================
+// .mapdata binary format — unified packed grid file
+// ============================================================================
+
+/// Magic number for .mapdata files: "PKOW" in little-endian
+const MAPDATA_MAGIC: u32 = 0x504B4F57;
+/// Current .mapdata format version
+const MAPDATA_VERSION: u16 = 1;
+/// Header size in bytes
+const MAPDATA_HEADER_SIZE: u32 = 32;
+
+/// Export all grid data as a single `.mapdata` binary file.
+///
+/// Format:
+///   Header (32 bytes)
+///   Collision bitmap (uncompressed) — 1 bit per cell, 2x resolution, MSB first
+///   Compressed block (zlib deflate) — obj_height + terrain_height + area + region
+///     + tile_texture + tile_layer + tile_color concatenated
+///
+/// The collision bitmap is uncompressed for instant per-frame walk queries.
+/// All other grids are decompressed once at map load (during loading screen).
+pub fn export_mapdata(
+    parsed_map: &ParsedMap,
+    section_tile_size: i32,
+    output_path: &Path,
+) -> Result<MapdataExportResult> {
+    use flate2::write::ZlibEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+
+    let map_w = parsed_map.header.n_width;
+    let map_h = parsed_map.header.n_height;
+    let collision_cells_per_tile: u16 = 2;
+    let collision_w = map_w * collision_cells_per_tile as i32;
+    let collision_h = map_h * collision_cells_per_tile as i32;
+    let sections_x = (map_w + section_tile_size - 1) / section_tile_size;
+    let sections_z = (map_h + section_tile_size - 1) / section_tile_size;
+
+    eprintln!(
+        "[mapdata] Building grids for {}x{} map (sections {}x{}, tile_size {})...",
+        map_w, map_h, sections_x, sections_z, section_tile_size
+    );
+
+    // Build all grids using existing functions
+    let (collision_grid, coll_w, coll_h) = build_collision_grid(parsed_map);
+    let (obj_height_bytes, _, _) = build_obj_height_grid(parsed_map);
+    let (terrain_height_bytes, _, _) = build_terrain_height_grid(parsed_map);
+    let area_bytes = build_area_grid(parsed_map);
+    let region_bytes = build_region_grid(parsed_map);
+    let tile_tex_bytes = build_tile_texture_grid(parsed_map);
+    let tile_layer_bytes = super::texture::build_tile_layer_grid(parsed_map);
+    let tile_color_bytes = build_tile_color_grid(parsed_map);
+
+    // 1. Pack collision into 1-bit bitmap (MSB first, 1=walkable, 0=blocked)
+    let bitmap_len = (coll_w as u64 * coll_h as u64).div_ceil(8);
+    let mut collision_bitmap = vec![0u8; bitmap_len as usize];
+    for (i, &cell) in collision_grid.iter().enumerate() {
+        let walkable = cell == 0; // 0 = walkable in the u8 grid
+        if walkable {
+            let byte_idx = i / 8;
+            let bit_idx = 7 - (i % 8); // MSB first
+            collision_bitmap[byte_idx] |= 1 << bit_idx;
+        }
+    }
+
+    // 2. Concatenate all compressed grids in spec order
+    let mut raw_block = Vec::with_capacity(
+        obj_height_bytes.len()
+            + terrain_height_bytes.len()
+            + area_bytes.len()
+            + region_bytes.len()
+            + tile_tex_bytes.len()
+            + tile_layer_bytes.len()
+            + tile_color_bytes.len(),
+    );
+    raw_block.extend_from_slice(&obj_height_bytes);
+    raw_block.extend_from_slice(&terrain_height_bytes);
+    raw_block.extend_from_slice(&area_bytes);
+    raw_block.extend_from_slice(&region_bytes);
+    raw_block.extend_from_slice(&tile_tex_bytes);
+    raw_block.extend_from_slice(&tile_layer_bytes);
+    raw_block.extend_from_slice(&tile_color_bytes);
+
+    let raw_block_size = raw_block.len() as u32;
+
+    // 3. Compress with zlib (level 6 = good balance of speed vs ratio)
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::new(6));
+    encoder.write_all(&raw_block)?;
+    let compressed_block = encoder.finish()?;
+    let compressed_block_size = compressed_block.len() as u32;
+
+    // 4. Compute offsets
+    let compressed_block_offset = MAPDATA_HEADER_SIZE + collision_bitmap.len() as u32;
+
+    // 5. Write the file
+    let mut out = Vec::with_capacity(
+        MAPDATA_HEADER_SIZE as usize + collision_bitmap.len() + compressed_block.len(),
+    );
+
+    // Header (32 bytes)
+    out.extend_from_slice(&MAPDATA_MAGIC.to_le_bytes()); // [0:4]
+    out.extend_from_slice(&MAPDATA_VERSION.to_le_bytes()); // [4:6]
+    out.extend_from_slice(&(map_w as u16).to_le_bytes()); // [6:8]
+    out.extend_from_slice(&(map_h as u16).to_le_bytes()); // [8:10]
+    out.extend_from_slice(&(section_tile_size as u16).to_le_bytes()); // [10:12]
+    out.extend_from_slice(&(sections_x as u16).to_le_bytes()); // [12:14]
+    out.extend_from_slice(&(sections_z as u16).to_le_bytes()); // [14:16]
+    out.extend_from_slice(&collision_cells_per_tile.to_le_bytes()); // [16:18]
+    out.extend_from_slice(&0u16.to_le_bytes()); // [18:20] flags (reserved)
+    out.extend_from_slice(&compressed_block_offset.to_le_bytes()); // [20:24]
+    out.extend_from_slice(&compressed_block_size.to_le_bytes()); // [24:28]
+    out.extend_from_slice(&raw_block_size.to_le_bytes()); // [28:32]
+
+    assert_eq!(out.len(), MAPDATA_HEADER_SIZE as usize, "header must be exactly 32 bytes");
+
+    // Collision bitmap (uncompressed)
+    out.extend_from_slice(&collision_bitmap);
+
+    // Compressed block
+    out.extend_from_slice(&compressed_block);
+
+    std::fs::write(output_path, &out)
+        .with_context(|| format!("Failed to write .mapdata: {}", output_path.display()))?;
+
+    let total_size = out.len();
+    let compression_ratio = if raw_block_size > 0 {
+        compressed_block_size as f64 / raw_block_size as f64
+    } else {
+        0.0
+    };
+
+    eprintln!(
+        "[mapdata] Written {} ({:.1} MB): bitmap={} bytes, raw={:.1} MB, compressed={:.1} MB ({:.1}% ratio)",
+        output_path.display(),
+        total_size as f64 / 1_048_576.0,
+        collision_bitmap.len(),
+        raw_block_size as f64 / 1_048_576.0,
+        compressed_block_size as f64 / 1_048_576.0,
+        compression_ratio * 100.0,
+    );
+
+    Ok(MapdataExportResult {
+        total_size: total_size as u64,
+        collision_bitmap_size: collision_bitmap.len() as u64,
+        raw_block_size: raw_block_size as u64,
+        compressed_block_size: compressed_block_size as u64,
+        collision_w: collision_w as u32,
+        collision_h: collision_h as u32,
+    })
+}
+
+/// Result of a .mapdata export
+pub struct MapdataExportResult {
+    pub total_size: u64,
+    pub collision_bitmap_size: u64,
+    pub raw_block_size: u64,
+    pub compressed_block_size: u64,
+    pub collision_w: u32,
+    pub collision_h: u32,
+}
+
 /// Find and load an .eff file from the project directory.
 /// sceneffectinfo stores filenames with .par extension; actual files use .eff.
 fn load_effect_file(project_dir: &Path, eff_filename: &str) -> Option<EffFile> {
@@ -3182,6 +3343,22 @@ pub fn export_map_for_unity(
         &grids_dir,
     )?;
 
+    // Write .mapdata binary (unified packed grid file)
+    let mapdata_path = output_dir.join(format!("{}.mapdata", map_name));
+    let section_tile_size = parsed_map.header.n_section_width;
+    match export_mapdata(&parsed_map, section_tile_size, &mapdata_path) {
+        Ok(result) => {
+            eprintln!(
+                "[map] .mapdata exported: {:.1} MB total ({:.1} MB compressed)",
+                result.total_size as f64 / 1_048_576.0,
+                result.compressed_block_size as f64 / 1_048_576.0,
+            );
+        }
+        Err(e) => {
+            eprintln!("[map] WARNING: .mapdata export failed: {:?}", e);
+        }
+    }
+
     // 10. Build effect definitions
     let mut effect_definitions = serde_json::Map::new();
     let mut missing_effect_ids: Vec<u16> = Vec::new();
@@ -3462,6 +3639,12 @@ pub fn export_map_for_unity(
                 "format": "i16_rgb8_offset"
             }
         }),
+    );
+
+    // .mapdata file reference (unified packed grid binary)
+    manifest_map.insert(
+        "mapdata".into(),
+        serde_json::json!(format!("{}.mapdata", map_name)),
     );
 
     // Buildings (GLB paths)
@@ -4874,5 +5057,75 @@ mod tests {
         // and local (0,y) in section1. Their normals come from the same
         // global_normals entry, so they must match exactly.
         // (We verified this by construction — both read from global_normals[vy * vw + gvx])
+    }
+
+    #[test]
+    fn export_mapdata_round_trip() {
+        use flate2::read::ZlibDecoder;
+        use std::io::Read;
+
+        let map = make_test_map(4, 4, 2);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.mapdata");
+
+        let result = export_mapdata(&map, 2, &path).expect("export_mapdata");
+
+        // Read back and verify header
+        let data = std::fs::read(&path).unwrap();
+        assert!(data.len() >= 32, "file too small");
+
+        let magic = u32::from_le_bytes(data[0..4].try_into().unwrap());
+        assert_eq!(magic, MAPDATA_MAGIC);
+
+        let version = u16::from_le_bytes(data[4..6].try_into().unwrap());
+        assert_eq!(version, 1);
+
+        let map_w = u16::from_le_bytes(data[6..8].try_into().unwrap());
+        let map_h = u16::from_le_bytes(data[8..10].try_into().unwrap());
+        assert_eq!(map_w, 4);
+        assert_eq!(map_h, 4);
+
+        let section_size = u16::from_le_bytes(data[10..12].try_into().unwrap());
+        assert_eq!(section_size, 2);
+
+        let sections_x = u16::from_le_bytes(data[12..14].try_into().unwrap());
+        let sections_z = u16::from_le_bytes(data[14..16].try_into().unwrap());
+        assert_eq!(sections_x, 2);
+        assert_eq!(sections_z, 2);
+
+        let cells_per_tile = u16::from_le_bytes(data[16..18].try_into().unwrap());
+        assert_eq!(cells_per_tile, 2);
+
+        let comp_offset = u32::from_le_bytes(data[20..24].try_into().unwrap()) as usize;
+        let comp_size = u32::from_le_bytes(data[24..28].try_into().unwrap()) as usize;
+        let raw_size = u32::from_le_bytes(data[28..32].try_into().unwrap()) as usize;
+
+        // Collision bitmap should be right after header
+        let coll_w = 4 * 2; // map_w * cells_per_tile
+        let coll_h = 4 * 2;
+        let bitmap_len = (coll_w * coll_h + 7) / 8;
+        assert_eq!(comp_offset, 32 + bitmap_len);
+
+        // Decompress the block
+        let compressed = &data[comp_offset..comp_offset + comp_size];
+        let mut decoder = ZlibDecoder::new(compressed);
+        let mut decompressed = Vec::new();
+        decoder.read_to_end(&mut decompressed).unwrap();
+        assert_eq!(decompressed.len(), raw_size);
+
+        // Verify expected raw size:
+        //   obj_height: 8*8*2 = 128
+        //   terrain_height: 5*5*2 = 50
+        //   area: 4*4*1 = 16
+        //   region: 4*4*2 = 32
+        //   tile_texture: 4*4*1 = 16
+        //   tile_layer: 4*4*7 = 112
+        //   tile_color: 4*4*2 = 32
+        //   Total: 386
+        let expected_raw = 8*8*2 + 5*5*2 + 4*4*1 + 4*4*2 + 4*4*1 + 4*4*7 + 4*4*2;
+        assert_eq!(raw_size, expected_raw, "raw block size mismatch");
+
+        // Verify total file size matches result
+        assert_eq!(data.len() as u64, result.total_size);
     }
 }
