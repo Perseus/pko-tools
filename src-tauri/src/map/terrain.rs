@@ -3005,7 +3005,7 @@ pub fn export_map_for_unity(
             let out_filename = format!("{}.glb", stem);
             let out_path = buildings_dir.join(&out_filename);
 
-            match super::scene_model::build_glb_from_lmo(&lmo_path, project_dir) {
+            match super::scene_model::build_glb_from_lmo(&lmo_path, project_dir, true) {
                 Ok((json, bin)) => {
                     super::glb::write_glb(&json, &bin, &out_path)?;
                 }
