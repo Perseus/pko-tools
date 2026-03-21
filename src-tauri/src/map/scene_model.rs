@@ -468,12 +468,24 @@ fn default_dst_blend_for_transp_type(transp_type: u32) -> Option<u32> {
     }
 }
 
+/// How to handle textures in material export.
+#[derive(Clone, Copy, PartialEq)]
+enum TextureMode {
+    /// Don't load textures at all (batch map loading).
+    Skip,
+    /// Load, decode, and embed as data URI (current behavior for individual building export).
+    Embed,
+    /// Write external URI reference to shared texture directory (new pipeline).
+    /// The URI is relative to the GLB's location: `../textures/scene/{stem}.dds`
+    ExternalUri,
+}
+
 fn build_lmo_material(
     builder: &mut GltfBuilder,
     mat: &lmo::LmoMaterial,
     name: &str,
     project_dir: &Path,
-    load_textures: bool,
+    texture_mode: TextureMode,
 ) {
     // Canonicalize types 6-8 to type 1 (they fall through to ONE/ONE in engine)
     // Types > 8 are unknown/corrupt — warn and remap to type 1
@@ -573,57 +585,113 @@ fn build_lmo_material(
         name.to_string()
     };
 
-    // Try to load and embed the texture (skipped for map batch loading)
-    let base_color_texture = if !load_textures {
+    // Try to load/reference the texture based on mode
+    let base_color_texture = if texture_mode == TextureMode::Skip {
         None
     } else {
         mat.tex_filename
             .as_deref()
             .filter(|f| !f.is_empty())
-            .and_then(|tex_name| find_texture_file(project_dir, tex_name))
-            .and_then(|tex_path| {
-                let data_uri = load_texture_as_data_uri(&tex_path)?;
-                let tex_stem = tex_path
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| name.to_string());
+            .and_then(|tex_name| {
+                // Get texture stem (filename without extension)
+                let stem = tex_name
+                    .rfind('.')
+                    .map(|i| &tex_name[..i])
+                    .unwrap_or(tex_name);
 
-                let image_index = builder.images.len() as u32;
-                builder.images.push(gltf_json::Image {
-                    name: Some(tex_stem.clone()),
-                    buffer_view: None,
-                    extensions: None,
-                    mime_type: Some(gltf_json::image::MimeType("image/png".to_string())),
-                    extras: None,
-                    uri: Some(data_uri),
-                });
+                match texture_mode {
+                    TextureMode::Embed => {
+                        // Original path: find file, decode, embed as data URI
+                        let tex_path = find_texture_file(project_dir, tex_name)?;
+                        let data_uri = load_texture_as_data_uri(&tex_path)?;
+                        let tex_stem = tex_path
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_else(|| name.to_string());
 
-                let sampler_index = builder.samplers.len() as u32;
-                builder.samplers.push(gltf_json::texture::Sampler {
-                    mag_filter: Some(Checked::Valid(gltf_json::texture::MagFilter::Linear)),
-                    min_filter: Some(Checked::Valid(
-                        gltf_json::texture::MinFilter::LinearMipmapLinear,
-                    )),
-                    wrap_s: Checked::Valid(gltf_json::texture::WrappingMode::Repeat),
-                    wrap_t: Checked::Valid(gltf_json::texture::WrappingMode::Repeat),
-                    ..Default::default()
-                });
+                        let image_index = builder.images.len() as u32;
+                        builder.images.push(gltf_json::Image {
+                            name: Some(tex_stem.clone()),
+                            buffer_view: None,
+                            extensions: None,
+                            mime_type: Some(gltf_json::image::MimeType("image/png".to_string())),
+                            extras: None,
+                            uri: Some(data_uri),
+                        });
 
-                let texture_index = builder.textures.len() as u32;
-                builder.textures.push(gltf_json::Texture {
-                    name: Some(tex_stem),
-                    sampler: Some(gltf_json::Index::new(sampler_index)),
-                    source: gltf_json::Index::new(image_index),
-                    extensions: None,
-                    extras: None,
-                });
+                        let sampler_index = builder.samplers.len() as u32;
+                        builder.samplers.push(gltf_json::texture::Sampler {
+                            mag_filter: Some(Checked::Valid(gltf_json::texture::MagFilter::Linear)),
+                            min_filter: Some(Checked::Valid(
+                                gltf_json::texture::MinFilter::LinearMipmapLinear,
+                            )),
+                            wrap_s: Checked::Valid(gltf_json::texture::WrappingMode::Repeat),
+                            wrap_t: Checked::Valid(gltf_json::texture::WrappingMode::Repeat),
+                            ..Default::default()
+                        });
 
-                Some(gltf_json::texture::Info {
-                    index: gltf_json::Index::new(texture_index),
-                    tex_coord: 0,
-                    extensions: None,
-                    extras: None,
-                })
+                        let texture_index = builder.textures.len() as u32;
+                        builder.textures.push(gltf_json::Texture {
+                            name: Some(tex_stem),
+                            sampler: Some(gltf_json::Index::new(sampler_index)),
+                            source: gltf_json::Index::new(image_index),
+                            extensions: None,
+                            extras: None,
+                        });
+
+                        Some(gltf_json::texture::Info {
+                            index: gltf_json::Index::new(texture_index),
+                            tex_coord: 0,
+                            extensions: None,
+                            extras: None,
+                        })
+                    }
+                    TextureMode::ExternalUri => {
+                        // New path: external URI reference to shared KTX2 texture
+                        // URI is relative to the GLB location (buildings/textures/)
+                        // Must be a subdirectory — glTFast doesn't resolve ../ in URIs
+                        // Uses KTX2 format: glTFast supports .ktx2 but NOT .dds
+                        let uri = format!("textures/{}.png", stem.to_lowercase());
+
+                        let image_index = builder.images.len() as u32;
+                        builder.images.push(gltf_json::Image {
+                            name: Some(stem.to_lowercase()),
+                            buffer_view: None,
+                            extensions: None,
+                            mime_type: None, // Let the importer determine MIME from file
+                            extras: None,
+                            uri: Some(uri),
+                        });
+
+                        let sampler_index = builder.samplers.len() as u32;
+                        builder.samplers.push(gltf_json::texture::Sampler {
+                            mag_filter: Some(Checked::Valid(gltf_json::texture::MagFilter::Linear)),
+                            min_filter: Some(Checked::Valid(
+                                gltf_json::texture::MinFilter::LinearMipmapLinear,
+                            )),
+                            wrap_s: Checked::Valid(gltf_json::texture::WrappingMode::Repeat),
+                            wrap_t: Checked::Valid(gltf_json::texture::WrappingMode::Repeat),
+                            ..Default::default()
+                        });
+
+                        let texture_index = builder.textures.len() as u32;
+                        builder.textures.push(gltf_json::Texture {
+                            name: Some(stem.to_lowercase()),
+                            sampler: Some(gltf_json::Index::new(sampler_index)),
+                            source: gltf_json::Index::new(image_index),
+                            extensions: None,
+                            extras: None,
+                        });
+
+                        Some(gltf_json::texture::Info {
+                            index: gltf_json::Index::new(texture_index),
+                            tex_coord: 0,
+                            extensions: None,
+                            extras: None,
+                        })
+                    }
+                    TextureMode::Skip => unreachable!(),
+                }
             })
     };
 
@@ -1518,6 +1586,7 @@ fn process_lmo_geometry<'a>(
     builder: &mut GltfBuilder,
     model: &'a LmoModel,
     project_dir: &Path,
+    texture_mode: TextureMode,
 ) -> Result<LmoGeomResult> {
     let mut child_indices = Vec::new();
     let mut animated_nodes: Vec<(u32, &'a LmoGeomObject)> = Vec::new();
@@ -1547,7 +1616,7 @@ fn process_lmo_geometry<'a>(
                 },
                 &format!("{}_default_mat", prefix),
                 project_dir,
-                true,
+                texture_mode,
             );
         } else {
             for (mi, mat) in geom.materials.iter().enumerate() {
@@ -1556,7 +1625,7 @@ fn process_lmo_geometry<'a>(
                     mat,
                     &format!("{}_mat{}", prefix, mi),
                     project_dir,
-                    true,
+                    texture_mode,
                 );
             }
         }
@@ -1676,7 +1745,7 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
     }
 
     let mut builder = GltfBuilder::new();
-    let geom_result = process_lmo_geometry(&mut builder, &model, project_dir)?;
+    let geom_result = process_lmo_geometry(&mut builder, &model, project_dir, TextureMode::Embed)?;
 
     let root = gltf_json::Root {
         asset: gltf_json::Asset {
@@ -1712,7 +1781,14 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
 /// Build a GLB-ready building model: returns (glTF JSON string, binary buffer).
 /// Uses the same mesh/material/animation logic as `build_gltf_from_lmo`, but
 /// packs all buffer data into a single binary buffer for GLB writing.
-pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String, Vec<u8>)> {
+/// Build a GLB from an LMO file. When `embed_textures` is false, textures are
+/// referenced via external `image.uri` paths (relative to `../textures/scene/`)
+/// instead of being embedded in the GLB binary buffer.
+pub fn build_glb_from_lmo(
+    lmo_path: &Path,
+    project_dir: &Path,
+    embed_textures: bool,
+) -> Result<(String, Vec<u8>)> {
     let model = lmo_loader::load_lmo(lmo_path)?;
 
     if model.geom_objects.is_empty() {
@@ -1720,7 +1796,8 @@ pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String
     }
 
     let mut builder = GltfBuilder::new();
-    let geom_result = process_lmo_geometry(&mut builder, &model, project_dir)?;
+    let texture_mode = if embed_textures { TextureMode::Embed } else { TextureMode::ExternalUri };
+    let geom_result = process_lmo_geometry(&mut builder, &model, project_dir, texture_mode)?;
 
     // Convert data-URI buffers into a single GLB binary buffer, then append
     // image data as additional buffer views.
@@ -1996,7 +2073,7 @@ fn add_model_to_builder(
                 },
                 &format!("{}_mat", prefix),
                 project_dir,
-                false, // skip textures for map batch loading
+                TextureMode::Skip, // skip textures for map batch loading
             );
         } else {
             for (mi, mat) in geom.materials.iter().enumerate() {
@@ -2005,7 +2082,7 @@ fn add_model_to_builder(
                     mat,
                     &format!("{}_mat{}", prefix, mi),
                     project_dir,
-                    false, // skip textures for map batch loading
+                    TextureMode::Skip, // skip textures for map batch loading
                 );
             }
         }
@@ -2192,7 +2269,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "test", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "test", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
         assert_eq!(
             gltf_mat.alpha_mode,
@@ -2220,7 +2297,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "test", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "test", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
         assert_eq!(
             gltf_mat.alpha_mode,
@@ -2247,7 +2324,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "test", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "test", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
 
         assert_eq!(
@@ -2280,7 +2357,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "test_type9", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "test_type9", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
         // Type 9 → remapped to 1 → is_effect=true → Opaque alpha mode (no alpha test)
         assert_eq!(
@@ -2313,7 +2390,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "tree_leaf", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "tree_leaf", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
 
         // Should be Mask (alpha test enabled)
@@ -2351,7 +2428,7 @@ mod tests {
         let geom = &model.geom_objects[0];
         let mat_base = builder.materials.len() as u32;
         for (mi, mat) in geom.materials.iter().enumerate() {
-            build_lmo_material(&mut builder, mat, &format!("mat{}", mi), &tmp, false);
+            build_lmo_material(&mut builder, mat, &format!("mat{}", mi), &tmp, TextureMode::Skip);
         }
 
         let prims = build_geom_primitives(&mut builder, geom, "test", mat_base, false);
@@ -2998,7 +3075,7 @@ mod tests {
                 tex_filename: None,
             };
             let mut builder = GltfBuilder::new();
-            build_lmo_material(&mut builder, &mat, "test", &tmp, false);
+            build_lmo_material(&mut builder, &mat, "test", &tmp, TextureMode::Skip);
             let gltf_mat = &builder.materials[0];
             // Name should contain T1, not T6/T7/T8
             assert!(
@@ -3031,7 +3108,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "glow", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "glow", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
         let name = gltf_mat.name.as_ref().unwrap();
         // opacity 0.75 * 255 = 191.25 → 191
@@ -3060,7 +3137,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "sparkle", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "sparkle", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
 
         assert_eq!(
@@ -3101,7 +3178,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "wall", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "wall", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
         let name = gltf_mat.name.as_ref().unwrap();
         assert!(
@@ -3129,7 +3206,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "tree", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "tree", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
         let name = gltf_mat.name.as_ref().unwrap();
         assert!(
@@ -3156,7 +3233,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "shadow", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "shadow", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
         let name = gltf_mat.name.as_ref().unwrap();
         assert!(
@@ -3192,7 +3269,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "glass", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "glass", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
         let name = gltf_mat.name.as_ref().unwrap();
         // opacity 0.5 * 255 = 127.5 → 128
@@ -3228,7 +3305,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "fence", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "fence", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
         let name = gltf_mat.name.as_ref().unwrap();
         // opacity 0.7 * 255 = 178.5 → 179
@@ -3257,7 +3334,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "stone", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "stone", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
         let name = gltf_mat.name.as_ref().unwrap();
         assert!(
@@ -3480,7 +3557,7 @@ mod tests {
         let model = make_multi_geom_model(4, false);
         let lmo_path = write_temp_lmo(&model, &tmp_dir, "no_colors.lmo");
 
-        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir).unwrap();
+        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir, true).unwrap();
         let glb = build_glb_bytes(&json_str, &bin);
         let (json, bin_data) = parse_glb(&glb);
 
@@ -3502,7 +3579,7 @@ mod tests {
         let model = make_multi_geom_model(4, true);
         let lmo_path = write_temp_lmo(&model, &tmp_dir, "with_colors.lmo");
 
-        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir).unwrap();
+        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir, true).unwrap();
         let glb = build_glb_bytes(&json_str, &bin);
         let (json, bin_data) = parse_glb(&glb);
 
@@ -3530,7 +3607,7 @@ mod tests {
 
         let lmo_path = write_temp_lmo(&model, &tmp_dir, "mixed_colors.lmo");
 
-        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir).unwrap();
+        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir, true).unwrap();
         let glb = build_glb_bytes(&json_str, &bin);
         let (json, bin_data) = parse_glb(&glb);
 
@@ -3612,7 +3689,7 @@ mod tests {
         };
 
         let project_dir = lmo_path.parent().unwrap().parent().unwrap();
-        let (json_str, bin) = build_glb_from_lmo(lmo_path, project_dir).unwrap();
+        let (json_str, bin) = build_glb_from_lmo(lmo_path, project_dir, true).unwrap();
         let glb = build_glb_bytes(&json_str, &bin);
         let (json, bin_data) = parse_glb(&glb);
 
@@ -3928,7 +4005,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "opaque_wall", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "opaque_wall", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
 
         assert_eq!(
@@ -4019,7 +4096,7 @@ mod tests {
             return;
         }
         let project_dir = std::path::Path::new("../top-client");
-        let (json, bin) = build_glb_from_lmo(lmo_path, project_dir)
+        let (json, bin) = build_glb_from_lmo(lmo_path, project_dir, true)
             .expect("GLB export should succeed for nml-bd199");
 
         let root: serde_json::Value = serde_json::from_str(&json).unwrap();

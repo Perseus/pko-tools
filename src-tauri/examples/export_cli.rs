@@ -46,6 +46,51 @@ fn main() {
         return;
     }
 
+    // Check for --shared-v2 mode: exports scene textures as DDS + geometry-only GLBs
+    if args.len() >= 4 && args[3] == "--shared-v2" {
+        let client_dir = PathBuf::from(&args[1]);
+        let output_dir = PathBuf::from(&args[2]);
+
+        eprintln!("Exporting shared assets (v2: external textures) ...");
+        eprintln!("  Client dir: {}", client_dir.display());
+        eprintln!("  Output dir: {}", output_dir.display());
+
+        // 1. Export scene textures as DDS with padded mip chains
+        eprintln!("[shared-v2] Exporting scene textures as DDS...");
+        match pko_tools_lib::map::shared::export_scene_textures(&client_dir, &output_dir) {
+            Ok(count) => eprintln!("  Scene textures: {}", count),
+            Err(e) => eprintln!("  Scene textures FAILED: {:?}", e),
+        }
+
+        // 2. Export terrain textures (same as v1)
+        eprintln!("[shared-v2] Exporting terrain textures...");
+        let terrain_count = pko_tools_lib::map::texture::export_all_terrain_textures(&client_dir, &output_dir)
+            .map(|m| m.len())
+            .unwrap_or(0);
+        eprintln!("  Terrain textures: {}", terrain_count);
+
+        // 3. Export alpha masks (same as v1)
+        eprintln!("[shared-v2] Exporting alpha masks...");
+        let _ = pko_tools_lib::map::texture::export_alpha_atlas(&client_dir, &output_dir);
+        let _ = pko_tools_lib::map::texture::export_alpha_mask_array(&client_dir, &output_dir);
+
+        // 4. Export buildings with external texture references
+        eprintln!("[shared-v2] Exporting buildings (geometry-only, external texture URIs)...");
+        match pko_tools_lib::map::shared::export_shared_assets_v2(&client_dir, &output_dir) {
+            Ok(result) => {
+                eprintln!("  Buildings exported: {} ({} failed)", result.total_buildings_exported, result.total_buildings_failed);
+            }
+            Err(e) => {
+                eprintln!("  Buildings FAILED: {:?}", e);
+                std::process::exit(1);
+            }
+        }
+
+        // 5. Export water textures + effect textures (same as v1 — handled by export_shared_assets_v2)
+        eprintln!("Shared v2 export complete!");
+        return;
+    }
+
     // Check for --shared mode: export_cli <client_dir> <output_dir> --shared
     if args.len() >= 4 && args[3] == "--shared" {
         let client_dir = PathBuf::from(&args[1]);
