@@ -2427,9 +2427,9 @@ fn build_obj_height_grid(map: &ParsedMap) -> (Vec<u8>, i32, i32) {
 }
 
 /// Build terrain height grid at vertex resolution using tile_height().
-/// Each vertex (vx, vy) samples get_tile(map, vx, vy) directly — strict owner
-/// semantics matching the terrain mesh builder. Edge vertices (vx >= n_width or
-/// vy >= n_height) return None → UNDERWATER_HEIGHT.
+/// Each vertex (vx, vy) samples get_render_vertex_tile(map, vx, vy) which
+/// uses boundary clamping to inherit neighbor heights at section edges.
+/// This prevents cliff walls where loaded terrain meets unloaded sea.
 /// Grid dimensions: (n_width+1) × (n_height+1).
 /// Each cell is an i16 in LE encoding representing height in millimeters.
 /// Returns (grid_bytes, width, height).
@@ -2442,7 +2442,7 @@ fn build_terrain_height_grid(map: &ParsedMap) -> (Vec<u8>, i32, i32) {
     for vy in 0..vh {
         for vx in 0..vw {
             let idx = (vy * vw + vx) as usize;
-            grid_i16[idx] = match get_tile(map, vx, vy) {
+            grid_i16[idx] = match get_render_vertex_tile(map, vx, vy) {
                 Some(tile) => (tile_height(tile) * 1000.0).round() as i16,
                 None => uw,
             };
