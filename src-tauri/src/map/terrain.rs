@@ -331,15 +331,22 @@ pub fn build_terrain_gltf(
         uv
     });
 
-    // Step 2: Build triangle indices for ALL tiles (including missing sections).
-    // Missing sections have vertices at UNDERWATER_HEIGHT with white vertex color
-    // and all-zero tile layer data. The shader detects these via the legacy missing
-    // tile sentinel and renders them with texture 22 (sandy beige), creating a
-    // continuous terrain floor under the sea.
+    // Step 2: Build triangle indices.
+    // Emit triangles for normal tiles and missing sections (underwater floor),
+    // but SKIP tiles that exist with bt_tile_info == 0 (no base texture).
+    // The original engine skips these entirely (`continue;` in render loop) —
+    // buildings cover the gaps.
     let mut indices: Vec<u32> = Vec::new();
 
     for ty in 0..h {
         for tx in 0..w {
+            // Skip loaded tiles with no base texture (match original engine behavior)
+            if let Some(tile) = get_tile(parsed_map, tx, ty) {
+                if tile.bt_tile_info == 0 {
+                    continue;
+                }
+            }
+
             let v00 = (ty as u32) * (vw as u32) + (tx as u32);
             let v10 = v00 + 1;
             let v01 = v00 + vw as u32;
@@ -1022,12 +1029,22 @@ pub fn build_terrain_glb(
         uv
     });
 
-    // ----- Step 2: Build triangle indices for ALL tiles (including missing sections) -----
-    // Missing sections have vertices at UNDERWATER_HEIGHT with white vertex color.
-    // Emitting triangles creates a continuous terrain floor under the sea.
+    // ----- Step 2: Build triangle indices -----
+    // Emit triangles for normal tiles and missing sections (underwater floor),
+    // but SKIP tiles that exist with bt_tile_info == 0 (no base texture).
+    // The original engine skips these entirely (`continue;` in render loop) —
+    // buildings cover the gaps. Emitting geometry here would show texture 22
+    // where the original shows nothing.
     let mut indices: Vec<u32> = Vec::new();
     for ty in 0..h {
         for tx in 0..w {
+            // Skip loaded tiles with no base texture (match original engine behavior)
+            if let Some(tile) = get_tile(parsed_map, tx, ty) {
+                if tile.bt_tile_info == 0 {
+                    continue;
+                }
+            }
+
             let v00 = (ty as u32) * (vw as u32) + (tx as u32);
             let v10 = v00 + 1;
             let v01 = v00 + vw as u32;
@@ -3924,7 +3941,7 @@ mod tests {
     fn make_tile(c_height: i8) -> MapTile {
         MapTile {
             dw_tile_info: 0,
-            bt_tile_info: 0,
+            bt_tile_info: 1, // non-zero so tile emits geometry (0 = skip, matching original engine)
             s_color: 0,
             c_height,
             s_region: 0,
@@ -5119,10 +5136,10 @@ mod tests {
         //   area: 4*4*1 = 16
         //   region: 4*4*2 = 32
         //   tile_texture: 4*4*1 = 16
-        //   tile_layer: 4*4*7 = 112
+        //   tile_layer: 4*4*8 = 128
         //   tile_color: 4*4*2 = 32
-        //   Total: 386
-        let expected_raw = 8*8*2 + 5*5*2 + 4*4*1 + 4*4*2 + 4*4*1 + 4*4*7 + 4*4*2;
+        //   Total: 402
+        let expected_raw = 8*8*2 + 5*5*2 + 4*4*1 + 4*4*2 + 4*4*1 + 4*4*8 + 4*4*2;
         assert_eq!(raw_size, expected_raw, "raw block size mismatch");
 
         // Verify total file size matches result
