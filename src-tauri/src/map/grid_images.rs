@@ -86,9 +86,9 @@ pub fn encode_tile_color_png(grid: &[u8], w: i32, h: i32, path: &Path) -> Result
         .with_context(|| format!("Failed to write tile color PNG: {}", path.display()))
 }
 
-/// Encode tile layer grid (7 bytes per tile) into two PNG files:
+/// Encode tile layer grid (8 bytes per tile) into two PNG files:
 /// - tile_layer_tex.png: RGBA8 (R=base_tex, G=L1_tex, B=L2_tex, A=L3_tex)
-/// - tile_layer_alpha.png: RGB8 (R=L1_alpha, G=L2_alpha, B=L3_alpha)
+/// - tile_layer_alpha.png: RGBA8 (R=L1_alpha, G=L2_alpha, B=L3_alpha, A=exists)
 pub fn encode_tile_layer_pngs(
     grid: &[u8],
     w: i32,
@@ -98,12 +98,12 @@ pub fn encode_tile_layer_pngs(
 ) -> Result<()> {
     let (w, h) = (w as u32, h as u32);
     let mut tex_img = RgbaImage::new(w, h);
-    let mut alpha_img = RgbImage::new(w, h);
+    let mut alpha_img = RgbaImage::new(w, h);
 
     for y in 0..h {
         for x in 0..w {
-            let base_idx = ((y * w + x) * 7) as usize;
-            // Layout: [base_tex, L1_tex, L1_alpha, L2_tex, L2_alpha, L3_tex, L3_alpha]
+            let base_idx = ((y * w + x) * 8) as usize;
+            // Layout: [base_tex, L1_tex, L1_alpha, L2_tex, L2_alpha, L3_tex, L3_alpha, exists]
             let base_tex = grid[base_idx];
             let l1_tex = grid[base_idx + 1];
             let l1_alpha = grid[base_idx + 2];
@@ -111,9 +111,10 @@ pub fn encode_tile_layer_pngs(
             let l2_alpha = grid[base_idx + 4];
             let l3_tex = grid[base_idx + 5];
             let l3_alpha = grid[base_idx + 6];
+            let exists = grid[base_idx + 7];
 
             tex_img.put_pixel(x, y, image::Rgba([base_tex, l1_tex, l2_tex, l3_tex]));
-            alpha_img.put_pixel(x, y, image::Rgb([l1_alpha, l2_alpha, l3_alpha]));
+            alpha_img.put_pixel(x, y, image::Rgba([l1_alpha, l2_alpha, l3_alpha, exists]));
         }
     }
 
@@ -338,40 +339,46 @@ mod tests {
         let tex_path = tmp.path().join("tile_layer_tex.png");
         let alpha_path = tmp.path().join("tile_layer_alpha.png");
 
-        // 2x2 grid, 7 bytes per tile
-        // Tile (0,0): base=1, L1t=2, L1a=3, L2t=4, L2a=5, L3t=6, L3a=7
-        // Tile (1,0): base=10, L1t=11, L1a=12, L2t=13, L2a=14, L3t=15, L3a=0
-        // Tile (0,1): base=0, all zeros
-        // Tile (1,1): base=22, L1t=0, L1a=0, L2t=0, L2a=0, L3t=0, L3a=0
+        // 2x2 grid, 8 bytes per tile (7 layer + 1 exists)
+        // Tile (0,0): base=1, L1t=2, L1a=3, L2t=4, L2a=5, L3t=6, L3a=7, exists=1
+        // Tile (1,0): base=10, L1t=11, L1a=12, L2t=13, L2a=14, L3t=15, L3a=0, exists=1
+        // Tile (0,1): base=0, all zeros, exists=0 (missing section)
+        // Tile (1,1): base=22, zeros, exists=1
         let grid: Vec<u8> = vec![
-            1, 2, 3, 4, 5, 6, 7, // tile (0,0)
-            10, 11, 12, 13, 14, 15, 0, // tile (1,0)
-            0, 0, 0, 0, 0, 0, 0, // tile (0,1)
-            22, 0, 0, 0, 0, 0, 0, // tile (1,1)
+            1, 2, 3, 4, 5, 6, 7, 1,   // tile (0,0)
+            10, 11, 12, 13, 14, 15, 0, 1, // tile (1,0)
+            0, 0, 0, 0, 0, 0, 0, 0,   // tile (0,1) missing
+            22, 0, 0, 0, 0, 0, 0, 1,  // tile (1,1)
         ];
 
         encode_tile_layer_pngs(&grid, 2, 2, &tex_path, &alpha_path).unwrap();
 
         let tex_img = image::open(&tex_path).unwrap().into_rgba8();
-        let alpha_img = image::open(&alpha_path).unwrap().into_rgb8();
+        let alpha_img = image::open(&alpha_path).unwrap().into_rgba8();
         assert_eq!(tex_img.dimensions(), (2, 2));
         assert_eq!(alpha_img.dimensions(), (2, 2));
 
-        // Tile (0,0): tex RGBA = (1,2,4,6), alpha RGB = (3,5,7)
+        // Tile (0,0): tex RGBA = (1,2,4,6), alpha RGBA = (3,5,7,1)
         let p = tex_img.get_pixel(0, 0).0;
         assert_eq!(p, [1, 2, 4, 6]);
         let p = alpha_img.get_pixel(0, 0).0;
-        assert_eq!(p, [3, 5, 7]);
+        assert_eq!(p, [3, 5, 7, 1]);
 
-        // Tile (1,0): tex RGBA = (10,11,13,15), alpha RGB = (12,14,0)
+        // Tile (1,0): tex RGBA = (10,11,13,15), alpha RGBA = (12,14,0,1)
         let p = tex_img.get_pixel(1, 0).0;
         assert_eq!(p, [10, 11, 13, 15]);
         let p = alpha_img.get_pixel(1, 0).0;
-        assert_eq!(p, [12, 14, 0]);
+        assert_eq!(p, [12, 14, 0, 1]);
 
-        // Tile (1,1): tex RGBA = (22,0,0,0)
+        // Tile (0,1): missing — alpha RGBA = (0,0,0,0)
+        let p = alpha_img.get_pixel(0, 1).0;
+        assert_eq!(p, [0, 0, 0, 0]);
+
+        // Tile (1,1): tex RGBA = (22,0,0,0), alpha RGBA = (0,0,0,1)
         let p = tex_img.get_pixel(1, 1).0;
         assert_eq!(p, [22, 0, 0, 0]);
+        let p = alpha_img.get_pixel(1, 1).0;
+        assert_eq!(p, [0, 0, 0, 1]);
     }
 
     #[test]
