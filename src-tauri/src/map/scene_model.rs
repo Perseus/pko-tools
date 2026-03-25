@@ -41,37 +41,6 @@ pub fn find_lmo_path(project_dir: &Path, filename: &str) -> Option<std::path::Pa
     candidates.into_iter().find(|p| p.exists())
 }
 
-// ============================================================================
-// Coordinate transform: Game Z-up → glTF Y-up
-// (x, y, z) → (x, z, y)
-//
-// Terrain uses Z = +tileY (south = positive). Building meshes must match:
-// PKO Y (south) → glTF Z (positive), no negation.
-// ============================================================================
-
-#[allow(dead_code)] // Will be removed in Task 10
-fn transform_position(p: [f32; 3]) -> [f32; 3] {
-    [p[0], p[2], p[1]]
-}
-
-#[allow(dead_code)] // Will be removed in Task 10
-fn transform_normal(n: [f32; 3]) -> [f32; 3] {
-    [n[0], n[2], n[1]]
-}
-
-/// Reverse triangle winding order: (i0, i1, i2) → (i0, i2, i1).
-/// Required because the Y-up transform `(x,y,z)→(x,z,y)` is a reflection
-/// (det = -1), which flips triangle facing. Reversing winding restores
-/// correct front-face orientation in glTF (CCW).
-#[allow(dead_code)] // Will be removed in Task 10
-fn reverse_winding(indices: &[u32]) -> Vec<u32> {
-    let mut out = indices.to_vec();
-    for tri in out.chunks_exact_mut(3) {
-        tri.swap(1, 2);
-    }
-    out
-}
-
 /// Check if a 4x4 matrix is identity.
 fn is_identity(mat: &[[f32; 4]; 4]) -> bool {
     for r in 0..4 {
@@ -1172,24 +1141,6 @@ fn build_node_extras(geom: &LmoGeomObject, geom_index: usize, ct: &CoordTransfor
 
 const FRAME_RATE: f32 = 30.0;
 
-/// Transform a position vector from Z-up game space to Y-up glTF space.
-/// Uses the same mapping as `transform_position`: (x,y,z) → (x,z,y).
-#[allow(dead_code)] // Will be removed in Task 10
-fn z_up_to_y_up_vec3(v: [f32; 3]) -> [f32; 3] {
-    [v[0], v[2], v[1]]
-}
-
-/// Transform a quaternion from Z-up game space to Y-up glTF space.
-/// Input/output in glTF [x, y, z, w] order.
-///
-/// The Y↔Z axis swap is a reflection (det = -1). For quaternions representing
-/// rotations, this means: swap Y↔Z components AND negate the rotation angle.
-/// Negating the angle negates the vector part: (qx,qy,qz,qw) → (-qx,-qz,-qy,qw).
-#[allow(dead_code)] // Will be removed in Task 10
-fn z_up_to_y_up_quat(q: [f32; 4]) -> [f32; 4] {
-    [-q[0], -q[2], -q[1], q[3]]
-}
-
 // ============================================================================
 // Animation: convert LMO matrix keyframes → glTF animation tracks
 // ============================================================================
@@ -2162,53 +2113,6 @@ mod tests {
                 mtlopac_anims: Vec::new(),
             }],
         }
-    }
-
-    #[test]
-    fn coordinate_transform_z_up_to_y_up() {
-        // Game: Z-up → glTF: Y-up: (x, y, z) → (x, z, y)
-        // Y is NOT negated so building Z matches terrain Z (south = positive).
-        assert_eq!(transform_position([1.0, 2.0, 3.0]), [1.0, 3.0, 2.0]);
-        // z_up_to_y_up_vec3 must match transform_position for consistency
-        assert_eq!(z_up_to_y_up_vec3([1.0, 2.0, 3.0]), [1.0, 3.0, 2.0]);
-        assert_eq!(transform_position([0.0, 0.0, 0.0]), [0.0, 0.0, 0.0]);
-        assert_eq!(transform_normal([0.0, 0.0, 1.0]), [0.0, 1.0, 0.0]);
-    }
-
-    #[test]
-    fn z_up_to_y_up_vec3_matches_static_transform() {
-        // z_up_to_y_up_vec3 (used for animations) must produce the same Z component
-        // as transform_position (used for static geometry) for any PKO Y value.
-        for y in [-5.0f32, -1.0, 0.0, 1.0, 5.0, 100.0] {
-            let p = [0.0, y, 0.0];
-            assert_eq!(
-                z_up_to_y_up_vec3(p)[2],
-                transform_position(p)[2],
-                "Z mismatch for PKO Y={y}"
-            );
-        }
-    }
-
-    #[test]
-    fn animated_static_z_consistency() {
-        // For a mixed model where animated and static geom share the same PKO Y offset,
-        // the resulting glTF Z components must have the same sign.
-        let pko_y = 5.0f32;
-        let static_z = transform_position([0.0, pko_y, 0.0])[2];
-        let anim_z = z_up_to_y_up_vec3([0.0, pko_y, 0.0])[2];
-        assert_eq!(
-            static_z.signum(),
-            anim_z.signum(),
-            "Static Z ({static_z}) and animated Z ({anim_z}) must have the same sign"
-        );
-        assert_eq!(static_z, anim_z, "Static and animated Z must be equal");
-    }
-
-    #[test]
-    fn reverse_winding_swaps_triangle_indices() {
-        let indices = vec![0, 1, 2, 3, 4, 5];
-        let reversed = reverse_winding(&indices);
-        assert_eq!(reversed, vec![0, 2, 1, 3, 5, 4]);
     }
 
     #[test]
