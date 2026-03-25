@@ -272,7 +272,7 @@ impl CharacterGeometricModel {
                 bsphere.sphere.c.0.z,
             ];
             let center = if let Some(ct) = ct {
-                ct.position(center)
+                ct.extras_position(center)
             } else {
                 center
             };

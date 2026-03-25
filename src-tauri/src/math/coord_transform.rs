@@ -45,19 +45,38 @@ impl CoordTransform {
     }
 
     /// Remap position for glTF extras/JSON data that bypasses glTFast.
-    /// Always uses plain Y↔Z swap (x, z, y) regardless of profile,
-    /// because extras are raw JSON passed through to Unity without
-    /// glTFast's X negation.
+    ///
+    /// Extras are raw JSON that glTFast passes through without coordinate
+    /// processing. The target space depends on the profile:
+    /// - StandardGltf: same as position() — the viewer reads extras natively
+    /// - UnityGltfast: final Unity space (x, z, y) — NOT pre-negated,
+    ///   because glTFast won't negate extras the way it negates vertices
     pub fn extras_position(&self, v: [f32; 3]) -> [f32; 3] {
         let [x, y, z] = v;
-        [x, z, y]
+        match self.profile {
+            ExportProfile::StandardGltf => [x, z, -y],
+            ExportProfile::UnityGltfast => [x, z, y],
+        }
     }
 
     /// Remap quaternion for glTF extras/JSON data that bypasses glTFast.
-    /// Same rationale as extras_position — no profile-specific X handling.
+    /// Same rationale as extras_position.
     pub fn extras_quaternion(&self, q: [f32; 4]) -> [f32; 4] {
         let [x, y, z, w] = q;
-        [x, z, y, w]
+        match self.profile {
+            ExportProfile::StandardGltf => [x, z, -y, w],
+            ExportProfile::UnityGltfast => [x, z, y, w],
+        }
+    }
+
+    /// Remap euler angles for extras/JSON data that bypasses glTFast.
+    /// Same rationale as extras_position.
+    pub fn extras_euler_angles(&self, angles: [f32; 3]) -> [f32; 3] {
+        let [ax, ay, az] = angles;
+        match self.profile {
+            ExportProfile::StandardGltf => [ax, az, -ay],
+            ExportProfile::UnityGltfast => [ax, az, ay],
+        }
     }
 
     /// Remap scale vector (axis swap, no sign flip)
