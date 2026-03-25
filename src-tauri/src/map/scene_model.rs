@@ -1085,7 +1085,7 @@ fn build_anim_extras(geom: &LmoGeomObject, geom_index: usize, ct: &CoordTransfor
                 .translations
                 .iter()
                 .map(|t| {
-                    let yt = ct.position(*t);
+                    let yt = ct.extras_position(*t);
                     serde_json::json!([yt[0], yt[1], yt[2]])
                 })
                 .collect();
@@ -1093,7 +1093,7 @@ fn build_anim_extras(geom: &LmoGeomObject, geom_index: usize, ct: &CoordTransfor
                 .rotations
                 .iter()
                 .map(|r| {
-                    let yr = ct.quaternion(*r);
+                    let yr = ct.extras_quaternion(*r);
                     serde_json::json!([yr[0], yr[1], yr[2], yr[3]])
                 })
                 .collect();
