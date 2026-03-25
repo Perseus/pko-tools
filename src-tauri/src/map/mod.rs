@@ -17,6 +17,8 @@ pub mod texture;
 
 use serde::{Deserialize, Serialize};
 
+use crate::math::coord_transform::ExportProfile;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MapEntry {
     pub name: String,
@@ -81,12 +83,16 @@ pub struct ExportOptions {
     /// When set, per-map export skips buildings, textures, effects, and water,
     /// and the manifest references assets relative to this directory.
     pub shared_assets_dir: Option<std::path::PathBuf>,
+    /// Coordinate transform profile. `UnityGltfast` pre-negates X for clean
+    /// Unity import; `StandardGltf` is spec-compliant for any glTF viewer.
+    pub export_profile: ExportProfile,
 }
 
 impl Default for ExportOptions {
     fn default() -> Self {
         Self {
             shared_assets_dir: None,
+            export_profile: ExportProfile::UnityGltfast,
         }
     }
 }
