@@ -3163,6 +3163,7 @@ pub fn export_map_for_unity(
     // When shared_assets_dir is set, buildings are in the shared dir — don't re-export.
     std::fs::create_dir_all(output_dir)?;
     let use_shared = options.shared_assets_dir.is_some();
+    let ct = CoordTransform::new(options.export_profile);
 
     let mut building_entries = Vec::new();
 
@@ -3207,7 +3208,7 @@ pub fn export_map_for_unity(
             let out_filename = format!("{}.glb", stem);
             let out_path = buildings_dir.join(&out_filename);
 
-            match super::scene_model::build_glb_from_lmo(&lmo_path, project_dir, true) {
+            match super::scene_model::build_glb_from_lmo(&lmo_path, project_dir, true, &ct) {
                 Ok((json, bin)) => {
                     super::glb::write_glb(&json, &bin, &out_path)?;
                 }
@@ -3453,8 +3454,6 @@ pub fn export_map_for_unity(
         background_color: [10, 10, 125],
         building_placements: building_glb_placements,
     };
-
-    let ct = CoordTransform::new(ExportProfile::StandardGltf);
 
     let map_w = parsed_map.header.n_width;
     let map_h = parsed_map.header.n_height;

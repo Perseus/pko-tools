@@ -1789,14 +1789,13 @@ pub fn build_glb_from_lmo(
     lmo_path: &Path,
     project_dir: &Path,
     embed_textures: bool,
+    ct: &CoordTransform,
 ) -> Result<(String, Vec<u8>)> {
     let model = lmo_loader::load_lmo(lmo_path)?;
 
     if model.geom_objects.is_empty() {
         return Err(anyhow!("LMO file has no geometry objects"));
     }
-
-    let ct = CoordTransform::new(ExportProfile::StandardGltf);
     let mut builder = GltfBuilder::new();
     let texture_mode = if embed_textures { TextureMode::Embed } else { TextureMode::ExternalUri };
     let geom_result = process_lmo_geometry(&mut builder, &model, project_dir, texture_mode, &ct)?;
@@ -3569,7 +3568,7 @@ mod tests {
         let model = make_multi_geom_model(4, false);
         let lmo_path = write_temp_lmo(&model, &tmp_dir, "no_colors.lmo");
 
-        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir, true).unwrap();
+        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir, true, &CoordTransform::new(ExportProfile::StandardGltf)).unwrap();
         let glb = build_glb_bytes(&json_str, &bin);
         let (json, bin_data) = parse_glb(&glb);
 
@@ -3591,7 +3590,7 @@ mod tests {
         let model = make_multi_geom_model(4, true);
         let lmo_path = write_temp_lmo(&model, &tmp_dir, "with_colors.lmo");
 
-        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir, true).unwrap();
+        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir, true, &CoordTransform::new(ExportProfile::StandardGltf)).unwrap();
         let glb = build_glb_bytes(&json_str, &bin);
         let (json, bin_data) = parse_glb(&glb);
 
@@ -3619,7 +3618,7 @@ mod tests {
 
         let lmo_path = write_temp_lmo(&model, &tmp_dir, "mixed_colors.lmo");
 
-        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir, true).unwrap();
+        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir, true, &CoordTransform::new(ExportProfile::StandardGltf)).unwrap();
         let glb = build_glb_bytes(&json_str, &bin);
         let (json, bin_data) = parse_glb(&glb);
 
@@ -3701,7 +3700,7 @@ mod tests {
         };
 
         let project_dir = lmo_path.parent().unwrap().parent().unwrap();
-        let (json_str, bin) = build_glb_from_lmo(lmo_path, project_dir, true).unwrap();
+        let (json_str, bin) = build_glb_from_lmo(lmo_path, project_dir, true, &CoordTransform::new(ExportProfile::StandardGltf)).unwrap();
         let glb = build_glb_bytes(&json_str, &bin);
         let (json, bin_data) = parse_glb(&glb);
 
@@ -4108,7 +4107,7 @@ mod tests {
             return;
         }
         let project_dir = std::path::Path::new("../top-client");
-        let (json, bin) = build_glb_from_lmo(lmo_path, project_dir, true)
+        let (json, bin) = build_glb_from_lmo(lmo_path, project_dir, true, &CoordTransform::new(ExportProfile::StandardGltf))
             .expect("GLB export should succeed for nml-bd199");
 
         let root: serde_json::Value = serde_json::from_str(&json).unwrap();
