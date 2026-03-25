@@ -44,6 +44,22 @@ impl CoordTransform {
         }
     }
 
+    /// Remap position for glTF extras/JSON data that bypasses glTFast.
+    /// Always uses plain Y↔Z swap (x, z, y) regardless of profile,
+    /// because extras are raw JSON passed through to Unity without
+    /// glTFast's X negation.
+    pub fn extras_position(&self, v: [f32; 3]) -> [f32; 3] {
+        let [x, y, z] = v;
+        [x, z, y]
+    }
+
+    /// Remap quaternion for glTF extras/JSON data that bypasses glTFast.
+    /// Same rationale as extras_position — no profile-specific X handling.
+    pub fn extras_quaternion(&self, q: [f32; 4]) -> [f32; 4] {
+        let [x, y, z, w] = q;
+        [x, z, y, w]
+    }
+
     /// Remap scale vector (axis swap, no sign flip)
     pub fn scale(&self, v: [f32; 3]) -> [f32; 3] {
         let [x, y, z] = v;
