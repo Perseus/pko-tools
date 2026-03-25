@@ -1,83 +1,82 @@
 //! Effect and particle JSON export with coordinate remapping.
 //!
-//! Serializes `EffFile` and `ParFile` domain types to JSON, applying the
-//! Y↔Z coordinate swap `(x,y,z) → (x,z,y)` to all position/direction/
-//! acceleration vectors — the same remap used by the terrain/building pipeline.
+//! Serializes `EffFile` and `ParFile` domain types to JSON, applying
+//! [`CoordTransform`] to all position/direction/acceleration vectors
+//! for the target coordinate system.
 
 use std::path::Path;
 
 use anyhow::Result;
 
 use super::model::{EffFile, ParFile};
+use crate::math::coord_transform::{CoordTransform, ExportProfile};
 
-/// Remap a 3-component vector from PKO Z-up to glTF/Unity Y-up: `(x,y,z) → (x,z,y)`.
-fn remap_vec3(v: [f32; 3]) -> [f32; 3] {
-    [v[0], v[2], v[1]]
-}
-
-/// Apply coordinate remap to an `EffFile` for Unity export.
+/// Apply coordinate remap to an `EffFile` for export.
 /// Modifies position and angle keyframe arrays in-place.
-pub fn remap_eff_for_export(eff: &mut EffFile) {
-    // Root rotation axis
-    eff.rota_vec = remap_vec3(eff.rota_vec);
+pub fn remap_eff_for_export(eff: &mut EffFile, ct: &CoordTransform) {
+    // Root rotation axis (direction vector)
+    eff.rota_vec = ct.position(eff.rota_vec);
 
     for sub in &mut eff.sub_effects {
         // Position keyframes
         for pos in &mut sub.frame_positions {
-            *pos = remap_vec3(*pos);
+            *pos = ct.position(*pos);
         }
-        // Angle keyframes (rotation axes)
+        // Angle keyframes (euler angles)
         for angle in &mut sub.frame_angles {
-            *angle = remap_vec3(*angle);
+            *angle = ct.euler_angles(*angle);
         }
-        // rota_loop_vec: [x, y, z, w] — remap xyz, keep w
+        // rota_loop_vec: [x, y, z, w] — remap xyz as euler angles, keep w
         let rlv = sub.rota_loop_vec;
-        sub.rota_loop_vec = [rlv[0], rlv[2], rlv[1], rlv[3]];
+        let remapped = ct.euler_angles([rlv[0], rlv[1], rlv[2]]);
+        sub.rota_loop_vec = [remapped[0], remapped[1], remapped[2], rlv[3]];
     }
 }
 
-/// Apply coordinate remap to a `ParFile` for Unity export.
+/// Apply coordinate remap to a `ParFile` for export.
 /// Modifies position/direction/acceleration/range/offset vectors.
-pub fn remap_par_for_export(par: &mut ParFile) {
+pub fn remap_par_for_export(par: &mut ParFile, ct: &CoordTransform) {
     for sys in &mut par.systems {
-        sys.range = remap_vec3(sys.range);
-        sys.direction = remap_vec3(sys.direction);
-        sys.acceleration = remap_vec3(sys.acceleration);
-        sys.offset = remap_vec3(sys.offset);
+        sys.range = ct.position(sys.range);
+        sys.direction = ct.normal(sys.direction);
+        sys.acceleration = ct.position(sys.acceleration);
+        sys.offset = ct.position(sys.offset);
 
         // Angle keyframes
         for angle in &mut sys.frame_angles {
-            *angle = remap_vec3(*angle);
+            *angle = ct.euler_angles(*angle);
         }
 
         // Path points and directions
         if let Some(ref mut path) = sys.path {
             for pt in &mut path.points {
-                *pt = remap_vec3(*pt);
+                *pt = ct.position(*pt);
             }
             for dir in &mut path.directions {
-                *dir = remap_vec3(*dir);
+                *dir = ct.normal(*dir);
             }
         }
 
         // Point ranges
         for pr in &mut sys.point_ranges {
-            *pr = remap_vec3(*pr);
+            *pr = ct.position(*pr);
         }
     }
 }
 
 /// Export a single .eff file as JSON with coordinate remap applied.
 pub fn export_eff_json(data: &[u8]) -> Result<String> {
+    let ct = CoordTransform::new(ExportProfile::StandardGltf);
     let mut eff = EffFile::from_bytes(data)?;
-    remap_eff_for_export(&mut eff);
+    remap_eff_for_export(&mut eff, &ct);
     Ok(serde_json::to_string_pretty(&eff)?)
 }
 
 /// Export a single .par file as JSON with coordinate remap applied.
 pub fn export_par_json(data: &[u8]) -> Result<String> {
+    let ct = CoordTransform::new(ExportProfile::StandardGltf);
     let mut par = ParFile::from_bytes(data)?;
-    remap_par_for_export(&mut par);
+    remap_par_for_export(&mut par, &ct);
     Ok(serde_json::to_string_pretty(&par)?)
 }
 
@@ -180,13 +179,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn remap_vec3_swaps_y_z() {
-        assert_eq!(remap_vec3([1.0, 2.0, 3.0]), [1.0, 3.0, 2.0]);
-        assert_eq!(remap_vec3([0.0, 0.0, 0.0]), [0.0, 0.0, 0.0]);
-        assert_eq!(remap_vec3([-1.0, 5.0, -3.0]), [-1.0, -3.0, 5.0]);
-    }
-
-    #[test]
     fn remap_eff_modifies_positions_and_angles() {
         let mut eff = EffFile {
             version: 7,
@@ -239,12 +231,15 @@ mod tests {
             }],
         };
 
-        remap_eff_for_export(&mut eff);
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        remap_eff_for_export(&mut eff, &ct);
 
-        assert_eq!(eff.rota_vec, [1.0, 3.0, 2.0]);
-        assert_eq!(eff.sub_effects[0].frame_positions[0], [100.0, 300.0, 200.0]);
-        assert_eq!(eff.sub_effects[0].frame_angles[0], [10.0, 30.0, 20.0]);
-        assert_eq!(eff.sub_effects[0].rota_loop_vec, [1.0, 3.0, 2.0, 4.0]);
+        // StandardGltf: position(x,y,z) -> (x, z, -y)
+        assert_eq!(eff.rota_vec, [1.0, 3.0, -2.0]);
+        assert_eq!(eff.sub_effects[0].frame_positions[0], [100.0, 300.0, -200.0]);
+        // euler_angles(ax,ay,az) -> (ax, az, -ay)
+        assert_eq!(eff.sub_effects[0].frame_angles[0], [10.0, 30.0, -20.0]);
+        assert_eq!(eff.sub_effects[0].rota_loop_vec, [1.0, 3.0, -2.0, 4.0]);
     }
 
     #[test]
@@ -292,13 +287,16 @@ mod tests {
             models: vec![],
         };
 
-        remap_par_for_export(&mut par);
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        remap_par_for_export(&mut par, &ct);
 
         let sys = &par.systems[0];
-        assert_eq!(sys.range, [1.0, 3.0, 2.0]);
-        assert_eq!(sys.direction, [0.0, 0.0, 1.0]);
+        // StandardGltf: position(x,y,z) -> (x, z, -y)
+        assert_eq!(sys.range, [1.0, 3.0, -2.0]);
+        // normal (same as position)
+        assert_eq!(sys.direction, [0.0, 0.0, -1.0]);
         assert_eq!(sys.acceleration, [0.0, -9.8, 0.0]);
-        assert_eq!(sys.offset, [10.0, 30.0, 20.0]);
+        assert_eq!(sys.offset, [10.0, 30.0, -20.0]);
     }
 
     /// Corpus test: export all .eff files to JSON and verify zero failures.
