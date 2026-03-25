@@ -1,8 +1,10 @@
 //! Effect and particle JSON export with coordinate remapping.
 //!
 //! Serializes `EffFile` and `ParFile` domain types to JSON, applying
-//! [`CoordTransform`] to all position/direction/acceleration vectors
-//! for the target coordinate system.
+//! [`CoordTransform`] extras methods to all position/direction/acceleration
+//! vectors. Effects are exported as standalone JSON (not glTF), so they
+//! bypass glTFast — hence the use of `extras_*` variants which produce
+//! final-space coordinates without profile-specific pre-negation.
 
 use std::path::Path;
 
@@ -15,20 +17,20 @@ use crate::math::coord_transform::{CoordTransform, ExportProfile};
 /// Modifies position and angle keyframe arrays in-place.
 pub fn remap_eff_for_export(eff: &mut EffFile, ct: &CoordTransform) {
     // Root rotation axis (direction vector)
-    eff.rota_vec = ct.position(eff.rota_vec);
+    eff.rota_vec = ct.extras_position(eff.rota_vec);
 
     for sub in &mut eff.sub_effects {
         // Position keyframes
         for pos in &mut sub.frame_positions {
-            *pos = ct.position(*pos);
+            *pos = ct.extras_position(*pos);
         }
         // Angle keyframes (euler angles)
         for angle in &mut sub.frame_angles {
-            *angle = ct.euler_angles(*angle);
+            *angle = ct.extras_euler_angles(*angle);
         }
         // rota_loop_vec: [x, y, z, w] — remap xyz as euler angles, keep w
         let rlv = sub.rota_loop_vec;
-        let remapped = ct.euler_angles([rlv[0], rlv[1], rlv[2]]);
+        let remapped = ct.extras_euler_angles([rlv[0], rlv[1], rlv[2]]);
         sub.rota_loop_vec = [remapped[0], remapped[1], remapped[2], rlv[3]];
     }
 }
@@ -37,29 +39,29 @@ pub fn remap_eff_for_export(eff: &mut EffFile, ct: &CoordTransform) {
 /// Modifies position/direction/acceleration/range/offset vectors.
 pub fn remap_par_for_export(par: &mut ParFile, ct: &CoordTransform) {
     for sys in &mut par.systems {
-        sys.range = ct.position(sys.range);
-        sys.direction = ct.normal(sys.direction);
-        sys.acceleration = ct.position(sys.acceleration);
-        sys.offset = ct.position(sys.offset);
+        sys.range = ct.extras_position(sys.range);
+        sys.direction = ct.extras_position(sys.direction);
+        sys.acceleration = ct.extras_position(sys.acceleration);
+        sys.offset = ct.extras_position(sys.offset);
 
         // Angle keyframes
         for angle in &mut sys.frame_angles {
-            *angle = ct.euler_angles(*angle);
+            *angle = ct.extras_euler_angles(*angle);
         }
 
         // Path points and directions
         if let Some(ref mut path) = sys.path {
             for pt in &mut path.points {
-                *pt = ct.position(*pt);
+                *pt = ct.extras_position(*pt);
             }
             for dir in &mut path.directions {
-                *dir = ct.normal(*dir);
+                *dir = ct.extras_position(*dir);
             }
         }
 
         // Point ranges
         for pr in &mut sys.point_ranges {
-            *pr = ct.position(*pr);
+            *pr = ct.extras_position(*pr);
         }
     }
 }
@@ -234,10 +236,10 @@ mod tests {
         let ct = CoordTransform::new(ExportProfile::StandardGltf);
         remap_eff_for_export(&mut eff, &ct);
 
-        // StandardGltf: position(x,y,z) -> (x, z, -y)
+        // StandardGltf extras_position(x,y,z) -> (x, z, -y) (same as position for Standard)
         assert_eq!(eff.rota_vec, [1.0, 3.0, -2.0]);
         assert_eq!(eff.sub_effects[0].frame_positions[0], [100.0, 300.0, -200.0]);
-        // euler_angles(ax,ay,az) -> (ax, az, -ay)
+        // extras_euler_angles(ax,ay,az) -> (ax, az, -ay)
         assert_eq!(eff.sub_effects[0].frame_angles[0], [10.0, 30.0, -20.0]);
         assert_eq!(eff.sub_effects[0].rota_loop_vec, [1.0, 3.0, -2.0, 4.0]);
     }
@@ -291,9 +293,8 @@ mod tests {
         remap_par_for_export(&mut par, &ct);
 
         let sys = &par.systems[0];
-        // StandardGltf: position(x,y,z) -> (x, z, -y)
+        // StandardGltf extras_position(x,y,z) -> (x, z, -y)
         assert_eq!(sys.range, [1.0, 3.0, -2.0]);
-        // normal (same as position)
         assert_eq!(sys.direction, [0.0, 0.0, -1.0]);
         assert_eq!(sys.acceleration, [0.0, -9.8, 0.0]);
         assert_eq!(sys.offset, [10.0, 30.0, -20.0]);
