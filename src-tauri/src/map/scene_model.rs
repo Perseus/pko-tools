@@ -18,6 +18,7 @@ use gltf_json::{
 };
 
 use crate::item::model::decode_pko_texture;
+use crate::math::coord_transform::{CoordTransform, ExportProfile};
 
 use super::lmo_types::{self as lmo, D3DCULL_NONE, LmoGeomObject, LmoModel};
 use super::lmo_loader;
@@ -48,10 +49,12 @@ pub fn find_lmo_path(project_dir: &Path, filename: &str) -> Option<std::path::Pa
 // PKO Y (south) → glTF Z (positive), no negation.
 // ============================================================================
 
+#[allow(dead_code)] // Will be removed in Task 10
 fn transform_position(p: [f32; 3]) -> [f32; 3] {
     [p[0], p[2], p[1]]
 }
 
+#[allow(dead_code)] // Will be removed in Task 10
 fn transform_normal(n: [f32; 3]) -> [f32; 3] {
     [n[0], n[2], n[1]]
 }
@@ -60,6 +63,7 @@ fn transform_normal(n: [f32; 3]) -> [f32; 3] {
 /// Required because the Y-up transform `(x,y,z)→(x,z,y)` is a reflection
 /// (det = -1), which flips triangle facing. Reversing winding restores
 /// correct front-face orientation in glTF (CCW).
+#[allow(dead_code)] // Will be removed in Task 10
 fn reverse_winding(indices: &[u32]) -> Vec<u32> {
     let mut out = indices.to_vec();
     for tri in out.chunks_exact_mut(3) {
@@ -736,6 +740,7 @@ fn build_geom_primitives(
     prefix: &str,
     material_base_idx: u32,
     skip_local_transform: bool,
+    ct: &CoordTransform,
 ) -> Vec<gltf_json::mesh::Primitive> {
     if geom.vertices.is_empty() || geom.indices.is_empty() {
         return vec![];
@@ -744,9 +749,6 @@ fn build_geom_primitives(
     // Apply mat_local transform if not identity — skip for animated objects
     // (animated objects get their transform from animation keyframes instead).
     let use_local_mat = !skip_local_transform && !is_identity(&geom.mat_local);
-    // The Z-up→Y-up mapping (x,y,z)→(x,z,y) is a reflection (det=-1),
-    // so winding must always be reversed to restore correct front-face (CCW).
-    let should_reverse_winding = true;
 
     let positions: Vec<f32> = geom
         .vertices
@@ -757,7 +759,7 @@ fn build_geom_primitives(
             } else {
                 *v
             };
-            transform_position(p).into_iter()
+            ct.position(p).into_iter()
         })
         .collect();
 
@@ -770,7 +772,7 @@ fn build_geom_primitives(
                 } else {
                     *n
                 };
-                transform_normal(n2).into_iter()
+                ct.normal(n2).into_iter()
             })
             .collect()
     } else {
@@ -893,11 +895,8 @@ fn build_geom_primitives(
     // Build primitives per subset (each subset maps to a material)
     if geom.subsets.is_empty() {
         // No subsets — single primitive with all indices
-        let prim_indices = if should_reverse_winding {
-            reverse_winding(&geom.indices)
-        } else {
-            geom.indices.clone()
-        };
+        let mut prim_indices = geom.indices.clone();
+        ct.reverse_indices(&mut prim_indices);
         let idx_acc = builder.add_index_accessor(&prim_indices, &format!("{}_idx", prefix));
 
         let mut attributes = std::collections::BTreeMap::new();
@@ -957,11 +956,8 @@ fn build_geom_primitives(
                 continue;
             }
 
-            let sub_indices = if should_reverse_winding {
-                reverse_winding(&geom.indices[start..end])
-            } else {
-                geom.indices[start..end].to_vec()
-            };
+            let mut sub_indices = geom.indices[start..end].to_vec();
+            ct.reverse_indices(&mut sub_indices);
             let idx_acc =
                 builder.add_index_accessor(&sub_indices, &format!("{}_idx_s{}", prefix, si));
 
@@ -1028,7 +1024,7 @@ fn build_geom_primitives(
 
 /// Build glTF node extras JSON for texuv/teximg/mtlopac/transform animation data.
 /// Returns None if the geom object has no animations of any kind.
-fn build_anim_extras(geom: &LmoGeomObject, geom_index: usize) -> gltf_json::extras::Extras {
+fn build_anim_extras(geom: &LmoGeomObject, geom_index: usize, ct: &CoordTransform) -> gltf_json::extras::Extras {
     let has_property_anims = !geom.texuv_anims.is_empty()
         || !geom.teximg_anims.is_empty()
         || !geom.mtlopac_anims.is_empty();
@@ -1120,7 +1116,7 @@ fn build_anim_extras(geom: &LmoGeomObject, geom_index: usize) -> gltf_json::extr
                 .translations
                 .iter()
                 .map(|t| {
-                    let yt = z_up_to_y_up_vec3(*t);
+                    let yt = ct.position(*t);
                     serde_json::json!([yt[0], yt[1], yt[2]])
                 })
                 .collect();
@@ -1128,7 +1124,7 @@ fn build_anim_extras(geom: &LmoGeomObject, geom_index: usize) -> gltf_json::extr
                 .rotations
                 .iter()
                 .map(|r| {
-                    let yr = z_up_to_y_up_quat(*r);
+                    let yr = ct.quaternion(*r);
                     serde_json::json!([yr[0], yr[1], yr[2], yr[3]])
                 })
                 .collect();
@@ -1151,8 +1147,8 @@ fn build_anim_extras(geom: &LmoGeomObject, geom_index: usize) -> gltf_json::extr
 /// Build glTF node extras combining animation data + pko_primitive_id.
 /// The primitive ID maps this mesh node to the PKO LMO subset index, used by
 /// Unity to identify which mesh pieces should fade (overhead roof fade system).
-fn build_node_extras(geom: &LmoGeomObject, geom_index: usize) -> gltf_json::extras::Extras {
-    let anim_extras = build_anim_extras(geom, geom_index);
+fn build_node_extras(geom: &LmoGeomObject, geom_index: usize, ct: &CoordTransform) -> gltf_json::extras::Extras {
+    let anim_extras = build_anim_extras(geom, geom_index, ct);
 
     // Start with existing anim extras or empty map
     let mut extras: serde_json::Map<String, serde_json::Value> = match &anim_extras {
@@ -1178,6 +1174,7 @@ const FRAME_RATE: f32 = 30.0;
 
 /// Transform a position vector from Z-up game space to Y-up glTF space.
 /// Uses the same mapping as `transform_position`: (x,y,z) → (x,z,y).
+#[allow(dead_code)] // Will be removed in Task 10
 fn z_up_to_y_up_vec3(v: [f32; 3]) -> [f32; 3] {
     [v[0], v[2], v[1]]
 }
@@ -1188,6 +1185,7 @@ fn z_up_to_y_up_vec3(v: [f32; 3]) -> [f32; 3] {
 /// The Y↔Z axis swap is a reflection (det = -1). For quaternions representing
 /// rotations, this means: swap Y↔Z components AND negate the rotation angle.
 /// Negating the angle negates the vector part: (qx,qy,qz,qw) → (-qx,-qz,-qy,qw).
+#[allow(dead_code)] // Will be removed in Task 10
 fn z_up_to_y_up_quat(q: [f32; 4]) -> [f32; 4] {
     [-q[0], -q[2], -q[1], q[3]]
 }
@@ -1203,6 +1201,7 @@ fn z_up_to_y_up_quat(q: [f32; 4]) -> [f32; 4] {
 fn build_animations(
     builder: &mut GltfBuilder,
     animated_nodes: &[(u32, &LmoGeomObject)],
+    ct: &CoordTransform,
 ) -> Vec<gltf_json::Animation> {
     if animated_nodes.is_empty() {
         return vec![];
@@ -1241,8 +1240,7 @@ fn build_animations(
             .translations
             .iter()
             .flat_map(|t| {
-                let yt = z_up_to_y_up_vec3(*t);
-                yt.into_iter()
+                ct.position(*t).into_iter()
             })
             .collect();
 
@@ -1260,8 +1258,7 @@ fn build_animations(
             .rotations
             .iter()
             .flat_map(|r| {
-                let yr = z_up_to_y_up_quat(*r);
-                yr.into_iter()
+                ct.quaternion(*r).into_iter()
             })
             .collect();
 
@@ -1359,6 +1356,7 @@ fn build_bone_skin(
     builder: &mut GltfBuilder,
     geom: &LmoGeomObject,
     prefix: &str,
+    ct: &CoordTransform,
 ) -> Option<BoneSkinData> {
     let bone_anim = geom.bone_animation.as_ref()?;
     if bone_anim.bones.is_empty() {
@@ -1380,8 +1378,8 @@ fn build_bone_skin(
         let (translation, rotation) = if bi < bone_anim.keyframes.len()
             && !bone_anim.keyframes[bi].translations.is_empty()
         {
-            let t = z_up_to_y_up_vec3(bone_anim.keyframes[bi].translations[0]);
-            let r = z_up_to_y_up_quat(bone_anim.keyframes[bi].rotations[0]);
+            let t = ct.position(bone_anim.keyframes[bi].translations[0]);
+            let r = ct.quaternion(bone_anim.keyframes[bi].rotations[0]);
             (Some(t), Some(r))
         } else {
             (None, None)
@@ -1486,7 +1484,7 @@ fn build_bone_skin(
             let trans_data: Vec<f32> = kf
                 .translations
                 .iter()
-                .flat_map(|t| z_up_to_y_up_vec3(*t).into_iter())
+                .flat_map(|t| ct.position(*t).into_iter())
                 .collect();
             let trans_acc = builder.add_accessor_f32(
                 &trans_data,
@@ -1521,7 +1519,7 @@ fn build_bone_skin(
             let rot_data: Vec<f32> = kf
                 .rotations
                 .iter()
-                .flat_map(|r| z_up_to_y_up_quat(*r).into_iter())
+                .flat_map(|r| ct.quaternion(*r).into_iter())
                 .collect();
             let rot_acc = builder.add_accessor_f32(
                 &rot_data,
@@ -1587,6 +1585,7 @@ fn process_lmo_geometry<'a>(
     model: &'a LmoModel,
     project_dir: &Path,
     texture_mode: TextureMode,
+    ct: &CoordTransform,
 ) -> Result<LmoGeomResult> {
     let mut child_indices = Vec::new();
     let mut animated_nodes: Vec<(u32, &'a LmoGeomObject)> = Vec::new();
@@ -1638,6 +1637,7 @@ fn process_lmo_geometry<'a>(
             &prefix,
             material_base_idx,
             has_animation || has_bone_animation,
+            ct,
         );
 
         if primitives.is_empty() {
@@ -1654,13 +1654,13 @@ fn process_lmo_geometry<'a>(
         });
 
         let skin_data = if has_bone_animation {
-            build_bone_skin(builder, geom, &prefix)
+            build_bone_skin(builder, geom, &prefix, ct)
         } else {
             None
         };
 
         let node_idx = builder.nodes.len() as u32;
-        let node_extras = build_node_extras(geom, gi);
+        let node_extras = build_node_extras(geom, gi, ct);
         builder.nodes.push(gltf_json::Node {
             mesh: Some(gltf_json::Index::new(mesh_idx)),
             name: Some(format!("geom_node_{}", gi)),
@@ -1706,7 +1706,7 @@ fn process_lmo_geometry<'a>(
         return Err(anyhow!("No renderable geometry in LMO file"));
     }
 
-    let mut animations = build_animations(builder, &animated_nodes);
+    let mut animations = build_animations(builder, &animated_nodes, ct);
 
     if !all_bone_channels.is_empty() {
         animations.push(gltf_json::Animation {
@@ -1744,8 +1744,9 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         return Err(anyhow!("LMO file has no geometry objects"));
     }
 
+    let ct = CoordTransform::new(ExportProfile::StandardGltf);
     let mut builder = GltfBuilder::new();
-    let geom_result = process_lmo_geometry(&mut builder, &model, project_dir, TextureMode::Embed)?;
+    let geom_result = process_lmo_geometry(&mut builder, &model, project_dir, TextureMode::Embed, &ct)?;
 
     let root = gltf_json::Root {
         asset: gltf_json::Asset {
@@ -1795,9 +1796,10 @@ pub fn build_glb_from_lmo(
         return Err(anyhow!("LMO file has no geometry objects"));
     }
 
+    let ct = CoordTransform::new(ExportProfile::StandardGltf);
     let mut builder = GltfBuilder::new();
     let texture_mode = if embed_textures { TextureMode::Embed } else { TextureMode::ExternalUri };
-    let geom_result = process_lmo_geometry(&mut builder, &model, project_dir, texture_mode)?;
+    let geom_result = process_lmo_geometry(&mut builder, &model, project_dir, texture_mode, &ct)?;
 
     // Convert data-URI buffers into a single GLB binary buffer, then append
     // image data as additional buffer views.
@@ -2001,6 +2003,7 @@ pub fn load_scene_models(
     unique_ids.sort_unstable();
     unique_ids.dedup();
 
+    let ct = CoordTransform::new(ExportProfile::StandardGltf);
     let mut builder = GltfBuilder::new();
     let mut model_mesh_map = HashMap::new();
 
@@ -2025,6 +2028,7 @@ pub fn load_scene_models(
             obj_id,
             &model,
             project_dir,
+            &ct,
         );
     }
 
@@ -2047,6 +2051,7 @@ fn add_model_to_builder(
     obj_id: u32,
     model: &LmoModel,
     project_dir: &Path,
+    ct: &CoordTransform,
 ) {
     // Merge all geometry objects into a single mesh with multiple primitives
     let mut all_primitives = Vec::new();
@@ -2087,7 +2092,7 @@ fn add_model_to_builder(
             }
         }
 
-        let prims = build_geom_primitives(builder, geom, &prefix, material_base_idx, false);
+        let prims = build_geom_primitives(builder, geom, &prefix, material_base_idx, false, ct);
         all_primitives.extend(prims);
     }
 
@@ -2431,7 +2436,8 @@ mod tests {
             build_lmo_material(&mut builder, mat, &format!("mat{}", mi), &tmp, TextureMode::Skip);
         }
 
-        let prims = build_geom_primitives(&mut builder, geom, "test", mat_base, false);
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let prims = build_geom_primitives(&mut builder, geom, "test", mat_base, false, &ct);
         assert_eq!(prims.len(), 1, "should have 1 primitive for 1 subset");
 
         // Verify accessor was created for positions
@@ -2793,7 +2799,8 @@ mod tests {
             .map(|(i, g)| (i as u32, g))
             .collect();
 
-        let anims = build_animations(&mut builder, &animated_nodes);
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let anims = build_animations(&mut builder, &animated_nodes, &ct);
 
         assert_eq!(anims.len(), 1, "should produce exactly one Animation");
         let anim = &anims[0];
@@ -2807,7 +2814,8 @@ mod tests {
         let mut builder = GltfBuilder::new();
         let animated_nodes: Vec<(u32, &LmoGeomObject)> = vec![];
 
-        let anims = build_animations(&mut builder, &animated_nodes);
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let anims = build_animations(&mut builder, &animated_nodes, &ct);
         assert!(anims.is_empty(), "static-only model should produce no animations");
     }
 
@@ -2816,7 +2824,8 @@ mod tests {
         let model = make_animated_test_model();
         let animated_geom = &model.geom_objects[1];
 
-        let extras = build_anim_extras(animated_geom, 5);
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let extras = build_anim_extras(animated_geom, 5, &ct);
         assert!(extras.is_some(), "animated geom should produce extras");
 
         let json_str = extras.unwrap().to_string();
@@ -2841,7 +2850,8 @@ mod tests {
         let model = make_test_model();
         let static_geom = &model.geom_objects[0];
 
-        let extras = build_anim_extras(static_geom, 0);
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let extras = build_anim_extras(static_geom, 0, &ct);
         assert!(extras.is_none(), "static geom with no anims should produce None");
     }
 
@@ -2851,7 +2861,8 @@ mod tests {
         let static_geom = &model.geom_objects[0];
 
         // Even a static geom with no anims should get pko_primitive_id
-        let extras = build_node_extras(static_geom, 7);
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let extras = build_node_extras(static_geom, 7, &ct);
         assert!(extras.is_some(), "node extras should always be Some (has pko_primitive_id)");
 
         let parsed: serde_json::Value = serde_json::from_str(&extras.unwrap().to_string()).unwrap();
@@ -2863,7 +2874,8 @@ mod tests {
         let model = make_animated_test_model();
         let animated_geom = &model.geom_objects[1];
 
-        let extras = build_node_extras(animated_geom, 3);
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let extras = build_node_extras(animated_geom, 3, &ct);
         assert!(extras.is_some());
 
         let parsed: serde_json::Value = serde_json::from_str(&extras.unwrap().to_string()).unwrap();
