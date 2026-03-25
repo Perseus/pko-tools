@@ -894,12 +894,16 @@ pub fn build_terrain_gltf(
                 None
             };
 
-            // Compute yaw rotation quaternion around Y axis
+            // Source Z-up position: (world_x, world_y, terrain_height + height_offset)
+            let pos = ct.position([obj.world_x, obj.world_y, terrain_h + obj.world_z]);
+
+            // Compute yaw rotation quaternion in Z-up space (rotation around Z = up axis)
             let rotation = if obj.yaw_angle != 0 {
                 let angle_rad = (obj.yaw_angle as f32).to_radians();
                 let half = angle_rad / 2.0;
-                // Quaternion: [x, y, z, w] for rotation around Y
-                Some([0.0, half.sin(), 0.0, half.cos()])
+                // Z-up quaternion: [x, y, z, w] for rotation around Z
+                let quat_z_up = [0.0, 0.0, half.sin(), half.cos()];
+                Some(ct.quaternion(quat_z_up))
             } else {
                 None
             };
@@ -907,9 +911,8 @@ pub fn build_terrain_gltf(
             nodes.push(gltf::Node {
                 name: Some(format!("obj_{}_{}", obj.obj_type, i)),
                 mesh: mesh_ref,
-                // Y-up: X = world_x, Y = terrain_height + height_offset, Z = world_y
-                translation: Some([obj.world_x, terrain_h + obj.world_z, obj.world_y]),
-                rotation: rotation.map(|r| gltf::scene::UnitQuaternion(r)),
+                translation: Some(pos),
+                rotation: rotation.map(gltf::scene::UnitQuaternion),
                 extras: Some(RawValue::from_string(extras_json)?),
                 ..Default::default()
             });
