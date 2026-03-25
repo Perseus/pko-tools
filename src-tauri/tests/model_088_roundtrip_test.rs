@@ -58,7 +58,7 @@ fn roundtrip_088_lab() {
         nodes: vec![],
     };
     let (skin, mut nodes) = original_lab.to_gltf_skin_and_nodes(&mut fields_to_aggregate);
-    original_lab.to_gltf_animations_and_sampler(&mut fields_to_aggregate, false);
+    original_lab.to_gltf_animations_and_sampler(&mut fields_to_aggregate, None);
 
     // Remove the "CharacterSkinnedMesh" node that to_gltf_skin_and_nodes adds at the end
     // since we're only testing LAB (skeleton) without mesh data
@@ -390,14 +390,14 @@ fn roundtrip_088_lgo() {
 
     // Export skeleton
     let (skin, nodes) = original_lab.to_gltf_skin_and_nodes(&mut fields_to_aggregate);
-    original_lab.to_gltf_animations_and_sampler(&mut fields_to_aggregate, false);
+    original_lab.to_gltf_animations_and_sampler(&mut fields_to_aggregate, None);
     fields_to_aggregate.skin.push(skin);
     fields_to_aggregate.nodes.extend(nodes);
 
     // Export mesh (use test fixtures dir as project_dir since it has texture/ subdirectory)
     let project_dir = test_dir.parent().unwrap();
     let primitive = original_lgo
-        .get_gltf_mesh_primitive(&project_dir, &mut fields_to_aggregate, false)
+        .get_gltf_mesh_primitive(&project_dir, &mut fields_to_aggregate, None)
         .expect("Failed to get mesh primitive");
 
     // Export helpers

@@ -231,13 +231,14 @@ fn export_characters(
     eprintln!("  Client dir: {}", client_dir.display());
     eprintln!("  Output dir: {}", output_dir.display());
 
-    let y_up = true; // glTF standard
+    use pko_tools_lib::math::coord_transform::{CoordTransform, ExportProfile};
+    let ct = CoordTransform::new(ExportProfile::StandardGltf);
     let mut exported = 0u32;
     let mut failed = 0u32;
 
     for character in &characters {
         let gltf_result = if split_animations {
-            character.get_gltf_json(client_dir, y_up)
+            character.get_gltf_json(client_dir, Some(&ct))
         } else {
             // Force legacy single-animation by temporarily hiding the data files.
             // Instead, we call get_gltf_json which auto-detects — to force no-split,
@@ -245,7 +246,7 @@ fn export_characters(
             // the default when data files exist. The --no-split flag would require
             // a code path change in get_gltf_json. Log a note.
             eprintln!("  [note] --no-split-animations not yet fully implemented, using auto-detect");
-            character.get_gltf_json(client_dir, y_up)
+            character.get_gltf_json(client_dir, Some(&ct))
         };
 
         match gltf_result {
