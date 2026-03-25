@@ -317,7 +317,7 @@ impl Item {
         }
 
         // Add helper nodes (dummy points, bounding spheres)
-        let helper_nodes = geom.get_gltf_helper_nodes_for_mesh(0, false);
+        let helper_nodes = geom.get_gltf_helper_nodes_for_mesh(0, None);
         let helper_start = all_nodes.len() as u32;
         for i in 0..helper_nodes.len() {
             scene_nodes.push(gltf::Index::new(helper_start + i as u32));
@@ -556,7 +556,7 @@ fn build_gltf_from_lgo_inner(
         scene_nodes.push(gltf::Index::new(overlay_node_idx));
     }
 
-    let helper_nodes = geom.get_gltf_helper_nodes_for_mesh(0, false);
+    let helper_nodes = geom.get_gltf_helper_nodes_for_mesh(0, None);
     let helper_start = all_nodes.len() as u32;
     for i in 0..helper_nodes.len() {
         scene_nodes.push(gltf::Index::new(helper_start + i as u32));
@@ -1501,8 +1501,8 @@ fn build_item_primitives_split(
     has_overlay: bool,
 ) -> SplitPrimitivesResult {
     // Shared vertex data (positions, normals, UVs, colors) — created once, referenced by all primitives
-    let pos_idx = mesh_info.get_vertex_position_accessor(fields, false);
-    let norm_idx = mesh_info.get_vertex_normal_accessor(fields, false);
+    let pos_idx = mesh_info.get_vertex_position_accessor(fields, None);
+    let norm_idx = mesh_info.get_vertex_normal_accessor(fields, None);
     let tc_idx = if !mesh_info.texcoord_seq[0].is_empty() {
         Some(mesh_info.get_vertex_texcoord_accessor(fields, 0))
     } else {
@@ -1548,7 +1548,7 @@ fn build_item_primitives_split(
 
     if mesh_info.subset_seq.is_empty() {
         // No subsets — single primitive with all indices and first material
-        let idx_acc = mesh_info.get_vertex_index_accessor(fields);
+        let idx_acc = mesh_info.get_vertex_index_accessor(fields, None);
         let mat_idx = build_single_material(project_dir, materials_vec.first(), fields);
         return SplitPrimitivesResult {
             main_primitives: vec![gltf::mesh::Primitive {

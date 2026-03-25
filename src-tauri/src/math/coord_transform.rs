@@ -107,6 +107,45 @@ impl CoordTransform {
         out
     }
 
+    /// Remap 4x4 transform matrix (column-major variant).
+    /// Input/output: column-major [f32; 16] as used by cgmath and glTF node matrices.
+    /// Same basis change as `matrix4()` but avoids row-major ↔ column-major reshaping.
+    pub fn matrix4_col_major(&self, m: [f32; 16]) -> [f32; 16] {
+        // Feed directly into cgmath (already column-major)
+        let mat = Matrix4::new(
+            m[0], m[1], m[2], m[3],
+            m[4], m[5], m[6], m[7],
+            m[8], m[9], m[10], m[11],
+            m[12], m[13], m[14], m[15],
+        );
+
+        let b = match self.profile {
+            ExportProfile::StandardGltf => Matrix4::new(
+                1.0,  0.0, 0.0, 0.0,
+                0.0,  0.0, -1.0, 0.0,
+                0.0,  1.0, 0.0, 0.0,
+                0.0,  0.0, 0.0, 1.0,
+            ),
+            ExportProfile::UnityGltfast => Matrix4::new(
+                -1.0, 0.0, 0.0, 0.0,
+                0.0,  0.0, 1.0, 0.0,
+                0.0,  1.0, 0.0, 0.0,
+                0.0,  0.0, 0.0, 1.0,
+            ),
+        };
+        let b_inv = b.transpose();
+
+        let result = b * mat * b_inv;
+
+        // Output column-major [f32; 16]
+        [
+            result[0][0], result[0][1], result[0][2], result[0][3],
+            result[1][0], result[1][1], result[1][2], result[1][3],
+            result[2][0], result[2][1], result[2][2], result[2][3],
+            result[3][0], result[3][1], result[3][2], result[3][3],
+        ]
+    }
+
     /// Reverse triangle winding: CW (D3D) -> CCW (glTF)
     /// Swaps indices 1 and 2 in each triangle.
     pub fn reverse_indices(&self, indices: &mut [u32]) {
