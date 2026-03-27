@@ -495,10 +495,13 @@ pub fn get_character_gltf_json(
     character_id: u32,
 ) -> anyhow::Result<String> {
     // Viewer path: single monolithic animation (fast), action picker uses frame ranges
+    // StandardGltf converts Z-up to Y-up. The Three.js viewer no longer applies its
+    // own -90° X rotation — the data arrives in Y-up and is rendered directly.
     let project = projects::project::Project::get_project(project_id)?;
     let character = get_character(project_id, character_id)?;
     let project_dir = project.project_directory.as_ref();
-    character.get_gltf_json_with_split(project_dir, None, false)
+    let ct = CoordTransform::new(ExportProfile::StandardGltf);
+    character.get_gltf_json_with_split(project_dir, Some(&ct), false)
 }
 
 pub fn get_character_gltf_json_with_options(

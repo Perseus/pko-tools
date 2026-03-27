@@ -548,10 +548,20 @@ impl LwBoneFile {
             ))
             .unwrap();
 
-            let mat = if let Some(ct) = ct {
-                ct.matrix4_col_major(dummy_info.mat.to_slice())
+            // dummy_info.mat is local to SKINNING SPACE (invBind * boneWorld),
+            // but as a child of the bone node, glTF computes boneGlobal * nodeMatrix.
+            // Pre-multiply by the parent bone's IBM to bridge the gap:
+            // nodeMatrix = invBind_parent * dummy_mat
+            // => boneGlobal * invBind * dummy_mat = correct skinning-space position
+            let combined = if let Some(&parent_idx) = bone_id_to_node_index.get(&dummy_info.parent_bone_id) {
+                LwMatrix44(self.invmat_seq[parent_idx].0 * dummy_info.mat.0)
             } else {
-                dummy_info.mat.to_slice()
+                dummy_info.mat.clone()
+            };
+            let mat = if let Some(ct) = ct {
+                ct.matrix4_col_major(combined.to_slice())
+            } else {
+                combined.to_slice()
             };
             let node = Node {
                 camera: None,

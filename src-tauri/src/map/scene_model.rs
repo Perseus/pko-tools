@@ -1371,17 +1371,14 @@ fn build_bone_skin(
     }
 
     // Build inverse bind matrices accessor.
-    // PKO IBMs are 4×4 row-major, row-vector convention (v' = v * M) in Z-up.
-    // glTF IBMs are 4×4 column-major, column-vector convention (v' = M * v) in Y-up.
-    // Conversion: IBM_gltf = S * IBM_pko^T * S, where S swaps Y↔Z.
-    // In element form: IBM_gltf[row][col] = IBM_pko[ymap[col]][ymap[row]]
-    // Writing column-major: iterate col outer, row inner.
-    let ymap = [0usize, 2, 1, 3]; // Y↔Z swap index mapping
+    // PKO IBMs are 4×4 row-major D3D matrices (row-vector convention).
+    // ct.matrix4() handles: D3D row-major → cgmath column-major → basis change → glTF column-major.
     let mut ibm_data: Vec<f32> = Vec::with_capacity(bone_num * 16);
     for ibm in &bone_anim.inv_bind_matrices {
+        let converted = ct.matrix4(*ibm);
         for col in 0..4 {
             for row in 0..4 {
-                ibm_data.push(ibm[ymap[col]][ymap[row]]);
+                ibm_data.push(converted[col][row]);
             }
         }
     }

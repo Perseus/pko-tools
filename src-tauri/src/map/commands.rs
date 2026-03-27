@@ -1,6 +1,5 @@
 use std::str::FromStr;
 
-use crate::math::coord_transform::ExportProfile;
 use crate::projects::project::Project;
 
 use super::terrain;
@@ -73,7 +72,7 @@ pub async fn export_map_for_unity(
         .join(&map_name);
 
     let mut options = super::ExportOptions::default();
-    options.export_profile = ExportProfile::StandardGltf;
+    // Use default profile (UnityGltfast) — Unity code expects positive X
     if let Some(dir) = shared_dir {
         options.shared_assets_dir = Some(std::path::PathBuf::from(dir));
     }
@@ -97,8 +96,8 @@ pub async fn batch_export_maps_for_unity(
         .join("exports")
         .join("map");
 
-    let mut options = super::ExportOptions::default();
-    options.export_profile = ExportProfile::StandardGltf;
+    let options = super::ExportOptions::default();
+    // Uses default profile (UnityGltfast) — Unity code expects positive X
 
     terrain::batch_export_for_unity(project.project_directory.as_ref(), &output_base_dir, &options)
         .map_err(|e| e.to_string())

@@ -84,7 +84,8 @@ pub struct ExportOptions {
     /// and the manifest references assets relative to this directory.
     pub shared_assets_dir: Option<std::path::PathBuf>,
     /// Coordinate transform profile. `UnityGltfast` pre-negates X for clean
-    /// Unity import; `StandardGltf` is spec-compliant for any glTF viewer.
+    /// Unity import (positive X after glTFast); `StandardGltf` is spec-compliant
+    /// for any glTF viewer.
     pub export_profile: ExportProfile,
 }
 

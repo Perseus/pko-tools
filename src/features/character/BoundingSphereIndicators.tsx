@@ -190,21 +190,13 @@ function BoundingSphere({ node, radius, center, id, meshIndex, skeleton, dummies
       return;
     }
 
-    // Update skeleton to compute boneMatrices for current frame
-    skeleton.update();
+    // The dummy node is a child of its parent bone, with its local matrix
+    // pre-multiplied by the parent's IBM. So dummyNode.matrixWorld already
+    // gives the correct skinning-space world position (boneGlobal * IBM * dummyMat).
+    dummyNode.updateWorldMatrix(true, false);
+    const dummyWorld = dummyNode.matrixWorld.clone();
 
-    // Get bone matrix from skeleton.boneMatrices (already includes inverse bind)
-    // boneMatrices is a Float32Array with 16 floats per matrix
-    const boneMatrix = new THREE.Matrix4().fromArray(skeleton.boneMatrices, boneIndex * 16);
-
-    // Get dummy's local matrix
-    dummyNode.updateMatrix();
-    const dummyLocal = dummyNode.matrix.clone();
-
-    // Compute: dummyWorld = dummyLocal * boneMatrix
-    const dummyWorld = new THREE.Matrix4().multiplyMatrices(dummyLocal, boneMatrix);
-
-    // Apply sphere center offset: sphereWorld = dummyWorld * translate(center)
+    // Apply sphere center offset in the dummy's local space
     const centerMatrix = new THREE.Matrix4().makeTranslation(center.x, center.y, center.z);
     const sphereWorld = new THREE.Matrix4().multiplyMatrices(dummyWorld, centerMatrix);
 

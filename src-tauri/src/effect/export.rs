@@ -236,12 +236,12 @@ mod tests {
         let ct = CoordTransform::new(ExportProfile::StandardGltf);
         remap_eff_for_export(&mut eff, &ct);
 
-        // StandardGltf extras_position(x,y,z) -> (x, z, -y) (same as position for Standard)
-        assert_eq!(eff.rota_vec, [1.0, 3.0, -2.0]);
-        assert_eq!(eff.sub_effects[0].frame_positions[0], [100.0, 300.0, -200.0]);
-        // extras_euler_angles(ax,ay,az) -> (ax, az, -ay)
-        assert_eq!(eff.sub_effects[0].frame_angles[0], [10.0, 30.0, -20.0]);
-        assert_eq!(eff.sub_effects[0].rota_loop_vec, [1.0, 3.0, -2.0, 4.0]);
+        // StandardGltf extras_position(x,y,z) -> (x, z, y)
+        assert_eq!(eff.rota_vec, [1.0, 3.0, 2.0]);
+        assert_eq!(eff.sub_effects[0].frame_positions[0], [100.0, 300.0, 200.0]);
+        // extras_euler_angles(ax,ay,az) -> (-ax, -az, -ay)
+        assert_eq!(eff.sub_effects[0].frame_angles[0], [-10.0, -30.0, -20.0]);
+        assert_eq!(eff.sub_effects[0].rota_loop_vec, [-1.0, -3.0, -2.0, 4.0]);
     }
 
     #[test]
@@ -293,11 +293,11 @@ mod tests {
         remap_par_for_export(&mut par, &ct);
 
         let sys = &par.systems[0];
-        // StandardGltf extras_position(x,y,z) -> (x, z, -y)
-        assert_eq!(sys.range, [1.0, 3.0, -2.0]);
-        assert_eq!(sys.direction, [0.0, 0.0, -1.0]);
+        // StandardGltf extras_position(x,y,z) -> (x, z, y)
+        assert_eq!(sys.range, [1.0, 3.0, 2.0]);
+        assert_eq!(sys.direction, [0.0, 0.0, 1.0]);
         assert_eq!(sys.acceleration, [0.0, -9.8, 0.0]);
-        assert_eq!(sys.offset, [10.0, 30.0, -20.0]);
+        assert_eq!(sys.offset, [10.0, 30.0, 20.0]);
     }
 
     /// Corpus test: export all .eff files to JSON and verify zero failures.

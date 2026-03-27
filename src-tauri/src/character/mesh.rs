@@ -497,7 +497,8 @@ impl CharacterMeshInfo {
         let buffer_view_index = fields_to_aggregate.buffer_view.len();
         let accessor_index = fields_to_aggregate.accessor.len();
 
-        // Reverse winding order when converting coordinates (CW D3D -> CCW glTF)
+        // Winding reversal handled by ct.reverse_indices() which is profile-aware:
+        // StandardGltf (det=-1) flips winding automatically, UnityGltfast needs manual reversal.
         let mut indices: Vec<u32> = self.index_seq.clone();
         if let Some(ct) = ct {
             ct.reverse_indices(&mut indices);
