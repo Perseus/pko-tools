@@ -128,7 +128,7 @@ fn main() {
         eprintln!("  Client dir: {}", client_dir.display());
         eprintln!("  Output dir: {}", output_dir.display());
 
-        match pko_tools_lib::map::shared::export_shared_assets(&client_dir, &output_dir) {
+        match pko_tools_lib::map::shared::export_shared_assets_with_profile(&client_dir, &output_dir, profile) {
             Ok(result) => {
                 eprintln!("Shared export complete!");
                 eprintln!("  Terrain textures: {}", result.total_terrain_textures);

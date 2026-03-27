@@ -21,11 +21,13 @@ impl CoordTransform {
         self.profile
     }
 
-    /// Remap position/translation: PKO Z-up LH -> Y-up
+    /// Remap position/translation: PKO LH Z-up -> Y-up
+    /// StandardGltf: (x, z, y) — det=-1, Y↔Z swap (LH→RH handedness change)
+    /// UnityGltfast: (-x, z, y) — det=+1, pre-negated X for glTFast
     pub fn position(&self, v: [f32; 3]) -> [f32; 3] {
         let [x, y, z] = v;
         match self.profile {
-            ExportProfile::StandardGltf => [x, z, -y],
+            ExportProfile::StandardGltf => [x, z, y],
             ExportProfile::UnityGltfast => [-x, z, y],
         }
     }
@@ -36,10 +38,15 @@ impl CoordTransform {
     }
 
     /// Remap quaternion rotation
+    /// StandardGltf: conjugation through B_std=(x,z,y), det=-1.
+    ///   [-x, -z, -y, w] — negate all imaginary + Y↔Z swap.
+    /// UnityGltfast: conjugation through B_unity=(-x,z,y), det=+1 (180° rotation).
+    ///   [-x, z, y, w] — negate X + Y↔Z swap (no negate on Y,Z).
+    ///   After glTFast (x,-y,-z,w) → [-x, -z, -y, w] in Unity — correct.
     pub fn quaternion(&self, q: [f32; 4]) -> [f32; 4] {
         let [x, y, z, w] = q;
         match self.profile {
-            ExportProfile::StandardGltf => [x, z, -y, w],
+            ExportProfile::StandardGltf => [-x, -z, -y, w],
             ExportProfile::UnityGltfast => [-x, z, y, w],
         }
     }
@@ -51,10 +58,13 @@ impl CoordTransform {
     /// - StandardGltf: same as position() — the viewer reads extras natively
     /// - UnityGltfast: final Unity space (x, z, y) — NOT pre-negated,
     ///   because glTFast won't negate extras the way it negates vertices
+    ///
+    /// Both profiles produce (x, z, y) because extras always target the
+    /// final coordinate space directly (no downstream tool processing).
     pub fn extras_position(&self, v: [f32; 3]) -> [f32; 3] {
         let [x, y, z] = v;
         match self.profile {
-            ExportProfile::StandardGltf => [x, z, -y],
+            ExportProfile::StandardGltf => [x, z, y],
             ExportProfile::UnityGltfast => [x, z, y],
         }
     }
@@ -64,7 +74,7 @@ impl CoordTransform {
     pub fn extras_quaternion(&self, q: [f32; 4]) -> [f32; 4] {
         let [x, y, z, w] = q;
         match self.profile {
-            ExportProfile::StandardGltf => [x, z, -y, w],
+            ExportProfile::StandardGltf => [-x, -z, -y, w],
             ExportProfile::UnityGltfast => [x, z, y, w],
         }
     }
@@ -74,7 +84,7 @@ impl CoordTransform {
     pub fn extras_euler_angles(&self, angles: [f32; 3]) -> [f32; 3] {
         let [ax, ay, az] = angles;
         match self.profile {
-            ExportProfile::StandardGltf => [ax, az, -ay],
+            ExportProfile::StandardGltf => [-ax, -az, -ay],
             ExportProfile::UnityGltfast => [ax, az, ay],
         }
     }
@@ -86,10 +96,12 @@ impl CoordTransform {
     }
 
     /// Remap euler angles (rotation amounts around axes)
+    /// StandardGltf: Y↔Z swap + negate all (handedness flip reverses rotations)
+    /// UnityGltfast: pre-negated X for glTFast + Y↔Z swap
     pub fn euler_angles(&self, angles: [f32; 3]) -> [f32; 3] {
         let [ax, ay, az] = angles;
         match self.profile {
-            ExportProfile::StandardGltf => [ax, az, -ay],
+            ExportProfile::StandardGltf => [-ax, -az, -ay],
             ExportProfile::UnityGltfast => [-ax, az, ay],
         }
     }
@@ -113,9 +125,9 @@ impl CoordTransform {
         // cgmath::Matrix4::new() is column-major
         let b = match self.profile {
             ExportProfile::StandardGltf => Matrix4::new(
-                // Maps (x,y,z) -> (x, z, -y)
+                // Maps (x,y,z) -> (x, z, y) — Y↔Z swap, det=-1 (LH→RH)
                 1.0,  0.0, 0.0, 0.0,
-                0.0,  0.0, -1.0, 0.0,
+                0.0,  0.0, 1.0, 0.0,
                 0.0,  1.0, 0.0, 0.0,
                 0.0,  0.0, 0.0, 1.0,
             ),
@@ -156,8 +168,9 @@ impl CoordTransform {
 
         let b = match self.profile {
             ExportProfile::StandardGltf => Matrix4::new(
+                // Maps (x,y,z) -> (x, z, y) — Y↔Z swap, det=-1 (LH→RH)
                 1.0,  0.0, 0.0, 0.0,
-                0.0,  0.0, -1.0, 0.0,
+                0.0,  0.0, 1.0, 0.0,
                 0.0,  1.0, 0.0, 0.0,
                 0.0,  0.0, 0.0, 1.0,
             ),
@@ -181,8 +194,10 @@ impl CoordTransform {
         ]
     }
 
-    /// Reverse triangle winding: CW (D3D) -> CCW (glTF)
+    /// Reverse triangle winding: CW (D3D) -> CCW (glTF).
     /// Swaps indices 1 and 2 in each triangle.
+    /// Required for both profiles — the position transform changes vertex positions
+    /// but not index order, so manual reversal is always needed.
     pub fn reverse_indices(&self, indices: &mut [u32]) {
         assert!(
             indices.len().is_multiple_of(3),
@@ -227,7 +242,7 @@ mod tests {
     #[test]
     fn standard_position_swizzle() {
         let ct = CoordTransform::new(ExportProfile::StandardGltf);
-        assert_arr3_eq(ct.position([1.0, 2.0, 3.0]), [1.0, 3.0, -2.0]);
+        assert_arr3_eq(ct.position([1.0, 2.0, 3.0]), [1.0, 3.0, 2.0]);
     }
 
     #[test]
@@ -262,35 +277,26 @@ mod tests {
         let ct = CoordTransform::new(ExportProfile::StandardGltf);
         assert_arr4_eq(
             ct.quaternion([0.1, 0.2, 0.3, 0.9]),
-            [0.1, 0.3, -0.2, 0.9],
+            [-0.1, -0.3, -0.2, 0.9],
         );
     }
 
     #[test]
     fn unity_quaternion_swizzle() {
         let ct = CoordTransform::new(ExportProfile::UnityGltfast);
+        // Conjugation through B_unity=(-x,z,y): [-x, z, y, w]
         assert_arr4_eq(
             ct.quaternion([0.1, 0.2, 0.3, 0.9]),
             [-0.1, 0.3, 0.2, 0.9],
         );
     }
 
-    #[test]
-    fn quaternion_position_consistency() {
-        // Rotate a position by a quaternion in source space then convert,
-        // vs convert both then rotate. Results must match within 1e-5.
-        let ct = CoordTransform::new(ExportProfile::StandardGltf);
-
-        // Source quaternion: ~45 deg around Z. glTF order [x,y,z,w].
-        let src_q = [0.0, 0.0, 0.383, 0.924];
-        let src_p = [1.0, 0.0, 0.0];
-
-        // Rotate in source space: q * p * q_conjugate
-        // cgmath Quaternion::new(w, x, y, z)
+    /// Helper: verify quaternion-position consistency for a given profile.
+    /// Rotate in source space then convert == convert both then rotate.
+    fn assert_quaternion_position_consistency(ct: &CoordTransform, src_q: [f32; 4], src_p: [f32; 3]) {
         let q = Quaternion::new(src_q[3], src_q[0], src_q[1], src_q[2]);
         let p = Vector3::new(src_p[0], src_p[1], src_p[2]);
 
-        // Manual quaternion rotation: q * p * q_conjugate
         let p_quat = Quaternion::new(0.0, p.x, p.y, p.z);
         let q_conj = Quaternion::new(q.s, -q.v.x, -q.v.y, -q.v.z);
         let rotated_quat = q * p_quat * q_conj;
@@ -310,6 +316,31 @@ mod tests {
         let path_b = [tgt_rotated.v.x, tgt_rotated.v.y, tgt_rotated.v.z];
 
         assert_arr3_eq(path_a, path_b);
+    }
+
+    #[test]
+    fn quaternion_position_consistency() {
+        // Rotate a position by a quaternion in source space then convert,
+        // vs convert both then rotate. Results must match within 1e-5.
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        // ~45 deg around Z
+        assert_quaternion_position_consistency(&ct, [0.0, 0.0, 0.383, 0.924], [1.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn unity_quaternion_position_consistency() {
+        // Same consistency check for UnityGltfast.
+        // After glTFast applies (x, -y, -z, w) to positions and quaternions,
+        // the result must equal the StandardGltf result. This is satisfied
+        // because both profiles use the same glTF-space quaternion formula.
+        let ct = CoordTransform::new(ExportProfile::UnityGltfast);
+
+        // ~45 deg around Z
+        assert_quaternion_position_consistency(&ct, [0.0, 0.0, 0.383, 0.924], [1.0, 0.0, 0.0]);
+        // ~30 deg around X (non-zero X component — the axis of the bug)
+        assert_quaternion_position_consistency(&ct, [0.259, 0.0, 0.0, 0.966], [0.0, 1.0, 0.0]);
+        // arbitrary rotation with all components non-zero
+        assert_quaternion_position_consistency(&ct, [0.1, 0.2, 0.3, 0.927], [0.5, -0.3, 0.8]);
     }
 
     #[test]
@@ -364,7 +395,7 @@ mod tests {
         let result = ct.matrix4(m);
 
         // Column-major output: translation is in column 3 (result[3])
-        // Standard profile: (x,y,z) -> (x, z, -y) so (10, 20, 30) -> (10, 30, -20)
+        // Standard profile: (x,y,z) -> (x, z, y) so (10, 20, 30) -> (10, 30, 20)
         assert!(
             approx_eq(result[3][0], 10.0),
             "tx: expected 10, got {}",
@@ -376,16 +407,15 @@ mod tests {
             result[3][1]
         );
         assert!(
-            approx_eq(result[3][2], -20.0),
-            "tz: expected -20, got {}",
+            approx_eq(result[3][2], 20.0),
+            "tz: expected 20, got {}",
             result[3][2]
         );
     }
 
     #[test]
-    fn matrix4_rotation_around_z_becomes_rotation_around_y() {
-        // 90 deg around Z in row-major D3D:
-        // cos90=0, sin90=1
+    fn matrix4_rotation_around_z_becomes_neg_rotation_around_y() {
+        // 90 deg CW around Z in row-major D3D (LH):
         // [ cos  sin  0  0]   [ 0  1  0  0]
         // [-sin  cos  0  0] = [-1  0  0  0]
         // [  0    0   1  0]   [ 0  0  1  0]
@@ -400,16 +430,13 @@ mod tests {
         let ct = CoordTransform::new(ExportProfile::StandardGltf);
         let result = ct.matrix4(m);
 
-        // 90 deg around Y in column-major glTF:
-        // [ cos  0  sin  0]   [ 0  0  1  0]
-        // [  0   1   0   0] = [ 0  1  0  0]
-        // [-sin  0  cos  0]   [-1  0  0  0]
-        // [  0   0   0   1]   [ 0  0  0  1]
-        // Column-major: col0=[0,0,-1,0], col1=[0,1,0,0], col2=[1,0,0,0], col3=[0,0,0,1]
+        // With det=-1 Y↔Z swap: PKO Z→glTF Y, so 90° CW around Z (LH)
+        // becomes -90° around Y (RH). Maps (x,y,z) -> (-z, y, x).
+        // Column-major: col0=[0,0,1,0], col1=[0,1,0,0], col2=[-1,0,0,0], col3=[0,0,0,1]
         let expected = [
-            [0.0, 0.0, -1.0, 0.0],
+            [0.0, 0.0, 1.0, 0.0],
             [0.0, 1.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0, 0.0],
             [0.0, 0.0, 0.0, 1.0],
         ];
 
@@ -417,7 +444,7 @@ mod tests {
             for row in 0..4 {
                 assert!(
                     approx_eq(result[col][row], expected[col][row]),
-                    "rot_z_to_y[{}][{}]: expected {}, got {}",
+                    "rot_z_to_neg_y[{}][{}]: expected {}, got {}",
                     col,
                     row,
                     expected[col][row],
@@ -439,7 +466,7 @@ mod tests {
     #[test]
     fn standard_euler_angles() {
         let ct = CoordTransform::new(ExportProfile::StandardGltf);
-        assert_arr3_eq(ct.euler_angles([0.1, 0.2, 0.3]), [0.1, 0.3, -0.2]);
+        assert_arr3_eq(ct.euler_angles([0.1, 0.2, 0.3]), [-0.1, -0.3, -0.2]);
     }
 
     #[test]
