@@ -33,7 +33,10 @@ use std::io::Seek;
 
 use crate::{
     character::GLTFFieldsToAggregate,
-    math::{self, matrix4_to_quaternion, LwMatrix43, LwMatrix44, LwQuaternion, LwVector3},
+    math::{
+        self, coord_transform::CoordTransform, matrix4_to_quaternion, LwMatrix43, LwMatrix44,
+        LwQuaternion, LwVector3,
+    },
 };
 
 // Constants
@@ -477,7 +480,7 @@ impl LwBoneFile {
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
     ) -> (Skin, Vec<Node>) {
         // Default to 1 mesh for backwards compatibility
-        self.to_gltf_skin_and_nodes_multi(fields_to_aggregate, 1, false)
+        self.to_gltf_skin_and_nodes_multi(fields_to_aggregate, 1, None)
     }
 
     /// Create glTF skin and nodes with support for multiple meshes
@@ -486,7 +489,7 @@ impl LwBoneFile {
         &self,
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
         mesh_count: usize,
-        y_up: bool,
+        ct: Option<&CoordTransform>,
     ) -> (Skin, Vec<Node>) {
         let bone_num = self.header.bone_num as usize;
         let mut bone_id_to_node_index = HashMap::new();
@@ -502,13 +505,13 @@ impl LwBoneFile {
                 .get_node_rot_and_translation_and_scale(node_index, 0)
                 .unwrap();
             let rot = LwQuaternion(rotation.0.normalize());
-            let rot_slice = if y_up {
-                math::z_up_to_y_up_quat(rot.to_slice())
+            let rot_slice = if let Some(ct) = ct {
+                ct.quaternion(rot.to_slice())
             } else {
                 rot.to_slice()
             };
-            let trans_slice = if y_up {
-                math::z_up_to_y_up_vec3(translation.to_slice())
+            let trans_slice = if let Some(ct) = ct {
+                ct.position(translation.to_slice())
             } else {
                 translation.to_slice()
             };
@@ -545,10 +548,20 @@ impl LwBoneFile {
             ))
             .unwrap();
 
-            let mat = if y_up {
-                math::z_up_to_y_up_mat4(dummy_info.mat.to_slice())
+            // dummy_info.mat is local to SKINNING SPACE (invBind * boneWorld),
+            // but as a child of the bone node, glTF computes boneGlobal * nodeMatrix.
+            // Pre-multiply by the parent bone's IBM to bridge the gap:
+            // nodeMatrix = invBind_parent * dummy_mat
+            // => boneGlobal * invBind * dummy_mat = correct skinning-space position
+            let combined = if let Some(&parent_idx) = bone_id_to_node_index.get(&dummy_info.parent_bone_id) {
+                LwMatrix44(self.invmat_seq[parent_idx].0 * dummy_info.mat.0)
             } else {
-                dummy_info.mat.to_slice()
+                dummy_info.mat.clone()
+            };
+            let mat = if let Some(ct) = ct {
+                ct.matrix4_col_major(combined.to_slice())
+            } else {
+                combined.to_slice()
             };
             let node = Node {
                 camera: None,
@@ -611,8 +624,8 @@ impl LwBoneFile {
 
         for i in 0..bone_num {
             let mut mat = self.invmat_seq[i].to_slice();
-            if y_up {
-                mat = math::z_up_to_y_up_mat4(mat);
+            if let Some(ct) = ct {
+                mat = ct.matrix4_col_major(mat);
             }
             let mat_bytes = bytemuck::cast_slice(&mat);
 
@@ -621,8 +634,8 @@ impl LwBoneFile {
 
         for i in 0..dummy_num {
             let mut mat = self.dummy_seq[i].mat.to_slice();
-            if y_up {
-                mat = math::z_up_to_y_up_mat4(mat);
+            if let Some(ct) = ct {
+                mat = ct.matrix4_col_major(mat);
             }
             let mat_bytes = bytemuck::cast_slice(&mat);
 
@@ -723,7 +736,7 @@ impl LwBoneFile {
     pub fn to_gltf_animations_and_sampler(
         &self,
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
-        y_up: bool,
+        ct: Option<&CoordTransform>,
     ) {
         let mut channels: Vec<Channel> = Vec::new();
         let mut samplers: Vec<Sampler> = Vec::new();
@@ -834,7 +847,7 @@ impl LwBoneFile {
                     frame_translation.0.y,
                     frame_translation.0.z,
                 ];
-                let t = if y_up { math::z_up_to_y_up_vec3(t) } else { t };
+                let t = if let Some(ct) = ct { ct.position(t) } else { t };
                 keyframe_translation_buffer_data.extend_from_slice(&t[0].to_le_bytes());
                 keyframe_translation_buffer_data.extend_from_slice(&t[1].to_le_bytes());
                 keyframe_translation_buffer_data.extend_from_slice(&t[2].to_le_bytes());
@@ -845,7 +858,7 @@ impl LwBoneFile {
                     frame_rotation.0.v.z,
                     frame_rotation.0.s,
                 ];
-                let r = if y_up { math::z_up_to_y_up_quat(r) } else { r };
+                let r = if let Some(ct) = ct { ct.quaternion(r) } else { r };
                 keyframe_rotation_buffer_data.extend_from_slice(&r[0].to_le_bytes());
                 keyframe_rotation_buffer_data.extend_from_slice(&r[1].to_le_bytes());
                 keyframe_rotation_buffer_data.extend_from_slice(&r[2].to_le_bytes());
@@ -1024,7 +1037,7 @@ impl LwBoneFile {
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
         actions: &[super::action_table::ActionRange],
         pose_table: Option<&super::pose_info::PoseTable>,
-        y_up: bool,
+        ct: Option<&CoordTransform>,
     ) {
         use super::pose_info::sanitize_action_name;
 
@@ -1158,7 +1171,7 @@ impl LwBoneFile {
 
                 for t in t_slice {
                     let v = [t.0.x, t.0.y, t.0.z];
-                    let v = if y_up { math::z_up_to_y_up_vec3(v) } else { v };
+                    let v = if let Some(ct) = ct { ct.position(v) } else { v };
                     trans_buf.extend_from_slice(&v[0].to_le_bytes());
                     trans_buf.extend_from_slice(&v[1].to_le_bytes());
                     trans_buf.extend_from_slice(&v[2].to_le_bytes());
@@ -1166,7 +1179,7 @@ impl LwBoneFile {
 
                 for r in r_slice {
                     let q = [r.0.v.x, r.0.v.y, r.0.v.z, r.0.s];
-                    let q = if y_up { math::z_up_to_y_up_quat(q) } else { q };
+                    let q = if let Some(ct) = ct { ct.quaternion(q) } else { q };
                     rot_buf.extend_from_slice(&q[0].to_le_bytes());
                     rot_buf.extend_from_slice(&q[1].to_le_bytes());
                     rot_buf.extend_from_slice(&q[2].to_le_bytes());

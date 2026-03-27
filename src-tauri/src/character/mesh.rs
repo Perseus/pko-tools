@@ -7,7 +7,7 @@ use std::{
 
 use crate::{
     d3d::{D3DPrimitiveType, D3DVertexElement9},
-    math::{self, LwVector2, LwVector3},
+    math::{self, coord_transform::CoordTransform, LwVector2, LwVector3},
 };
 use ::gltf::{
     json::{
@@ -247,7 +247,7 @@ impl CharacterMeshInfo {
     pub fn get_vertex_position_accessor(
         &self,
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
-        y_up: bool,
+        ct: Option<&CoordTransform>,
     ) -> usize {
         let mut vertex_position_buffer_data = vec![];
 
@@ -257,8 +257,8 @@ impl CharacterMeshInfo {
 
         for vertex in &self.vertex_seq {
             let pos = [vertex.0.x, vertex.0.y, vertex.0.z];
-            let pos = if y_up {
-                math::z_up_to_y_up_vec3(pos)
+            let pos = if let Some(ct) = ct {
+                ct.position(pos)
             } else {
                 pos
             };
@@ -288,7 +288,7 @@ impl CharacterMeshInfo {
 
         for vertex in &self.vertex_seq {
             let v = [vertex.0.x, vertex.0.y, vertex.0.z];
-            let v = if y_up { math::z_up_to_y_up_vec3(v) } else { v };
+            let v = if let Some(ct) = ct { ct.position(v) } else { v };
 
             if v[0] < min_x {
                 min_x = v[0];
@@ -353,7 +353,7 @@ impl CharacterMeshInfo {
     pub fn get_vertex_normal_accessor(
         &self,
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
-        y_up: bool,
+        ct: Option<&CoordTransform>,
     ) -> usize {
         let mut vertex_normal_buffer_data = vec![];
 
@@ -363,7 +363,7 @@ impl CharacterMeshInfo {
 
         for normal in &self.normal_seq {
             let n = [normal.0.x, normal.0.y, normal.0.z];
-            let n = if y_up { math::z_up_to_y_up_vec3(n) } else { n };
+            let n = if let Some(ct) = ct { ct.normal(n) } else { n };
             vertex_normal_buffer_data.extend_from_slice(&n[0].to_le_bytes());
             vertex_normal_buffer_data.extend_from_slice(&n[1].to_le_bytes());
             vertex_normal_buffer_data.extend_from_slice(&n[2].to_le_bytes());
@@ -490,13 +490,21 @@ impl CharacterMeshInfo {
     pub fn get_vertex_index_accessor(
         &self,
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
+        ct: Option<&CoordTransform>,
     ) -> usize {
         let mut indices_buffer_data = vec![];
         let buffer_index = fields_to_aggregate.buffer.len();
         let buffer_view_index = fields_to_aggregate.buffer_view.len();
         let accessor_index = fields_to_aggregate.accessor.len();
 
-        for index in &self.index_seq {
+        // Winding reversal handled by ct.reverse_indices() which is profile-aware:
+        // StandardGltf (det=-1) flips winding automatically, UnityGltfast needs manual reversal.
+        let mut indices: Vec<u32> = self.index_seq.clone();
+        if let Some(ct) = ct {
+            ct.reverse_indices(&mut indices);
+        }
+
+        for index in &indices {
             indices_buffer_data.extend_from_slice(&index.to_le_bytes());
         }
 
@@ -928,13 +936,13 @@ impl CharacterMeshInfo {
         project_dir: &Path,
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
         materials: &Option<Vec<CharMaterialTextureInfo>>,
-        y_up: bool,
+        ct: Option<&CoordTransform>,
     ) -> gltf::json::mesh::Primitive {
         let vertex_position_accessor_index =
-            self.get_vertex_position_accessor(fields_to_aggregate, y_up);
+            self.get_vertex_position_accessor(fields_to_aggregate, ct);
         let vertex_normal_accessor_index =
-            self.get_vertex_normal_accessor(fields_to_aggregate, y_up);
-        let vertex_indices_accessor_index = self.get_vertex_index_accessor(fields_to_aggregate);
+            self.get_vertex_normal_accessor(fields_to_aggregate, ct);
+        let vertex_indices_accessor_index = self.get_vertex_index_accessor(fields_to_aggregate, ct);
 
         let material_index =
             self.get_material_accessor(project_dir, fields_to_aggregate, materials);
@@ -1007,9 +1015,9 @@ impl CharacterMeshInfo {
         project_dir: &Path,
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
         materials: &Option<Vec<CharMaterialTextureInfo>>,
-        y_up: bool,
+        ct: Option<&CoordTransform>,
     ) -> gltf::json::mesh::Primitive {
-        self.get_primitive(project_dir, fields_to_aggregate, materials, y_up)
+        self.get_primitive(project_dir, fields_to_aggregate, materials, ct)
     }
 
     fn add_node_to_hierarchy(
@@ -2106,9 +2114,9 @@ impl CharacterMeshInfo {
         &self,
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
     ) -> gltf::json::mesh::Primitive {
-        let pos_idx = self.get_vertex_position_accessor(fields_to_aggregate, false);
-        let norm_idx = self.get_vertex_normal_accessor(fields_to_aggregate, false);
-        let idx_idx = self.get_vertex_index_accessor(fields_to_aggregate);
+        let pos_idx = self.get_vertex_position_accessor(fields_to_aggregate, None);
+        let norm_idx = self.get_vertex_normal_accessor(fields_to_aggregate, None);
+        let idx_idx = self.get_vertex_index_accessor(fields_to_aggregate, None);
 
         let mut attributes = BTreeMap::from([
             (

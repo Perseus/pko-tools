@@ -1,3 +1,5 @@
+pub mod coord_transform;
+
 use binrw::binrw;
 use cgmath::{InnerSpace, Matrix3, Matrix4, Quaternion, Vector2, Vector3};
 use serde::Serialize;
@@ -394,44 +396,6 @@ pub struct LwPlane {
 pub struct LwSphere {
     pub c: LwVector3,
     pub r: f32,
-}
-
-/// Convert a position/direction vector from Z-up to Y-up coordinate system.
-/// Z-up (x, y, z) → Y-up (x, z, -y)
-pub fn z_up_to_y_up_vec3(v: [f32; 3]) -> [f32; 3] {
-    [v[0], v[2], -v[1]]
-}
-
-/// Convert a quaternion from Z-up to Y-up coordinate system.
-/// In (w,x,y,z) notation: (w, x, y, z) → (w, x, z, -y)
-/// Input/output uses glTF [x, y, z, w] order.
-pub fn z_up_to_y_up_quat(q: [f32; 4]) -> [f32; 4] {
-    // q is [x, y, z, w] in glTF order
-    // Swizzle the vector part: (x, y, z) → (x, z, -y)
-    [q[0], q[2], -q[1], q[3]]
-}
-
-/// Convert a column-major 4x4 matrix from Z-up to Y-up coordinate system.
-/// M' = B * M * B^(-1) where B maps (x,y,z) → (x,z,-y).
-pub fn z_up_to_y_up_mat4(m: [f32; 16]) -> [f32; 16] {
-    let mat = Matrix4::new(
-        m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13],
-        m[14], m[15],
-    );
-
-    // B: maps (x,y,z) → (x,z,-y)
-    let b = Matrix4::new(
-        1.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
-    );
-
-    // B^(-1): maps (x,y,z) → (x,-z,y) (orthogonal, so B^(-1) = B^T)
-    let b_inv = Matrix4::new(
-        1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
-    );
-
-    let result = b * mat * b_inv;
-
-    LwMatrix44(result).to_slice()
 }
 
 #[cfg(test)]

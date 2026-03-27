@@ -7,7 +7,7 @@ use crate::{
     animation::character::LW_INVALID_INDEX,
     character::{helper::BoundingSphereInfo, texture},
     d3d::D3DRenderStateType,
-    math::{self, LwMatrix44, LwSphere, LwVector3},
+    math::{self, coord_transform::CoordTransform, LwMatrix44, LwSphere, LwVector3},
 };
 use ::gltf::{buffer, image, Document};
 use binrw::{binwrite, BinWrite};
@@ -200,14 +200,14 @@ impl CharacterGeometricModel {
         &self,
         project_dir: &Path,
         fields_to_aggregate: &mut GLTFFieldsToAggregate,
-        y_up: bool,
+        ct: Option<&CoordTransform>,
     ) -> anyhow::Result<gltf::mesh::Primitive> {
         let mesh_info = self.mesh_info.as_ref().unwrap();
         let primitive = mesh_info.get_gltf_primitive(
             project_dir,
             fields_to_aggregate,
             &self.material_seq,
-            y_up,
+            ct,
         );
 
         Ok(primitive)
@@ -215,7 +215,7 @@ impl CharacterGeometricModel {
 
     /// Get glTF helper nodes (dummy points, bounding spheres, etc.)
     /// The mesh_index parameter associates these helpers with a specific mesh for round-trip support
-    pub fn get_gltf_helper_nodes_for_mesh(&self, mesh_index: usize, y_up: bool) -> Vec<gltf::Node> {
+    pub fn get_gltf_helper_nodes_for_mesh(&self, mesh_index: usize, ct: Option<&CoordTransform>) -> Vec<gltf::Node> {
         if self.helper_data.is_none() {
             return vec![];
         }
@@ -225,13 +225,13 @@ impl CharacterGeometricModel {
 
         // Dummy points (attachment points for effects, items, etc.)
         for dummy in helper_data.dummy_seq.iter() {
-            let mat = if y_up {
-                math::z_up_to_y_up_mat4(dummy.mat.to_slice())
+            let mat = if let Some(ct) = ct {
+                ct.matrix4_col_major(dummy.mat.to_slice())
             } else {
                 dummy.mat.to_slice()
             };
-            let mat_local = if y_up {
-                math::z_up_to_y_up_mat4(dummy.mat_local.to_slice())
+            let mat_local = if let Some(ct) = ct {
+                ct.matrix4_col_major(dummy.mat_local.to_slice())
             } else {
                 dummy.mat_local.to_slice()
             };
@@ -261,8 +261,8 @@ impl CharacterGeometricModel {
 
         // Bounding spheres
         for bsphere in helper_data.bsphere_seq.iter() {
-            let mat = if y_up {
-                math::z_up_to_y_up_mat4(bsphere.mat.to_slice())
+            let mat = if let Some(ct) = ct {
+                ct.matrix4_col_major(bsphere.mat.to_slice())
             } else {
                 bsphere.mat.to_slice()
             };
@@ -271,8 +271,8 @@ impl CharacterGeometricModel {
                 bsphere.sphere.c.0.y,
                 bsphere.sphere.c.0.z,
             ];
-            let center = if y_up {
-                math::z_up_to_y_up_vec3(center)
+            let center = if let Some(ct) = ct {
+                ct.extras_position(center)
             } else {
                 center
             };
@@ -311,7 +311,7 @@ impl CharacterGeometricModel {
 
     /// Get glTF helper nodes without mesh association (legacy, uses mesh_index 0)
     pub fn get_gltf_helper_nodes(&self) -> Vec<gltf::Node> {
-        self.get_gltf_helper_nodes_for_mesh(0, false)
+        self.get_gltf_helper_nodes_for_mesh(0, None)
     }
 
     pub fn from_file(file_path: PathBuf) -> anyhow::Result<Self> {

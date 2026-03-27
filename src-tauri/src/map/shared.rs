@@ -10,6 +10,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::effect::model::EffFile;
+use crate::math::coord_transform::{CoordTransform, ExportProfile};
 
 /// Result of a shared asset export.
 #[derive(Debug, Serialize, Deserialize)]
@@ -36,6 +37,10 @@ pub struct SharedExportResult {
 /// 5. Water textures (ocean_h_01-30)
 /// 6. shared_manifest.json (inventory of everything exported)
 pub fn export_shared_assets(project_dir: &Path, output_dir: &Path) -> Result<SharedExportResult> {
+    export_shared_assets_with_profile(project_dir, output_dir, ExportProfile::UnityGltfast)
+}
+
+pub fn export_shared_assets_with_profile(project_dir: &Path, output_dir: &Path, profile: ExportProfile) -> Result<SharedExportResult> {
     // Atomic write: export to temp dir, rename on success
     let temp_dir = output_dir.with_file_name(format!(
         ".shared-export-tmp-{}",
@@ -46,7 +51,7 @@ pub fn export_shared_assets(project_dir: &Path, output_dir: &Path) -> Result<Sha
     }
     std::fs::create_dir_all(&temp_dir)?;
 
-    let result = export_shared_assets_inner(project_dir, &temp_dir);
+    let result = export_shared_assets_inner(project_dir, &temp_dir, profile);
 
     match result {
         Ok(mut export_result) => {
@@ -71,7 +76,7 @@ pub fn export_shared_assets(project_dir: &Path, output_dir: &Path) -> Result<Sha
     }
 }
 
-fn export_shared_assets_inner(project_dir: &Path, output_dir: &Path) -> Result<SharedExportResult> {
+fn export_shared_assets_inner(project_dir: &Path, output_dir: &Path, profile: ExportProfile) -> Result<SharedExportResult> {
     // 1. Export ALL terrain textures
     eprintln!("[shared] Exporting all terrain textures...");
     let terrain_textures =
@@ -89,8 +94,9 @@ fn export_shared_assets_inner(project_dir: &Path, output_dir: &Path) -> Result<S
 
     // 3. Export ALL buildings from sceneobjinfo.bin
     eprintln!("[shared] Exporting all buildings...");
+    let ct = CoordTransform::new(profile);
     let (buildings_exported, buildings_failed, buildings_manifest) =
-        export_all_buildings(project_dir, output_dir, true)?;
+        export_all_buildings(project_dir, output_dir, true, &ct)?;
 
     // 4. Export ALL effect textures
     eprintln!("[shared] Exporting all effect textures...");
@@ -170,8 +176,9 @@ pub fn export_shared_assets_v2(project_dir: &Path, output_dir: &Path) -> Result<
 
 fn export_shared_assets_v2_inner(project_dir: &Path, output_dir: &Path) -> Result<SharedExportResult> {
     // Export buildings with external texture URIs (no embedded textures)
+    let ct = CoordTransform::new(ExportProfile::UnityGltfast);
     let (buildings_exported, buildings_failed, _manifest) =
-        export_all_buildings(project_dir, output_dir, false)?;
+        export_all_buildings(project_dir, output_dir, false, &ct)?;
 
     // Export effect textures + water textures (same as v1)
     let effect_textures = export_all_effect_textures(project_dir, output_dir);
@@ -436,6 +443,7 @@ fn export_all_buildings(
     project_dir: &Path,
     output_dir: &Path,
     embed_textures: bool,
+    ct: &CoordTransform,
 ) -> Result<(u32, u32, serde_json::Map<String, serde_json::Value>)> {
     let obj_info = super::scene_obj_info::load_scene_obj_info(project_dir)
         .context("Failed to load sceneobjinfo.bin")?;
@@ -489,7 +497,7 @@ fn export_all_buildings(
         let out_filename = format!("{}.glb", stem);
         let out_path = buildings_dir.join(&out_filename);
 
-        match super::scene_model::build_glb_from_lmo(&lmo_path, project_dir, embed_textures) {
+        match super::scene_model::build_glb_from_lmo(&lmo_path, project_dir, embed_textures, ct) {
             Ok((json, bin)) => {
                 if let Err(e) = super::glb::write_glb(&json, &bin, &out_path) {
                     eprintln!(
