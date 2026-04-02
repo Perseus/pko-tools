@@ -56,9 +56,6 @@ impl KStruct for PkoLab {
         let _prc = self_rc._parent.get_value().borrow().upgrade();
         let _r = _rrc.as_ref().unwrap();
         *self_rc.version.borrow_mut() = _io.read_u4le()?.into();
-        if !(((*self_rc.version() as i32) >= (4096 as i32))) {
-            return Err(KError::ValidationFailed(ValidationFailedError { kind: ValidationKind::LessThan, src_path: "/seq/0".to_string() }));
-        }
         let t = Self::read_into::<_, PkoLab_BoneInfoHeader>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
         *self_rc.header.borrow_mut() = t;
         *self_rc.base_seq.borrow_mut() = Vec::new();
