@@ -18,9 +18,7 @@ doc: |
 seq:
   - id: version
     type: u4
-    valid:
-      min: 4096
-    doc: "Format version (must be >= 0x1000 = 4096 for .lab files)"
+    doc: "Format version. Most files are >= 0x1000 (4096), but some older files have version=1 with identical layout."
   - id: header
     type: bone_info_header
     doc: "Skeleton/animation header with bone counts and keyframe format"
