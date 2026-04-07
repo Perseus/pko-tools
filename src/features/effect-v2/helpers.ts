@@ -68,13 +68,6 @@ export function deriveParName(effName: string): string {
   return effName.replace(/\.eff$/i, ".par");
 }
 
-/**
- * Convert a PKO world-space vector (Z-up, right-handed) to Three.js space (Y-up, right-handed).
- * Rule: (x, y, z) → (x, z, y)  — swap Y↔Z, leave X unchanged.
- */
-export function pkoVec([x, y, z]: Vec3): Vec3 {
-  return [x, z, y];
-}
 
 /**
  * Find the current keyframe for global playback time t.
