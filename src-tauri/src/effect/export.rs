@@ -20,32 +20,24 @@ pub fn remap_eff_for_export(eff: &mut EffFile, _ct: &CoordTransform) {
     // jjry03.eff positions). No Y↔Z swap needed. Apply Y-negate to simulate
     // the weapon bone attachment flip (effects are designed to be viewed on
     // downward-pointing weapons).
-    fn flip_y_pos(v: [f32; 3]) -> [f32; 3] {
+    fn flip_y(v: [f32; 3]) -> [f32; 3] {
         [v[0], -v[1], v[2]]
-    }
-    fn flip_y_angle(v: [f32; 3]) -> [f32; 3] {
-        // angle[0]=pitch (Rx), angle[1]=yaw (Ry), angle[2]=roll (Rz)
-        // Flipping Y negates pitch and yaw, keeps roll
-        [-v[0], -v[1], v[2]]
     }
 
     // Root rotation axis
-    eff.rota_vec = flip_y_pos(eff.rota_vec);
+    eff.rota_vec = flip_y(eff.rota_vec);
 
     for sub in &mut eff.sub_effects {
         // Position keyframes
         for pos in &mut sub.frame_positions {
-            *pos = flip_y_pos(*pos);
+            *pos = flip_y(*pos);
         }
         // Sizes — no change (local scale factors)
+        // Angles — no change (rotation still applied in D3D convention via "YXZ" Euler)
 
-        // Angle keyframes
-        for angle in &mut sub.frame_angles {
-            *angle = flip_y_angle(*angle);
-        }
         // rota_loop_vec: [x, y, z, speed] — xyz is a rotation axis direction
         let rlv = sub.rota_loop_vec;
-        let flipped = flip_y_pos([rlv[0], rlv[1], rlv[2]]);
+        let flipped = flip_y([rlv[0], rlv[1], rlv[2]]);
         sub.rota_loop_vec = [flipped[0], flipped[1], flipped[2], rlv[3]];
     }
 }
@@ -251,10 +243,10 @@ mod tests {
         // Y-flip: (x,y,z) -> (x,-y,z) for positions and direction vectors
         assert_eq!(eff.rota_vec, [1.0, -2.0, 3.0]);
         assert_eq!(eff.sub_effects[0].frame_positions[0], [100.0, -200.0, 300.0]);
-        // Sizes unchanged (local scale factors)
+        // Sizes unchanged
         assert_eq!(eff.sub_effects[0].frame_sizes[0], [1.0, 2.0, 3.0]);
-        // Angles: pitch and yaw negated, roll unchanged
-        assert_eq!(eff.sub_effects[0].frame_angles[0], [-10.0, -20.0, 30.0]);
+        // Angles unchanged (rotation convention preserved)
+        assert_eq!(eff.sub_effects[0].frame_angles[0], [10.0, 20.0, 30.0]);
         // rota_loop_vec xyz direction vector: Y negated
         assert_eq!(eff.sub_effects[0].rota_loop_vec, [1.0, -2.0, 3.0, 4.0]);
     }

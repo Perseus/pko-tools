@@ -8,8 +8,9 @@ use crate::character::{model::CharacterGeometricModel, GLTFFieldsToAggregate};
 use crate::projects::project::Project;
 
 use super::{model::EffFile, model::ParFile, scan_effects_directory, scan_par_files};
-use super::export::remap_eff_for_export;
-use crate::math::coord_transform::CoordTransform;
+// Effect data is in D3D Y-up LH space. Transforms match Three.js "YXZ" Euler
+// directly (confirmed via matrix comparison with game client debug dumps).
+// No coordinate conversion needed for standalone viewing.
 
 #[tauri::command]
 pub async fn list_effects(project_id: String) -> Result<Vec<String>, String> {
@@ -34,10 +35,7 @@ pub async fn load_effect(project_id: String, effect_name: String) -> Result<EffF
             e
         )
     })?;
-    let mut eff = EffFile::from_bytes(&bytes).map_err(|e| e.to_string())?;
-    let ct = CoordTransform::new();
-    remap_eff_for_export(&mut eff, &ct);
-    Ok(eff)
+    EffFile::from_bytes(&bytes).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
