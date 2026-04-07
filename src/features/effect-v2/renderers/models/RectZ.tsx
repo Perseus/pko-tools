@@ -5,7 +5,7 @@ import { Billboard } from "@react-three/drei";
 import * as THREE from "three";
 import { useTimeSource } from "../../TimeContext";
 import { useEffectTexture } from "../../useEffectTexture";
-import { getMappedUVs, getThreeJSBlendFromD3D, findFrame, lerp, d3dYawPitchRollQuaternion } from "../../helpers";
+import { getMappedUVs, getThreeJSBlendFromD3D, findFrame, lerp } from "../../helpers";
 
 interface RectZProps {
   subEffect: SubEffect;
@@ -13,15 +13,15 @@ interface RectZProps {
 }
 
 /**
- * "RectZ" mesh — a vertical quad in the YZ plane.
+ * "RectZ" mesh -- a vertical quad in the YZ plane.
  *
  * C++ CreateRectZ() vertices (PKO Z-up):
  *   (0, 0, 0), (0, 0, 1), (0, 1, 1), (0, 1, 0)
  *
- * After Y↔Z swap for Three.js (Y-up):
+ * Remapped to Three.js (Y-up):
  *   (0, 0, 0), (0, 1, 0), (0, 1, 1), (0, 0, 1)
  *
- * This is a vertical quad in the YZ plane at X=0.
+ * Vertical quad in the YZ plane at X=0.
  */
 export function RectZ({ subEffect, onComplete }: RectZProps) {
   const meshRef = useRef<THREE.Mesh>(null);
@@ -45,12 +45,13 @@ export function RectZ({ subEffect, onComplete }: RectZProps) {
 
   const geometry = useMemo(() => {
     const geo = new THREE.BufferGeometry();
-    // C++ CreateRectZ: YZ plane (PKO Z-up native)
+    // C++ CreateRectZ: YZ plane in PKO. Remapped to Three.js Y-up:
+    // PKO (0,0,0),(0,0,1),(0,1,1),(0,1,0) -> Three.js (0,0,0),(0,1,0),(0,1,1),(0,0,1)
     const positions = new Float32Array([
       0, 0, 0,
-      0, 0, 1,
-      0, 1, 1,
       0, 1, 0,
+      0, 1, 1,
+      0, 0, 1,
     ]);
     const indices = new Uint16Array([0, 1, 2, 0, 2, 3]);
     geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
@@ -129,11 +130,11 @@ export function RectZ({ subEffect, onComplete }: RectZProps) {
     if (frameAngles.length > frameIdx) {
       const a0 = frameAngles[frameIdx];
       const a1 = frameAngles[nextIdx] ?? a0;
-      d3dYawPitchRollQuaternion(
+      meshRef.current.rotation.set(
         lerp(a0[0], a1[0], frac),
         lerp(a0[1], a1[1], frac),
         lerp(a0[2], a1[2], frac),
-        meshRef.current.quaternion
+        "YXZ",
       );
     }
   });
