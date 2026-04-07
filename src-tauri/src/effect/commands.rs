@@ -8,6 +8,8 @@ use crate::character::{model::CharacterGeometricModel, GLTFFieldsToAggregate};
 use crate::projects::project::Project;
 
 use super::{model::EffFile, model::ParFile, scan_effects_directory, scan_par_files};
+use super::export::{remap_eff_for_export, remap_par_for_export};
+use crate::math::coord_transform::CoordTransform;
 
 #[tauri::command]
 pub async fn list_effects(project_id: String) -> Result<Vec<String>, String> {
@@ -32,9 +34,14 @@ pub async fn load_effect(project_id: String, effect_name: String) -> Result<EffF
             e
         )
     })?;
-    EffFile::from_bytes(&bytes).map_err(|e| e.to_string())
+    let mut eff = EffFile::from_bytes(&bytes).map_err(|e| e.to_string())?;
+    let ct = CoordTransform::new();
+    remap_eff_for_export(&mut eff, &ct);
+    Ok(eff)
 }
 
+// TODO: Inverse remap (Y-up -> PKO Z-up) needed here once editing is supported.
+// The frontend now holds Y-up data; writing it directly produces incorrect PKO files.
 #[tauri::command]
 pub async fn save_effect(
     project_id: String,
@@ -80,7 +87,10 @@ pub async fn load_par_file(
             e
         )
     })?;
-    ParFile::from_bytes(&bytes).map_err(|e| e.to_string())
+    let mut par = ParFile::from_bytes(&bytes).map_err(|e| e.to_string())?;
+    let ct = CoordTransform::new();
+    remap_par_for_export(&mut par, &ct);
+    Ok(par)
 }
 
 #[tauri::command]
@@ -487,6 +497,8 @@ fn resolve_case_insensitive(path: &str) -> Option<std::path::PathBuf> {
     None
 }
 
+// TODO: Inverse remap (Y-up -> PKO Z-up) needed here once editing is supported.
+// The frontend now holds Y-up data; writing it directly produces incorrect PKO files.
 #[tauri::command]
 pub async fn save_particles(
     project_id: String,
