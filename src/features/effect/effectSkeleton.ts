@@ -64,9 +64,9 @@ export type BuildEffectSkeletonOptions = {
 const _vec = new THREE.Vector3();
 const _quat = new THREE.Quaternion();
 const _scale = new THREE.Vector3();
-const _euler = new THREE.Euler(0, 0, 0, "YXZ");
+const _euler = new THREE.Euler(0, 0, 0, "ZXY");
 const _matrix = new THREE.Matrix4();
-const _subEuler = new THREE.Euler(0, 0, 0, "YXZ");
+const _subEuler = new THREE.Euler(0, 0, 0, "ZXY");
 const _subQuat = new THREE.Quaternion();
 const _subLoopQuat = new THREE.Quaternion();
 const _subAxis = new THREE.Vector3();
@@ -229,7 +229,7 @@ function resolveSubEffectState(
   const rotation = interpolated.angle;
   const scale = interpolated.size;
 
-  _subEuler.set(rotation[0], rotation[1], rotation[2], "YXZ");
+  _subEuler.set(rotation[0], rotation[1], rotation[2], "ZXY");
   _subQuat.setFromEuler(_subEuler);
 
   if (subEffect.rotaLoop) {
@@ -299,7 +299,7 @@ function decomposeMatrix(matrix: THREE.Matrix4): {
 }
 
 function eulerFromQuaternion(quaternion: THREE.Quaternion): Vec3 {
-  _euler.setFromQuaternion(quaternion, "YXZ");
+  _euler.setFromQuaternion(quaternion, "ZXY");
   return [_euler.x, _euler.y, _euler.z];
 }
 

@@ -183,7 +183,7 @@ export default function HitSubEffect({
         interpolated.angle[0],
         interpolated.angle[1],
         interpolated.angle[2],
-        "YXZ",
+        "ZXY",
       )}
       scale={interpolated.size}
     >

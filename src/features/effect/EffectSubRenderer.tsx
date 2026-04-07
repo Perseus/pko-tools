@@ -443,7 +443,7 @@ export default function EffectSubRenderer({
     <mesh
       ref={meshRef}
       position={position}
-      rotation={new THREE.Euler(angle[0], angle[1], angle[2], "YXZ")}
+      rotation={new THREE.Euler(angle[0], angle[1], angle[2], "ZXY")}
       scale={size}
     >
       {builtinGeometry && <primitive object={builtinGeometry} attach="geometry" />}

@@ -32,9 +32,9 @@ pub fn remap_eff_for_export(eff: &mut EffFile, ct: &CoordTransform) {
         for angle in &mut sub.frame_angles {
             *angle = ct.extras_euler_angles(*angle);
         }
-        // rota_loop_vec: [x, y, z, w] — remap xyz as euler angles, keep w
+        // rota_loop_vec: [x, y, z, speed] — xyz is a rotation AXIS (direction vector), not euler angles
         let rlv = sub.rota_loop_vec;
-        let remapped = ct.extras_euler_angles([rlv[0], rlv[1], rlv[2]]);
+        let remapped = ct.extras_position([rlv[0], rlv[1], rlv[2]]);
         sub.rota_loop_vec = [remapped[0], remapped[1], remapped[2], rlv[3]];
     }
 }
@@ -247,7 +247,8 @@ mod tests {
         assert_eq!(eff.sub_effects[0].frame_sizes[0], [1.0, 3.0, 2.0]);
         // extras_euler_angles(ax,ay,az) -> (-ax, -az, -ay)
         assert_eq!(eff.sub_effects[0].frame_angles[0], [-10.0, -30.0, -20.0]);
-        assert_eq!(eff.sub_effects[0].rota_loop_vec, [-1.0, -3.0, -2.0, 4.0]);
+        // rota_loop_vec xyz is a direction vector → extras_position (no negation)
+        assert_eq!(eff.sub_effects[0].rota_loop_vec, [1.0, 3.0, 2.0, 4.0]);
     }
 
     #[test]
