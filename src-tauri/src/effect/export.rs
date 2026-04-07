@@ -11,7 +11,7 @@ use std::path::Path;
 use anyhow::Result;
 
 use super::model::{EffFile, ParFile};
-use crate::math::coord_transform::{CoordTransform, ExportProfile};
+use crate::math::coord_transform::CoordTransform;
 
 /// Apply coordinate remap to an `EffFile` for export.
 /// Modifies position and angle keyframe arrays in-place.
@@ -23,6 +23,10 @@ pub fn remap_eff_for_export(eff: &mut EffFile, ct: &CoordTransform) {
         // Position keyframes
         for pos in &mut sub.frame_positions {
             *pos = ct.extras_position(*pos);
+        }
+        // Size/scale keyframes (axis swap, no negation — same as position)
+        for size in &mut sub.frame_sizes {
+            *size = ct.extras_position(*size);
         }
         // Angle keyframes (euler angles)
         for angle in &mut sub.frame_angles {
@@ -68,7 +72,7 @@ pub fn remap_par_for_export(par: &mut ParFile, ct: &CoordTransform) {
 
 /// Export a single .eff file as JSON with coordinate remap applied.
 pub fn export_eff_json(data: &[u8]) -> Result<String> {
-    let ct = CoordTransform::new(ExportProfile::StandardGltf);
+    let ct = CoordTransform::new();
     let mut eff = EffFile::from_bytes(data)?;
     remap_eff_for_export(&mut eff, &ct);
     Ok(serde_json::to_string_pretty(&eff)?)
@@ -76,7 +80,7 @@ pub fn export_eff_json(data: &[u8]) -> Result<String> {
 
 /// Export a single .par file as JSON with coordinate remap applied.
 pub fn export_par_json(data: &[u8]) -> Result<String> {
-    let ct = CoordTransform::new(ExportProfile::StandardGltf);
+    let ct = CoordTransform::new();
     let mut par = ParFile::from_bytes(data)?;
     remap_par_for_export(&mut par, &ct);
     Ok(serde_json::to_string_pretty(&par)?)
@@ -201,7 +205,7 @@ mod tests {
                 length: 1.0,
                 frame_count: 1,
                 frame_times: vec![0.0],
-                frame_sizes: vec![[1.0, 1.0, 1.0]],
+                frame_sizes: vec![[1.0, 2.0, 3.0]],
                 frame_angles: vec![[10.0, 20.0, 30.0]],
                 frame_positions: vec![[100.0, 200.0, 300.0]],
                 frame_colors: vec![[1.0, 1.0, 1.0, 1.0]],
@@ -233,12 +237,14 @@ mod tests {
             }],
         };
 
-        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let ct = CoordTransform::new();
         remap_eff_for_export(&mut eff, &ct);
 
         // StandardGltf extras_position(x,y,z) -> (x, z, y)
         assert_eq!(eff.rota_vec, [1.0, 3.0, 2.0]);
         assert_eq!(eff.sub_effects[0].frame_positions[0], [100.0, 300.0, 200.0]);
+        // extras_position(x,y,z) -> (x, z, y) for sizes too
+        assert_eq!(eff.sub_effects[0].frame_sizes[0], [1.0, 3.0, 2.0]);
         // extras_euler_angles(ax,ay,az) -> (-ax, -az, -ay)
         assert_eq!(eff.sub_effects[0].frame_angles[0], [-10.0, -30.0, -20.0]);
         assert_eq!(eff.sub_effects[0].rota_loop_vec, [-1.0, -3.0, -2.0, 4.0]);
@@ -289,7 +295,7 @@ mod tests {
             models: vec![],
         };
 
-        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let ct = CoordTransform::new();
         remap_par_for_export(&mut par, &ct);
 
         let sys = &par.systems[0];
