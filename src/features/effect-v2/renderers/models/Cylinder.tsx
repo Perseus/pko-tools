@@ -1,7 +1,7 @@
 import { SubEffect } from '@/types/effect';
 import { useMemo, useRef, useEffect } from 'react';
 import * as THREE from 'three';
-import { getThreeJSBlendFromD3D, findFrame, lerp, pkoVec } from '../../helpers';
+import { getThreeJSBlendFromD3D, findFrame, lerp } from '../../helpers';
 import { useEffectTexture } from '../../useEffectTexture';
 import { useFrame } from '@react-three/fiber';
 import { useTimeSource } from '../../TimeContext';
@@ -119,8 +119,8 @@ export function Cylinder({ subEffect, onComplete }: CylinderProps) {
 
     // Interpolate position
     if (framePositions.length > frameIdx) {
-      const p0 = pkoVec(framePositions[frameIdx]);
-      const p1 = pkoVec(framePositions[nextFrameIdx] ?? p0);
+      const p0 = framePositions[frameIdx];
+      const p1 = framePositions[nextFrameIdx] ?? p0;
       meshRef.current.position.set(
         lerp(p0[0], p1[0], frac),
         lerp(p0[1], p1[1], frac),
@@ -129,8 +129,8 @@ export function Cylinder({ subEffect, onComplete }: CylinderProps) {
     }
     // Interpolate scale
     if (frameSizes.length > frameIdx) {
-      const s0 = pkoVec(frameSizes[frameIdx]);
-      const s1 = pkoVec(frameSizes[nextFrameIdx] ?? s0);
+      const s0 = frameSizes[frameIdx];
+      const s1 = frameSizes[nextFrameIdx] ?? s0;
       meshRef.current.scale.set(
         lerp(s0[0], s1[0], frac),
         lerp(s0[1], s1[1], frac),
@@ -151,7 +151,14 @@ export function Cylinder({ subEffect, onComplete }: CylinderProps) {
 
     // Interpolate angles
     if (frameAngles.length > frameIdx) {
-      // TODO: interp angles
+      const a0 = frameAngles[frameIdx];
+      const a1 = frameAngles[nextFrameIdx] ?? a0;
+      meshRef.current.rotation.set(
+        lerp(a0[0], a1[0], frac),
+        lerp(a0[1], a1[1], frac),
+        lerp(a0[2], a1[2], frac),
+        "YXZ",
+      );
     }
   });
 
