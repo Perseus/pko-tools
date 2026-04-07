@@ -5,7 +5,7 @@ import { Billboard } from "@react-three/drei";
 import * as THREE from "three";
 import { useTimeSource } from "../../TimeContext";
 import { useEffectTexture } from "../../useEffectTexture";
-import { getMappedUVs, getThreeJSBlendFromD3D, findFrame, lerp, d3dYawPitchRollQuaternion } from "../../helpers";
+import { getMappedUVs, getThreeJSBlendFromD3D, findFrame, lerp } from "../../helpers";
 
 interface RectProps {
   subEffect: SubEffect;
@@ -13,16 +13,16 @@ interface RectProps {
 }
 
 /**
- * "Rect" mesh — a vertical quad that extends forward from the origin.
+ * "Rect" mesh -- a vertical quad that extends upward from the origin.
  *
  * C++ CreateRect() vertices (PKO Z-up):
  *   (-0.5, 0, 0), (-0.5, 0, 1), (0.5, 0, 1), (0.5, 0, 0)
  *
- * After Y↔Z swap for Three.js (Y-up):
+ * Remapped to Three.js (Y-up):
  *   (-0.5, 0, 0), (-0.5, 1, 0), (0.5, 1, 0), (0.5, 0, 0)
  *
- * This is a vertical quad in the XY plane, bottom edge at Y=0, top at Y=1,
- * centered on X. Used for projectile effects that face forward.
+ * Vertical quad in the XY plane, bottom edge at Y=0, top at Y=1,
+ * centered on X.
  */
 export function Rect({ subEffect, onComplete }: RectProps) {
   const meshRef = useRef<THREE.Mesh>(null);
@@ -46,11 +46,12 @@ export function Rect({ subEffect, onComplete }: RectProps) {
 
   const geometry = useMemo(() => {
     const geo = new THREE.BufferGeometry();
-    // C++ CreateRect: XZ plane, extends along +Z (PKO Z-up native)
+    // C++ CreateRect: vertical quad extending upward.
+    // PKO (Z-up): XZ plane along +Z. Three.js (Y-up): XY plane along +Y.
     const positions = new Float32Array([
       -0.5, 0, 0,
-      -0.5, 0, 1,
-       0.5, 0, 1,
+      -0.5, 1, 0,
+       0.5, 1, 0,
        0.5, 0, 0,
     ]);
     const indices = new Uint16Array([0, 1, 2, 0, 2, 3]);
@@ -131,11 +132,11 @@ export function Rect({ subEffect, onComplete }: RectProps) {
     if (frameAngles.length > frameIdx) {
       const a0 = frameAngles[frameIdx];
       const a1 = frameAngles[nextIdx] ?? a0;
-      d3dYawPitchRollQuaternion(
+      meshRef.current.rotation.set(
         lerp(a0[0], a1[0], frac),
         lerp(a0[1], a1[1], frac),
         lerp(a0[2], a1[2], frac),
-        meshRef.current.quaternion
+        "YXZ",
       );
     }
   });
