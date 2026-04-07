@@ -163,6 +163,15 @@ fn convert_geometry_to_char_model(
         None
     };
 
+    // Animation
+    let (animation, bone_animation, texuv_anims, teximg_anims, mtlopac_anims) =
+        if header.anim_size > 0 {
+            let anim_section = chunk.anim().clone();
+            crate::map::lmo_loader::convert_anim_section(&anim_section, version)?
+        } else {
+            (None, None, Vec::new(), Vec::new(), Vec::new())
+        };
+
     Ok(CharacterGeometricModel {
         version,
         header,
@@ -171,6 +180,11 @@ fn convert_geometry_to_char_model(
         material_seq,
         mesh_info,
         helper_data,
+        animation,
+        bone_animation,
+        texuv_anims,
+        teximg_anims,
+        mtlopac_anims,
     })
 }
 

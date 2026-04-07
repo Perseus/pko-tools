@@ -690,7 +690,7 @@ fn parse_old_rs_from_raw_bytes(raw: &[u8]) -> MaterialRenderState {
 // ============================================================================
 
 #[allow(clippy::type_complexity)]
-fn convert_anim_section(
+pub(crate) fn convert_anim_section(
     section: &OptRc<PkoLmo_AnimSection>,
     file_version: u32,
 ) -> Result<(Option<LmoAnimData>, Option<LmoBoneAnimData>, Vec<LmoTexUvAnim>, Vec<LmoTexImgAnim>, Vec<LmoMtlOpacAnim>)> {
@@ -810,7 +810,7 @@ fn convert_anim_section(
 
 /// Convert Kaitai bone animation data to domain types.
 /// Matches lwAnimDataBone::Load() and lwAnimDataBone::GetValue() from the PKO engine.
-fn convert_bone_animation(
+pub(crate) fn convert_bone_animation(
     anim_bone: &OptRc<PkoLmo_AnimDataBone>,
     file_version: u32,
 ) -> Result<Option<LmoBoneAnimData>> {
@@ -934,7 +934,7 @@ fn convert_bone_animation(
     }))
 }
 
-fn convert_matrix_animation(
+pub(crate) fn convert_matrix_animation(
     anim_mat: &OptRc<PkoLmo_AnimDataMatrix>,
 ) -> Result<Option<LmoAnimData>> {
     let frame_num = *anim_mat.frame_num();
@@ -973,7 +973,7 @@ fn extract_matrix44(mat: &OptRc<PkoLmo_Matrix44>) -> [[f32; 4]; 4] {
     ]
 }
 
-fn extract_matrix44_array(mat: &OptRc<PkoLmo_Matrix44>) -> [[f32; 4]; 4] {
+pub(crate) fn extract_matrix44_array(mat: &OptRc<PkoLmo_Matrix44>) -> [[f32; 4]; 4] {
     extract_matrix44(mat)
 }
 
@@ -992,7 +992,7 @@ fn decompose_matrix44_to_tq(raw: &[[f32; 4]; 4]) -> ([f32; 3], [f32; 4]) {
     (translation, q)
 }
 
-fn extract_matrix43_array(mat: &OptRc<PkoLmo_Matrix43>) -> [f32; 12] {
+pub(crate) fn extract_matrix43_array(mat: &OptRc<PkoLmo_Matrix43>) -> [f32; 12] {
     [
         *mat.m11(), *mat.m12(), *mat.m13(),
         *mat.m21(), *mat.m22(), *mat.m23(),

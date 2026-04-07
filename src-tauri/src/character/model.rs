@@ -7,6 +7,7 @@ use crate::{
     animation::character::LW_INVALID_INDEX,
     character::{helper::BoundingSphereInfo, texture},
     d3d::D3DRenderStateType,
+    map::lmo_types::{LmoAnimData, LmoBoneAnimData, LmoTexUvAnim, LmoTexImgAnim, LmoMtlOpacAnim},
     math::{self, coord_transform::CoordTransform, LwMatrix44, LwSphere, LwVector3},
 };
 use ::gltf::{buffer, image, Document};
@@ -193,6 +194,18 @@ pub struct CharacterGeometricModel {
     pub mesh_info: Option<CharacterMeshInfo>,
 
     pub helper_data: Option<HelperData>,
+
+    // Embedded animation data (parsed from anim_section when anim_size > 0)
+    #[bw(ignore)]
+    pub animation: Option<LmoAnimData>,
+    #[bw(ignore)]
+    pub bone_animation: Option<LmoBoneAnimData>,
+    #[bw(ignore)]
+    pub texuv_anims: Vec<LmoTexUvAnim>,
+    #[bw(ignore)]
+    pub teximg_anims: Vec<LmoTexImgAnim>,
+    #[bw(ignore)]
+    pub mtlopac_anims: Vec<LmoMtlOpacAnim>,
 }
 
 impl CharacterGeometricModel {
@@ -454,6 +467,11 @@ impl CharacterGeometricModel {
             material_seq: Some(material_seq),
             mesh_info: Some(mesh),
             helper_data: Some(helper_data),
+            animation: None,
+            bone_animation: None,
+            texuv_anims: Vec::new(),
+            teximg_anims: Vec::new(),
+            mtlopac_anims: Vec::new(),
         })
     }
 
@@ -531,6 +549,11 @@ impl CharacterGeometricModel {
             material_seq: Some(material_seq),
             mesh_info: Some(mesh),
             helper_data: Some(helper_data),
+            animation: None,
+            bone_animation: None,
+            texuv_anims: Vec::new(),
+            teximg_anims: Vec::new(),
+            mtlopac_anims: Vec::new(),
         })
     }
 
@@ -600,6 +623,11 @@ impl CharacterGeometricModel {
             material_seq: Some(material_seq),
             mesh_info: Some(mesh),
             helper_data: Some(helper_data),
+            animation: None,
+            bone_animation: None,
+            texuv_anims: Vec::new(),
+            teximg_anims: Vec::new(),
+            mtlopac_anims: Vec::new(),
         })
     }
 
