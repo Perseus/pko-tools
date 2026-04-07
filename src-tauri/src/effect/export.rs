@@ -15,26 +15,38 @@ use crate::math::coord_transform::CoordTransform;
 
 /// Apply coordinate remap to an `EffFile` for export.
 /// Modifies position and angle keyframe arrays in-place.
-pub fn remap_eff_for_export(eff: &mut EffFile, ct: &CoordTransform) {
-    // Root rotation axis (direction vector)
-    eff.rota_vec = ct.extras_position(eff.rota_vec);
+pub fn remap_eff_for_export(eff: &mut EffFile, _ct: &CoordTransform) {
+    // Effect data is in D3D's native Y-up LH space (confirmed by inspecting
+    // jjry03.eff positions). No Y↔Z swap needed. Apply Y-negate to simulate
+    // the weapon bone attachment flip (effects are designed to be viewed on
+    // downward-pointing weapons).
+    fn flip_y_pos(v: [f32; 3]) -> [f32; 3] {
+        [v[0], -v[1], v[2]]
+    }
+    fn flip_y_angle(v: [f32; 3]) -> [f32; 3] {
+        // angle[0]=pitch (Rx), angle[1]=yaw (Ry), angle[2]=roll (Rz)
+        // Flipping Y negates pitch and yaw, keeps roll
+        [-v[0], -v[1], v[2]]
+    }
+
+    // Root rotation axis
+    eff.rota_vec = flip_y_pos(eff.rota_vec);
 
     for sub in &mut eff.sub_effects {
         // Position keyframes
         for pos in &mut sub.frame_positions {
-            *pos = ct.extras_position(*pos);
+            *pos = flip_y_pos(*pos);
         }
-        // Size/scale keyframes (axis swap, no negation — same as position)
-        for size in &mut sub.frame_sizes {
-            *size = ct.extras_position(*size);
+        // Sizes — no change (local scale factors)
+
+        // Angle keyframes
+        for angle in &mut sub.frame_angles {
+            *angle = flip_y_angle(*angle);
         }
-        // Angle keyframes — left as-is (no transform).
-        // The frontend applies them with the original "YXZ" Euler order
-        // which matches D3D's YawPitchRoll convention directly.
-        // rota_loop_vec: [x, y, z, speed] — xyz is a rotation AXIS (direction vector), not euler angles
+        // rota_loop_vec: [x, y, z, speed] — xyz is a rotation axis direction
         let rlv = sub.rota_loop_vec;
-        let remapped = ct.extras_position([rlv[0], rlv[1], rlv[2]]);
-        sub.rota_loop_vec = [remapped[0], remapped[1], remapped[2], rlv[3]];
+        let flipped = flip_y_pos([rlv[0], rlv[1], rlv[2]]);
+        sub.rota_loop_vec = [flipped[0], flipped[1], flipped[2], rlv[3]];
     }
 }
 
@@ -236,15 +248,15 @@ mod tests {
         let ct = CoordTransform::new();
         remap_eff_for_export(&mut eff, &ct);
 
-        // StandardGltf extras_position(x,y,z) -> (x, z, y)
-        assert_eq!(eff.rota_vec, [1.0, 3.0, 2.0]);
-        assert_eq!(eff.sub_effects[0].frame_positions[0], [100.0, 300.0, 200.0]);
-        // extras_position(x,y,z) -> (x, z, y) for sizes too
-        assert_eq!(eff.sub_effects[0].frame_sizes[0], [1.0, 3.0, 2.0]);
-        // Euler angles: left as-is (no transform)
-        assert_eq!(eff.sub_effects[0].frame_angles[0], [10.0, 20.0, 30.0]);
-        // rota_loop_vec xyz is a direction vector → extras_position (no negation)
-        assert_eq!(eff.sub_effects[0].rota_loop_vec, [1.0, 3.0, 2.0, 4.0]);
+        // Y-flip: (x,y,z) -> (x,-y,z) for positions and direction vectors
+        assert_eq!(eff.rota_vec, [1.0, -2.0, 3.0]);
+        assert_eq!(eff.sub_effects[0].frame_positions[0], [100.0, -200.0, 300.0]);
+        // Sizes unchanged (local scale factors)
+        assert_eq!(eff.sub_effects[0].frame_sizes[0], [1.0, 2.0, 3.0]);
+        // Angles: pitch and yaw negated, roll unchanged
+        assert_eq!(eff.sub_effects[0].frame_angles[0], [-10.0, -20.0, 30.0]);
+        // rota_loop_vec xyz direction vector: Y negated
+        assert_eq!(eff.sub_effects[0].rota_loop_vec, [1.0, -2.0, 3.0, 4.0]);
     }
 
     #[test]
