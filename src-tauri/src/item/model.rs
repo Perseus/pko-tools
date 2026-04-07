@@ -1429,6 +1429,11 @@ pub fn import_item_from_gltf(
         material_seq: Some(material_seq),
         mesh_info: Some(mesh_info),
         helper_data: Some(helper_data),
+        animation: None,
+        bone_animation: None,
+        texuv_anims: Vec::new(),
+        teximg_anims: Vec::new(),
+        mtlopac_anims: Vec::new(),
     };
 
     let model_dir = output_dir.join("model");
