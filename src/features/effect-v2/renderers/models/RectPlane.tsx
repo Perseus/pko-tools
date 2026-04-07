@@ -5,7 +5,7 @@ import { Billboard } from "@react-three/drei";
 import * as THREE from "three";
 import { useTimeSource } from "../../TimeContext";
 import { useEffectTexture } from "../../useEffectTexture";
-import { getMappedUVs, getThreeJSBlendFromD3D, findFrame, lerp, pkoVec } from "../../helpers";
+import { getMappedUVs, getThreeJSBlendFromD3D, findFrame, lerp } from "../../helpers";
 
 interface RectPlaneProps {
   subEffect: SubEffect;
@@ -88,8 +88,8 @@ export function RectPlane({ subEffect, onComplete }: RectPlaneProps) {
 
     // Interpolate position
     if (framePositions.length > frameIdx) {
-      const p0 = pkoVec(framePositions[frameIdx]);
-      const p1 = pkoVec(framePositions[nextIdx] ?? p0);
+      const p0 = framePositions[frameIdx];
+      const p1 = framePositions[nextIdx] ?? p0;
       meshRef.current.position.set(
         lerp(p0[0], p1[0], frac),
         lerp(p0[1], p1[1], frac),
@@ -99,8 +99,8 @@ export function RectPlane({ subEffect, onComplete }: RectPlaneProps) {
 
     // Interpolate scale
     if (frameSizes.length > frameIdx) {
-      const s0 = pkoVec(frameSizes[frameIdx]);
-      const s1 = pkoVec(frameSizes[nextIdx] ?? s0);
+      const s0 = frameSizes[frameIdx];
+      const s1 = frameSizes[nextIdx] ?? s0;
       meshRef.current.scale.set(
         lerp(s0[0], s1[0], frac),
         lerp(s0[1], s1[1], frac),
@@ -121,12 +121,13 @@ export function RectPlane({ subEffect, onComplete }: RectPlaneProps) {
     }
 
     if (frameAngles.length > frameIdx) {
-      const a0 = pkoVec(frameAngles[frameIdx]);
-      const a1 = pkoVec(frameAngles[nextIdx] ?? a0);
+      const a0 = frameAngles[frameIdx];
+      const a1 = frameAngles[nextIdx] ?? a0;
       meshRef.current.rotation.set(
         lerp(a0[0], a1[0], frac),
         lerp(a0[1], a1[1], frac),
         lerp(a0[2], a1[2], frac),
+        "YXZ",
       );
     }
   });
