@@ -1,5 +1,4 @@
 import { BlendingDstFactor, DstAlphaFactor, DstColorFactor, OneFactor, OneMinusDstAlphaFactor, OneMinusDstColorFactor, OneMinusSrcAlphaFactor, OneMinusSrcColorFactor, SrcAlphaFactor, SrcColorFactor, ZeroFactor } from "three";
-import type { Vec3 } from "@/types/effect";
 
 /*
   **
