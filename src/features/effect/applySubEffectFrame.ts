@@ -16,7 +16,7 @@ import { interpolateUVCoords, getTexListFrameIndex } from "@/features/effect/ani
 // Reusable scratch objects — module-level to avoid per-frame GC
 const _rotaAxis = new THREE.Vector3();
 const _rotaQuat = new THREE.Quaternion();
-const _baseEuler = new THREE.Euler(0, 0, 0, "ZXY");
+const _baseEuler = new THREE.Euler(0, 0, 0, "YXZ");
 
 export interface SubEffectFrameOptions {
   sub: SubEffect;
@@ -75,14 +75,14 @@ export function applySubEffectFrame(
     if (_rotaAxis.lengthSq() > 0.0001) {
       _rotaAxis.normalize();
       const rotaAngle = playbackTime * speed;
-      _baseEuler.set(angle[0], angle[1], angle[2], "ZXY");
+      _baseEuler.set(angle[0], angle[1], angle[2], "YXZ");
       mesh.quaternion.setFromEuler(_baseEuler);
       _rotaQuat.setFromAxisAngle(_rotaAxis, rotaAngle);
       mesh.quaternion.premultiply(_rotaQuat);
     }
   } else if (!isBillboard) {
     // Non-billboard, no rotaLoop: just apply frame rotation
-    _baseEuler.set(angle[0], angle[1], angle[2], "ZXY");
+    _baseEuler.set(angle[0], angle[1], angle[2], "YXZ");
     mesh.quaternion.setFromEuler(_baseEuler);
   }
 
