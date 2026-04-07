@@ -28,12 +28,9 @@ pub fn remap_eff_for_export(eff: &mut EffFile, ct: &CoordTransform) {
         for size in &mut sub.frame_sizes {
             *size = ct.extras_position(*size);
         }
-        // Angle keyframes — swap Y↔Z (same as position), NO negation.
-        // D3D LH rotation Raxis(θ) basis-changed through B(Y↔Z) gives
-        // the same angle θ on the swapped axis, so only reorder components.
-        for angle in &mut sub.frame_angles {
-            *angle = ct.extras_position(*angle);
-        }
+        // Angle keyframes — left as-is (no transform).
+        // The frontend applies them with the original "YXZ" Euler order
+        // which matches D3D's YawPitchRoll convention directly.
         // rota_loop_vec: [x, y, z, speed] — xyz is a rotation AXIS (direction vector), not euler angles
         let rlv = sub.rota_loop_vec;
         let remapped = ct.extras_position([rlv[0], rlv[1], rlv[2]]);
@@ -50,10 +47,7 @@ pub fn remap_par_for_export(par: &mut ParFile, ct: &CoordTransform) {
         sys.acceleration = ct.extras_position(sys.acceleration);
         sys.offset = ct.extras_position(sys.offset);
 
-        // Angle keyframes — swap Y↔Z, no negation (same reasoning as eff angles)
-        for angle in &mut sys.frame_angles {
-            *angle = ct.extras_position(*angle);
-        }
+        // Angle keyframes — left as-is (no transform), same as eff angles.
 
         // Path points and directions
         if let Some(ref mut path) = sys.path {
@@ -247,8 +241,8 @@ mod tests {
         assert_eq!(eff.sub_effects[0].frame_positions[0], [100.0, 300.0, 200.0]);
         // extras_position(x,y,z) -> (x, z, y) for sizes too
         assert_eq!(eff.sub_effects[0].frame_sizes[0], [1.0, 3.0, 2.0]);
-        // Euler angles: extras_position (swap Y↔Z, no negation)
-        assert_eq!(eff.sub_effects[0].frame_angles[0], [10.0, 30.0, 20.0]);
+        // Euler angles: left as-is (no transform)
+        assert_eq!(eff.sub_effects[0].frame_angles[0], [10.0, 20.0, 30.0]);
         // rota_loop_vec xyz is a direction vector → extras_position (no negation)
         assert_eq!(eff.sub_effects[0].rota_loop_vec, [1.0, 3.0, 2.0, 4.0]);
     }

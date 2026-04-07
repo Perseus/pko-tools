@@ -136,7 +136,7 @@ export function Rect({ subEffect, onComplete }: RectProps) {
         lerp(a0[0], a1[0], frac),
         lerp(a0[1], a1[1], frac),
         lerp(a0[2], a1[2], frac),
-        "ZXY",
+        "YXZ",
       );
     }
   });
