@@ -8,8 +8,8 @@ use crate::character::{model::CharacterGeometricModel, GLTFFieldsToAggregate};
 use crate::projects::project::Project;
 
 use super::{model::EffFile, model::ParFile, scan_effects_directory, scan_par_files};
-use super::export::{remap_eff_for_export, remap_par_for_export};
-use crate::math::coord_transform::CoordTransform;
+// Effect data is in D3D's native Y-up LH space (not Z-up like the world).
+// No Y↔Z swap needed. LH→RH conversion (Z negation) to be added separately.
 
 #[tauri::command]
 pub async fn list_effects(project_id: String) -> Result<Vec<String>, String> {
@@ -34,14 +34,9 @@ pub async fn load_effect(project_id: String, effect_name: String) -> Result<EffF
             e
         )
     })?;
-    let mut eff = EffFile::from_bytes(&bytes).map_err(|e| e.to_string())?;
-    let ct = CoordTransform::new();
-    remap_eff_for_export(&mut eff, &ct);
-    Ok(eff)
+    EffFile::from_bytes(&bytes).map_err(|e| e.to_string())
 }
 
-// TODO: Inverse remap (Y-up -> PKO Z-up) needed here once editing is supported.
-// The frontend now holds Y-up data; writing it directly produces incorrect PKO files.
 #[tauri::command]
 pub async fn save_effect(
     project_id: String,
@@ -87,10 +82,7 @@ pub async fn load_par_file(
             e
         )
     })?;
-    let mut par = ParFile::from_bytes(&bytes).map_err(|e| e.to_string())?;
-    let ct = CoordTransform::new();
-    remap_par_for_export(&mut par, &ct);
-    Ok(par)
+    ParFile::from_bytes(&bytes).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
