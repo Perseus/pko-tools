@@ -154,8 +154,6 @@ pub fn run() {
             map::commands::load_map_terrain,
             map::commands::get_map_metadata,
             map::commands::export_map_to_gltf,
-            map::commands::export_map_for_unity,
-            map::commands::batch_export_maps_for_unity,
             map::commands::export_shared_assets,
             map::commands::get_building_list,
             map::commands::load_building_model,

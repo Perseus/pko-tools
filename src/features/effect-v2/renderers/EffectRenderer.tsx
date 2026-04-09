@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef } from "react";
+import { useAtomValue } from "jotai";
 import { EffectFile } from "@/types/effect";
+import { effectV2HiddenSubEffectsAtom } from "@/store/effect-v2";
 import { SubEffectRenderer } from "./SubEffectRenderer";
 
 interface EffectRendererProps {
@@ -12,6 +14,8 @@ export function EffectRenderer({ effect, onComplete }: EffectRendererProps) {
   // Always point to the latest onComplete without recreating callbacks
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
+
+  const hiddenSubEffects = useAtomValue(effectV2HiddenSubEffectsAtom);
 
   // Tracks which sub-effect indices have fired onComplete
   const completedRef = useRef(new Set<number>());
@@ -38,9 +42,12 @@ export function EffectRenderer({ effect, onComplete }: EffectRendererProps) {
 
   return (
     <group>
-      {effect.subEffects.map((sub, i) => (
-        <SubEffectRenderer key={i} subEffect={sub} onComplete={() => handleSubComplete(i)} />
-      ))}
+      {effect.subEffects.map((sub, i) => {
+        if (hiddenSubEffects.has(i)) return null;
+        return (
+          <SubEffectRenderer key={i} subEffect={sub} onComplete={() => handleSubComplete(i)} />
+        );
+      })}
     </group>
   );
 }

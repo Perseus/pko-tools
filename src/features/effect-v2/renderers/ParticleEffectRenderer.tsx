@@ -25,6 +25,7 @@ import { Range2System } from "./particles/Range2System";
 import { DummySystem } from "./particles/DummySystem";
 import { LineSingleSystem } from "./particles/LineSingleSystem";
 import { LineRoundSystem } from "./particles/LineRoundSystem";
+import { StripRenderer } from "./StripRenderer";
 
 interface ParticleEffectRendererProps {
   /** The .par filename (without extension). */
@@ -110,6 +111,9 @@ export function ParticleEffectRenderer({ particleEffectName, loop = false, onCom
           <System key={i} system={system} index={i} loop={loop} onComplete={() => handleSystemComplete(i)} />
         );
       })}
+      {parData.strips.map((strip, i) => (
+        <StripRenderer key={`strip-${i}`} strip={strip} />
+      ))}
     </group>
   );
 }

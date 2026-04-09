@@ -2,7 +2,7 @@ import { Canvas } from "@react-three/fiber";
 import { GizmoHelper, GizmoViewport, OrbitControls } from "@react-three/drei";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useEffect, useMemo, useState } from "react";
-import { effectV2SelectionAtom, effectV2PlaybackAtom, magicSingleTableAtom } from "@/store/effect-v2";
+import { effectV2SelectionAtom, effectV2PlaybackAtom, magicSingleTableAtom, effectV2HiddenSubEffectsAtom } from "@/store/effect-v2";
 import { MagicEffectRenderer } from "./renderers/MagicEffectRenderer";
 import { MagicGroupRenderer } from "./renderers/MagicGroupRenderer";
 import { EffectRenderer } from "./renderers/EffectRenderer";
@@ -191,6 +191,24 @@ function MagicGroupInfoPanel({ entry }: { entry: MagicGroupEntry }) {
 function EffectFileInfoPanel({ fileName }: { fileName: string }) {
   const effFiles = useLoadEffect([fileName]);
   const eff = effFiles[0] ?? null;
+  const [hiddenIndices, setHiddenIndices] = useAtom(effectV2HiddenSubEffectsAtom);
+
+  const toggleSubEffect = (index: number) => {
+    setHiddenIndices((prev: Set<number>) => {
+      const next = new Set(prev);
+      if (next.has(index)) {
+        next.delete(index);
+      } else {
+        next.add(index);
+      }
+      return next;
+    });
+  };
+
+  // Reset hidden indices when effect file changes
+  useEffect(() => {
+    setHiddenIndices(new Set());
+  }, [fileName, setHiddenIndices]);
 
   return (
     <div className="flex flex-col gap-3 text-sm">
@@ -224,11 +242,20 @@ function EffectFileInfoPanel({ fileName }: { fileName: string }) {
           )}
           {eff.subEffects.length > 0 && (
             <div>
-              <div className="text-xs text-muted-foreground">Models</div>
+              <div className="text-xs text-muted-foreground">Sub-effects (click to toggle)</div>
               {eff.subEffects.map((sub, i) => (
-                <div key={i} className="font-mono text-xs bg-muted px-2 py-1 rounded mt-1">
-                  {sub.modelName || "(texture-only)"}{sub.texName ? ` [${sub.texName}]` : ""}
-                </div>
+                <button
+                  key={i}
+                  className="w-full flex items-center gap-2 font-mono text-xs bg-muted hover:bg-accent px-2 py-1 rounded mt-1 cursor-pointer transition-colors"
+                  onClick={() => toggleSubEffect(i)}
+                >
+                  <span className={hiddenIndices.has(i) ? "opacity-30" : ""}>
+                    {hiddenIndices.has(i) ? "\u25CB" : "\u25CF"}
+                  </span>
+                  <span className={hiddenIndices.has(i) ? "line-through opacity-50" : ""}>
+                    {sub.modelName || "(default)"}{sub.texName ? ` [${sub.texName}]` : ""}
+                  </span>
+                </button>
               ))}
             </div>
           )}
@@ -346,9 +373,9 @@ export default function EffectV2Workbench() {
   const selection = useAtomValue(effectV2SelectionAtom);
   const [, setPlayback] = useAtom(effectV2PlaybackAtom);
 
-  // Reset playback when switching selection
+  // Reset time but keep playing when switching selection
   useEffect(() => {
-    setPlayback((p) => ({ ...p, playing: false, time: 0 }));
+    setPlayback((p) => ({ ...p, time: 0 }));
   }, [selection]);
 
   return (

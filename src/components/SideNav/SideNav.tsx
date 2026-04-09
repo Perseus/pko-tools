@@ -54,12 +54,7 @@ export default function SideNav() {
           {
             title: "Effects",
             url: "/effects",
-            isActive: pathname === "/effects",
-          },
-          {
-            title: "Effects V2",
-            url: "/effects-v2",
-            isActive: pathname.startsWith("/effects-v2"),
+            isActive: pathname.startsWith("/effects"),
           },
           {
             title: "Items",

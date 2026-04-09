@@ -7,21 +7,23 @@ import { useTimeSource } from "../../TimeContext";
 import { useEffectTexture } from "../../useEffectTexture";
 import { getMappedUVs, getThreeJSBlendFromD3D, findFrame, lerp } from "../../helpers";
 
-interface RectProps {
+interface TrianglePlaneProps {
   subEffect: SubEffect;
   onComplete?: () => void;
 }
 
 /**
- * "Rect" mesh -- a horizontal quad in the XZ plane.
+ * "TrianglePlane" mesh -- a triangle in the XY plane (normal +Z).
  *
- * C++ CreateRect() vertices:
- *   (-0.5, 0, 0), (-0.5, 0, 1), (0.5, 0, 1), (0.5, 0, 0)
+ * C++ CreatePlaneTriangle() vertices (PKO Z-up):
+ *   (0, 0.5, 0), (-0.5, -0.5, 0), (0.5, -0.5, 0)
  *
- * XZ plane, normal +Y, Z range [0,1] (not centered).
- * Same orientation as RectPlane but offset on Z.
+ * These are already in the XY plane, no Z-up remap needed:
+ *   (0, 0.5, 0), (-0.5, -0.5, 0), (0.5, -0.5, 0)
+ *
+ * Triangle with tip at Y=0.5, base at Y=-0.5, centered on X, lying flat in XY.
  */
-export function Rect({ subEffect, onComplete }: RectProps) {
+export function TrianglePlane({ subEffect, onComplete }: TrianglePlaneProps) {
   const meshRef = useRef<THREE.Mesh>(null);
   const matRef = useRef<THREE.MeshBasicMaterial>(null);
   const timeSource = useTimeSource();
@@ -33,24 +35,23 @@ export function Rect({ subEffect, onComplete }: RectProps) {
   const { frameCount, frameTimes, frameSizes, framePositions, frameColors, texList, verCount, frameAngles } = subEffect;
 
   const uvAttr = useMemo(() => {
-    if (texList.length > 0 && texList[0].length === verCount && verCount >= 4) {
+    if (texList.length > 0 && texList[0].length === verCount && verCount >= 3) {
       const uvs = getMappedUVs(texList[0]);
       return new Float32Array(uvs.flat());
     }
-    // C++ UVs: (0,1), (0,0), (1,0), (1,1)
-    return new Float32Array([0, 1, 0, 0, 1, 0, 1, 1]);
+    // C++ UVs: (0.5, 0), (0, 1), (1, 1)
+    return new Float32Array([0.5, 0, 0, 1, 1, 1]);
   }, [texList, verCount]);
 
   const geometry = useMemo(() => {
     const geo = new THREE.BufferGeometry();
-    // C++ CreateRect: XZ horizontal quad, Z range [0,1].
+    // C++ CreatePlaneTriangle: XY plane, no remap needed
     const positions = new Float32Array([
-      -0.5, 0, 0,
-      -0.5, 0, 1,
-       0.5, 0, 1,
-       0.5, 0, 0,
+       0,    0.5,  0,  // tip
+      -0.5, -0.5,  0,  // base left
+       0.5, -0.5,  0,  // base right
     ]);
-    const indices = new Uint16Array([0, 1, 2, 0, 2, 3]);
+    const indices = new Uint16Array([0, 1, 2]);
     geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
     geo.setAttribute("uv", new THREE.BufferAttribute(uvAttr, 2));
     geo.setIndex(new THREE.BufferAttribute(indices, 1));

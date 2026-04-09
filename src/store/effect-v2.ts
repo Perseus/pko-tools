@@ -28,3 +28,6 @@ export const effectV2PlaybackAtom = atom<EffectV2Playback>({
   time: 0,
   fps: 0,
 });
+
+/** Set of sub-effect indices currently hidden in the effect viewer. */
+export const effectV2HiddenSubEffectsAtom = atom<Set<number>>(new Set<number>());

@@ -2,14 +2,11 @@ import { Canvas } from "@react-three/fiber";
 import { modLabel } from "@/lib/platform";
 import { OrbitControls, GizmoHelper, GizmoViewport } from "@react-three/drei";
 import { useAtomValue, useAtom } from "jotai";
-import { Suspense, useMemo, useState } from "react";
-import { mapGltfJsonAtom, mapLoadingAtom, mapMetadataAtom, mapViewConfigAtom, selectedMapAtom } from "@/store/map";
-import { currentProjectAtom } from "@/store/project";
+import { Suspense, useMemo } from "react";
+import { mapGltfJsonAtom, mapLoadingAtom, mapMetadataAtom, mapViewConfigAtom } from "@/store/map";
 import MapTerrainViewer from "./MapTerrainViewer";
-import { Loader2, Download } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { exportMapForUnity } from "@/commands/map";
-import { toast } from "@/hooks/use-toast";
 import { actionIds } from "@/features/actions/actionIds";
 import { ContextualActionMenu } from "@/features/actions/ContextualActionMenu";
 import { useRegisterActionRuntime } from "@/features/actions/ActionKernelProvider";
@@ -20,34 +17,10 @@ const MAP_CONTEXT_ACTIONS = [
   actionIds.mapToggleObjectMarkers,
   actionIds.mapToggleWireframe,
   actionIds.mapExportGltf,
-  actionIds.mapExportUnity,
 ];
 
 function MapViewToolbar() {
   const [viewConfig, setViewConfig] = useAtom(mapViewConfigAtom);
-  const selectedMap = useAtomValue(selectedMapAtom);
-  const currentProject = useAtomValue(currentProjectAtom);
-  const [exporting, setExporting] = useState(false);
-
-  const handleExportForUnity = async () => {
-    if (!currentProject || !selectedMap) return;
-    setExporting(true);
-    try {
-      const result = await exportMapForUnity(currentProject.id, selectedMap.name);
-      toast({
-        title: "Export complete",
-        description: `Exported ${result.total_buildings_exported} buildings, ${result.total_placements} placements to ${result.output_dir}`,
-      });
-    } catch (e) {
-      toast({
-        title: "Export failed",
-        description: String(e),
-        variant: "destructive",
-      });
-    } finally {
-      setExporting(false);
-    }
-  };
 
   const mapToggleObjectsActionRuntime = useMemo(
     () => ({
@@ -73,27 +46,9 @@ function MapViewToolbar() {
     }),
     [setViewConfig],
   );
-  const mapExportUnityActionRuntime = useMemo(
-    () => ({
-      run: () => {
-        if (!exporting) {
-          void handleExportForUnity();
-        }
-      },
-      isEnabled: () => Boolean(currentProject && selectedMap && !exporting),
-      disabledReason: () => {
-        if (!currentProject) return "No project selected";
-        if (!selectedMap) return "No map selected";
-        if (exporting) return "Export already in progress";
-        return undefined;
-      },
-    }),
-    [currentProject, exporting, selectedMap],
-  );
 
   useRegisterActionRuntime(actionIds.mapToggleObjectMarkers, mapToggleObjectsActionRuntime);
   useRegisterActionRuntime(actionIds.mapToggleWireframe, mapToggleWireframeActionRuntime);
-  useRegisterActionRuntime(actionIds.mapExportUnity, mapExportUnityActionRuntime);
 
   return (
     <div className="absolute top-2 left-2 z-10 flex gap-1">
@@ -123,22 +78,6 @@ function MapViewToolbar() {
       >
         Wireframe
       </Button>
-      {selectedMap && (
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 text-xs"
-          onClick={handleExportForUnity}
-          disabled={exporting}
-        >
-          {exporting ? (
-            <Loader2 className="h-3 w-3 animate-spin mr-1" />
-          ) : (
-            <Download className="h-3 w-3 mr-1" />
-          )}
-          Export for Unity
-        </Button>
-      )}
     </div>
   );
 }
