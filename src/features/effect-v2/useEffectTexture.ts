@@ -14,6 +14,10 @@ interface DecodedTexture {
 /**
  * Hook that loads a sub-effect's texture from the project's texture/effect/ directory.
  * Tries <name>.tga first. Returns a THREE.Texture or null.
+ *
+ * Uses DataTexture with flipY=false and SRGBColorSpace to match V1's
+ * createEffectTexture() — the decoded RGBA is already in OpenGL row order
+ * (bottom-to-top), so no flip is needed.
  */
 export function useEffectTexture(texName: string): THREE.Texture | null {
   const [texture, setTexture] = useState<THREE.Texture | null>(null);
@@ -39,21 +43,22 @@ export function useEffectTexture(texName: string): THREE.Texture | null {
         if (cancelled) return;
 
         const bytes = Uint8Array.from(atob(decoded.data), (c) => c.charCodeAt(0));
-        const imageData = new ImageData(
-          new Uint8ClampedArray(bytes.buffer),
+
+        // Use DataTexture with V1's exact settings — decoded RGBA is already
+        // in OpenGL row order, so flipY=false is correct.
+        tex = new THREE.DataTexture(
+          new Uint8Array(bytes.buffer),
           decoded.width,
           decoded.height,
+          THREE.RGBAFormat,
         );
-
-        const canvas = document.createElement("canvas");
-        canvas.width = decoded.width;
-        canvas.height = decoded.height;
-        const ctx = canvas.getContext("2d")!;
-        ctx.putImageData(imageData, 0, 0);
-
-        tex = new THREE.CanvasTexture(canvas);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.flipY = false;
+        tex.magFilter = THREE.LinearFilter;
+        tex.minFilter = THREE.LinearFilter;
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
         tex.needsUpdate = true;
-        tex.flipY = true;
         setTexture(tex);
       } catch (err) {
         if (!cancelled) {

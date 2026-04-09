@@ -1,27 +1,23 @@
 import { SubEffect } from "@/types/effect";
 import { useRef, useMemo, useEffect } from "react";
 import { useFrame } from "@react-three/fiber";
-import { Billboard } from "@react-three/drei";
 import * as THREE from "three";
 import { useTimeSource } from "../../TimeContext";
 import { useEffectTexture } from "../../useEffectTexture";
-import { getMappedUVs, getThreeJSBlendFromD3D, findFrame, lerp } from "../../helpers";
+import { getThreeJSBlendFromD3D, findFrame, lerp } from "../../helpers";
 
-interface RectProps {
+interface SphereProps {
   subEffect: SubEffect;
   onComplete?: () => void;
 }
 
 /**
- * "Rect" mesh -- a horizontal quad in the XZ plane.
+ * "Sphere" mesh -- a standard sphere with radius 0.5.
  *
- * C++ CreateRect() vertices:
- *   (-0.5, 0, 0), (-0.5, 0, 1), (0.5, 0, 1), (0.5, 0, 0)
- *
- * XZ plane, normal +Y, Z range [0,1] (not centered).
- * Same orientation as RectPlane but offset on Z.
+ * Uses THREE.SphereGeometry for vertex/UV generation.
+ * No billboard support (sphere looks the same from all angles).
  */
-export function Rect({ subEffect, onComplete }: RectProps) {
+export function Sphere({ subEffect, onComplete }: SphereProps) {
   const meshRef = useRef<THREE.Mesh>(null);
   const matRef = useRef<THREE.MeshBasicMaterial>(null);
   const timeSource = useTimeSource();
@@ -30,32 +26,11 @@ export function Rect({ subEffect, onComplete }: RectProps) {
   onCompleteRef.current = onComplete;
   const firedRef = useRef(false);
 
-  const { frameCount, frameTimes, frameSizes, framePositions, frameColors, texList, verCount, frameAngles } = subEffect;
-
-  const uvAttr = useMemo(() => {
-    if (texList.length > 0 && texList[0].length === verCount && verCount >= 4) {
-      const uvs = getMappedUVs(texList[0]);
-      return new Float32Array(uvs.flat());
-    }
-    // C++ UVs: (0,1), (0,0), (1,0), (1,1)
-    return new Float32Array([0, 1, 0, 0, 1, 0, 1, 1]);
-  }, [texList, verCount]);
+  const { frameCount, frameTimes, frameSizes, framePositions, frameColors, frameAngles } = subEffect;
 
   const geometry = useMemo(() => {
-    const geo = new THREE.BufferGeometry();
-    // C++ CreateRect: XZ horizontal quad, Z range [0,1].
-    const positions = new Float32Array([
-      -0.5, 0, 0,
-      -0.5, 0, 1,
-       0.5, 0, 1,
-       0.5, 0, 0,
-    ]);
-    const indices = new Uint16Array([0, 1, 2, 0, 2, 3]);
-    geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
-    geo.setAttribute("uv", new THREE.BufferAttribute(uvAttr, 2));
-    geo.setIndex(new THREE.BufferAttribute(indices, 1));
-    return geo;
-  }, [uvAttr]);
+    return new THREE.SphereGeometry(0.5, 24, 24);
+  }, []);
 
   let totalAnimationDurationSeconds = 0;
   for (let i = 0; i < frameCount; i++) {
@@ -141,31 +116,21 @@ export function Rect({ subEffect, onComplete }: RectProps) {
   const blendSrc = getThreeJSBlendFromD3D(subEffect.srcBlend);
   const blendDst = getThreeJSBlendFromD3D(subEffect.destBlend);
 
-  const meshContent = (
-    <mesh ref={meshRef} geometry={geometry}>
-      <meshBasicMaterial
-        ref={matRef}
-        color="#ffffff"
-        transparent
-        depthWrite={false}
-        side={THREE.DoubleSide}
-        map={texture}
-        blending={THREE.CustomBlending}
-        blendSrc={blendSrc}
-        blendDst={blendDst}
-      />
-    </mesh>
+  return (
+    <group>
+      <mesh ref={meshRef} geometry={geometry}>
+        <meshBasicMaterial
+          ref={matRef}
+          color="#ffffff"
+          transparent
+          depthWrite={false}
+          side={THREE.DoubleSide}
+          map={texture}
+          blending={THREE.CustomBlending}
+          blendSrc={blendSrc}
+          blendDst={blendDst}
+        />
+      </mesh>
+    </group>
   );
-
-  if (subEffect.billboard) {
-    return (
-      <Billboard>
-        <group rotation={[Math.PI / 2, 0, 0]}>
-          {meshContent}
-        </group>
-      </Billboard>
-    );
-  }
-
-  return <group>{meshContent}</group>;
 }
