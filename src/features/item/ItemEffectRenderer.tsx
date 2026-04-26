@@ -24,6 +24,7 @@ import {
 /** Effect animation type enum matching game engine I_Effect.h */
 const EFFECT_FRAMETEX = 1;
 
+
 const TEX_EXTENSIONS = [".tga", ".TGA", ".bmp", ".BMP", ".dds", ".png"];
 
 /** Create geometry matching the game's built-in effect primitives.
@@ -293,8 +294,6 @@ function EffectGroup({ effectName, projectId, projectDir, dummyMatrix, effectSca
   }, [effData, projectDir]);
 
   // Apply dummy matrix to the outer anchor group.
-  // The dummy matrix includes both position and rotation from the weapon model's
-  // dummy point, placing the effect at the correct attachment point on the blade.
   useEffect(() => {
     if (anchorRef.current) {
       anchorRef.current.matrixAutoUpdate = false;

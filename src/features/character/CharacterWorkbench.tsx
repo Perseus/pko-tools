@@ -3,8 +3,8 @@ import { currentProjectAtom } from "@/store/project";
 import { getCharacterActions } from "@/commands/character";
 import { atom, useAtom, useAtomValue, useSetAtom } from "jotai";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useGLTF, OrbitControls,  CameraControls,  Environment, useAnimations } from '@react-three/drei';
-import { Canvas, useFrame} from '@react-three/fiber';
+import { useGLTF, OrbitControls, CameraControls, useAnimations } from '@react-three/drei';
+import { Canvas, useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import { useControls, Leva } from 'leva';
 import { extractBoundingSpheres, BoundingSphereIndicators } from './BoundingSphereIndicators';
@@ -94,6 +94,28 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
   const fps = 30;
   const animationDuration = selectedClip?.duration || 1;
   const totalKeyframes = Math.max(Math.floor(animationDuration * fps), 1);
+
+  // Override PBR materials with unlit Gouraud (MeshLambertMaterial) to match PKO's D3D8 fixed-function pipeline
+  useEffect(() => {
+    scene.traverse((obj: THREE.Object3D) => {
+      if (obj instanceof THREE.Mesh && obj.material) {
+        const mats = Array.isArray(obj.material) ? obj.material : [obj.material];
+        const newMats = mats.map((oldMat: THREE.Material) => {
+          const old = oldMat as THREE.MeshStandardMaterial;
+          const mat = new THREE.MeshLambertMaterial({
+            map: old.map ?? undefined,
+            color: old.color,
+            transparent: old.transparent,
+            opacity: old.opacity,
+            alphaTest: old.alphaTest,
+            side: old.side,
+          });
+          return mat;
+        });
+        obj.material = Array.isArray(obj.material) ? newMats : newMats[0];
+      }
+    });
+  }, [scene]);
 
   // Extract bounding spheres and meshes from the loaded glTF scene
   const boundingSpheres = useMemo(() => extractBoundingSpheres(scene), [scene]);
@@ -256,7 +278,7 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
       // Legacy keyframe-based playback
       if (playing) {
         timeAccumulator.current += delta;
-        const keyframeDuration = 1/fps;
+        const keyframeDuration = 1 / fps;
 
         if (timeAccumulator.current >= keyframeDuration) {
           const framesToAdvance = Math.floor(timeAccumulator.current / keyframeDuration);
@@ -281,7 +303,7 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
   });
 
   return <>
-    <group rotation={[-Math.PI / 2, 0, 0]}>
+    <group>
       <primitive object={scene} />
       <BoundingSphereIndicators
         spheres={boundingSpheres}
@@ -342,126 +364,126 @@ function ActionPickerPanel() {
   }, [actions, weaponFilter]);
 
   return (
-      <div
-        style={{
-          position: 'fixed',
-          top: 8,
-          left: 8,
-          width: 260,
-          background: '#1a1a2e',
-          borderRadius: 8,
-          padding: 8,
-          color: '#e0e0e0',
-          fontSize: 12,
-          fontFamily: 'monospace',
-          maxHeight: 'calc(100vh - 80px)',
-          display: 'flex',
-          flexDirection: 'column',
-          boxShadow: '0 2px 12px rgba(0,0,0,0.4)',
-          zIndex: 1000,
-          pointerEvents: 'auto',
-        }}
-      >
-        <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13 }}>
-          Actions ({actions.length})
-        </div>
+    <div
+      style={{
+        position: 'fixed',
+        top: 8,
+        left: 8,
+        width: 260,
+        background: '#1a1a2e',
+        borderRadius: 8,
+        padding: 8,
+        color: '#e0e0e0',
+        fontSize: 12,
+        fontFamily: 'monospace',
+        maxHeight: 'calc(100vh - 80px)',
+        display: 'flex',
+        flexDirection: 'column',
+        boxShadow: '0 2px 12px rgba(0,0,0,0.4)',
+        zIndex: 1000,
+        pointerEvents: 'auto',
+      }}
+    >
+      <div style={{ fontWeight: 'bold', marginBottom: 4, fontSize: 13 }}>
+        Actions ({actions.length})
+      </div>
 
-        {/* Weapon filter */}
-        {weaponModes.length > 1 && (
-          <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap', marginBottom: 4 }}>
-            <button
-              onClick={() => setWeaponFilter(null)}
-              style={{
-                padding: '2px 6px',
-                borderRadius: 4,
-                border: 'none',
-                cursor: 'pointer',
-                fontSize: 10,
-                background: weaponFilter === null ? '#4a90d9' : '#333',
-                color: '#fff',
-              }}
-            >
-              All
-            </button>
-            {weaponModes.map(m => (
-              <button
-                key={m}
-                onClick={() => setWeaponFilter(m)}
-                style={{
-                  padding: '2px 6px',
-                  borderRadius: 4,
-                  border: 'none',
-                  cursor: 'pointer',
-                  fontSize: 10,
-                  background: weaponFilter === m ? '#4a90d9' : '#333',
-                  color: '#fff',
-                }}
-              >
-                {m}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Play controls */}
-        <div style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center' }}>
+      {/* Weapon filter */}
+      {weaponModes.length > 1 && (
+        <div style={{ display: 'flex', gap: 2, flexWrap: 'wrap', marginBottom: 4 }}>
           <button
-            onClick={onTogglePlay}
+            onClick={() => setWeaponFilter(null)}
             style={{
-              padding: '4px 10px',
+              padding: '2px 6px',
               borderRadius: 4,
               border: 'none',
               cursor: 'pointer',
-              background: playing ? '#d94a4a' : '#4ad97a',
+              fontSize: 10,
+              background: weaponFilter === null ? '#4a90d9' : '#333',
               color: '#fff',
-              fontWeight: 'bold',
-              fontSize: 11,
             }}
           >
-            {playing ? 'Pause' : 'Play'}
+            All
           </button>
-          {SPEED_OPTIONS.map(s => (
+          {weaponModes.map(m => (
             <button
-              key={s}
-              onClick={() => onSpeedChange(s)}
+              key={m}
+              onClick={() => setWeaponFilter(m)}
               style={{
                 padding: '2px 6px',
                 borderRadius: 4,
                 border: 'none',
                 cursor: 'pointer',
                 fontSize: 10,
-                background: speed === s ? '#4a90d9' : '#333',
+                background: weaponFilter === m ? '#4a90d9' : '#333',
                 color: '#fff',
               }}
             >
-              {s}x
+              {m}
             </button>
           ))}
         </div>
+      )}
 
-        {/* Action list */}
-        <div style={{ overflowY: 'auto', flex: 1 }}>
-          {filteredActions.map(({ action, origIndex }) => (
-            <div
-              key={origIndex}
-              onClick={() => onSelect(origIndex)}
-              style={{
-                padding: '4px 6px',
-                borderRadius: 4,
-                cursor: 'pointer',
-                background: origIndex === selectedIndex ? '#2a4a6e' : 'transparent',
-                marginBottom: 1,
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-              }}
-              title={`${action.name} (frames ${action.startFrame}-${action.endFrame})`}
-            >
-              {action.name}
-            </div>
-          ))}
-        </div>
+      {/* Play controls */}
+      <div style={{ display: 'flex', gap: 4, marginBottom: 4, alignItems: 'center' }}>
+        <button
+          onClick={onTogglePlay}
+          style={{
+            padding: '4px 10px',
+            borderRadius: 4,
+            border: 'none',
+            cursor: 'pointer',
+            background: playing ? '#d94a4a' : '#4ad97a',
+            color: '#fff',
+            fontWeight: 'bold',
+            fontSize: 11,
+          }}
+        >
+          {playing ? 'Pause' : 'Play'}
+        </button>
+        {SPEED_OPTIONS.map(s => (
+          <button
+            key={s}
+            onClick={() => onSpeedChange(s)}
+            style={{
+              padding: '2px 6px',
+              borderRadius: 4,
+              border: 'none',
+              cursor: 'pointer',
+              fontSize: 10,
+              background: speed === s ? '#4a90d9' : '#333',
+              color: '#fff',
+            }}
+          >
+            {s}x
+          </button>
+        ))}
       </div>
+
+      {/* Action list */}
+      <div style={{ overflowY: 'auto', flex: 1 }}>
+        {filteredActions.map(({ action, origIndex }) => (
+          <div
+            key={origIndex}
+            onClick={() => onSelect(origIndex)}
+            style={{
+              padding: '4px 6px',
+              borderRadius: 4,
+              cursor: 'pointer',
+              background: origIndex === selectedIndex ? '#2a4a6e' : 'transparent',
+              marginBottom: 1,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+            title={`${action.name} (frames ${action.startFrame}-${action.endFrame})`}
+          >
+            {action.name}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -502,19 +524,13 @@ export default function CharacterWorkbench() {
       <CanvasErrorBoundary className="absolute inset-0 flex items-center justify-center">
         <Canvas
           style={{ height: '100%', width: '100%' }}
-          shadows
           camera={{ position: [10, 12, 12], fov: 25 }}
           dpr={[1, 1.5]}
-          gl={{ powerPreference: "high-performance" }}
+          gl={{ powerPreference: "high-performance", toneMapping: THREE.NoToneMapping }}
         >
-          <ambientLight intensity={1} />
-          <directionalLight position={[5, 5, 5]} castShadow />
-          <Environment background>
-            <mesh scale={100}>
-              <sphereGeometry args={[1, 16, 16]} />
-              <meshBasicMaterial color="#393939" side={THREE.BackSide} />
-            </mesh>
-          </Environment>
+          <color attach="background" args={['#393939']} />
+          <ambientLight intensity={1.5} />
+          <directionalLight position={[5, 5, 5]} intensity={0.3} />
           <Suspense fallback={<>Loading...</>}>
             <Character />
           </Suspense>

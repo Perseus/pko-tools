@@ -17,7 +17,7 @@ import { ImportWizard } from "./features/import/ImportWizard";
 import { ActionKernelProvider, CommandPalette } from "./features/actions";
 
 const CharacterPage = lazy(() => import("./pages/characters"));
-const EffectsPage = lazy(() => import("./pages/effects"));
+const EffectsPage = lazy(() => import("./pages/effects-v2"));
 const ItemsPage = lazy(() => import("./pages/items"));
 const MapsPage = lazy(() => import("./pages/maps"));
 const BuildingsPage = lazy(() => import("./pages/buildings"));

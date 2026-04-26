@@ -19,6 +19,7 @@ mod d3d;
 mod db;
 pub mod decompiler;
 pub mod effect;
+pub mod effect_v2;
 pub mod item;
 pub mod map;
 pub mod math;
@@ -108,6 +109,9 @@ pub fn run() {
             effect::commands::load_effect_model,
             effect::commands::load_par_file,
             effect::commands::list_par_files,
+            effect_v2::commands::effect_v2_ping,
+            effect_v2::commands::load_magic_single_table,
+            effect_v2::commands::load_magic_group_table,
             item::commands::get_item_list,
             item::commands::load_item_model,
             item::commands::get_item_lit_info,
@@ -150,8 +154,6 @@ pub fn run() {
             map::commands::load_map_terrain,
             map::commands::get_map_metadata,
             map::commands::export_map_to_gltf,
-            map::commands::export_map_for_unity,
-            map::commands::batch_export_maps_for_unity,
             map::commands::export_shared_assets,
             map::commands::get_building_list,
             map::commands::load_building_model,

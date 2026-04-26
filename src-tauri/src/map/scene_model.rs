@@ -18,6 +18,7 @@ use gltf_json::{
 };
 
 use crate::item::model::decode_pko_texture;
+use crate::math::coord_transform::{CoordTransform, ExportProfile};
 
 use super::lmo_types::{self as lmo, D3DCULL_NONE, LmoGeomObject, LmoModel};
 use super::lmo_loader;
@@ -38,34 +39,6 @@ pub fn find_lmo_path(project_dir: &Path, filename: &str) -> Option<std::path::Pa
         project_dir.join("model").join(filename.to_lowercase()),
     ];
     candidates.into_iter().find(|p| p.exists())
-}
-
-// ============================================================================
-// Coordinate transform: Game Z-up → glTF Y-up
-// (x, y, z) → (x, z, y)
-//
-// Terrain uses Z = +tileY (south = positive). Building meshes must match:
-// PKO Y (south) → glTF Z (positive), no negation.
-// ============================================================================
-
-fn transform_position(p: [f32; 3]) -> [f32; 3] {
-    [p[0], p[2], p[1]]
-}
-
-fn transform_normal(n: [f32; 3]) -> [f32; 3] {
-    [n[0], n[2], n[1]]
-}
-
-/// Reverse triangle winding order: (i0, i1, i2) → (i0, i2, i1).
-/// Required because the Y-up transform `(x,y,z)→(x,z,y)` is a reflection
-/// (det = -1), which flips triangle facing. Reversing winding restores
-/// correct front-face orientation in glTF (CCW).
-fn reverse_winding(indices: &[u32]) -> Vec<u32> {
-    let mut out = indices.to_vec();
-    for tri in out.chunks_exact_mut(3) {
-        tri.swap(1, 2);
-    }
-    out
 }
 
 /// Check if a 4x4 matrix is identity.
@@ -468,12 +441,24 @@ fn default_dst_blend_for_transp_type(transp_type: u32) -> Option<u32> {
     }
 }
 
+/// How to handle textures in material export.
+#[derive(Clone, Copy, PartialEq)]
+enum TextureMode {
+    /// Don't load textures at all (batch map loading).
+    Skip,
+    /// Load, decode, and embed as data URI (current behavior for individual building export).
+    Embed,
+    /// Write external URI reference to shared texture directory (new pipeline).
+    /// The URI is relative to the GLB's location: `../textures/scene/{stem}.dds`
+    ExternalUri,
+}
+
 fn build_lmo_material(
     builder: &mut GltfBuilder,
     mat: &lmo::LmoMaterial,
     name: &str,
     project_dir: &Path,
-    load_textures: bool,
+    texture_mode: TextureMode,
 ) {
     // Canonicalize types 6-8 to type 1 (they fall through to ONE/ONE in engine)
     // Types > 8 are unknown/corrupt — warn and remap to type 1
@@ -573,57 +558,113 @@ fn build_lmo_material(
         name.to_string()
     };
 
-    // Try to load and embed the texture (skipped for map batch loading)
-    let base_color_texture = if !load_textures {
+    // Try to load/reference the texture based on mode
+    let base_color_texture = if texture_mode == TextureMode::Skip {
         None
     } else {
         mat.tex_filename
             .as_deref()
             .filter(|f| !f.is_empty())
-            .and_then(|tex_name| find_texture_file(project_dir, tex_name))
-            .and_then(|tex_path| {
-                let data_uri = load_texture_as_data_uri(&tex_path)?;
-                let tex_stem = tex_path
-                    .file_stem()
-                    .map(|s| s.to_string_lossy().to_string())
-                    .unwrap_or_else(|| name.to_string());
+            .and_then(|tex_name| {
+                // Get texture stem (filename without extension)
+                let stem = tex_name
+                    .rfind('.')
+                    .map(|i| &tex_name[..i])
+                    .unwrap_or(tex_name);
 
-                let image_index = builder.images.len() as u32;
-                builder.images.push(gltf_json::Image {
-                    name: Some(tex_stem.clone()),
-                    buffer_view: None,
-                    extensions: None,
-                    mime_type: Some(gltf_json::image::MimeType("image/png".to_string())),
-                    extras: None,
-                    uri: Some(data_uri),
-                });
+                match texture_mode {
+                    TextureMode::Embed => {
+                        // Original path: find file, decode, embed as data URI
+                        let tex_path = find_texture_file(project_dir, tex_name)?;
+                        let data_uri = load_texture_as_data_uri(&tex_path)?;
+                        let tex_stem = tex_path
+                            .file_stem()
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_else(|| name.to_string());
 
-                let sampler_index = builder.samplers.len() as u32;
-                builder.samplers.push(gltf_json::texture::Sampler {
-                    mag_filter: Some(Checked::Valid(gltf_json::texture::MagFilter::Linear)),
-                    min_filter: Some(Checked::Valid(
-                        gltf_json::texture::MinFilter::LinearMipmapLinear,
-                    )),
-                    wrap_s: Checked::Valid(gltf_json::texture::WrappingMode::Repeat),
-                    wrap_t: Checked::Valid(gltf_json::texture::WrappingMode::Repeat),
-                    ..Default::default()
-                });
+                        let image_index = builder.images.len() as u32;
+                        builder.images.push(gltf_json::Image {
+                            name: Some(tex_stem.clone()),
+                            buffer_view: None,
+                            extensions: None,
+                            mime_type: Some(gltf_json::image::MimeType("image/png".to_string())),
+                            extras: None,
+                            uri: Some(data_uri),
+                        });
 
-                let texture_index = builder.textures.len() as u32;
-                builder.textures.push(gltf_json::Texture {
-                    name: Some(tex_stem),
-                    sampler: Some(gltf_json::Index::new(sampler_index)),
-                    source: gltf_json::Index::new(image_index),
-                    extensions: None,
-                    extras: None,
-                });
+                        let sampler_index = builder.samplers.len() as u32;
+                        builder.samplers.push(gltf_json::texture::Sampler {
+                            mag_filter: Some(Checked::Valid(gltf_json::texture::MagFilter::Linear)),
+                            min_filter: Some(Checked::Valid(
+                                gltf_json::texture::MinFilter::LinearMipmapLinear,
+                            )),
+                            wrap_s: Checked::Valid(gltf_json::texture::WrappingMode::Repeat),
+                            wrap_t: Checked::Valid(gltf_json::texture::WrappingMode::Repeat),
+                            ..Default::default()
+                        });
 
-                Some(gltf_json::texture::Info {
-                    index: gltf_json::Index::new(texture_index),
-                    tex_coord: 0,
-                    extensions: None,
-                    extras: None,
-                })
+                        let texture_index = builder.textures.len() as u32;
+                        builder.textures.push(gltf_json::Texture {
+                            name: Some(tex_stem),
+                            sampler: Some(gltf_json::Index::new(sampler_index)),
+                            source: gltf_json::Index::new(image_index),
+                            extensions: None,
+                            extras: None,
+                        });
+
+                        Some(gltf_json::texture::Info {
+                            index: gltf_json::Index::new(texture_index),
+                            tex_coord: 0,
+                            extensions: None,
+                            extras: None,
+                        })
+                    }
+                    TextureMode::ExternalUri => {
+                        // New path: external URI reference to shared KTX2 texture
+                        // URI is relative to the GLB location (buildings/textures/)
+                        // Must be a subdirectory — glTFast doesn't resolve ../ in URIs
+                        // Uses KTX2 format: glTFast supports .ktx2 but NOT .dds
+                        let uri = format!("textures/{}.png", stem.to_lowercase());
+
+                        let image_index = builder.images.len() as u32;
+                        builder.images.push(gltf_json::Image {
+                            name: Some(stem.to_lowercase()),
+                            buffer_view: None,
+                            extensions: None,
+                            mime_type: None, // Let the importer determine MIME from file
+                            extras: None,
+                            uri: Some(uri),
+                        });
+
+                        let sampler_index = builder.samplers.len() as u32;
+                        builder.samplers.push(gltf_json::texture::Sampler {
+                            mag_filter: Some(Checked::Valid(gltf_json::texture::MagFilter::Linear)),
+                            min_filter: Some(Checked::Valid(
+                                gltf_json::texture::MinFilter::LinearMipmapLinear,
+                            )),
+                            wrap_s: Checked::Valid(gltf_json::texture::WrappingMode::Repeat),
+                            wrap_t: Checked::Valid(gltf_json::texture::WrappingMode::Repeat),
+                            ..Default::default()
+                        });
+
+                        let texture_index = builder.textures.len() as u32;
+                        builder.textures.push(gltf_json::Texture {
+                            name: Some(stem.to_lowercase()),
+                            sampler: Some(gltf_json::Index::new(sampler_index)),
+                            source: gltf_json::Index::new(image_index),
+                            extensions: None,
+                            extras: None,
+                        });
+
+                        Some(gltf_json::texture::Info {
+                            index: gltf_json::Index::new(texture_index),
+                            tex_coord: 0,
+                            extensions: None,
+                            extras: None,
+                        })
+                    }
+                    TextureMode::Skip => unreachable!(),
+                }
             })
     };
 
@@ -668,6 +709,7 @@ fn build_geom_primitives(
     prefix: &str,
     material_base_idx: u32,
     skip_local_transform: bool,
+    ct: &CoordTransform,
 ) -> Vec<gltf_json::mesh::Primitive> {
     if geom.vertices.is_empty() || geom.indices.is_empty() {
         return vec![];
@@ -676,9 +718,6 @@ fn build_geom_primitives(
     // Apply mat_local transform if not identity — skip for animated objects
     // (animated objects get their transform from animation keyframes instead).
     let use_local_mat = !skip_local_transform && !is_identity(&geom.mat_local);
-    // The Z-up→Y-up mapping (x,y,z)→(x,z,y) is a reflection (det=-1),
-    // so winding must always be reversed to restore correct front-face (CCW).
-    let should_reverse_winding = true;
 
     let positions: Vec<f32> = geom
         .vertices
@@ -689,7 +728,7 @@ fn build_geom_primitives(
             } else {
                 *v
             };
-            transform_position(p).into_iter()
+            ct.position(p).into_iter()
         })
         .collect();
 
@@ -702,7 +741,7 @@ fn build_geom_primitives(
                 } else {
                     *n
                 };
-                transform_normal(n2).into_iter()
+                ct.normal(n2).into_iter()
             })
             .collect()
     } else {
@@ -825,11 +864,8 @@ fn build_geom_primitives(
     // Build primitives per subset (each subset maps to a material)
     if geom.subsets.is_empty() {
         // No subsets — single primitive with all indices
-        let prim_indices = if should_reverse_winding {
-            reverse_winding(&geom.indices)
-        } else {
-            geom.indices.clone()
-        };
+        let mut prim_indices = geom.indices.clone();
+        ct.reverse_indices(&mut prim_indices);
         let idx_acc = builder.add_index_accessor(&prim_indices, &format!("{}_idx", prefix));
 
         let mut attributes = std::collections::BTreeMap::new();
@@ -889,11 +925,8 @@ fn build_geom_primitives(
                 continue;
             }
 
-            let sub_indices = if should_reverse_winding {
-                reverse_winding(&geom.indices[start..end])
-            } else {
-                geom.indices[start..end].to_vec()
-            };
+            let mut sub_indices = geom.indices[start..end].to_vec();
+            ct.reverse_indices(&mut sub_indices);
             let idx_acc =
                 builder.add_index_accessor(&sub_indices, &format!("{}_idx_s{}", prefix, si));
 
@@ -960,7 +993,7 @@ fn build_geom_primitives(
 
 /// Build glTF node extras JSON for texuv/teximg/mtlopac/transform animation data.
 /// Returns None if the geom object has no animations of any kind.
-fn build_anim_extras(geom: &LmoGeomObject, geom_index: usize) -> gltf_json::extras::Extras {
+fn build_anim_extras(geom: &LmoGeomObject, geom_index: usize, ct: &CoordTransform) -> gltf_json::extras::Extras {
     let has_property_anims = !geom.texuv_anims.is_empty()
         || !geom.teximg_anims.is_empty()
         || !geom.mtlopac_anims.is_empty();
@@ -1052,7 +1085,7 @@ fn build_anim_extras(geom: &LmoGeomObject, geom_index: usize) -> gltf_json::extr
                 .translations
                 .iter()
                 .map(|t| {
-                    let yt = z_up_to_y_up_vec3(*t);
+                    let yt = ct.extras_position(*t);
                     serde_json::json!([yt[0], yt[1], yt[2]])
                 })
                 .collect();
@@ -1060,7 +1093,7 @@ fn build_anim_extras(geom: &LmoGeomObject, geom_index: usize) -> gltf_json::extr
                 .rotations
                 .iter()
                 .map(|r| {
-                    let yr = z_up_to_y_up_quat(*r);
+                    let yr = ct.extras_quaternion(*r);
                     serde_json::json!([yr[0], yr[1], yr[2], yr[3]])
                 })
                 .collect();
@@ -1083,8 +1116,8 @@ fn build_anim_extras(geom: &LmoGeomObject, geom_index: usize) -> gltf_json::extr
 /// Build glTF node extras combining animation data + pko_primitive_id.
 /// The primitive ID maps this mesh node to the PKO LMO subset index, used by
 /// Unity to identify which mesh pieces should fade (overhead roof fade system).
-fn build_node_extras(geom: &LmoGeomObject, geom_index: usize) -> gltf_json::extras::Extras {
-    let anim_extras = build_anim_extras(geom, geom_index);
+fn build_node_extras(geom: &LmoGeomObject, geom_index: usize, ct: &CoordTransform) -> gltf_json::extras::Extras {
+    let anim_extras = build_anim_extras(geom, geom_index, ct);
 
     // Start with existing anim extras or empty map
     let mut extras: serde_json::Map<String, serde_json::Value> = match &anim_extras {
@@ -1108,22 +1141,6 @@ fn build_node_extras(geom: &LmoGeomObject, geom_index: usize) -> gltf_json::extr
 
 const FRAME_RATE: f32 = 30.0;
 
-/// Transform a position vector from Z-up game space to Y-up glTF space.
-/// Uses the same mapping as `transform_position`: (x,y,z) → (x,z,y).
-fn z_up_to_y_up_vec3(v: [f32; 3]) -> [f32; 3] {
-    [v[0], v[2], v[1]]
-}
-
-/// Transform a quaternion from Z-up game space to Y-up glTF space.
-/// Input/output in glTF [x, y, z, w] order.
-///
-/// The Y↔Z axis swap is a reflection (det = -1). For quaternions representing
-/// rotations, this means: swap Y↔Z components AND negate the rotation angle.
-/// Negating the angle negates the vector part: (qx,qy,qz,qw) → (-qx,-qz,-qy,qw).
-fn z_up_to_y_up_quat(q: [f32; 4]) -> [f32; 4] {
-    [-q[0], -q[2], -q[1], q[3]]
-}
-
 // ============================================================================
 // Animation: convert LMO matrix keyframes → glTF animation tracks
 // ============================================================================
@@ -1135,6 +1152,7 @@ fn z_up_to_y_up_quat(q: [f32; 4]) -> [f32; 4] {
 fn build_animations(
     builder: &mut GltfBuilder,
     animated_nodes: &[(u32, &LmoGeomObject)],
+    ct: &CoordTransform,
 ) -> Vec<gltf_json::Animation> {
     if animated_nodes.is_empty() {
         return vec![];
@@ -1173,8 +1191,7 @@ fn build_animations(
             .translations
             .iter()
             .flat_map(|t| {
-                let yt = z_up_to_y_up_vec3(*t);
-                yt.into_iter()
+                ct.position(*t).into_iter()
             })
             .collect();
 
@@ -1192,8 +1209,7 @@ fn build_animations(
             .rotations
             .iter()
             .flat_map(|r| {
-                let yr = z_up_to_y_up_quat(*r);
-                yr.into_iter()
+                ct.quaternion(*r).into_iter()
             })
             .collect();
 
@@ -1291,6 +1307,7 @@ fn build_bone_skin(
     builder: &mut GltfBuilder,
     geom: &LmoGeomObject,
     prefix: &str,
+    ct: &CoordTransform,
 ) -> Option<BoneSkinData> {
     let bone_anim = geom.bone_animation.as_ref()?;
     if bone_anim.bones.is_empty() {
@@ -1312,8 +1329,8 @@ fn build_bone_skin(
         let (translation, rotation) = if bi < bone_anim.keyframes.len()
             && !bone_anim.keyframes[bi].translations.is_empty()
         {
-            let t = z_up_to_y_up_vec3(bone_anim.keyframes[bi].translations[0]);
-            let r = z_up_to_y_up_quat(bone_anim.keyframes[bi].rotations[0]);
+            let t = ct.position(bone_anim.keyframes[bi].translations[0]);
+            let r = ct.quaternion(bone_anim.keyframes[bi].rotations[0]);
             (Some(t), Some(r))
         } else {
             (None, None)
@@ -1354,17 +1371,14 @@ fn build_bone_skin(
     }
 
     // Build inverse bind matrices accessor.
-    // PKO IBMs are 4×4 row-major, row-vector convention (v' = v * M) in Z-up.
-    // glTF IBMs are 4×4 column-major, column-vector convention (v' = M * v) in Y-up.
-    // Conversion: IBM_gltf = S * IBM_pko^T * S, where S swaps Y↔Z.
-    // In element form: IBM_gltf[row][col] = IBM_pko[ymap[col]][ymap[row]]
-    // Writing column-major: iterate col outer, row inner.
-    let ymap = [0usize, 2, 1, 3]; // Y↔Z swap index mapping
+    // PKO IBMs are 4×4 row-major D3D matrices (row-vector convention).
+    // ct.matrix4() handles: D3D row-major → cgmath column-major → basis change → glTF column-major.
     let mut ibm_data: Vec<f32> = Vec::with_capacity(bone_num * 16);
     for ibm in &bone_anim.inv_bind_matrices {
+        let converted = ct.matrix4(*ibm);
         for col in 0..4 {
             for row in 0..4 {
-                ibm_data.push(ibm[ymap[col]][ymap[row]]);
+                ibm_data.push(converted[col][row]);
             }
         }
     }
@@ -1418,7 +1432,7 @@ fn build_bone_skin(
             let trans_data: Vec<f32> = kf
                 .translations
                 .iter()
-                .flat_map(|t| z_up_to_y_up_vec3(*t).into_iter())
+                .flat_map(|t| ct.position(*t).into_iter())
                 .collect();
             let trans_acc = builder.add_accessor_f32(
                 &trans_data,
@@ -1453,7 +1467,7 @@ fn build_bone_skin(
             let rot_data: Vec<f32> = kf
                 .rotations
                 .iter()
-                .flat_map(|r| z_up_to_y_up_quat(*r).into_iter())
+                .flat_map(|r| ct.quaternion(*r).into_iter())
                 .collect();
             let rot_acc = builder.add_accessor_f32(
                 &rot_data,
@@ -1518,6 +1532,8 @@ fn process_lmo_geometry<'a>(
     builder: &mut GltfBuilder,
     model: &'a LmoModel,
     project_dir: &Path,
+    texture_mode: TextureMode,
+    ct: &CoordTransform,
 ) -> Result<LmoGeomResult> {
     let mut child_indices = Vec::new();
     let mut animated_nodes: Vec<(u32, &'a LmoGeomObject)> = Vec::new();
@@ -1547,7 +1563,7 @@ fn process_lmo_geometry<'a>(
                 },
                 &format!("{}_default_mat", prefix),
                 project_dir,
-                true,
+                texture_mode,
             );
         } else {
             for (mi, mat) in geom.materials.iter().enumerate() {
@@ -1556,7 +1572,7 @@ fn process_lmo_geometry<'a>(
                     mat,
                     &format!("{}_mat{}", prefix, mi),
                     project_dir,
-                    true,
+                    texture_mode,
                 );
             }
         }
@@ -1569,6 +1585,7 @@ fn process_lmo_geometry<'a>(
             &prefix,
             material_base_idx,
             has_animation || has_bone_animation,
+            ct,
         );
 
         if primitives.is_empty() {
@@ -1585,13 +1602,13 @@ fn process_lmo_geometry<'a>(
         });
 
         let skin_data = if has_bone_animation {
-            build_bone_skin(builder, geom, &prefix)
+            build_bone_skin(builder, geom, &prefix, ct)
         } else {
             None
         };
 
         let node_idx = builder.nodes.len() as u32;
-        let node_extras = build_node_extras(geom, gi);
+        let node_extras = build_node_extras(geom, gi, ct);
         builder.nodes.push(gltf_json::Node {
             mesh: Some(gltf_json::Index::new(mesh_idx)),
             name: Some(format!("geom_node_{}", gi)),
@@ -1637,7 +1654,7 @@ fn process_lmo_geometry<'a>(
         return Err(anyhow!("No renderable geometry in LMO file"));
     }
 
-    let mut animations = build_animations(builder, &animated_nodes);
+    let mut animations = build_animations(builder, &animated_nodes, ct);
 
     if !all_bone_channels.is_empty() {
         animations.push(gltf_json::Animation {
@@ -1675,8 +1692,9 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         return Err(anyhow!("LMO file has no geometry objects"));
     }
 
+    let ct = CoordTransform::new(ExportProfile::StandardGltf);
     let mut builder = GltfBuilder::new();
-    let geom_result = process_lmo_geometry(&mut builder, &model, project_dir)?;
+    let geom_result = process_lmo_geometry(&mut builder, &model, project_dir, TextureMode::Embed, &ct)?;
 
     let root = gltf_json::Root {
         asset: gltf_json::Asset {
@@ -1712,15 +1730,23 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
 /// Build a GLB-ready building model: returns (glTF JSON string, binary buffer).
 /// Uses the same mesh/material/animation logic as `build_gltf_from_lmo`, but
 /// packs all buffer data into a single binary buffer for GLB writing.
-pub fn build_glb_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<(String, Vec<u8>)> {
+/// Build a GLB from an LMO file. When `embed_textures` is false, textures are
+/// referenced via external `image.uri` paths (relative to `../textures/scene/`)
+/// instead of being embedded in the GLB binary buffer.
+pub fn build_glb_from_lmo(
+    lmo_path: &Path,
+    project_dir: &Path,
+    embed_textures: bool,
+    ct: &CoordTransform,
+) -> Result<(String, Vec<u8>)> {
     let model = lmo_loader::load_lmo(lmo_path)?;
 
     if model.geom_objects.is_empty() {
         return Err(anyhow!("LMO file has no geometry objects"));
     }
-
     let mut builder = GltfBuilder::new();
-    let geom_result = process_lmo_geometry(&mut builder, &model, project_dir)?;
+    let texture_mode = if embed_textures { TextureMode::Embed } else { TextureMode::ExternalUri };
+    let geom_result = process_lmo_geometry(&mut builder, &model, project_dir, texture_mode, &ct)?;
 
     // Convert data-URI buffers into a single GLB binary buffer, then append
     // image data as additional buffer views.
@@ -1924,6 +1950,7 @@ pub fn load_scene_models(
     unique_ids.sort_unstable();
     unique_ids.dedup();
 
+    let ct = CoordTransform::new(ExportProfile::StandardGltf);
     let mut builder = GltfBuilder::new();
     let mut model_mesh_map = HashMap::new();
 
@@ -1948,6 +1975,7 @@ pub fn load_scene_models(
             obj_id,
             &model,
             project_dir,
+            &ct,
         );
     }
 
@@ -1970,6 +1998,7 @@ fn add_model_to_builder(
     obj_id: u32,
     model: &LmoModel,
     project_dir: &Path,
+    ct: &CoordTransform,
 ) {
     // Merge all geometry objects into a single mesh with multiple primitives
     let mut all_primitives = Vec::new();
@@ -1996,7 +2025,7 @@ fn add_model_to_builder(
                 },
                 &format!("{}_mat", prefix),
                 project_dir,
-                false, // skip textures for map batch loading
+                TextureMode::Skip, // skip textures for map batch loading
             );
         } else {
             for (mi, mat) in geom.materials.iter().enumerate() {
@@ -2005,12 +2034,12 @@ fn add_model_to_builder(
                     mat,
                     &format!("{}_mat{}", prefix, mi),
                     project_dir,
-                    false, // skip textures for map batch loading
+                    TextureMode::Skip, // skip textures for map batch loading
                 );
             }
         }
 
-        let prims = build_geom_primitives(builder, geom, &prefix, material_base_idx, false);
+        let prims = build_geom_primitives(builder, geom, &prefix, material_base_idx, false, ct);
         all_primitives.extend(prims);
     }
 
@@ -2084,53 +2113,6 @@ mod tests {
     }
 
     #[test]
-    fn coordinate_transform_z_up_to_y_up() {
-        // Game: Z-up → glTF: Y-up: (x, y, z) → (x, z, y)
-        // Y is NOT negated so building Z matches terrain Z (south = positive).
-        assert_eq!(transform_position([1.0, 2.0, 3.0]), [1.0, 3.0, 2.0]);
-        // z_up_to_y_up_vec3 must match transform_position for consistency
-        assert_eq!(z_up_to_y_up_vec3([1.0, 2.0, 3.0]), [1.0, 3.0, 2.0]);
-        assert_eq!(transform_position([0.0, 0.0, 0.0]), [0.0, 0.0, 0.0]);
-        assert_eq!(transform_normal([0.0, 0.0, 1.0]), [0.0, 1.0, 0.0]);
-    }
-
-    #[test]
-    fn z_up_to_y_up_vec3_matches_static_transform() {
-        // z_up_to_y_up_vec3 (used for animations) must produce the same Z component
-        // as transform_position (used for static geometry) for any PKO Y value.
-        for y in [-5.0f32, -1.0, 0.0, 1.0, 5.0, 100.0] {
-            let p = [0.0, y, 0.0];
-            assert_eq!(
-                z_up_to_y_up_vec3(p)[2],
-                transform_position(p)[2],
-                "Z mismatch for PKO Y={y}"
-            );
-        }
-    }
-
-    #[test]
-    fn animated_static_z_consistency() {
-        // For a mixed model where animated and static geom share the same PKO Y offset,
-        // the resulting glTF Z components must have the same sign.
-        let pko_y = 5.0f32;
-        let static_z = transform_position([0.0, pko_y, 0.0])[2];
-        let anim_z = z_up_to_y_up_vec3([0.0, pko_y, 0.0])[2];
-        assert_eq!(
-            static_z.signum(),
-            anim_z.signum(),
-            "Static Z ({static_z}) and animated Z ({anim_z}) must have the same sign"
-        );
-        assert_eq!(static_z, anim_z, "Static and animated Z must be equal");
-    }
-
-    #[test]
-    fn reverse_winding_swaps_triangle_indices() {
-        let indices = vec![0, 1, 2, 3, 4, 5];
-        let reversed = reverse_winding(&indices);
-        assert_eq!(reversed, vec![0, 2, 1, 3, 5, 4]);
-    }
-
-    #[test]
     fn identity_matrix_detection() {
         let id = [
             [1.0, 0.0, 0.0, 0.0],
@@ -2192,7 +2174,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "test", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "test", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
         assert_eq!(
             gltf_mat.alpha_mode,
@@ -2220,7 +2202,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "test", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "test", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
         assert_eq!(
             gltf_mat.alpha_mode,
@@ -2247,7 +2229,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "test", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "test", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
 
         assert_eq!(
@@ -2280,7 +2262,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "test_type9", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "test_type9", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
         // Type 9 → remapped to 1 → is_effect=true → Opaque alpha mode (no alpha test)
         assert_eq!(
@@ -2313,7 +2295,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "tree_leaf", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "tree_leaf", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
 
         // Should be Mask (alpha test enabled)
@@ -2351,10 +2333,11 @@ mod tests {
         let geom = &model.geom_objects[0];
         let mat_base = builder.materials.len() as u32;
         for (mi, mat) in geom.materials.iter().enumerate() {
-            build_lmo_material(&mut builder, mat, &format!("mat{}", mi), &tmp, false);
+            build_lmo_material(&mut builder, mat, &format!("mat{}", mi), &tmp, TextureMode::Skip);
         }
 
-        let prims = build_geom_primitives(&mut builder, geom, "test", mat_base, false);
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let prims = build_geom_primitives(&mut builder, geom, "test", mat_base, false, &ct);
         assert_eq!(prims.len(), 1, "should have 1 primitive for 1 subset");
 
         // Verify accessor was created for positions
@@ -2716,7 +2699,8 @@ mod tests {
             .map(|(i, g)| (i as u32, g))
             .collect();
 
-        let anims = build_animations(&mut builder, &animated_nodes);
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let anims = build_animations(&mut builder, &animated_nodes, &ct);
 
         assert_eq!(anims.len(), 1, "should produce exactly one Animation");
         let anim = &anims[0];
@@ -2730,7 +2714,8 @@ mod tests {
         let mut builder = GltfBuilder::new();
         let animated_nodes: Vec<(u32, &LmoGeomObject)> = vec![];
 
-        let anims = build_animations(&mut builder, &animated_nodes);
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let anims = build_animations(&mut builder, &animated_nodes, &ct);
         assert!(anims.is_empty(), "static-only model should produce no animations");
     }
 
@@ -2739,7 +2724,8 @@ mod tests {
         let model = make_animated_test_model();
         let animated_geom = &model.geom_objects[1];
 
-        let extras = build_anim_extras(animated_geom, 5);
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let extras = build_anim_extras(animated_geom, 5, &ct);
         assert!(extras.is_some(), "animated geom should produce extras");
 
         let json_str = extras.unwrap().to_string();
@@ -2764,7 +2750,8 @@ mod tests {
         let model = make_test_model();
         let static_geom = &model.geom_objects[0];
 
-        let extras = build_anim_extras(static_geom, 0);
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let extras = build_anim_extras(static_geom, 0, &ct);
         assert!(extras.is_none(), "static geom with no anims should produce None");
     }
 
@@ -2774,7 +2761,8 @@ mod tests {
         let static_geom = &model.geom_objects[0];
 
         // Even a static geom with no anims should get pko_primitive_id
-        let extras = build_node_extras(static_geom, 7);
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let extras = build_node_extras(static_geom, 7, &ct);
         assert!(extras.is_some(), "node extras should always be Some (has pko_primitive_id)");
 
         let parsed: serde_json::Value = serde_json::from_str(&extras.unwrap().to_string()).unwrap();
@@ -2786,7 +2774,8 @@ mod tests {
         let model = make_animated_test_model();
         let animated_geom = &model.geom_objects[1];
 
-        let extras = build_node_extras(animated_geom, 3);
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let extras = build_node_extras(animated_geom, 3, &ct);
         assert!(extras.is_some());
 
         let parsed: serde_json::Value = serde_json::from_str(&extras.unwrap().to_string()).unwrap();
@@ -2998,7 +2987,7 @@ mod tests {
                 tex_filename: None,
             };
             let mut builder = GltfBuilder::new();
-            build_lmo_material(&mut builder, &mat, "test", &tmp, false);
+            build_lmo_material(&mut builder, &mat, "test", &tmp, TextureMode::Skip);
             let gltf_mat = &builder.materials[0];
             // Name should contain T1, not T6/T7/T8
             assert!(
@@ -3031,7 +3020,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "glow", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "glow", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
         let name = gltf_mat.name.as_ref().unwrap();
         // opacity 0.75 * 255 = 191.25 → 191
@@ -3060,7 +3049,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "sparkle", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "sparkle", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
 
         assert_eq!(
@@ -3101,7 +3090,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "wall", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "wall", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
         let name = gltf_mat.name.as_ref().unwrap();
         assert!(
@@ -3129,7 +3118,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "tree", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "tree", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
         let name = gltf_mat.name.as_ref().unwrap();
         assert!(
@@ -3156,7 +3145,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "shadow", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "shadow", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
         let name = gltf_mat.name.as_ref().unwrap();
         assert!(
@@ -3192,7 +3181,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "glass", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "glass", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
         let name = gltf_mat.name.as_ref().unwrap();
         // opacity 0.5 * 255 = 127.5 → 128
@@ -3228,7 +3217,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "fence", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "fence", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
         let name = gltf_mat.name.as_ref().unwrap();
         // opacity 0.7 * 255 = 178.5 → 179
@@ -3257,7 +3246,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "stone", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "stone", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
         let name = gltf_mat.name.as_ref().unwrap();
         assert!(
@@ -3480,7 +3469,7 @@ mod tests {
         let model = make_multi_geom_model(4, false);
         let lmo_path = write_temp_lmo(&model, &tmp_dir, "no_colors.lmo");
 
-        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir).unwrap();
+        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir, true, &CoordTransform::new(ExportProfile::StandardGltf)).unwrap();
         let glb = build_glb_bytes(&json_str, &bin);
         let (json, bin_data) = parse_glb(&glb);
 
@@ -3502,7 +3491,7 @@ mod tests {
         let model = make_multi_geom_model(4, true);
         let lmo_path = write_temp_lmo(&model, &tmp_dir, "with_colors.lmo");
 
-        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir).unwrap();
+        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir, true, &CoordTransform::new(ExportProfile::StandardGltf)).unwrap();
         let glb = build_glb_bytes(&json_str, &bin);
         let (json, bin_data) = parse_glb(&glb);
 
@@ -3530,7 +3519,7 @@ mod tests {
 
         let lmo_path = write_temp_lmo(&model, &tmp_dir, "mixed_colors.lmo");
 
-        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir).unwrap();
+        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir, true, &CoordTransform::new(ExportProfile::StandardGltf)).unwrap();
         let glb = build_glb_bytes(&json_str, &bin);
         let (json, bin_data) = parse_glb(&glb);
 
@@ -3612,7 +3601,7 @@ mod tests {
         };
 
         let project_dir = lmo_path.parent().unwrap().parent().unwrap();
-        let (json_str, bin) = build_glb_from_lmo(lmo_path, project_dir).unwrap();
+        let (json_str, bin) = build_glb_from_lmo(lmo_path, project_dir, true, &CoordTransform::new(ExportProfile::StandardGltf)).unwrap();
         let glb = build_glb_bytes(&json_str, &bin);
         let (json, bin_data) = parse_glb(&glb);
 
@@ -3928,7 +3917,7 @@ mod tests {
         };
         let mut builder = GltfBuilder::new();
         let tmp = std::env::temp_dir();
-        build_lmo_material(&mut builder, &mat, "opaque_wall", &tmp, false);
+        build_lmo_material(&mut builder, &mat, "opaque_wall", &tmp, TextureMode::Skip);
         let gltf_mat = &builder.materials[0];
 
         assert_eq!(
@@ -4019,7 +4008,7 @@ mod tests {
             return;
         }
         let project_dir = std::path::Path::new("../top-client");
-        let (json, bin) = build_glb_from_lmo(lmo_path, project_dir)
+        let (json, bin) = build_glb_from_lmo(lmo_path, project_dir, true, &CoordTransform::new(ExportProfile::StandardGltf))
             .expect("GLB export should succeed for nml-bd199");
 
         let root: serde_json::Value = serde_json::from_str(&json).unwrap();

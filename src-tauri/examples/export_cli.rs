@@ -1,8 +1,36 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 
+use pko_tools_lib::math::coord_transform::ExportProfile;
+
+/// Parse `--profile unity|standard` from args. Returns the profile and removes
+/// the flag from the args vec so downstream parsers don't trip on it.
+fn parse_profile(args: &[String]) -> ExportProfile {
+    let mut i = 0;
+    while i < args.len() {
+        if args[i] == "--profile" {
+            if let Some(val) = args.get(i + 1) {
+                return match val.as_str() {
+                    "unity" => ExportProfile::UnityGltfast,
+                    "standard" => ExportProfile::StandardGltf,
+                    other => {
+                        eprintln!("Unknown profile '{}'. Use 'unity' or 'standard'.", other);
+                        std::process::exit(1);
+                    }
+                };
+            } else {
+                eprintln!("--profile requires a value (unity or standard)");
+                std::process::exit(1);
+            }
+        }
+        i += 1;
+    }
+    ExportProfile::UnityGltfast // default
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+    let profile = parse_profile(&args);
 
     // Check for --dump-scene-obj-info mode
     if args.len() >= 3 && args[1] == "--dump-scene-obj-info" {
@@ -42,7 +70,52 @@ fn main() {
             }
         }
 
-        export_characters(&client_dir, &output_dir, split_animations, char_id_filter);
+        export_characters(&client_dir, &output_dir, split_animations, char_id_filter, profile);
+        return;
+    }
+
+    // Check for --shared-v2 mode: exports scene textures as DDS + geometry-only GLBs
+    if args.len() >= 4 && args[3] == "--shared-v2" {
+        let client_dir = PathBuf::from(&args[1]);
+        let output_dir = PathBuf::from(&args[2]);
+
+        eprintln!("Exporting shared assets (v2: external textures) ...");
+        eprintln!("  Client dir: {}", client_dir.display());
+        eprintln!("  Output dir: {}", output_dir.display());
+
+        // 1. Export scene textures as DDS with padded mip chains
+        eprintln!("[shared-v2] Exporting scene textures as DDS...");
+        match pko_tools_lib::map::shared::export_scene_textures(&client_dir, &output_dir) {
+            Ok(count) => eprintln!("  Scene textures: {}", count),
+            Err(e) => eprintln!("  Scene textures FAILED: {:?}", e),
+        }
+
+        // 2. Export terrain textures (same as v1)
+        eprintln!("[shared-v2] Exporting terrain textures...");
+        let terrain_count = pko_tools_lib::map::texture::export_all_terrain_textures(&client_dir, &output_dir)
+            .map(|m| m.len())
+            .unwrap_or(0);
+        eprintln!("  Terrain textures: {}", terrain_count);
+
+        // 3. Export alpha masks (same as v1)
+        eprintln!("[shared-v2] Exporting alpha masks...");
+        let _ = pko_tools_lib::map::texture::export_alpha_atlas(&client_dir, &output_dir);
+        let _ = pko_tools_lib::map::texture::export_alpha_mask_array(&client_dir, &output_dir);
+
+        // 4. Export buildings with external texture references
+        eprintln!("[shared-v2] Exporting buildings (geometry-only, external texture URIs)...");
+        match pko_tools_lib::map::shared::export_shared_assets_v2(&client_dir, &output_dir) {
+            Ok(result) => {
+                eprintln!("  Buildings exported: {} ({} failed)", result.total_buildings_exported, result.total_buildings_failed);
+            }
+            Err(e) => {
+                eprintln!("  Buildings FAILED: {:?}", e);
+                std::process::exit(1);
+            }
+        }
+
+        // 5. Export water textures + effect textures (same as v1 — handled by export_shared_assets_v2)
+        eprintln!("Shared v2 export complete!");
         return;
     }
 
@@ -55,7 +128,7 @@ fn main() {
         eprintln!("  Client dir: {}", client_dir.display());
         eprintln!("  Output dir: {}", output_dir.display());
 
-        match pko_tools_lib::map::shared::export_shared_assets(&client_dir, &output_dir) {
+        match pko_tools_lib::map::shared::export_shared_assets_with_profile(&client_dir, &output_dir, profile) {
             Ok(result) => {
                 eprintln!("Shared export complete!");
                 eprintln!("  Terrain textures: {}", result.total_terrain_textures);
@@ -74,10 +147,15 @@ fn main() {
 
     if args.len() < 4 {
         eprintln!("Usage:");
-        eprintln!("  export_cli <client_dir> <output_dir> <map_name> [--shared-dir <path>]");
-        eprintln!("  export_cli <client_dir> <output_dir> --shared");
-        eprintln!("  export_cli <client_dir> <output_dir> --characters [--no-split-animations] [--char-id <id>]");
+        eprintln!("  export_cli <client_dir> <output_dir> <map_name> [--shared-dir <path>] [--profile <unity|standard>]");
+        eprintln!("  export_cli <client_dir> <output_dir> --shared [--profile <unity|standard>]");
+        eprintln!("  export_cli <client_dir> <output_dir> --characters [--no-split-animations] [--char-id <id>] [--profile <unity|standard>]");
         eprintln!("  export_cli --dump-scene-obj-info <client_dir> [map_name]");
+        eprintln!();
+        eprintln!("Options:");
+        eprintln!("  --profile <unity|standard>  Coordinate profile (default: unity)");
+        eprintln!("    unity    — pre-negate X for glTFast import (clean Unity coordinates)");
+        eprintln!("    standard — spec-compliant glTF (correct in any viewer)");
         eprintln!();
         eprintln!("Examples:");
         eprintln!("  export_cli ./top-client ./unity-export 07xmas2");
@@ -85,6 +163,7 @@ fn main() {
         eprintln!("  export_cli ./top-client ./unity-export 07xmas2 --shared-dir ./unity-export/Shared");
         eprintln!("  export_cli ./top-client ./unity-export --characters");
         eprintln!("  export_cli ./top-client ./unity-export --characters --char-id 1");
+        eprintln!("  export_cli ./top-client ./unity-export 07xmas2 --profile standard");
         eprintln!("  export_cli --dump-scene-obj-info ./top-client");
         eprintln!("  export_cli --dump-scene-obj-info ./top-client 07xmas2");
         std::process::exit(1);
@@ -96,6 +175,7 @@ fn main() {
 
     // Parse optional flags
     let mut options = pko_tools_lib::map::ExportOptions::default();
+    options.export_profile = profile;
     let mut i = 4;
     while i < args.len() {
         match args[i].as_str() {
@@ -114,6 +194,7 @@ fn main() {
                     std::process::exit(1);
                 }
             }
+            "--profile" => { i += 2; } // already parsed globally
             _ => { i += 1; }
         }
     }
@@ -142,6 +223,7 @@ fn export_characters(
     output_dir: &PathBuf,
     split_animations: bool,
     char_id_filter: Option<u32>,
+    profile: ExportProfile,
 ) {
     let char_info_path = client_dir.join("scripts/table/CharacterInfo.txt");
     if !char_info_path.exists() {
@@ -186,13 +268,14 @@ fn export_characters(
     eprintln!("  Client dir: {}", client_dir.display());
     eprintln!("  Output dir: {}", output_dir.display());
 
-    let y_up = true; // glTF standard
+    use pko_tools_lib::math::coord_transform::CoordTransform;
+    let ct = CoordTransform::new(profile);
     let mut exported = 0u32;
     let mut failed = 0u32;
 
     for character in &characters {
         let gltf_result = if split_animations {
-            character.get_gltf_json(client_dir, y_up)
+            character.get_gltf_json(client_dir, Some(&ct))
         } else {
             // Force legacy single-animation by temporarily hiding the data files.
             // Instead, we call get_gltf_json which auto-detects — to force no-split,
@@ -200,7 +283,7 @@ fn export_characters(
             // the default when data files exist. The --no-split flag would require
             // a code path change in get_gltf_json. Log a note.
             eprintln!("  [note] --no-split-animations not yet fully implemented, using auto-detect");
-            character.get_gltf_json(client_dir, y_up)
+            character.get_gltf_json(client_dir, Some(&ct))
         };
 
         match gltf_result {

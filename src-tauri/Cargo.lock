@@ -3910,6 +3910,7 @@ dependencies = [
  "cgmath",
  "csv",
  "encoding_rs",
+ "flate2",
  "gltf",
  "image",
  "insta",

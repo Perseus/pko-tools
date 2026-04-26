@@ -20,6 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     db,
+    math::coord_transform::{CoordTransform, ExportProfile},
     projects::{self, project},
 };
 use gltf::json as gltf;
@@ -200,11 +201,11 @@ impl Character {
         })
     }
 
-    pub fn get_gltf_json(&self, project_dir: &Path, y_up: bool) -> anyhow::Result<String> {
-        self.get_gltf_json_with_split(project_dir, y_up, true)
+    pub fn get_gltf_json(&self, project_dir: &Path, ct: Option<&CoordTransform>) -> anyhow::Result<String> {
+        self.get_gltf_json_with_split(project_dir, ct, true)
     }
 
-    pub fn get_gltf_json_with_split(&self, project_dir: &Path, y_up: bool, split_animations: bool) -> anyhow::Result<String> {
+    pub fn get_gltf_json_with_split(&self, project_dir: &Path, ct: Option<&CoordTransform>, split_animations: bool) -> anyhow::Result<String> {
         let parts = self.get_parts();
         let mut model_locations = vec![];
 
@@ -249,7 +250,7 @@ impl Character {
         let mut meshes: Vec<gltf::Mesh> = vec![];
         for (i, model) in models.iter().enumerate() {
             let primitive =
-                model.get_gltf_mesh_primitive(project_dir, &mut fields_to_aggregate, y_up)?;
+                model.get_gltf_mesh_primitive(project_dir, &mut fields_to_aggregate, ct)?;
             let model_id_base = self.model as u32 * 1000000;
             let suit_id = self.suit_id as u32 * 10000;
             let model_id = model_id_base + suit_id + i as u32;
@@ -266,14 +267,14 @@ impl Character {
 
         let mesh_count = meshes.len();
         let (skin, nodes) =
-            animation.to_gltf_skin_and_nodes_multi(&mut fields_to_aggregate, mesh_count, y_up);
+            animation.to_gltf_skin_and_nodes_multi(&mut fields_to_aggregate, mesh_count, ct);
         fields_to_aggregate.skin.push(skin);
         fields_to_aggregate.nodes.extend(nodes);
 
         let helpers: Vec<Vec<gltf::Node>> = models
             .iter()
             .enumerate()
-            .map(|(i, model)| model.get_gltf_helper_nodes_for_mesh(i, y_up))
+            .map(|(i, model)| model.get_gltf_helper_nodes_for_mesh(i, ct))
             .collect();
         let mut total_helper_nodes = 0;
         for helper_nodes in helpers.iter() {
@@ -291,20 +292,21 @@ impl Character {
             let pose_table =
                 super::animation::pose_info::load_poseinfo(&poseinfo_path)?;
 
-            // Action table key is char_type_id (matches Character.id), not model number
-            if let Some(actions) = action_table.get(&(self.id as u16)) {
+            // Action table is keyed by Action ID (CharacterInfo column 20), not character ID.
+            // C++ source: SMallMap.cpp:1688 uses sActionID for LoadPose.
+            if let Some(actions) = action_table.get(&self.action_id) {
                 animation.to_gltf_animations_split(
                     &mut fields_to_aggregate,
                     actions,
                     Some(&pose_table),
-                    y_up,
+                    ct,
                 );
             } else {
                 // No actions for this char type — fall back to single animation
-                animation.to_gltf_animations_and_sampler(&mut fields_to_aggregate, y_up);
+                animation.to_gltf_animations_and_sampler(&mut fields_to_aggregate, ct);
             }
         } else {
-            animation.to_gltf_animations_and_sampler(&mut fields_to_aggregate, y_up);
+            animation.to_gltf_animations_and_sampler(&mut fields_to_aggregate, ct);
         }
 
         // Build scene node indices: root bone, skinned mesh nodes, and all helper nodes
@@ -495,10 +497,13 @@ pub fn get_character_gltf_json(
     character_id: u32,
 ) -> anyhow::Result<String> {
     // Viewer path: single monolithic animation (fast), action picker uses frame ranges
+    // StandardGltf converts Z-up to Y-up. The Three.js viewer no longer applies its
+    // own -90° X rotation — the data arrives in Y-up and is rendered directly.
     let project = projects::project::Project::get_project(project_id)?;
     let character = get_character(project_id, character_id)?;
     let project_dir = project.project_directory.as_ref();
-    character.get_gltf_json_with_split(project_dir, false, false)
+    let ct = CoordTransform::new(ExportProfile::StandardGltf);
+    character.get_gltf_json_with_split(project_dir, Some(&ct), false)
 }
 
 pub fn get_character_gltf_json_with_options(
@@ -510,7 +515,12 @@ pub fn get_character_gltf_json_with_options(
     let project = projects::project::Project::get_project(project_id)?;
     let character = get_character(project_id, character_id)?;
     let project_dir = project.project_directory.as_ref();
-    character.get_gltf_json_with_split(project_dir, y_up, true)
+    let ct = if y_up {
+        Some(CoordTransform::new(ExportProfile::StandardGltf))
+    } else {
+        None
+    };
+    character.get_gltf_json_with_split(project_dir, ct.as_ref(), true)
 }
 
 pub fn get_character_metadata(
@@ -569,7 +579,7 @@ mod test {
             suit_num: 0,
         };
 
-        let gltf = character.get_gltf_json(Path::new("/mnt/d/EA 1.0.1"), false);
+        let gltf = character.get_gltf_json(Path::new("/mnt/d/EA 1.0.1"), None);
         let mut file = File::create("./test_artifacts/test.gltf").unwrap();
         file.write_all(gltf.unwrap().as_bytes()).unwrap();
     }

@@ -1,10 +1,10 @@
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import EffectWorkbench from "@/features/effect/EffectWorkbench";
+import EffectV2Workbench from "@/features/effect-v2/EffectV2Workbench";
 import { currentProjectAtom } from "@/store/project";
 import { useAtomValue } from "jotai";
 import { AlertCircle } from "lucide-react";
 
-export default function EffectsPage() {
+export default function EffectsV2Page() {
   const currentProject = useAtomValue(currentProjectAtom);
   if (!currentProject) {
     return (
@@ -22,7 +22,7 @@ export default function EffectsPage() {
 
   return (
     <main className="h-full w-full">
-      <EffectWorkbench />
+      <EffectV2Workbench />
     </main>
   );
 }

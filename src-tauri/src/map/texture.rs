@@ -601,42 +601,33 @@ pub fn export_alpha_mask_array(
     Ok(Some(paths))
 }
 
-/// Build tile layer grid: 7 bytes per tile encoding all 4 texture layers.
+/// Build tile layer grid: 8 bytes per tile encoding all 4 texture layers + existence flag.
 /// Format per tile: [base_tex, L1_tex, L1_alpha, L2_tex, L2_alpha, L3_tex, L3_alpha]
 /// Row-major order (Y outer, X inner), same as other grids.
 pub fn build_tile_layer_grid(parsed_map: &ParsedMap) -> Vec<u8> {
     let w = parsed_map.header.n_width;
     let h = parsed_map.header.n_height;
-    let mut grid = Vec::with_capacity((w * h * 7) as usize);
+    let mut grid = Vec::with_capacity((w * h * 8) as usize);
 
     for ty in 0..h {
         for tx in 0..w {
-            let layers = match super::terrain::get_tile(parsed_map, tx, ty) {
-                Some(tile) => unpack_tile_layers(tile.bt_tile_info, tile.dw_tile_info),
-                // Missing sections: use 0 sentinel (same as tile_texture_grid).
-                // UNDERWATER_TEXNO (22) is only meaningful for tiles that actually
-                // exist in loaded sections — injecting it for absent data is misleading.
-                None => [
-                    TileLayer {
-                        tex_id: 0,
-                        alpha: 0,
-                    },
-                    TileLayer {
-                        tex_id: 0,
-                        alpha: 0,
-                    },
-                    TileLayer {
-                        tex_id: 0,
-                        alpha: 0,
-                    },
-                    TileLayer {
-                        tex_id: 0,
-                        alpha: 0,
-                    },
-                ],
+            let (layers, exists) = match super::terrain::get_tile(parsed_map, tx, ty) {
+                Some(tile) => (unpack_tile_layers(tile.bt_tile_info, tile.dw_tile_info), 1u8),
+                // Missing section: no data in .map file. The original engine returns
+                // _pDefaultTile (btTexNo=22, height=-2.0) at runtime. We write zeros
+                // for the layer data and exists=0 so Unity can apply the fallback.
+                None => (
+                    [
+                        TileLayer { tex_id: 0, alpha: 0 },
+                        TileLayer { tex_id: 0, alpha: 0 },
+                        TileLayer { tex_id: 0, alpha: 0 },
+                        TileLayer { tex_id: 0, alpha: 0 },
+                    ],
+                    0u8,
+                ),
             };
 
-            // 7 bytes: base_tex, L1_tex, L1_alpha, L2_tex, L2_alpha, L3_tex, L3_alpha
+            // 8 bytes: base_tex, L1_tex, L1_alpha, L2_tex, L2_alpha, L3_tex, L3_alpha, exists
             grid.push(layers[0].tex_id);
             grid.push(layers[1].tex_id);
             grid.push(layers[1].alpha);
@@ -644,6 +635,7 @@ pub fn build_tile_layer_grid(parsed_map: &ParsedMap) -> Vec<u8> {
             grid.push(layers[2].alpha);
             grid.push(layers[3].tex_id);
             grid.push(layers[3].alpha);
+            grid.push(exists);
         }
     }
 
@@ -717,21 +709,23 @@ mod tests {
         };
 
         let grid = build_tile_layer_grid(&parsed);
-        assert_eq!(grid.len(), 14, "2 tiles * 7 bytes");
+        assert_eq!(grid.len(), 16, "2 tiles * 8 bytes");
 
-        // Tile (0,0): source data
+        // Tile (0,0): source data, exists=1
         assert_eq!(grid[0], 5);
         assert_eq!(grid[1], 3);
         assert_eq!(grid[2], 15);
+        assert_eq!(grid[7], 1, "exists flag for loaded tile");
 
-        // Tile (1,0): missing section => 0 sentinel (matches tile_texture_grid)
-        assert_eq!(grid[7], 0);
+        // Tile (1,0): missing section => 0 sentinel + exists=0
         assert_eq!(grid[8], 0);
         assert_eq!(grid[9], 0);
         assert_eq!(grid[10], 0);
         assert_eq!(grid[11], 0);
         assert_eq!(grid[12], 0);
         assert_eq!(grid[13], 0);
+        assert_eq!(grid[14], 0);
+        assert_eq!(grid[15], 0, "exists flag for missing section");
     }
 
     #[test]

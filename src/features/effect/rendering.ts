@@ -328,7 +328,7 @@ export function createCylinderGeometry(
   height = 1.0,
   segments = 16,
 ): THREE.BufferGeometry {
-  const geo = new THREE.CylinderGeometry(topRadius, botRadius, height, Math.max(segments, 3));
+  const geo = new THREE.CylinderGeometry(topRadius, botRadius, height, Math.max(segments, 3), 1, true);
   // THREE.CylinderGeometry extends along Y, centered at origin.
   // Rotate to Z-axis: rotateX(-π/2) maps Y→Z
   // Then translate +Z by h/2 so base is at Z=0, top at Z=h
@@ -380,7 +380,7 @@ export function createEffectTexture(
 ): THREE.DataTexture {
   const tex = new THREE.DataTexture(data, width, height, THREE.RGBAFormat);
   tex.colorSpace = THREE.SRGBColorSpace;
-  tex.flipY = true;
+  tex.flipY = false;
   tex.magFilter = THREE.LinearFilter;
   tex.minFilter = THREE.LinearFilter;
   tex.wrapS = THREE.RepeatWrapping;

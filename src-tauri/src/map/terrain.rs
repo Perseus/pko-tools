@@ -16,6 +16,7 @@ use crate::effect::model::EffFile;
 use crate::map::scene_model::LoadedSceneModels;
 use crate::map::obj_loader;
 use crate::map::scene_obj::ParsedObjFile;
+use crate::math::coord_transform::{CoordTransform, ExportProfile};
 
 // ============================================================================
 // Map file constants
@@ -269,6 +270,7 @@ pub fn build_terrain_gltf(
     objects: Option<&ParsedObjFile>,
     atlas: Option<&RgbImage>,
     scene_models: Option<&LoadedSceneModels>,
+    ct: &CoordTransform,
 ) -> Result<String> {
     let w = parsed_map.header.n_width;
     let h = parsed_map.header.n_height;
@@ -300,10 +302,11 @@ pub fn build_terrain_gltf(
                 None => (UNDERWATER_HEIGHT / MAP_VISUAL_SCALE, 1.0, 1.0, 1.0),
             };
 
-            // Position: X = vx, Y = height, Z = vy (Y-up, glTF standard)
-            positions.push(vx as f32);
-            positions.push(height);
-            positions.push(vy as f32);
+            // Position: source Z-up (tileX, tileY, height) → CoordTransform
+            let p = ct.position([vx as f32, vy as f32, height]);
+            positions.push(p[0]);
+            positions.push(p[1]);
+            positions.push(p[2]);
 
             colors.push(r);
             colors.push(g);
@@ -331,15 +334,22 @@ pub fn build_terrain_gltf(
         uv
     });
 
-    // Step 2: Build triangle indices for ALL tiles (including missing sections).
-    // Missing sections have vertices at UNDERWATER_HEIGHT with white vertex color
-    // and all-zero tile layer data. The shader detects these via the legacy missing
-    // tile sentinel and renders them with texture 22 (sandy beige), creating a
-    // continuous terrain floor under the sea.
+    // Step 2: Build triangle indices.
+    // Emit triangles for normal tiles and missing sections (underwater floor),
+    // but SKIP tiles that exist with bt_tile_info == 0 (no base texture).
+    // The original engine skips these entirely (`continue;` in render loop) —
+    // buildings cover the gaps.
     let mut indices: Vec<u32> = Vec::new();
 
     for ty in 0..h {
         for tx in 0..w {
+            // Skip loaded tiles with no base texture (match original engine behavior)
+            if let Some(tile) = get_tile(parsed_map, tx, ty) {
+                if tile.bt_tile_info == 0 {
+                    continue;
+                }
+            }
+
             let v00 = (ty as u32) * (vw as u32) + (tx as u32);
             let v10 = v00 + 1;
             let v01 = v00 + vw as u32;
@@ -360,6 +370,9 @@ pub fn build_terrain_gltf(
     if indices.is_empty() {
         return Err(anyhow!("Map has no visible terrain tiles"));
     }
+
+    // Reverse winding: CW (D3D) → CCW (glTF)
+    ct.reverse_indices(&mut indices);
 
     // Step 3: Compute per-vertex normals by averaging adjacent face normals.
     let mut normals = vec![[0.0f32; 3]; vertex_count];
@@ -881,12 +894,16 @@ pub fn build_terrain_gltf(
                 None
             };
 
-            // Compute yaw rotation quaternion around Y axis
+            // Source Z-up position: (world_x, world_y, terrain_height + height_offset)
+            let pos = ct.position([obj.world_x, obj.world_y, terrain_h + obj.world_z]);
+
+            // Compute yaw rotation quaternion in Z-up space (rotation around Z = up axis)
             let rotation = if obj.yaw_angle != 0 {
                 let angle_rad = (obj.yaw_angle as f32).to_radians();
                 let half = angle_rad / 2.0;
-                // Quaternion: [x, y, z, w] for rotation around Y
-                Some([0.0, half.sin(), 0.0, half.cos()])
+                // Z-up quaternion: [x, y, z, w] for rotation around Z
+                let quat_z_up = [0.0, 0.0, half.sin(), half.cos()];
+                Some(ct.quaternion(quat_z_up))
             } else {
                 None
             };
@@ -894,9 +911,8 @@ pub fn build_terrain_gltf(
             nodes.push(gltf::Node {
                 name: Some(format!("obj_{}_{}", obj.obj_type, i)),
                 mesh: mesh_ref,
-                // Y-up: X = world_x, Y = terrain_height + height_offset, Z = world_y
-                translation: Some([obj.world_x, terrain_h + obj.world_z, obj.world_y]),
-                rotation: rotation.map(|r| gltf::scene::UnitQuaternion(r)),
+                translation: Some(pos),
+                rotation: rotation.map(gltf::scene::UnitQuaternion),
                 extras: Some(RawValue::from_string(extras_json)?),
                 ..Default::default()
             });
@@ -972,6 +988,7 @@ pub fn build_terrain_glb(
     parsed_map: &ParsedMap,
     atlas: Option<&RgbImage>,
     metadata: &TerrainGlbMetadata,
+    ct: &CoordTransform,
 ) -> Result<(String, Vec<u8>)> {
     let w = parsed_map.header.n_width;
     let h = parsed_map.header.n_height;
@@ -997,9 +1014,11 @@ pub fn build_terrain_glb(
                 None => (UNDERWATER_HEIGHT / MAP_VISUAL_SCALE, 1.0, 1.0, 1.0),
             };
 
-            positions.push(vx as f32);
-            positions.push(height);
-            positions.push(vy as f32);
+            // Position: source Z-up (tileX, tileY, height) → CoordTransform
+            let p = ct.position([vx as f32, vy as f32, height]);
+            positions.push(p[0]);
+            positions.push(p[1]);
+            positions.push(p[2]);
 
             colors.push(r);
             colors.push(g);
@@ -1022,12 +1041,22 @@ pub fn build_terrain_glb(
         uv
     });
 
-    // ----- Step 2: Build triangle indices for ALL tiles (including missing sections) -----
-    // Missing sections have vertices at UNDERWATER_HEIGHT with white vertex color.
-    // Emitting triangles creates a continuous terrain floor under the sea.
+    // ----- Step 2: Build triangle indices -----
+    // Emit triangles for normal tiles and missing sections (underwater floor),
+    // but SKIP tiles that exist with bt_tile_info == 0 (no base texture).
+    // The original engine skips these entirely (`continue;` in render loop) —
+    // buildings cover the gaps. Emitting geometry here would show texture 22
+    // where the original shows nothing.
     let mut indices: Vec<u32> = Vec::new();
     for ty in 0..h {
         for tx in 0..w {
+            // Skip loaded tiles with no base texture (match original engine behavior)
+            if let Some(tile) = get_tile(parsed_map, tx, ty) {
+                if tile.bt_tile_info == 0 {
+                    continue;
+                }
+            }
+
             let v00 = (ty as u32) * (vw as u32) + (tx as u32);
             let v10 = v00 + 1;
             let v01 = v00 + vw as u32;
@@ -1045,6 +1074,9 @@ pub fn build_terrain_glb(
     if indices.is_empty() {
         return Err(anyhow!("Map has no visible terrain tiles"));
     }
+
+    // Reverse winding: CW (D3D) → CCW (glTF)
+    ct.reverse_indices(&mut indices);
 
     // ----- Step 3: Compute normals -----
     let mut normals = vec![[0.0f32; 3]; vertex_count];
@@ -1613,14 +1645,14 @@ pub fn build_terrain_glb(
 /// correct normal contributions from triangles on both sides.
 ///
 /// Returns a flat Vec of [f32; 3] normals, indexed as `normals[vy * vw + vx]`.
-pub fn compute_global_normals(parsed_map: &ParsedMap) -> Vec<[f32; 3]> {
+pub fn compute_global_normals(parsed_map: &ParsedMap, ct: &CoordTransform) -> Vec<[f32; 3]> {
     let w = parsed_map.header.n_width;
     let h = parsed_map.header.n_height;
     let vw = (w + 1) as usize;
     let vh = (h + 1) as usize;
     let vertex_count = vw * vh;
 
-    // Build full-map positions (only Y varies, X/Z are grid indices)
+    // Build full-map positions: source Z-up (tileX, tileY, height) → CoordTransform
     let mut positions = Vec::with_capacity(vertex_count * 3);
     for vy in 0..vh {
         for vx in 0..vw {
@@ -1628,9 +1660,10 @@ pub fn compute_global_normals(parsed_map: &ParsedMap) -> Vec<[f32; 3]> {
                 Some(tile) => tile_height(tile),
                 None => UNDERWATER_HEIGHT / MAP_VISUAL_SCALE,
             };
-            positions.push(vx as f32);
-            positions.push(height);
-            positions.push(vy as f32);
+            let p = ct.position([vx as f32, vy as f32, height]);
+            positions.push(p[0]);
+            positions.push(p[1]);
+            positions.push(p[2]);
         }
     }
 
@@ -1643,9 +1676,8 @@ pub fn compute_global_normals(parsed_map: &ParsedMap) -> Vec<[f32; 3]> {
             let v01 = v00 + vw;
             let v11 = v01 + 1;
 
-            // Triangle 1: v00, v01, v10
-            // Triangle 2: v10, v01, v11
-            for &(i0, i1, i2) in &[(v00, v01, v10), (v10, v01, v11)] {
+            // Triangle winding reversed (CCW for glTF): v00,v10,v01 and v10,v11,v01
+            for &(i0, i1, i2) in &[(v00, v10, v01), (v10, v11, v01)] {
                 let p0 = [positions[i0*3], positions[i0*3+1], positions[i0*3+2]];
                 let p1 = [positions[i1*3], positions[i1*3+1], positions[i1*3+2]];
                 let p2 = [positions[i2*3], positions[i2*3+1], positions[i2*3+2]];
@@ -1694,6 +1726,7 @@ pub fn build_terrain_section_glb(
     section_tile_size: i32,
     sx: i32,
     sz: i32,
+    ct: &CoordTransform,
 ) -> Result<(String, Vec<u8>)> {
     let map_w = parsed_map.header.n_width;
     let map_h = parsed_map.header.n_height;
@@ -1730,10 +1763,11 @@ pub fn build_terrain_section_glb(
                 None => (UNDERWATER_HEIGHT / MAP_VISUAL_SCALE, 1.0, 1.0, 1.0),
             };
 
-            // Local coordinates (0..section_tile_size)
-            positions.push(lx as f32);
-            positions.push(height);
-            positions.push(ly as f32);
+            // Local coordinates (0..section_tile_size): source Z-up → CoordTransform
+            let p = ct.position([lx as f32, ly as f32, height]);
+            positions.push(p[0]);
+            positions.push(p[1]);
+            positions.push(p[2]);
 
             colors.push(r);
             colors.push(g);
@@ -1788,6 +1822,9 @@ pub fn build_terrain_section_glb(
             indices.push(v11);
         }
     }
+
+    // Reverse winding: CW (D3D) → CCW (glTF)
+    ct.reverse_indices(&mut indices);
 
     // ----- Pack binary buffer -----
     let mut bin = Vec::new();
@@ -2277,11 +2314,13 @@ pub fn export_terrain_gltf(
     };
 
     // Build the glTF (embedded data URIs)
+    let ct = CoordTransform::new(ExportProfile::StandardGltf);
     let gltf_json = build_terrain_gltf(
         &parsed_map,
         objects.as_ref(),
         atlas.as_ref(),
         scene_models.as_ref(),
+        &ct,
     )?;
 
     std::fs::create_dir_all(output_dir)?;
@@ -2317,11 +2356,13 @@ pub fn build_map_viewer_gltf(project_dir: &Path, map_name: &str) -> Result<Strin
     // Skip building models for now — loading hundreds of LMO files is too slow for the viewer
     let scene_models: Option<super::scene_model::LoadedSceneModels> = None;
 
+    let ct = CoordTransform::new(ExportProfile::StandardGltf);
     build_terrain_gltf(
         &parsed_map,
         objects.as_ref(),
         atlas.as_ref(),
         scene_models.as_ref(),
+        &ct,
     )
 }
 
@@ -2427,9 +2468,9 @@ fn build_obj_height_grid(map: &ParsedMap) -> (Vec<u8>, i32, i32) {
 }
 
 /// Build terrain height grid at vertex resolution using tile_height().
-/// Each vertex (vx, vy) samples get_tile(map, vx, vy) directly — strict owner
-/// semantics matching the terrain mesh builder. Edge vertices (vx >= n_width or
-/// vy >= n_height) return None → UNDERWATER_HEIGHT.
+/// Each vertex (vx, vy) samples get_render_vertex_tile(map, vx, vy) which
+/// uses boundary clamping to inherit neighbor heights at section edges.
+/// This prevents cliff walls where loaded terrain meets unloaded sea.
 /// Grid dimensions: (n_width+1) × (n_height+1).
 /// Each cell is an i16 in LE encoding representing height in millimeters.
 /// Returns (grid_bytes, width, height).
@@ -2442,7 +2483,7 @@ fn build_terrain_height_grid(map: &ParsedMap) -> (Vec<u8>, i32, i32) {
     for vy in 0..vh {
         for vx in 0..vw {
             let idx = (vy * vw + vx) as usize;
-            grid_i16[idx] = match get_tile(map, vx, vy) {
+            grid_i16[idx] = match get_render_vertex_tile(map, vx, vy) {
                 Some(tile) => (tile_height(tile) * 1000.0).round() as i16,
                 None => uw,
             };
@@ -2525,6 +2566,167 @@ fn build_tile_color_grid(map: &ParsedMap) -> Vec<u8> {
     }
 
     data
+}
+
+// ============================================================================
+// .mapdata binary format — unified packed grid file
+// ============================================================================
+
+/// Magic number for .mapdata files: "PKOW" in little-endian
+const MAPDATA_MAGIC: u32 = 0x504B4F57;
+/// Current .mapdata format version
+const MAPDATA_VERSION: u16 = 1;
+/// Header size in bytes
+const MAPDATA_HEADER_SIZE: u32 = 32;
+
+/// Export all grid data as a single `.mapdata` binary file.
+///
+/// Format:
+///   Header (32 bytes)
+///   Collision bitmap (uncompressed) — 1 bit per cell, 2x resolution, MSB first
+///   Compressed block (zlib deflate) — obj_height + terrain_height + area + region
+///     + tile_texture + tile_layer + tile_color concatenated
+///
+/// The collision bitmap is uncompressed for instant per-frame walk queries.
+/// All other grids are decompressed once at map load (during loading screen).
+pub fn export_mapdata(
+    parsed_map: &ParsedMap,
+    section_tile_size: i32,
+    output_path: &Path,
+) -> Result<MapdataExportResult> {
+    use flate2::write::ZlibEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+
+    let map_w = parsed_map.header.n_width;
+    let map_h = parsed_map.header.n_height;
+    let collision_cells_per_tile: u16 = 2;
+    let collision_w = map_w * collision_cells_per_tile as i32;
+    let collision_h = map_h * collision_cells_per_tile as i32;
+    let sections_x = (map_w + section_tile_size - 1) / section_tile_size;
+    let sections_z = (map_h + section_tile_size - 1) / section_tile_size;
+
+    eprintln!(
+        "[mapdata] Building grids for {}x{} map (sections {}x{}, tile_size {})...",
+        map_w, map_h, sections_x, sections_z, section_tile_size
+    );
+
+    // Build all grids using existing functions
+    let (collision_grid, coll_w, coll_h) = build_collision_grid(parsed_map);
+    let (obj_height_bytes, _, _) = build_obj_height_grid(parsed_map);
+    let (terrain_height_bytes, _, _) = build_terrain_height_grid(parsed_map);
+    let area_bytes = build_area_grid(parsed_map);
+    let region_bytes = build_region_grid(parsed_map);
+    let tile_tex_bytes = build_tile_texture_grid(parsed_map);
+    let tile_layer_bytes = super::texture::build_tile_layer_grid(parsed_map);
+    let tile_color_bytes = build_tile_color_grid(parsed_map);
+
+    // 1. Pack collision into 1-bit bitmap (MSB first, 1=walkable, 0=blocked)
+    let bitmap_len = (coll_w as u64 * coll_h as u64).div_ceil(8);
+    let mut collision_bitmap = vec![0u8; bitmap_len as usize];
+    for (i, &cell) in collision_grid.iter().enumerate() {
+        let walkable = cell == 0; // 0 = walkable in the u8 grid
+        if walkable {
+            let byte_idx = i / 8;
+            let bit_idx = 7 - (i % 8); // MSB first
+            collision_bitmap[byte_idx] |= 1 << bit_idx;
+        }
+    }
+
+    // 2. Concatenate all compressed grids in spec order
+    let mut raw_block = Vec::with_capacity(
+        obj_height_bytes.len()
+            + terrain_height_bytes.len()
+            + area_bytes.len()
+            + region_bytes.len()
+            + tile_tex_bytes.len()
+            + tile_layer_bytes.len()
+            + tile_color_bytes.len(),
+    );
+    raw_block.extend_from_slice(&obj_height_bytes);
+    raw_block.extend_from_slice(&terrain_height_bytes);
+    raw_block.extend_from_slice(&area_bytes);
+    raw_block.extend_from_slice(&region_bytes);
+    raw_block.extend_from_slice(&tile_tex_bytes);
+    raw_block.extend_from_slice(&tile_layer_bytes);
+    raw_block.extend_from_slice(&tile_color_bytes);
+
+    let raw_block_size = raw_block.len() as u32;
+
+    // 3. Compress with zlib (level 6 = good balance of speed vs ratio)
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::new(6));
+    encoder.write_all(&raw_block)?;
+    let compressed_block = encoder.finish()?;
+    let compressed_block_size = compressed_block.len() as u32;
+
+    // 4. Compute offsets
+    let compressed_block_offset = MAPDATA_HEADER_SIZE + collision_bitmap.len() as u32;
+
+    // 5. Write the file
+    let mut out = Vec::with_capacity(
+        MAPDATA_HEADER_SIZE as usize + collision_bitmap.len() + compressed_block.len(),
+    );
+
+    // Header (32 bytes)
+    out.extend_from_slice(&MAPDATA_MAGIC.to_le_bytes()); // [0:4]
+    out.extend_from_slice(&MAPDATA_VERSION.to_le_bytes()); // [4:6]
+    out.extend_from_slice(&(map_w as u16).to_le_bytes()); // [6:8]
+    out.extend_from_slice(&(map_h as u16).to_le_bytes()); // [8:10]
+    out.extend_from_slice(&(section_tile_size as u16).to_le_bytes()); // [10:12]
+    out.extend_from_slice(&(sections_x as u16).to_le_bytes()); // [12:14]
+    out.extend_from_slice(&(sections_z as u16).to_le_bytes()); // [14:16]
+    out.extend_from_slice(&collision_cells_per_tile.to_le_bytes()); // [16:18]
+    out.extend_from_slice(&0u16.to_le_bytes()); // [18:20] flags (reserved)
+    out.extend_from_slice(&compressed_block_offset.to_le_bytes()); // [20:24]
+    out.extend_from_slice(&compressed_block_size.to_le_bytes()); // [24:28]
+    out.extend_from_slice(&raw_block_size.to_le_bytes()); // [28:32]
+
+    assert_eq!(out.len(), MAPDATA_HEADER_SIZE as usize, "header must be exactly 32 bytes");
+
+    // Collision bitmap (uncompressed)
+    out.extend_from_slice(&collision_bitmap);
+
+    // Compressed block
+    out.extend_from_slice(&compressed_block);
+
+    std::fs::write(output_path, &out)
+        .with_context(|| format!("Failed to write .mapdata: {}", output_path.display()))?;
+
+    let total_size = out.len();
+    let compression_ratio = if raw_block_size > 0 {
+        compressed_block_size as f64 / raw_block_size as f64
+    } else {
+        0.0
+    };
+
+    eprintln!(
+        "[mapdata] Written {} ({:.1} MB): bitmap={} bytes, raw={:.1} MB, compressed={:.1} MB ({:.1}% ratio)",
+        output_path.display(),
+        total_size as f64 / 1_048_576.0,
+        collision_bitmap.len(),
+        raw_block_size as f64 / 1_048_576.0,
+        compressed_block_size as f64 / 1_048_576.0,
+        compression_ratio * 100.0,
+    );
+
+    Ok(MapdataExportResult {
+        total_size: total_size as u64,
+        collision_bitmap_size: collision_bitmap.len() as u64,
+        raw_block_size: raw_block_size as u64,
+        compressed_block_size: compressed_block_size as u64,
+        collision_w: collision_w as u32,
+        collision_h: collision_h as u32,
+    })
+}
+
+/// Result of a .mapdata export
+pub struct MapdataExportResult {
+    pub total_size: u64,
+    pub collision_bitmap_size: u64,
+    pub raw_block_size: u64,
+    pub compressed_block_size: u64,
+    pub collision_w: u32,
+    pub collision_h: u32,
 }
 
 /// Find and load an .eff file from the project directory.
@@ -2961,6 +3163,7 @@ pub fn export_map_for_unity(
     // When shared_assets_dir is set, buildings are in the shared dir — don't re-export.
     std::fs::create_dir_all(output_dir)?;
     let use_shared = options.shared_assets_dir.is_some();
+    let ct = CoordTransform::new(options.export_profile);
 
     let mut building_entries = Vec::new();
 
@@ -3005,7 +3208,7 @@ pub fn export_map_for_unity(
             let out_filename = format!("{}.glb", stem);
             let out_path = buildings_dir.join(&out_filename);
 
-            match super::scene_model::build_glb_from_lmo(&lmo_path, project_dir) {
+            match super::scene_model::build_glb_from_lmo(&lmo_path, project_dir, true, &ct) {
                 Ok((json, bin)) => {
                     super::glb::write_glb(&json, &bin, &out_path)?;
                 }
@@ -3182,6 +3385,22 @@ pub fn export_map_for_unity(
         &grids_dir,
     )?;
 
+    // Write .mapdata binary (unified packed grid file)
+    let mapdata_path = output_dir.join(format!("{}.mapdata", map_name));
+    let section_tile_size = parsed_map.header.n_section_width;
+    match export_mapdata(&parsed_map, section_tile_size, &mapdata_path) {
+        Ok(result) => {
+            eprintln!(
+                "[map] .mapdata exported: {:.1} MB total ({:.1} MB compressed)",
+                result.total_size as f64 / 1_048_576.0,
+                result.compressed_block_size as f64 / 1_048_576.0,
+            );
+        }
+        Err(e) => {
+            eprintln!("[map] WARNING: .mapdata export failed: {:?}", e);
+        }
+    }
+
     // 10. Build effect definitions
     let mut effect_definitions = serde_json::Map::new();
     let mut missing_effect_ids: Vec<u16> = Vec::new();
@@ -3253,7 +3472,7 @@ pub fn export_map_for_unity(
 
         // Step 1: Compute global normals (prevents seam artifacts at section boundaries)
         eprintln!("  Computing global normals...");
-        let global_normals = compute_global_normals(&parsed_map);
+        let global_normals = compute_global_normals(&parsed_map, &ct);
 
         // Step 2: Export per-section GLBs
         let sections_dir = output_dir.join("terrain_sections");
@@ -3268,7 +3487,7 @@ pub fn export_map_for_unity(
                     eprintln!("  Section {}/{}", idx + 1, total_sections);
                 }
                 let (json, bin) = build_terrain_section_glb(
-                    &parsed_map, has_atlas, &global_normals, sec_size, sx, sz,
+                    &parsed_map, has_atlas, &global_normals, sec_size, sx, sz, &ct,
                 )?;
                 let section_path = sections_dir.join(format!("section_{}_{}.glb", sx, sz));
                 super::glb::write_glb(&json, &bin, &section_path)?;
@@ -3297,7 +3516,7 @@ pub fn export_map_for_unity(
         }));
     } else {
         // Small map: monolithic terrain GLB
-        let (json, bin) = build_terrain_glb(&parsed_map, atlas.as_ref(), &glb_metadata)?;
+        let (json, bin) = build_terrain_glb(&parsed_map, atlas.as_ref(), &glb_metadata, &ct)?;
         terrain_file_path = output_dir.join("terrain.glb");
         super::glb::write_glb(&json, &bin, &terrain_file_path)?;
     }
@@ -3462,6 +3681,12 @@ pub fn export_map_for_unity(
                 "format": "i16_rgb8_offset"
             }
         }),
+    );
+
+    // .mapdata file reference (unified packed grid binary)
+    manifest_map.insert(
+        "mapdata".into(),
+        serde_json::json!(format!("{}.mapdata", map_name)),
     );
 
     // Buildings (GLB paths)
@@ -3741,7 +3966,7 @@ mod tests {
     fn make_tile(c_height: i8) -> MapTile {
         MapTile {
             dw_tile_info: 0,
-            bt_tile_info: 0,
+            bt_tile_info: 1, // non-zero so tile emits geometry (0 = skip, matching original engine)
             s_color: 0,
             c_height,
             s_region: 0,
@@ -3822,7 +4047,8 @@ mod tests {
             })],
         };
 
-        let gltf_json = build_terrain_gltf(&parsed, None, None, None).expect("gltf build");
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let gltf_json = build_terrain_gltf(&parsed, None, None, None, &ct).expect("gltf build");
         let root: serde_json::Value = serde_json::from_str(&gltf_json).expect("json parse");
 
         let pos_acc_idx = root["meshes"][0]["primitives"][0]["attributes"]["POSITION"]
@@ -3891,7 +4117,8 @@ mod tests {
             ],
         };
 
-        let gltf_json = build_terrain_gltf(&parsed, None, None, None).expect("gltf build");
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let gltf_json = build_terrain_gltf(&parsed, None, None, None, &ct).expect("gltf build");
         let root: serde_json::Value = serde_json::from_str(&gltf_json).expect("json parse");
         let idx_acc_idx = root["meshes"][0]["primitives"][0]["indices"]
             .as_u64()
@@ -4049,7 +4276,8 @@ mod tests {
         let data = std::fs::read(map_path).unwrap();
         let parsed = crate::map::map_loader::load_map(&data).unwrap();
 
-        let gltf_json = build_terrain_gltf(&parsed, None, None, None).unwrap();
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let gltf_json = build_terrain_gltf(&parsed, None, None, None, &ct).unwrap();
         assert!(gltf_json.contains("\"asset\""));
         assert!(gltf_json.contains("terrain_mesh"));
 
@@ -4740,7 +4968,8 @@ mod tests {
     #[test]
     fn compute_global_normals_produces_correct_count() {
         let map = make_test_map(4, 4, 2);
-        let normals = compute_global_normals(&map);
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let normals = compute_global_normals(&map, &ct);
         // (w+1)*(h+1) = 5*5 = 25 vertices
         assert_eq!(normals.len(), 25);
         // All tiles at same height (flat) → normals should point up
@@ -4756,7 +4985,8 @@ mod tests {
         if let Some(ref mut sec) = map.sections[0] {
             sec.tiles[0].c_height = 50;
         }
-        let normals = compute_global_normals(&map);
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let normals = compute_global_normals(&map, &ct);
         for n in &normals {
             let len = (n[0]*n[0] + n[1]*n[1] + n[2]*n[2]).sqrt();
             assert!((len - 1.0).abs() < 0.001, "non-unit normal: {:?} len={}", n, len);
@@ -4766,9 +4996,10 @@ mod tests {
     #[test]
     fn build_section_glb_vertex_count() {
         let map = make_test_map(4, 4, 2);
-        let normals = compute_global_normals(&map);
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let normals = compute_global_normals(&map, &ct);
         // Section (0,0) covers tiles [0..2) x [0..2) with section_tile_size=2
-        let (json, bin) = build_terrain_section_glb(&map, false, &normals, 2, 0, 0)
+        let (json, bin) = build_terrain_section_glb(&map, false, &normals, 2, 0, 0, &ct)
             .expect("section glb");
         let root: serde_json::Value = serde_json::from_str(&json).expect("parse");
         // 2x2 tiles → 3x3 = 9 vertices
@@ -4780,9 +5011,10 @@ mod tests {
     #[test]
     fn build_section_glb_local_coords() {
         let map = make_test_map(4, 4, 2);
-        let normals = compute_global_normals(&map);
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let normals = compute_global_normals(&map, &ct);
         // Section (1,1) covers tiles [2..4) x [2..4)
-        let (json, bin) = build_terrain_section_glb(&map, false, &normals, 2, 1, 1)
+        let (json, bin) = build_terrain_section_glb(&map, false, &normals, 2, 1, 1, &ct)
             .expect("section glb");
         let root: serde_json::Value = serde_json::from_str(&json).expect("parse");
 
@@ -4805,8 +5037,9 @@ mod tests {
     #[test]
     fn build_section_glb_no_texture_reference() {
         let map = make_test_map(4, 4, 2);
-        let normals = compute_global_normals(&map);
-        let (json, _bin) = build_terrain_section_glb(&map, true, &normals, 2, 0, 0)
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let normals = compute_global_normals(&map, &ct);
+        let (json, _bin) = build_terrain_section_glb(&map, true, &normals, 2, 0, 0, &ct)
             .expect("section glb");
         let root: serde_json::Value = serde_json::from_str(&json).expect("parse");
 
@@ -4853,12 +5086,13 @@ mod tests {
         if let Some(ref mut sec) = map.sections[0] {
             sec.tiles[3].c_height = 50; // tile (1,1) in section (0,0)
         }
-        let global_normals = compute_global_normals(&map);
+        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let global_normals = compute_global_normals(&map, &ct);
 
         // Build section (0,0) and section (1,0)
-        let (json0, _) = build_terrain_section_glb(&map, false, &global_normals, 2, 0, 0)
+        let (json0, _) = build_terrain_section_glb(&map, false, &global_normals, 2, 0, 0, &ct)
             .expect("section 0,0");
-        let (json1, _) = build_terrain_section_glb(&map, false, &global_normals, 2, 1, 0)
+        let (json1, _) = build_terrain_section_glb(&map, false, &global_normals, 2, 1, 0, &ct)
             .expect("section 1,0");
 
         let root0: serde_json::Value = serde_json::from_str(&json0).unwrap();
@@ -4874,5 +5108,75 @@ mod tests {
         // and local (0,y) in section1. Their normals come from the same
         // global_normals entry, so they must match exactly.
         // (We verified this by construction — both read from global_normals[vy * vw + gvx])
+    }
+
+    #[test]
+    fn export_mapdata_round_trip() {
+        use flate2::read::ZlibDecoder;
+        use std::io::Read;
+
+        let map = make_test_map(4, 4, 2);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("test.mapdata");
+
+        let result = export_mapdata(&map, 2, &path).expect("export_mapdata");
+
+        // Read back and verify header
+        let data = std::fs::read(&path).unwrap();
+        assert!(data.len() >= 32, "file too small");
+
+        let magic = u32::from_le_bytes(data[0..4].try_into().unwrap());
+        assert_eq!(magic, MAPDATA_MAGIC);
+
+        let version = u16::from_le_bytes(data[4..6].try_into().unwrap());
+        assert_eq!(version, 1);
+
+        let map_w = u16::from_le_bytes(data[6..8].try_into().unwrap());
+        let map_h = u16::from_le_bytes(data[8..10].try_into().unwrap());
+        assert_eq!(map_w, 4);
+        assert_eq!(map_h, 4);
+
+        let section_size = u16::from_le_bytes(data[10..12].try_into().unwrap());
+        assert_eq!(section_size, 2);
+
+        let sections_x = u16::from_le_bytes(data[12..14].try_into().unwrap());
+        let sections_z = u16::from_le_bytes(data[14..16].try_into().unwrap());
+        assert_eq!(sections_x, 2);
+        assert_eq!(sections_z, 2);
+
+        let cells_per_tile = u16::from_le_bytes(data[16..18].try_into().unwrap());
+        assert_eq!(cells_per_tile, 2);
+
+        let comp_offset = u32::from_le_bytes(data[20..24].try_into().unwrap()) as usize;
+        let comp_size = u32::from_le_bytes(data[24..28].try_into().unwrap()) as usize;
+        let raw_size = u32::from_le_bytes(data[28..32].try_into().unwrap()) as usize;
+
+        // Collision bitmap should be right after header
+        let coll_w = 4 * 2; // map_w * cells_per_tile
+        let coll_h = 4 * 2;
+        let bitmap_len = (coll_w * coll_h + 7) / 8;
+        assert_eq!(comp_offset, 32 + bitmap_len);
+
+        // Decompress the block
+        let compressed = &data[comp_offset..comp_offset + comp_size];
+        let mut decoder = ZlibDecoder::new(compressed);
+        let mut decompressed = Vec::new();
+        decoder.read_to_end(&mut decompressed).unwrap();
+        assert_eq!(decompressed.len(), raw_size);
+
+        // Verify expected raw size:
+        //   obj_height: 8*8*2 = 128
+        //   terrain_height: 5*5*2 = 50
+        //   area: 4*4*1 = 16
+        //   region: 4*4*2 = 32
+        //   tile_texture: 4*4*1 = 16
+        //   tile_layer: 4*4*8 = 128
+        //   tile_color: 4*4*2 = 32
+        //   Total: 402
+        let expected_raw = 8*8*2 + 5*5*2 + 4*4*1 + 4*4*2 + 4*4*1 + 4*4*8 + 4*4*2;
+        assert_eq!(raw_size, expected_raw, "raw block size mismatch");
+
+        // Verify total file size matches result
+        assert_eq!(data.len() as u64, result.total_size);
     }
 }

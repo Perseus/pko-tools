@@ -8,6 +8,9 @@ use crate::character::{model::CharacterGeometricModel, GLTFFieldsToAggregate};
 use crate::projects::project::Project;
 
 use super::{model::EffFile, model::ParFile, scan_effects_directory, scan_par_files};
+// Effect data is in D3D Y-up LH space. Transforms match Three.js "YXZ" Euler
+// directly (confirmed via matrix comparison with game client debug dumps).
+// No coordinate conversion needed for standalone viewing.
 
 #[tauri::command]
 pub async fn list_effects(project_id: String) -> Result<Vec<String>, String> {
@@ -147,6 +150,13 @@ pub async fn decode_texture(path: String) -> Result<DecodedTexture, String> {
             height: h,
             data,
         });
+    }
+
+    // Fallback: paletted (color-mapped) TGA.
+    // image crate v0.25 doesn't handle type 1 (color-mapped) TGA files.
+    // These have a palette (color map) followed by 8-bit pixel indices.
+    if let Some(result) = try_decode_paletted_tga(&bytes) {
+        return Ok(result);
     }
 
     // Fallback: PKO non-standard TGA formats.
@@ -321,6 +331,99 @@ fn try_decode_pko_tga_argb(pixel_data: &[u8]) -> Option<DecodedTexture> {
     })
 }
 
+/// Decode a paletted (color-mapped) TGA file (image_type = 1).
+/// Layout:
+///   18 bytes: TGA header
+///   id_length bytes: image ID (usually 0)
+///   palette_length * (palette_bpp / 8) bytes: palette in BGR(A) order
+///   width * height bytes: 8-bit pixel indices
+///   optional 26-byte TGA 2.0 footer ("TRUEVISION-XFILE.\0")
+fn try_decode_paletted_tga(bytes: &[u8]) -> Option<DecodedTexture> {
+    if bytes.len() < 18 {
+        return None;
+    }
+
+    let id_length = bytes[0] as usize;
+    let color_map_type = bytes[1];
+    let image_type = bytes[2];
+
+    // Only handle color-mapped, uncompressed (type 1)
+    if color_map_type != 1 || image_type != 1 {
+        return None;
+    }
+
+    let palette_start = u16::from_le_bytes([bytes[3], bytes[4]]) as usize;
+    let palette_length = u16::from_le_bytes([bytes[5], bytes[6]]) as usize;
+    let palette_bpp = bytes[7] as usize; // bits per palette entry (usually 24 or 32)
+    let width = u16::from_le_bytes([bytes[12], bytes[13]]) as usize;
+    let height = u16::from_le_bytes([bytes[14], bytes[15]]) as usize;
+    let pixel_depth = bytes[16] as usize; // bits per pixel index (should be 8)
+    let descriptor = bytes[17];
+
+    if pixel_depth != 8 || (palette_bpp != 24 && palette_bpp != 32) {
+        return None;
+    }
+    if width == 0 || height == 0 || palette_length == 0 {
+        return None;
+    }
+
+    let palette_bytes_per_entry = palette_bpp / 8;
+    let header_end = 18 + id_length;
+    let palette_data_start = header_end;
+    let palette_data_end = palette_data_start + palette_length * palette_bytes_per_entry;
+    let pixel_data_start = palette_data_end;
+    let pixel_data_end = pixel_data_start + width * height;
+
+    if bytes.len() < pixel_data_end {
+        return None;
+    }
+
+    // Parse palette (BGR or BGRA order)
+    let palette = &bytes[palette_data_start..palette_data_end];
+    let pixel_data = &bytes[pixel_data_start..pixel_data_end];
+
+    let mut rgba = Vec::with_capacity(width * height * 4);
+    for &idx in pixel_data {
+        let actual_idx = (idx as usize).saturating_sub(palette_start);
+        if actual_idx >= palette_length {
+            // Out-of-range index: transparent black
+            rgba.extend_from_slice(&[0, 0, 0, 0]);
+            continue;
+        }
+        let offset = actual_idx * palette_bytes_per_entry;
+        let b = palette[offset];
+        let g = palette[offset + 1];
+        let r = palette[offset + 2];
+        let a = if palette_bytes_per_entry == 4 {
+            palette[offset + 3]
+        } else {
+            255
+        };
+        rgba.extend_from_slice(&[r, g, b, a]);
+    }
+
+    // TGA origin: check bit 5 of descriptor for top-to-bottom
+    let top_to_bottom = (descriptor & 0x20) != 0;
+    if !top_to_bottom {
+        // Default TGA is bottom-to-top; flip vertically
+        let row_bytes = width * 4;
+        let mut flipped = vec![0u8; rgba.len()];
+        for y in 0..height {
+            let src_row = y * row_bytes;
+            let dst_row = (height - 1 - y) * row_bytes;
+            flipped[dst_row..dst_row + row_bytes].copy_from_slice(&rgba[src_row..src_row + row_bytes]);
+        }
+        rgba = flipped;
+    }
+
+    let data = base64::engine::general_purpose::STANDARD.encode(&rgba);
+    Some(DecodedTexture {
+        width: width as u32,
+        height: height as u32,
+        data,
+    })
+}
+
 /// Guess texture dimensions from pixel count.
 /// Finds all valid power-of-2 dimension pairs and picks the one closest to square.
 /// Falls back to pow2 width with any reasonable even height.
@@ -387,6 +490,8 @@ fn resolve_case_insensitive(path: &str) -> Option<std::path::PathBuf> {
     None
 }
 
+// TODO: Inverse remap (Y-up -> PKO Z-up) needed here once editing is supported.
+// The frontend now holds Y-up data; writing it directly produces incorrect PKO files.
 #[tauri::command]
 pub async fn save_particles(
     project_id: String,
@@ -715,5 +820,32 @@ mod tests {
         assert_eq!(root.materials.len(), 0, "Expected 0 materials");
         assert!(!root.accessors.is_empty(), "Expected at least 1 accessor");
         assert!(!root.buffers.is_empty(), "Expected at least 1 buffer");
+    }
+
+    #[test]
+    fn test_decode_paletted_tga() {
+        let path = std::path::Path::new(
+            "../top-client/texture/effect/jb05.TGA",
+        );
+        if !path.exists() {
+            eprintln!("Skipping: jb05.TGA not found at {}", path.display());
+            return;
+        }
+
+        let bytes = std::fs::read(path).unwrap();
+        let result = try_decode_paletted_tga(&bytes);
+        assert!(result.is_some(), "Should decode paletted TGA");
+
+        let decoded = result.unwrap();
+        assert_eq!(decoded.width, 128);
+        assert_eq!(decoded.height, 128);
+
+        // RGBA data should be width * height * 4 bytes, base64-encoded
+        let raw = base64::engine::general_purpose::STANDARD
+            .decode(&decoded.data)
+            .unwrap();
+        assert_eq!(raw.len(), 128 * 128 * 4);
+
+        eprintln!("Decoded paletted TGA: {}x{}, {} bytes RGBA", decoded.width, decoded.height, raw.len());
     }
 }

@@ -163,6 +163,15 @@ fn convert_geometry_to_char_model(
         None
     };
 
+    // Animation
+    let (animation, bone_animation, texuv_anims, teximg_anims, mtlopac_anims) =
+        if header.anim_size > 0 {
+            let anim_section = chunk.anim().clone();
+            crate::map::lmo_loader::convert_anim_section(&anim_section, version)?
+        } else {
+            (None, None, Vec::new(), Vec::new(), Vec::new())
+        };
+
     Ok(CharacterGeometricModel {
         version,
         header,
@@ -171,6 +180,11 @@ fn convert_geometry_to_char_model(
         material_seq,
         mesh_info,
         helper_data,
+        animation,
+        bone_animation,
+        texuv_anims,
+        teximg_anims,
+        mtlopac_anims,
     })
 }
 
@@ -1174,6 +1188,10 @@ mod tests {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("test_artifacts")
     }
 
+    fn client_model_dir() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../mp-client-source/Client/client/model")
+    }
+
     #[test]
     fn kaitai_parses_single_lgo() {
         let path = test_artifacts_dir().join("0909000000.lgo");
@@ -1187,5 +1205,105 @@ mod tests {
         if let Some(ref mesh) = model.mesh_info {
             assert!(mesh.header.vertex_num > 0, "should have vertices");
         }
+    }
+
+    #[test]
+    fn target_lgo_has_matrix_animation() {
+        let path = client_model_dir().join("item/target.lgo");
+        if !path.exists() {
+            eprintln!(
+                "Skipping target_lgo_has_matrix_animation: file not found at {}",
+                path.display()
+            );
+            return;
+        }
+
+        let model = load_lgo(&path).expect("Failed to parse target.lgo");
+
+        // Header must indicate animation data is present
+        assert!(
+            model.header.anim_size > 0,
+            "target.lgo should have anim_size > 0, got {}",
+            model.header.anim_size
+        );
+
+        // Animation must be Some with frames
+        let anim = model
+            .animation
+            .as_ref()
+            .expect("target.lgo should have matrix animation (animation == Some)");
+        assert!(
+            anim.frame_num > 0,
+            "target.lgo should have frame_num > 0, got {}",
+            anim.frame_num
+        );
+
+        // translations and rotations must each have frame_num entries
+        assert_eq!(
+            anim.translations.len(),
+            anim.frame_num as usize,
+            "translations count should match frame_num"
+        );
+        assert_eq!(
+            anim.rotations.len(),
+            anim.frame_num as usize,
+            "rotations count should match frame_num"
+        );
+
+        // All quaternions must be normalized (magnitude ≈ 1.0)
+        for (i, q) in anim.rotations.iter().enumerate() {
+            let mag = (q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3]).sqrt();
+            assert!(
+                (mag - 1.0).abs() < 0.01,
+                "quaternion at frame {} not normalized: magnitude = {} (quat = {:?})",
+                i,
+                mag,
+                q
+            );
+        }
+
+        // No other animation types should be present
+        assert!(
+            model.bone_animation.is_none(),
+            "target.lgo should not have bone_animation"
+        );
+        assert!(
+            model.texuv_anims.is_empty(),
+            "target.lgo should have no texuv_anims"
+        );
+        assert!(
+            model.teximg_anims.is_empty(),
+            "target.lgo should have no teximg_anims"
+        );
+        assert!(
+            model.mtlopac_anims.is_empty(),
+            "target.lgo should have no mtlopac_anims"
+        );
+    }
+
+    #[test]
+    fn character_lgo_without_animation_parses_cleanly() {
+        let path = client_model_dir().join("character/0101000000.lgo");
+        if !path.exists() {
+            eprintln!(
+                "Skipping character_lgo_without_animation_parses_cleanly: file not found at {}",
+                path.display()
+            );
+            return;
+        }
+
+        let model = load_lgo(&path).expect("Failed to parse 0101000000.lgo");
+
+        // Header should indicate no animation data
+        assert_eq!(
+            model.header.anim_size, 0,
+            "character body part should have anim_size == 0"
+        );
+
+        // animation field should be None
+        assert!(
+            model.animation.is_none(),
+            "character body part should have animation == None"
+        );
     }
 }
