@@ -32,7 +32,7 @@ pub mod texture_pipeline;
 pub mod validation;
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
 pub struct AppState {
@@ -40,6 +40,8 @@ pub struct AppState {
     preferences: preferences::Preferences,
     /// Cache of glTF JSON strings keyed by (project_id, character_id).
     pub character_gltf_cache: Mutex<HashMap<(uuid::Uuid, u32), String>>,
+    /// Cache of parsed/enriched map placement records keyed by (project_id, map_name).
+    pub map_placement_cache: Mutex<HashMap<(uuid::Uuid, String), Arc<Vec<map::MapPlacementRecord>>>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -68,6 +70,7 @@ pub fn run() {
                 current_project: None,
                 preferences,
                 character_gltf_cache: Mutex::new(HashMap::new()),
+                map_placement_cache: Mutex::new(HashMap::new()),
             };
 
             if let Some(current_project_id) = &state.preferences.get_current_project() {
@@ -122,6 +125,7 @@ pub fn run() {
             item::commands::import_item_from_gltf,
             item::commands::load_model_preview,
             item::commands::get_forge_effect_preview,
+            item::commands::trace_forge_combination,
             item::commands::get_item_category_availability,
             item::commands::decompile_item_refine_info,
             item::commands::decompile_item_refine_effect_info,
@@ -154,6 +158,8 @@ pub fn run() {
             map::commands::load_map_terrain,
             map::commands::get_map_metadata,
             map::commands::export_map_to_gltf,
+            map::commands::get_map_placement_summary,
+            map::commands::query_map_placements,
             map::commands::export_shared_assets,
             map::commands::get_building_list,
             map::commands::load_building_model,
