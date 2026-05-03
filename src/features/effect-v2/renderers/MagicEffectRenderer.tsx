@@ -91,7 +91,7 @@ export function MagicEffectRenderer({ effFiles, magicEntry: selected, onComplete
   const handleArrival = useCallback((info: ArrivalInfo) => {
     setArrivalInfo(info);
 
-    if (hasHitEffect) {
+    if (hasHitEffect.current) {
       setHitActive(true);
     } else {
       // No hit effect — signal completion immediately

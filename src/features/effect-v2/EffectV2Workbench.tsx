@@ -2,7 +2,7 @@ import { Canvas } from "@react-three/fiber";
 import { GizmoHelper, GizmoViewport, OrbitControls } from "@react-three/drei";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useEffect, useMemo, useState } from "react";
-import { effectV2SelectionAtom, effectV2PlaybackAtom, magicSingleTableAtom, effectV2HiddenSubEffectsAtom } from "@/store/effect-v2";
+import { effectV2SelectionAtom, effectV2PlaybackAtom, magicSingleTableAtom, effectV2HiddenSubEffectsAtom, effectV2HiddenParticleSystemsAtom, effectV2HiddenParticleSubEffectsAtom } from "@/store/effect-v2";
 import { MagicEffectRenderer } from "./renderers/MagicEffectRenderer";
 import { MagicGroupRenderer } from "./renderers/MagicGroupRenderer";
 import { EffectRenderer } from "./renderers/EffectRenderer";
@@ -13,7 +13,8 @@ import { useLoadEffect } from "./useLoadEffect";
 import { Button } from "@/components/ui/button";
 import { Play, Square, RotateCcw, Repeat } from "lucide-react";
 import { EffectV2Selection, MagicSingleEntry, MagicGroupEntry, ParFile } from "@/types/effect-v2";
-import { loadParFile } from "@/commands/effect";
+import { EffectFile } from "@/types/effect";
+import { loadParFile, loadEffect } from "@/commands/effect";
 import { currentProjectAtom } from "@/store/project";
 
 function PlaybackBar() {
@@ -160,16 +161,16 @@ function MagicGroupInfoPanel({ entry }: { entry: MagicGroupEntry }) {
         </div>
         <div>
           <div className="text-xs text-muted-foreground">Render Idx</div>
-          <div>{entry.renderIdx}</div>
+          <div>{entry.render_idx}</div>
         </div>
         <div>
           <div className="text-xs text-muted-foreground">Total Count</div>
-          <div>{entry.totalCount}</div>
+          <div>{entry.total_count}</div>
         </div>
       </div>
       <div>
         <div className="text-xs text-muted-foreground">Phases (click to view)</div>
-        {entry.typeIds.map((typeId, i) => {
+        {entry.type_ids.map((typeId, i) => {
           if (typeId < 0) return null;
           const magicEntry = table?.entries.find((e) => e.id === typeId);
           const name = magicEntry?.name ?? `#${typeId}`;
@@ -265,9 +266,19 @@ function EffectFileInfoPanel({ fileName }: { fileName: string }) {
   );
 }
 
+const PARTICLE_TYPE_NAMES: Record<number, string> = {
+  1: "Snow", 2: "Fire", 3: "Blast", 4: "Ripple", 5: "Model",
+  6: "Strip", 7: "Wind", 8: "Arrow", 9: "Round", 10: "Blast2",
+  11: "Blast3", 12: "Shrink", 13: "Shade", 14: "Range", 15: "Range2",
+  16: "Dummy", 17: "LineSingle", 18: "LineRound",
+};
+
 function ParticleFileInfoPanel({ fileName }: { fileName: string }) {
   const [parData, setParData] = useState<ParFile | null>(null);
+  const [effFileMap, setEffFileMap] = useState<Map<string, EffectFile>>(new Map());
   const currentProject = useAtomValue(currentProjectAtom);
+  const [hiddenSystems, setHiddenSystems] = useAtom(effectV2HiddenParticleSystemsAtom);
+  const [hiddenSubEffectsMap, setHiddenSubEffectsMap] = useAtom(effectV2HiddenParticleSubEffectsAtom);
 
   useEffect(() => {
     if (!currentProject) return;
@@ -276,6 +287,53 @@ function ParticleFileInfoPanel({ fileName }: { fileName: string }) {
       .then((data) => setParData(data as ParFile))
       .catch(() => setParData(null));
   }, [fileName, currentProject]);
+
+  // Reset visibility when the particle file changes
+  useEffect(() => {
+    setHiddenSystems(new Set());
+    setHiddenSubEffectsMap(new Map());
+  }, [fileName, setHiddenSystems, setHiddenSubEffectsMap]);
+
+  // Load .eff files referenced by MODEL/STRIP systems
+  useEffect(() => {
+    if (!currentProject || !parData) { setEffFileMap(new Map()); return; }
+    const names = [...new Set(
+      parData.systems.map(s => s.modelName).filter(n => n.endsWith('.eff'))
+    )];
+    if (names.length === 0) { setEffFileMap(new Map()); return; }
+    let cancelled = false;
+    async function fetchEffs() {
+      const map = new Map<string, EffectFile>();
+      for (const name of names) {
+        try {
+          const data = await loadEffect(currentProject!.id, name) as EffectFile;
+          if (cancelled) return;
+          map.set(name, data);
+        } catch { /* skip missing */ }
+      }
+      if (!cancelled) setEffFileMap(map);
+    }
+    fetchEffs();
+    return () => { cancelled = true; };
+  }, [parData, currentProject]);
+
+  const toggleSystem = (i: number) => {
+    setHiddenSystems(prev => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i); else next.add(i);
+      return next;
+    });
+  };
+
+  const toggleSubEffect = (sysIdx: number, subIdx: number) => {
+    setHiddenSubEffectsMap(prev => {
+      const next = new Map(prev);
+      const s = new Set(next.get(sysIdx) ?? []);
+      if (s.has(subIdx)) s.delete(subIdx); else s.add(subIdx);
+      next.set(sysIdx, s);
+      return next;
+    });
+  };
 
   return (
     <div className="flex flex-col gap-3 text-sm">
@@ -309,12 +367,45 @@ function ParticleFileInfoPanel({ fileName }: { fileName: string }) {
           </div>
           {parData.systems.length > 0 && (
             <div>
-              <div className="text-xs text-muted-foreground">Particle Types</div>
-              {parData.systems.map((sys, i) => (
-                <div key={i} className="font-mono text-xs bg-muted px-2 py-1 rounded mt-1">
-                  {sys.name || `Type ${sys.type}`} ({sys.particleCount} particles)
-                </div>
-              ))}
+              <div className="text-xs text-muted-foreground mb-1">Particle Systems (click to toggle)</div>
+              {parData.systems.map((sys, i) => {
+                const hidden = hiddenSystems.has(i);
+                const typeName = PARTICLE_TYPE_NAMES[sys.type] ?? `Type${sys.type}`;
+                const hasEff = sys.modelName.endsWith('.eff');
+                const effFile = hasEff ? effFileMap.get(sys.modelName) : undefined;
+                const sysSubHidden = hiddenSubEffectsMap.get(i) ?? new Set<number>();
+                return (
+                  <div key={i}>
+                    <button
+                      className="w-full flex items-center gap-2 font-mono text-xs bg-muted hover:bg-accent px-2 py-1 rounded mt-1 cursor-pointer transition-colors"
+                      onClick={() => toggleSystem(i)}
+                    >
+                      <span className={hidden ? "opacity-30" : ""}>{hidden ? "○" : "●"}</span>
+                      <span className={hidden ? "line-through opacity-50" : ""}>
+                        {sys.name || `System ${i}`}
+                      </span>
+                      <span className="text-muted-foreground ml-auto shrink-0">
+                        {typeName}{hasEff ? `: ${sys.modelName}` : ""} · {sys.particleCount}px
+                      </span>
+                    </button>
+                    {hasEff && !hidden && effFile && effFile.subEffects.map((sub, j) => {
+                      const subHidden = sysSubHidden.has(j);
+                      return (
+                        <button
+                          key={j}
+                          className="w-full flex items-center gap-2 font-mono text-xs bg-muted/50 hover:bg-accent pl-6 pr-2 py-1 rounded mt-0.5 cursor-pointer transition-colors"
+                          onClick={() => toggleSubEffect(i, j)}
+                        >
+                          <span className={subHidden ? "opacity-30" : ""}>{subHidden ? "○" : "●"}</span>
+                          <span className={subHidden ? "line-through opacity-50" : ""}>
+                            {sub.modelName || "(default)"}{sub.texName ? ` [${sub.texName}]` : ""}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </div>
           )}
         </>

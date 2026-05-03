@@ -52,9 +52,11 @@ export function ParticleVisual({ system, particle, loop: _loop }: ParticleVisual
  */
 function ParticleTimeScope({ particle, children }: { particle: Particle; children: React.ReactNode }) {
   const parent = useTimeSource();
+  const particleRef = useRef(particle);
+  particleRef.current = particle;
 
   const localTime = useRef<TimeSource>({
-    getTime: () => particle.elapsed,
+    getTime: () => particleRef.current.elapsed,
     get playing() { return parent.playing; },
     loop: true, // sub-effects loop within particle life
   }).current;

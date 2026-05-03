@@ -3,9 +3,11 @@ import { useFrame } from "@react-three/fiber";
 import { useAtomValue } from "jotai";
 import * as THREE from "three";
 import { currentProjectAtom } from "@/store/project";
+import { effectV2HiddenParticleSystemsAtom, effectV2HiddenParticleSubEffectsAtom } from "@/store/effect-v2";
 import { useTimeSource } from "../TimeContext";
 import { ParFile } from "@/types/effect-v2";
 import { loadParFile } from "@/commands/effect";
+import { EffectSubEffectVisibilityContext } from "./EffectRenderer";
 import { ParticleSystemProps, ParticleType } from "./particles/types";
 import { SnowSystem } from "./particles/SnowSystem";
 import { FireSystem } from "./particles/FireSystem";
@@ -40,8 +42,12 @@ interface ParticleEffectRendererProps {
  * Loads and renders a .par particle file.
  * Routes each system to the correct particle type renderer.
  */
+const EMPTY_SET = new Set<number>();
+
 export function ParticleEffectRenderer({ particleEffectName, loop = false, onComplete }: ParticleEffectRendererProps) {
   const currentProject = useAtomValue(currentProjectAtom);
+  const hiddenSystems = useAtomValue(effectV2HiddenParticleSystemsAtom);
+  const hiddenSubEffectsMap = useAtomValue(effectV2HiddenParticleSubEffectsAtom);
   const timeSource = useTimeSource();
   const groupRef = useRef<THREE.Group>(null);
   const [parData, setParData] = useState<ParFile | null>(null);
@@ -105,10 +111,14 @@ export function ParticleEffectRenderer({ particleEffectName, loop = false, onCom
   return (
     <group ref={groupRef}>
       {parData.systems.map((system, i) => {
+        if (hiddenSystems.has(i)) return null;
         const System = getSystemComponent(system.type);
         if (!System) return null;
+        const subEffectHidden = hiddenSubEffectsMap.get(i) ?? EMPTY_SET;
         return (
-          <System key={i} system={system} index={i} loop={loop} onComplete={() => handleSystemComplete(i)} />
+          <EffectSubEffectVisibilityContext.Provider key={i} value={subEffectHidden}>
+            <System system={system} index={i} loop={loop} onComplete={() => handleSystemComplete(i)} />
+          </EffectSubEffectVisibilityContext.Provider>
         );
       })}
       {parData.strips.map((strip, i) => (

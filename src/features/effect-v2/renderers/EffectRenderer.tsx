@@ -1,8 +1,14 @@
-import { useCallback, useEffect, useRef } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef } from "react";
 import { useAtomValue } from "jotai";
 import { EffectFile } from "@/types/effect";
 import { effectV2HiddenSubEffectsAtom } from "@/store/effect-v2";
 import { SubEffectRenderer } from "./SubEffectRenderer";
+
+/**
+ * When non-null, overrides the global effectV2HiddenSubEffectsAtom.
+ * Used by ParticleEffectRenderer to provide per-particle-system sub-effect visibility.
+ */
+export const EffectSubEffectVisibilityContext = createContext<Set<number> | null>(null);
 
 interface EffectRendererProps {
   effect: EffectFile;
@@ -15,7 +21,9 @@ export function EffectRenderer({ effect, onComplete }: EffectRendererProps) {
   const onCompleteRef = useRef(onComplete);
   onCompleteRef.current = onComplete;
 
-  const hiddenSubEffects = useAtomValue(effectV2HiddenSubEffectsAtom);
+  const globalHidden = useAtomValue(effectV2HiddenSubEffectsAtom);
+  const scopedHidden = useContext(EffectSubEffectVisibilityContext);
+  const hiddenSubEffects = scopedHidden ?? globalHidden;
 
   // Tracks which sub-effect indices have fired onComplete
   const completedRef = useRef(new Set<number>());
