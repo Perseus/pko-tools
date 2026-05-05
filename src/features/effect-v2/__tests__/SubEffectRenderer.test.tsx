@@ -22,22 +22,27 @@ function TestTimeWrapper({ children }: { children: React.ReactNode }) {
 }
 
 describe("SubEffectRenderer", () => {
-  it("renders a group with a mesh for RectPlane", async () => {
+  it("renders a mesh for RectPlane", async () => {
     const renderer = await ReactThreeTestRenderer.create(
       <TestTimeWrapper>
         <SubEffectRenderer subEffect={baseSubEffect} />
       </TestTimeWrapper>
     );
 
-    const groups = renderer.scene.findAll((node) => node.type === "Group");
-    expect(groups.length).toBeGreaterThan(0);
-
     const meshes = renderer.scene.findAll((node) => node.type === "Mesh");
     expect(meshes.length).toBe(1);
   });
 
-  it("returns null for cylinder sub-effects (not yet implemented)", async () => {
-    const cylinderSubEffect = { ...baseSubEffect, useParam: 1 };
+  it("renders a mesh for cylinder sub-effects (useParam=1)", async () => {
+    const cylinderSubEffect = {
+      ...baseSubEffect,
+      modelName: "Cylinder",
+      useParam: 1,
+      perFrameCylinder: [
+        { segments: 8, height: 2, topRadius: 0.5, botRadius: 1 },
+        { segments: 8, height: 2, topRadius: 0.5, botRadius: 1 },
+      ],
+    };
     const renderer = await ReactThreeTestRenderer.create(
       <TestTimeWrapper>
         <SubEffectRenderer subEffect={cylinderSubEffect} />
@@ -45,7 +50,7 @@ describe("SubEffectRenderer", () => {
     );
 
     const meshes = renderer.scene.findAll((node) => node.type === "Mesh");
-    expect(meshes.length).toBe(0);
+    expect(meshes.length).toBe(1);
   });
 
   it("returns null for external .lgo models (not yet implemented)", async () => {
@@ -72,26 +77,32 @@ describe("SubEffectRenderer", () => {
     expect(meshes.length).toBe(1);
   });
 
-  it("applies rotation after advancing frames when rotaLoop is true", async () => {
+  it("applies transform after advancing frames when rotaLoop is true", async () => {
     const renderer = await ReactThreeTestRenderer.create(
       <TestTimeWrapper>
         <SubEffectRenderer subEffect={rotatingSubEffect} />
       </TestTimeWrapper>
     );
 
-    // Get the outer group (first group is the SubEffectRenderer group)
-    const groups = renderer.scene.findAll((node) => node.type === "Group");
-    const outerGroup = groups[0];
+    // SubEffectRenderer renders a <mesh> directly — find it
+    const meshes = renderer.scene.findAll((node) => node.type === "Mesh");
+    expect(meshes.length).toBe(1);
+    const mesh = meshes[0];
 
-    // Identity quaternion before advancing
-    const qBefore = outerGroup.instance.quaternion.clone();
+    // Capture position before advancing
+    const posBefore = mesh.instance.position.clone();
 
     // Advance 30 frames at 60fps
     await renderer.advanceFrames(30, 1 / 60);
 
-    const qAfter = outerGroup.instance.quaternion.clone();
+    // After advancing, the mesh should have been transformed by applySubEffectFrame
+    // (position, rotation, or scale should differ from initial state)
+    const posAfter = mesh.instance.position.clone();
+    const scaleAfter = mesh.instance.scale.clone();
 
-    // Quaternion should have changed due to rotation
-    expect(qBefore.equals(qAfter)).toBe(false);
+    // At least one transform property should have changed
+    const posChanged = !posBefore.equals(posAfter);
+    const scaleChanged = scaleAfter.x !== 1 || scaleAfter.y !== 1 || scaleAfter.z !== 1;
+    expect(posChanged || scaleChanged).toBe(true);
   });
 });

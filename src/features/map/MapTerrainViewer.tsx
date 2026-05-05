@@ -1,15 +1,17 @@
 import { useEffect, useMemo, useRef } from "react";
 import { useGLTF } from "@react-three/drei";
 import * as THREE from "three";
-import { MapViewConfig } from "@/types/map";
+import { MapPlacementRecord, MapViewConfig } from "@/types/map";
 import { useGltfResource } from "@/hooks/use-gltf-resource";
 
 function TerrainModel({
   gltfDataURI,
   viewConfig,
+  selectedPlacement,
 }: {
   gltfDataURI: string;
   viewConfig: MapViewConfig;
+  selectedPlacement: MapPlacementRecord | null;
 }) {
   const { scene } = useGLTF(gltfDataURI);
 
@@ -19,20 +21,34 @@ function TerrainModel({
       position: THREE.Vector3;
       type: number;
       id: number;
+      index: number;
     }[] = [];
 
     scene.traverse((child) => {
       if (child.userData?.objectType !== undefined) {
+        const match = child.name.match(/^obj_(\d+)_(\d+)$/);
         markers.push({
           position: child.position.clone(),
           type: child.userData.objectType,
           id: child.userData.objectId,
+          index: match ? Number(match[2]) : -1,
         });
       }
     });
 
     return markers;
   }, [scene]);
+
+  const selectedMarker = useMemo(() => {
+    if (!selectedPlacement) {
+      return null;
+    }
+    return objectMarkers.find(
+      (marker) =>
+        marker.type === selectedPlacement.obj_type &&
+        marker.index === selectedPlacement.index,
+    ) ?? null;
+  }, [objectMarkers, selectedPlacement]);
 
   return (
     <group>
@@ -59,6 +75,13 @@ function TerrainModel({
       {/* Object markers */}
       {viewConfig.showObjectMarkers &&
         <ObjectMarkerInstances markers={objectMarkers} />}
+
+      {selectedMarker && (
+        <mesh position={selectedMarker.position}>
+          <sphereGeometry args={[1.1, 14, 10]} />
+          <meshBasicMaterial color="#ef4444" />
+        </mesh>
+      )}
     </group>
   );
 }
@@ -139,9 +162,11 @@ function ObjectMarkerInstances({
 export default function MapTerrainViewer({
   gltfJson,
   viewConfig,
+  selectedPlacement,
 }: {
   gltfJson: string;
   viewConfig: MapViewConfig;
+  selectedPlacement: MapPlacementRecord | null;
 }) {
   const dataURI = useGltfResource(gltfJson);
 
@@ -155,5 +180,11 @@ export default function MapTerrainViewer({
 
   if (!dataURI) return null;
 
-  return <TerrainModel gltfDataURI={dataURI} viewConfig={viewConfig} />;
+  return (
+    <TerrainModel
+      gltfDataURI={dataURI}
+      viewConfig={viewConfig}
+      selectedPlacement={selectedPlacement}
+    />
+  );
 }

@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     db,
-    math::coord_transform::{CoordTransform, ExportProfile},
+    math::coord_transform::CoordTransform,
     projects::{self, project},
 };
 use gltf::json as gltf;
@@ -500,7 +500,7 @@ pub fn get_character_gltf_json(
     let project = projects::project::Project::get_project(project_id)?;
     let character = get_character(project_id, character_id)?;
     let project_dir = project.project_directory.as_ref();
-    let ct = CoordTransform::new(ExportProfile::StandardGltf);
+    let ct = CoordTransform::new();
     character.get_gltf_json_with_split(project_dir, Some(&ct), false)
 }
 
@@ -514,7 +514,7 @@ pub fn get_character_gltf_json_with_options(
     let character = get_character(project_id, character_id)?;
     let project_dir = project.project_directory.as_ref();
     let ct = if y_up {
-        Some(CoordTransform::new(ExportProfile::StandardGltf))
+        Some(CoordTransform::new())
     } else {
         None
     };

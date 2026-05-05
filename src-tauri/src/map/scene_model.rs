@@ -18,7 +18,7 @@ use gltf_json::{
 };
 
 use crate::item::model::decode_pko_texture;
-use crate::math::coord_transform::{CoordTransform, ExportProfile};
+use crate::math::coord_transform::CoordTransform;
 
 use super::lmo_types::{self as lmo, D3DCULL_NONE, LmoGeomObject, LmoModel};
 use super::lmo_loader;
@@ -373,6 +373,87 @@ pub(crate) fn decode_dds_with_alpha(data: &[u8]) -> Option<image::DynamicImage> 
                 return Some(image::DynamicImage::ImageRgba8(img_buf));
             }
             // DXT3/DXT5: fall through to image crate (handles alpha correctly)
+        } else {
+            // Uncompressed RGB/RGBA DDS (DDPF_RGB with optional DDPF_ALPHAPIXELS)
+            let is_rgb = pf_flags & 0x40 != 0; // DDPF_RGB
+            if is_rgb {
+                let height = u32::from_le_bytes([data[12], data[13], data[14], data[15]]) as usize;
+                let width = u32::from_le_bytes([data[16], data[17], data[18], data[19]]) as usize;
+                let bit_count =
+                    u32::from_le_bytes([data[88], data[89], data[90], data[91]]) as usize;
+
+                if width == 0 || height == 0 || bit_count == 0 {
+                    return None;
+                }
+
+                let has_alpha = pf_flags & 0x1 != 0; // DDPF_ALPHAPIXELS
+                let bytes_per_pixel = bit_count / 8;
+                let pixel_data = &data[128..];
+                let expected_size = width * height * bytes_per_pixel;
+
+                if pixel_data.len() < expected_size {
+                    return None;
+                }
+
+                let r_mask =
+                    u32::from_le_bytes([data[92], data[93], data[94], data[95]]);
+                let g_mask =
+                    u32::from_le_bytes([data[96], data[97], data[98], data[99]]);
+                let b_mask =
+                    u32::from_le_bytes([data[100], data[101], data[102], data[103]]);
+                let a_mask = if has_alpha {
+                    u32::from_le_bytes([data[104], data[105], data[106], data[107]])
+                } else {
+                    0
+                };
+
+                let r_shift = r_mask.trailing_zeros();
+                let g_shift = g_mask.trailing_zeros();
+                let b_shift = b_mask.trailing_zeros();
+                let a_shift = if a_mask != 0 { a_mask.trailing_zeros() } else { 0 };
+
+                let mut rgba_bytes = Vec::with_capacity(width * height * 4);
+                for y in 0..height {
+                    for x in 0..width {
+                        let offset = (y * width + x) * bytes_per_pixel;
+                        let pixel = match bytes_per_pixel {
+                            4 => u32::from_le_bytes([
+                                pixel_data[offset],
+                                pixel_data[offset + 1],
+                                pixel_data[offset + 2],
+                                pixel_data[offset + 3],
+                            ]),
+                            3 => u32::from_le_bytes([
+                                pixel_data[offset],
+                                pixel_data[offset + 1],
+                                pixel_data[offset + 2],
+                                0,
+                            ]),
+                            2 => u32::from_le_bytes([
+                                pixel_data[offset],
+                                pixel_data[offset + 1],
+                                0,
+                                0,
+                            ]),
+                            _ => return None,
+                        };
+
+                        let r = ((pixel & r_mask) >> r_shift) as u8;
+                        let g = ((pixel & g_mask) >> g_shift) as u8;
+                        let b = ((pixel & b_mask) >> b_shift) as u8;
+                        let a = if has_alpha && a_mask != 0 {
+                            ((pixel & a_mask) >> a_shift) as u8
+                        } else {
+                            255
+                        };
+                        rgba_bytes.extend_from_slice(&[r, g, b, a]);
+                    }
+                }
+
+                let img_buf =
+                    image::RgbaImage::from_raw(width as u32, height as u32, rgba_bytes)?;
+                return Some(image::DynamicImage::ImageRgba8(img_buf));
+            }
         }
     }
 
@@ -1692,7 +1773,7 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         return Err(anyhow!("LMO file has no geometry objects"));
     }
 
-    let ct = CoordTransform::new(ExportProfile::StandardGltf);
+    let ct = CoordTransform::new();
     let mut builder = GltfBuilder::new();
     let geom_result = process_lmo_geometry(&mut builder, &model, project_dir, TextureMode::Embed, &ct)?;
 
@@ -1950,7 +2031,7 @@ pub fn load_scene_models(
     unique_ids.sort_unstable();
     unique_ids.dedup();
 
-    let ct = CoordTransform::new(ExportProfile::StandardGltf);
+    let ct = CoordTransform::new();
     let mut builder = GltfBuilder::new();
     let mut model_mesh_map = HashMap::new();
 
@@ -2336,7 +2417,7 @@ mod tests {
             build_lmo_material(&mut builder, mat, &format!("mat{}", mi), &tmp, TextureMode::Skip);
         }
 
-        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let ct = CoordTransform::new();
         let prims = build_geom_primitives(&mut builder, geom, "test", mat_base, false, &ct);
         assert_eq!(prims.len(), 1, "should have 1 primitive for 1 subset");
 
@@ -2699,7 +2780,7 @@ mod tests {
             .map(|(i, g)| (i as u32, g))
             .collect();
 
-        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let ct = CoordTransform::new();
         let anims = build_animations(&mut builder, &animated_nodes, &ct);
 
         assert_eq!(anims.len(), 1, "should produce exactly one Animation");
@@ -2714,7 +2795,7 @@ mod tests {
         let mut builder = GltfBuilder::new();
         let animated_nodes: Vec<(u32, &LmoGeomObject)> = vec![];
 
-        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let ct = CoordTransform::new();
         let anims = build_animations(&mut builder, &animated_nodes, &ct);
         assert!(anims.is_empty(), "static-only model should produce no animations");
     }
@@ -2724,7 +2805,7 @@ mod tests {
         let model = make_animated_test_model();
         let animated_geom = &model.geom_objects[1];
 
-        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let ct = CoordTransform::new();
         let extras = build_anim_extras(animated_geom, 5, &ct);
         assert!(extras.is_some(), "animated geom should produce extras");
 
@@ -2750,7 +2831,7 @@ mod tests {
         let model = make_test_model();
         let static_geom = &model.geom_objects[0];
 
-        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let ct = CoordTransform::new();
         let extras = build_anim_extras(static_geom, 0, &ct);
         assert!(extras.is_none(), "static geom with no anims should produce None");
     }
@@ -2761,7 +2842,7 @@ mod tests {
         let static_geom = &model.geom_objects[0];
 
         // Even a static geom with no anims should get pko_primitive_id
-        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let ct = CoordTransform::new();
         let extras = build_node_extras(static_geom, 7, &ct);
         assert!(extras.is_some(), "node extras should always be Some (has pko_primitive_id)");
 
@@ -2774,7 +2855,7 @@ mod tests {
         let model = make_animated_test_model();
         let animated_geom = &model.geom_objects[1];
 
-        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let ct = CoordTransform::new();
         let extras = build_node_extras(animated_geom, 3, &ct);
         assert!(extras.is_some());
 
@@ -3469,7 +3550,7 @@ mod tests {
         let model = make_multi_geom_model(4, false);
         let lmo_path = write_temp_lmo(&model, &tmp_dir, "no_colors.lmo");
 
-        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir, true, &CoordTransform::new(ExportProfile::StandardGltf)).unwrap();
+        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir, true, &CoordTransform::new()).unwrap();
         let glb = build_glb_bytes(&json_str, &bin);
         let (json, bin_data) = parse_glb(&glb);
 
@@ -3491,7 +3572,7 @@ mod tests {
         let model = make_multi_geom_model(4, true);
         let lmo_path = write_temp_lmo(&model, &tmp_dir, "with_colors.lmo");
 
-        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir, true, &CoordTransform::new(ExportProfile::StandardGltf)).unwrap();
+        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir, true, &CoordTransform::new()).unwrap();
         let glb = build_glb_bytes(&json_str, &bin);
         let (json, bin_data) = parse_glb(&glb);
 
@@ -3519,7 +3600,7 @@ mod tests {
 
         let lmo_path = write_temp_lmo(&model, &tmp_dir, "mixed_colors.lmo");
 
-        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir, true, &CoordTransform::new(ExportProfile::StandardGltf)).unwrap();
+        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir, true, &CoordTransform::new()).unwrap();
         let glb = build_glb_bytes(&json_str, &bin);
         let (json, bin_data) = parse_glb(&glb);
 
@@ -3601,7 +3682,7 @@ mod tests {
         };
 
         let project_dir = lmo_path.parent().unwrap().parent().unwrap();
-        let (json_str, bin) = build_glb_from_lmo(lmo_path, project_dir, true, &CoordTransform::new(ExportProfile::StandardGltf)).unwrap();
+        let (json_str, bin) = build_glb_from_lmo(lmo_path, project_dir, true, &CoordTransform::new()).unwrap();
         let glb = build_glb_bytes(&json_str, &bin);
         let (json, bin_data) = parse_glb(&glb);
 
@@ -4008,7 +4089,7 @@ mod tests {
             return;
         }
         let project_dir = std::path::Path::new("../top-client");
-        let (json, bin) = build_glb_from_lmo(lmo_path, project_dir, true, &CoordTransform::new(ExportProfile::StandardGltf))
+        let (json, bin) = build_glb_from_lmo(lmo_path, project_dir, true, &CoordTransform::new())
             .expect("GLB export should succeed for nml-bd199");
 
         let root: serde_json::Value = serde_json::from_str(&json).unwrap();

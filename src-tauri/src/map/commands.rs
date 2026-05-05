@@ -1,10 +1,229 @@
+use std::sync::Arc;
 use std::str::FromStr;
 
+use tauri::State;
+
+use crate::AppState;
 use crate::projects::project::Project;
 
 use super::terrain;
 use super::lmo_types::BuildingMetadata;
-use super::{BuildingEntry, MapEntry, MapExportResult, MapForUnityExportResult, MapMetadata};
+use super::{BuildingEntry, MapEntry, MapExportResult, MapMetadata, MapPlacementPage, MapPlacementRecord, MapPlacementSummary};
+
+fn load_map_placements_cached(
+    app_state: &AppState,
+    project_id: uuid::Uuid,
+    project_dir: &std::path::Path,
+    map_name: &str,
+) -> Result<Arc<Vec<MapPlacementRecord>>, String> {
+    let cache_key = (project_id, map_name.to_string());
+
+    {
+        let cache = app_state
+            .map_placement_cache
+            .lock()
+            .map_err(|e| e.to_string())?;
+        if let Some(cached) = cache.get(&cache_key) {
+            return Ok(Arc::clone(cached));
+        }
+    }
+
+    let obj_path = project_dir.join("map").join(format!("{map_name}.obj"));
+    if !obj_path.exists() {
+        return Ok(Arc::new(Vec::new()));
+    }
+
+    let data = std::fs::read(&obj_path).map_err(|e| e.to_string())?;
+    let parsed = super::obj_loader::load_obj(&data).map_err(|e| e.to_string())?;
+    let building_info = super::scene_obj_info::load_scene_obj_info(project_dir)
+        .map_err(|e| e.to_string())?;
+    let effect_info = crate::item::sceneffect::load_scene_effect_info(project_dir)
+        .map_err(|e| e.to_string())?;
+
+    let mut placements = Vec::with_capacity(parsed.objects.len());
+    for (index, obj) in parsed.objects.iter().enumerate() {
+        let (kind, display_name, asset_name, attach_effect_id) = match obj.obj_type {
+            0 => {
+                let info = building_info.get(&(obj.obj_id as u32));
+                (
+                    "building".to_string(),
+                    info.and_then(|v| (!v.display_name.is_empty()).then(|| v.display_name.clone())),
+                    info.map(|v| v.filename.clone()),
+                    info.map(|v| v.attach_effect_id),
+                )
+            }
+            1 => {
+                let info = effect_info.get(&(obj.obj_id as u32));
+                (
+                    "effect".to_string(),
+                    info.and_then(|v| (!v.display_name.is_empty()).then(|| v.display_name.clone())),
+                    info.map(|v| v.filename.clone()),
+                    None,
+                )
+            }
+            _ => ("unknown".to_string(), None, None, None),
+        };
+
+        placements.push(MapPlacementRecord {
+            index: index as u32,
+            obj_type: obj.obj_type,
+            obj_id: obj.obj_id as u32,
+            kind,
+            world_x: obj.world_x,
+            world_y: obj.world_y,
+            world_z: obj.world_z,
+            yaw_angle: obj.yaw_angle,
+            scale: obj.scale,
+            display_name,
+            asset_name,
+            attach_effect_id,
+            distance: None,
+        });
+    }
+
+    let placements = Arc::new(placements);
+    let mut cache = app_state
+        .map_placement_cache
+        .lock()
+        .map_err(|e| e.to_string())?;
+    cache.insert(cache_key, Arc::clone(&placements));
+    Ok(placements)
+}
+
+#[tauri::command]
+pub async fn get_map_placement_summary(
+    app_state: State<'_, AppState>,
+    project_id: String,
+    map_name: String,
+) -> Result<MapPlacementSummary, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+    let placements = load_map_placements_cached(
+        app_state.inner(),
+        project_id,
+        project.project_directory.as_ref(),
+        &map_name,
+    )?;
+
+    let mut building_count = 0u32;
+    let mut effect_count = 0u32;
+    for placement in placements.iter() {
+        match placement.obj_type {
+            0 => building_count += 1,
+            1 => effect_count += 1,
+            _ => {}
+        }
+    }
+
+    Ok(MapPlacementSummary {
+        total: placements.len() as u32,
+        building_count,
+        effect_count,
+    })
+}
+
+#[tauri::command]
+pub async fn query_map_placements(
+    app_state: State<'_, AppState>,
+    project_id: String,
+    map_name: String,
+    query: Option<String>,
+    placement_type: Option<String>,
+    near_x: Option<f32>,
+    near_y: Option<f32>,
+    near_radius: Option<f32>,
+    offset: Option<u32>,
+    limit: Option<u32>,
+) -> Result<MapPlacementPage, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+    let placements = load_map_placements_cached(
+        app_state.inner(),
+        project_id,
+        project.project_directory.as_ref(),
+        &map_name,
+    )?;
+
+    let query = query.unwrap_or_default().trim().to_ascii_lowercase();
+    let placement_type = placement_type.unwrap_or_else(|| "all".to_string());
+    let near_center = match (near_x, near_y) {
+        (Some(x), Some(y)) => Some((x, y)),
+        _ => None,
+    };
+    let near_radius = near_radius.unwrap_or(50.0).max(0.0);
+    let offset = offset.unwrap_or(0) as usize;
+    let limit = limit.unwrap_or(200).clamp(1, 500) as usize;
+
+    let mut filtered: Vec<MapPlacementRecord> = placements
+        .iter()
+        .filter(|placement| match placement_type.as_str() {
+            "building" => placement.obj_type == 0,
+            "effect" => placement.obj_type == 1,
+            _ => true,
+        })
+        .filter(|placement| {
+            if query.is_empty() {
+                return true;
+            }
+
+            let id_matches = placement.obj_id.to_string().contains(&query)
+                || placement.index.to_string().contains(&query);
+            let display_matches = placement
+                .display_name
+                .as_deref()
+                .map(|v| v.to_ascii_lowercase().contains(&query))
+                .unwrap_or(false);
+            let asset_matches = placement
+                .asset_name
+                .as_deref()
+                .map(|v| v.to_ascii_lowercase().contains(&query))
+                .unwrap_or(false);
+
+            id_matches || display_matches || asset_matches || placement.kind.contains(&query)
+        })
+        .filter_map(|placement| {
+            if let Some((x, y)) = near_center {
+                let dx = placement.world_x - x;
+                let dy = placement.world_y - y;
+                let distance = (dx * dx + dy * dy).sqrt();
+                if distance > near_radius {
+                    return None;
+                }
+
+                let mut placement = placement.clone();
+                placement.distance = Some(distance);
+                Some(placement)
+            } else {
+                Some(placement.clone())
+            }
+        })
+        .collect();
+
+    if near_center.is_some() {
+        filtered.sort_by(|a, b| {
+            a.distance
+                .unwrap_or(f32::MAX)
+                .partial_cmp(&b.distance.unwrap_or(f32::MAX))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+    }
+
+    let total = filtered.len() as u32;
+    let items = filtered
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .collect();
+
+    Ok(MapPlacementPage {
+        total,
+        offset: offset as u32,
+        limit: limit as u32,
+        items,
+    })
+}
 
 #[tauri::command]
 pub async fn get_map_list(project_id: String) -> Result<Vec<MapEntry>, String> {
@@ -50,56 +269,6 @@ pub async fn export_map_to_gltf(
         .join("map");
 
     terrain::export_terrain_gltf(project.project_directory.as_ref(), &map_name, &exports_dir)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn export_map_for_unity(
-    project_id: String,
-    map_name: String,
-    _format: Option<String>,
-    shared_dir: Option<String>,
-) -> Result<MapForUnityExportResult, String> {
-    let project_id =
-        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
-    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
-
-    let exports_dir = project
-        .project_directory
-        .join("pko-tools")
-        .join("exports")
-        .join("map")
-        .join(&map_name);
-
-    let mut options = super::ExportOptions::default();
-    // Use default profile (UnityGltfast) — Unity code expects positive X
-    if let Some(dir) = shared_dir {
-        options.shared_assets_dir = Some(std::path::PathBuf::from(dir));
-    }
-
-    terrain::export_map_for_unity(project.project_directory.as_ref(), &map_name, &exports_dir, &options)
-        .map_err(|e| e.to_string())
-}
-
-#[tauri::command]
-pub async fn batch_export_maps_for_unity(
-    project_id: String,
-    _format: Option<String>,
-) -> Result<super::terrain::BatchExportResult, String> {
-    let project_id =
-        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
-    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
-
-    let output_base_dir = project
-        .project_directory
-        .join("pko-tools")
-        .join("exports")
-        .join("map");
-
-    let options = super::ExportOptions::default();
-    // Uses default profile (UnityGltfast) — Unity code expects positive X
-
-    terrain::batch_export_for_unity(project.project_directory.as_ref(), &output_base_dir, &options)
         .map_err(|e| e.to_string())
 }
 

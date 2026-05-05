@@ -1,4 +1,4 @@
-//! Shared asset export for the PKO → Unity pipeline.
+//! Shared asset export for the PKO pipeline.
 //!
 //! Exports all global assets once to a central directory so per-map exports
 //! can reference them instead of duplicating buildings, textures, and effects.
@@ -10,7 +10,7 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::effect::model::EffFile;
-use crate::math::coord_transform::{CoordTransform, ExportProfile};
+use crate::math::coord_transform::CoordTransform;
 
 /// Result of a shared asset export.
 #[derive(Debug, Serialize, Deserialize)]
@@ -37,10 +37,6 @@ pub struct SharedExportResult {
 /// 5. Water textures (ocean_h_01-30)
 /// 6. shared_manifest.json (inventory of everything exported)
 pub fn export_shared_assets(project_dir: &Path, output_dir: &Path) -> Result<SharedExportResult> {
-    export_shared_assets_with_profile(project_dir, output_dir, ExportProfile::UnityGltfast)
-}
-
-pub fn export_shared_assets_with_profile(project_dir: &Path, output_dir: &Path, profile: ExportProfile) -> Result<SharedExportResult> {
     // Atomic write: export to temp dir, rename on success
     let temp_dir = output_dir.with_file_name(format!(
         ".shared-export-tmp-{}",
@@ -51,7 +47,7 @@ pub fn export_shared_assets_with_profile(project_dir: &Path, output_dir: &Path, 
     }
     std::fs::create_dir_all(&temp_dir)?;
 
-    let result = export_shared_assets_inner(project_dir, &temp_dir, profile);
+    let result = export_shared_assets_inner(project_dir, &temp_dir);
 
     match result {
         Ok(mut export_result) => {
@@ -76,7 +72,7 @@ pub fn export_shared_assets_with_profile(project_dir: &Path, output_dir: &Path, 
     }
 }
 
-fn export_shared_assets_inner(project_dir: &Path, output_dir: &Path, profile: ExportProfile) -> Result<SharedExportResult> {
+fn export_shared_assets_inner(project_dir: &Path, output_dir: &Path) -> Result<SharedExportResult> {
     // 1. Export ALL terrain textures
     eprintln!("[shared] Exporting all terrain textures...");
     let terrain_textures =
@@ -94,7 +90,7 @@ fn export_shared_assets_inner(project_dir: &Path, output_dir: &Path, profile: Ex
 
     // 3. Export ALL buildings from sceneobjinfo.bin
     eprintln!("[shared] Exporting all buildings...");
-    let ct = CoordTransform::new(profile);
+    let ct = CoordTransform::new();
     let (buildings_exported, buildings_failed, buildings_manifest) =
         export_all_buildings(project_dir, output_dir, true, &ct)?;
 
@@ -176,7 +172,7 @@ pub fn export_shared_assets_v2(project_dir: &Path, output_dir: &Path) -> Result<
 
 fn export_shared_assets_v2_inner(project_dir: &Path, output_dir: &Path) -> Result<SharedExportResult> {
     // Export buildings with external texture URIs (no embedded textures)
-    let ct = CoordTransform::new(ExportProfile::UnityGltfast);
+    let ct = CoordTransform::new();
     let (buildings_exported, buildings_failed, _manifest) =
         export_all_buildings(project_dir, output_dir, false, &ct)?;
 

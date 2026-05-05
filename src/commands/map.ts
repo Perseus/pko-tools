@@ -1,5 +1,11 @@
 import { invokeTimed as invoke } from "@/commands/invokeTimed";
-import { MapEntry, MapExportResult, MapForUnityExportResult, MapMetadata } from "@/types/map";
+import {
+  MapEntry,
+  MapExportResult,
+  MapMetadata,
+  MapPlacementPage,
+  MapPlacementSummary,
+} from "@/types/map";
 
 export const getMapList = async (
   projectId: string
@@ -28,9 +34,33 @@ export const exportMapToGltf = async (
   return invoke("export_map_to_gltf", { projectId, mapName });
 };
 
-export const exportMapForUnity = async (
+export const getMapPlacementSummary = async (
   projectId: string,
-  mapName: string
-): Promise<MapForUnityExportResult> => {
-  return invoke("export_map_for_unity", { projectId, mapName });
+  mapName: string,
+): Promise<MapPlacementSummary> => {
+  return invoke("get_map_placement_summary", { projectId, mapName });
+};
+
+export const queryMapPlacements = async (
+  projectId: string,
+  mapName: string,
+  query?: string,
+  placementType?: "all" | "building" | "effect",
+  nearX?: number,
+  nearY?: number,
+  nearRadius?: number,
+  offset?: number,
+  limit?: number,
+): Promise<MapPlacementPage> => {
+  return invoke("query_map_placements", {
+    projectId,
+    mapName,
+    query,
+    placementType,
+    nearX,
+    nearY,
+    nearRadius,
+    offset,
+    limit,
+  });
 };

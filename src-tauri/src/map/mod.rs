@@ -17,8 +17,6 @@ pub mod texture;
 
 use serde::{Deserialize, Serialize};
 
-use crate::math::coord_transform::ExportProfile;
-
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct MapEntry {
     pub name: String,
@@ -58,42 +56,40 @@ pub struct MapExportResult {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct MapForUnityExportResult {
-    pub output_dir: String,
-    pub terrain_gltf_path: String,
-    pub building_gltf_paths: Vec<BuildingExportEntry>,
-    pub manifest_path: String,
-    pub total_buildings_exported: u32,
-    pub total_placements: u32,
-    pub total_effect_placements: u32,
-    pub total_effect_definitions: u32,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 pub struct BuildingExportEntry {
     pub obj_id: u32,
     pub filename: String,
     pub gltf_path: String,
 }
 
-/// Options controlling the map export format.
-#[derive(Debug, Clone)]
-pub struct ExportOptions {
-    /// Path to the shared assets directory (from `--shared` export).
-    /// When set, per-map export skips buildings, textures, effects, and water,
-    /// and the manifest references assets relative to this directory.
-    pub shared_assets_dir: Option<std::path::PathBuf>,
-    /// Coordinate transform profile. `UnityGltfast` pre-negates X for clean
-    /// Unity import (positive X after glTFast); `StandardGltf` is spec-compliant
-    /// for any glTF viewer.
-    pub export_profile: ExportProfile,
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MapPlacementRecord {
+    pub index: u32,
+    pub obj_type: u8,
+    pub obj_id: u32,
+    pub kind: String,
+    pub world_x: f32,
+    pub world_y: f32,
+    pub world_z: f32,
+    pub yaw_angle: i16,
+    pub scale: i16,
+    pub display_name: Option<String>,
+    pub asset_name: Option<String>,
+    pub attach_effect_id: Option<i32>,
+    pub distance: Option<f32>,
 }
 
-impl Default for ExportOptions {
-    fn default() -> Self {
-        Self {
-            shared_assets_dir: None,
-            export_profile: ExportProfile::UnityGltfast,
-        }
-    }
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MapPlacementSummary {
+    pub total: u32,
+    pub building_count: u32,
+    pub effect_count: u32,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct MapPlacementPage {
+    pub total: u32,
+    pub offset: u32,
+    pub limit: u32,
+    pub items: Vec<MapPlacementRecord>,
 }

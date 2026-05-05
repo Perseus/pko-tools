@@ -11,7 +11,6 @@ export const actionIds = {
   itemImportGltf: "item.import.gltf",
   itemWorkbenchSave: "item.workbench.save",
   mapExportGltf: "map.export.gltf",
-  mapExportUnity: "map.export.unity",
   mapToggleObjectMarkers: "map.view.toggleObjectMarkers",
   mapToggleWireframe: "map.view.toggleWireframe",
   buildingExportGltf: "building.export.gltf",

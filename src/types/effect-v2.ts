@@ -20,10 +20,10 @@ export interface MagicGroupEntry {
   id: number;
   data_name: string;
   name: string;
-  typeIds: number[];   // up to 8 MagicSingleInfo IDs (-1 = unused)
+  type_ids: number[];   // up to 8 MagicSingleInfo IDs (-1 = unused)
   counts: number[];    // play count for each type
-  totalCount: number;
-  renderIdx: number;
+  total_count: number;
+  render_idx: number;
 }
 
 export interface MagicGroupTable {

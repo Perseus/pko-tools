@@ -5,7 +5,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ScrollAreaVirtualizable } from "@/components/ui/scroll-area-virtualizable";
 import { SidebarHeader } from "@/components/ui/sidebar";
 import { MapEntry } from "@/types/map";
-import { getMapList, getMapMetadata, loadMapTerrain, exportMapToGltf } from "@/commands/map";
+import { getMapList, getMapMetadata, exportMapToGltf } from "@/commands/map";
 import {
   mapGltfJsonAtom,
   mapLoadingAtom,
@@ -79,14 +79,10 @@ export default function MapNavigator() {
     setMapLoading(true);
 
     try {
-      const [gltfJson, metadata] = await Promise.all([
-        loadMapTerrain(currentProject.id, map.name),
-        getMapMetadata(currentProject.id, map.name),
-      ]);
+      const metadata = await getMapMetadata(currentProject.id, map.name);
       if (!loadRequestGuard.current.isLatest(requestVersion)) {
         return;
       }
-      setMapGltfJson(gltfJson);
       setMapMetadata(metadata);
     } catch (err) {
       if (loadRequestGuard.current.isLatest(requestVersion)) {

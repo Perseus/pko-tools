@@ -222,14 +222,6 @@ function buildCoreActions(params: {
       priority: 60,
     },
     {
-      id: actionIds.mapExportUnity,
-      title: "Export Map for Unity",
-      group: "Map",
-      surfaces: ["maps"],
-      keywords: ["map", "export", "unity"],
-      priority: 60,
-    },
-    {
       id: actionIds.mapToggleObjectMarkers,
       title: "Toggle Object Markers",
       group: "Map View",
