@@ -20,6 +20,7 @@ mod db;
 pub mod decompiler;
 pub mod effect;
 pub mod effect_v2;
+pub mod forge_glow;
 pub mod item;
 pub mod map;
 pub mod math;
