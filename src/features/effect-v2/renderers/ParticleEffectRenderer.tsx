@@ -174,23 +174,25 @@ export function ParticleEffectRenderer({
     <ParticleOpacityProvider value={opacityScale}>
       <group ref={groupRef}>
         {parData.systems.map((system, i) => {
-          if (hiddenSystems.has(i)) return null;
           const System = getSystemComponent(system.type);
           if (!System) return null;
+          const hidden = hiddenSystems.has(i);
           const subEffectHidden = hiddenSubEffectsMap.get(i) ?? EMPTY_SET;
           return (
-            <EffectSubEffectVisibilityContext.Provider key={i} value={subEffectHidden}>
-              <System
-                system={system}
-                index={i}
-                loop={loop}
-                dummyLineSpan={getSystemDummyLineSpan(system.type, dummyLineSpan)}
-                emitterPositionRef={emitterPositionRef}
-                sourceDirectionRef={sourceDirectionRef}
-                onHitEffect={handleHitEffect}
-                onComplete={() => handleRenderableComplete(`system:${i}`)}
-              />
-            </EffectSubEffectVisibilityContext.Provider>
+            <group key={i} visible={!hidden}>
+              <EffectSubEffectVisibilityContext.Provider value={subEffectHidden}>
+                <System
+                  system={system}
+                  index={i}
+                  loop={loop}
+                  dummyLineSpan={getSystemDummyLineSpan(system.type, dummyLineSpan)}
+                  emitterPositionRef={emitterPositionRef}
+                  sourceDirectionRef={sourceDirectionRef}
+                  onHitEffect={handleHitEffect}
+                  onComplete={() => handleRenderableComplete(`system:${i}`)}
+                />
+              </EffectSubEffectVisibilityContext.Provider>
+            </group>
           );
         })}
         {parData.strips.map((strip, i) => (
