@@ -1,46 +1,62 @@
+import { useEffect, useRef } from "react";
 import { ParticleSystemProps } from "./types";
 import { ParticleVisual } from "./ParticleVisual";
 import { useParticleLifecycle, Particle } from "./useParticleLifecycle";
-import { randf } from "../../helpers";
 import { ParSystem } from "@/types/effect-v2";
+import {
+  computeLineSingleDelta,
+  computeLineSingleVelocity,
+  DummyLineSpan,
+} from "./dummyLineKinematics";
 
 /**
  * Per-particle spawn for line-single.
  * Matches C++ _CreateLineSingle:
- * - vel = direction * velocity (straight line in fixed direction)
- * - Spawn position randomized within system range
- * PKO→Three.js coordinate swap (Y↔Z) applied.
+ * - requires GetDummyPosList() to provide the dummy span
+ * - vel = dummy distance / particle life along dummy1 - dummy2
  */
-function initLineSingleParticle(p: Particle, _i: number, system: ParSystem) {
-  p.dir.set(
-    system.direction[0] * system.velocity,
-    system.direction[2] * system.velocity, // PKO Z → Three.js Y
-    system.direction[1] * system.velocity, // PKO Y → Three.js Z
-  );
-  p.accel.set(system.acceleration[0], system.acceleration[2], system.acceleration[1]);
-  p.pos.set(
-    randf(system.range[0]),
-    randf(system.range[2]),
-    randf(system.range[1]),
-  );
+function initLineSingleParticle(p: Particle, _i: number, _system: ParSystem, dummyLineSpan: DummyLineSpan) {
+  p.pos.copy(dummyLineSpan.start);
+  p.dir.copy(computeLineSingleVelocity(dummyLineSpan, p.life));
+  p.accel.set(0, 0, 0);
 }
 
 /**
  * Per-frame position update for line-single particles.
- * Default physics: pos += dir*dt; dir += accel*dt
+ * C++ applies velocity plus the particle acceleration term; acceleration is zero at spawn.
  */
 function moveLineSingleParticle(p: Particle, _i: number, dt: number) {
-  p.pos.addScaledVector(p.dir, dt);
-  p.dir.addScaledVector(p.accel, dt);
+  p.pos.add(computeLineSingleDelta(p.dir, p.accel, dt));
 }
 
 /** Type 17 — Single line particle emission. */
-export function LineSingleSystem({ system, onComplete, loop }: ParticleSystemProps) {
+export function LineSingleSystem(props: ParticleSystemProps) {
+  const { dummyLineSpan, onComplete } = props;
+
+  useEffect(() => {
+    if (!dummyLineSpan) onComplete?.();
+  }, [dummyLineSpan, onComplete]);
+
+  if (!dummyLineSpan) return null;
+
+  return <LineSingleActiveSystem {...props} dummyLineSpan={dummyLineSpan} />;
+}
+
+function LineSingleActiveSystem({
+  system,
+  onComplete,
+  loop,
+  dummyLineSpan,
+  emitterPositionRef,
+}: ParticleSystemProps & { dummyLineSpan: DummyLineSpan }) {
+  const sharedEffectElapsedRef = useRef(0);
   const particlesRef = useParticleLifecycle({
     system,
     loop,
     onComplete,
-    initParticle: initLineSingleParticle,
+    emitterPositionRef,
+    sharedEffectElapsedRef,
+    initParticle: (p, i, s) => initLineSingleParticle(p, i, s, dummyLineSpan),
     moveParticle: moveLineSingleParticle,
   });
 
@@ -50,7 +66,7 @@ export function LineSingleSystem({ system, onComplete, loop }: ParticleSystemPro
     <group>
       {alive.map((p) => (
         <group key={p.index} position={p.pos} scale={p.size}>
-          <ParticleVisual system={system} particle={p} loop={loop} />
+          <ParticleVisual system={system} particle={p} loop={loop} sharedEffectElapsedRef={sharedEffectElapsedRef} />
         </group>
       ))}
     </group>

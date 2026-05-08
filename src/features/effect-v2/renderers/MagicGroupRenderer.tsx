@@ -7,42 +7,15 @@ import { magicSingleTableAtom } from "@/store/effect-v2";
 import { useTimeSource } from "../TimeContext";
 import { MagicEffectRenderer } from "./MagicEffectRenderer";
 import { useLoadEffect } from "../useLoadEffect";
-
-/**
- * Default fan angle in radians (~43 degrees).
- * Matches C++ _fFanAngle = 0.75f in EffectObj.cpp.
- */
-const DEFAULT_FAN_ANGLE = 0.75;
-
-/**
- * Delay between sequential effects in seconds.
- * Matches C++ Part_sequence: SetDailTime((float)n * 0.2f).
- */
-const SEQUENCE_DELAY = 0.2;
+import {
+  computeFanPhaseTarget,
+  computeSequenceDelay,
+  expandMagicGroupPhases,
+} from "./magicGroupKinematics";
 
 /** Group render modes matching C++ GroupList[] indices. */
 const GROUP_MODE_FAN = 0;
-// const GROUP_MODE_SEQUENCE = 1;
-
-/**
- * Expand a MagicGroupEntry into a flat list of MagicSingleEntry references.
- * typeIds=[10,11], counts=[2,1] -> [entry10, entry10, entry11]
- */
-function expandGroupPhases(
-  group: MagicGroupEntry,
-  magicMap: Map<number, MagicSingleEntry>,
-): MagicSingleEntry[] {
-  const entries: MagicSingleEntry[] = [];
-  for (let i = 0; i < group.type_ids.length; i++) {
-    if (group.type_ids[i] < 0) continue;
-    const entry = magicMap.get(group.type_ids[i]);
-    if (!entry) continue;
-    for (let j = 0; j < group.counts[i]; j++) {
-      entries.push(entry);
-    }
-  }
-  return entries;
-}
+const GROUP_MODE_SEQUENCE = 1;
 
 interface MagicGroupRendererProps {
   group: MagicGroupEntry;
@@ -67,7 +40,7 @@ export function MagicGroupRenderer({ group }: MagicGroupRendererProps) {
   }, [table]);
 
   const phases = useMemo(
-    () => expandGroupPhases(group, magicMap),
+    () => expandMagicGroupPhases(group, magicMap),
     [group, magicMap],
   );
 
@@ -75,12 +48,14 @@ export function MagicGroupRenderer({ group }: MagicGroupRendererProps) {
 
   if (phases.length === 0) return null;
 
-  if (renderMode === GROUP_MODE_FAN) {
-    return <FanGroupRenderer phases={phases} />;
+  switch (renderMode) {
+    case GROUP_MODE_FAN:
+      return <FanGroupRenderer phases={phases} />;
+    case GROUP_MODE_SEQUENCE:
+      return <SequenceGroupRenderer phases={phases} />;
+    default:
+      return null;
   }
-
-  // Default to sequence for renderIdx=1 or any unknown value
-  return <SequenceGroupRenderer phases={phases} />;
 }
 
 // ── Fan Mode ────────────────────────────────────────────────────────────────
@@ -91,31 +66,46 @@ interface FanGroupRendererProps {
 
 /**
  * Fan mode: fires all effects simultaneously, each rotated by an angular
- * offset around the Y axis. Matches C++ Part_fan() which uses
- * D3DXMatrixRotationZ to spread effects in a cone (Z in D3D = Y in Three.js).
+ * offset around PKO vertical Z. Matches C++ Part_fan() which flattens target
+ * Z to the origin height and uses D3DXMatrixRotationZ.
  */
 function FanGroupRenderer({ phases }: FanGroupRendererProps) {
   const count = phases.length;
-  const angleStep = count > 1 ? DEFAULT_FAN_ANGLE / (count - 1) : 0;
-  const startAngle = count > 1 ? -DEFAULT_FAN_ANGLE / 2 : 0;
+  const origin = useMemo(() => new THREE.Vector3(0, 0, 0), []);
+  const target = useMemo(() => new THREE.Vector3(0, 8, 0), []);
 
   return (
     <group>
       {phases.map((entry, i) => {
-        const angle = startAngle + i * angleStep;
+        const phaseTarget = computeFanPhaseTarget(origin, target, i, count);
         return (
-          <group key={i} rotation={[0, angle, 0]}>
-            <FanPhase entry={entry} />
-          </group>
+          <FanPhase key={i} entry={entry} origin={origin} target={phaseTarget} />
         );
       })}
     </group>
   );
 }
 
-function FanPhase({ entry }: { entry: MagicSingleEntry }) {
+function FanPhase({
+  entry,
+  origin,
+  target,
+}: {
+  entry: MagicSingleEntry;
+  origin: THREE.Vector3;
+  target: THREE.Vector3;
+}) {
   const effFiles = useLoadEffect(entry.models);
-  return <MagicEffectRenderer effFiles={effFiles} magicEntry={entry} />;
+  return (
+    <MagicEffectRenderer
+      effFiles={effFiles}
+      magicEntry={entry}
+      origin={origin}
+      target={target}
+      showTarget={false}
+      animateTarget={false}
+    />
+  );
 }
 
 // ── Sequence Mode ───────────────────────────────────────────────────────────
@@ -130,20 +120,52 @@ interface SequenceGroupRendererProps {
  * SetDailTime((float)n * 0.2f) on each effect.
  */
 function SequenceGroupRenderer({ phases }: SequenceGroupRendererProps) {
+  const origin = useMemo(() => new THREE.Vector3(0, 0, 0), []);
+  const target = useMemo(() => new THREE.Vector3(0, 8, 1), []);
+  const targetVisual = useMemo(() => new THREE.Vector3(0, 8, 0), []);
+
   return (
     <group>
       {phases.map((entry, i) => (
-        <DelayedEffect key={i} delay={i * SEQUENCE_DELAY}>
-          <SequencePhase entry={entry} />
+        <DelayedEffect key={i} delay={computeSequenceDelay(i)}>
+          <SequencePhase
+            entry={entry}
+            origin={origin}
+            target={target}
+            targetVisual={targetVisual}
+            showTarget={i === 0}
+          />
         </DelayedEffect>
       ))}
     </group>
   );
 }
 
-function SequencePhase({ entry }: { entry: MagicSingleEntry }) {
+function SequencePhase({
+  entry,
+  origin,
+  target,
+  targetVisual,
+  showTarget,
+}: {
+  entry: MagicSingleEntry;
+  origin: THREE.Vector3;
+  target: THREE.Vector3;
+  targetVisual: THREE.Vector3;
+  showTarget: boolean;
+}) {
   const effFiles = useLoadEffect(entry.models);
-  return <MagicEffectRenderer effFiles={effFiles} magicEntry={entry} />;
+  return (
+    <MagicEffectRenderer
+      effFiles={effFiles}
+      magicEntry={entry}
+      origin={origin}
+      target={target}
+      targetVisual={targetVisual}
+      showTarget={showTarget}
+      animateTarget={false}
+    />
+  );
 }
 
 // ── Delay wrapper ───────────────────────────────────────────────────────────

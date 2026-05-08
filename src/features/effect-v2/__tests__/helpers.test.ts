@@ -38,8 +38,8 @@ describe("getThreeJSBlendFromD3D", () => {
     expect(getThreeJSBlendFromD3D(4)).toBe(THREE.OneMinusSrcColorFactor);
     expect(getThreeJSBlendFromD3D(5)).toBe(THREE.SrcAlphaFactor);
     expect(getThreeJSBlendFromD3D(6)).toBe(THREE.OneMinusSrcAlphaFactor);
-    expect(getThreeJSBlendFromD3D(7)).toBe(THREE.DstAlphaFactor);
-    expect(getThreeJSBlendFromD3D(8)).toBe(THREE.OneMinusDstAlphaFactor);
+    expect(getThreeJSBlendFromD3D(7)).toBe(THREE.OneFactor);
+    expect(getThreeJSBlendFromD3D(8)).toBe(THREE.ZeroFactor);
     expect(getThreeJSBlendFromD3D(9)).toBe(THREE.DstColorFactor);
     expect(getThreeJSBlendFromD3D(10)).toBe(THREE.OneMinusDstColorFactor);
   });
@@ -47,6 +47,11 @@ describe("getThreeJSBlendFromD3D", () => {
   it("falls back to ZeroFactor for unknown values", () => {
     expect(getThreeJSBlendFromD3D(0)).toBe(THREE.ZeroFactor);
     expect(getThreeJSBlendFromD3D(99)).toBe(THREE.ZeroFactor);
+  });
+
+  it("normalizes destination alpha for PKO's opaque effect backbuffer", () => {
+    expect(getThreeJSBlendFromD3D(7)).toBe(THREE.OneFactor);
+    expect(getThreeJSBlendFromD3D(8)).toBe(THREE.ZeroFactor);
   });
 });
 
