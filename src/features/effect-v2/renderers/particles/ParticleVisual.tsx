@@ -85,6 +85,7 @@ export function ParticleVisual({
     () => resolveBlendFactors(system.srcBlend, system.destBlend),
     [system.srcBlend, system.destBlend],
   );
+  const usePremultipliedAdditive = system.srcBlend === 5 && system.destBlend === 2;
   const materialColor = particle
     ? createPkoTextureFactorColor(particle.color.r, particle.color.g, particle.color.b)
     : "white";
@@ -130,9 +131,12 @@ export function ParticleVisual({
         opacity={(particle?.alpha ?? 1) * opacityScale}
         map={modelTexture}
         transparent
+        premultipliedAlpha={usePremultipliedAdditive}
         blending={THREE.CustomBlending}
-        blendSrc={blendFactors.blendSrc}
+        blendSrc={usePremultipliedAdditive ? THREE.OneFactor : blendFactors.blendSrc}
         blendDst={blendFactors.blendDst}
+        blendSrcAlpha={THREE.ZeroFactor}
+        blendDstAlpha={THREE.OneFactor}
         side={THREE.DoubleSide}
         depthWrite={false}
         toneMapped={false}
