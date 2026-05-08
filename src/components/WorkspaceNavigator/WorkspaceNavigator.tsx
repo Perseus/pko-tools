@@ -1,6 +1,7 @@
 import CharacterNavigator from "@/features/character/CharacterNavigator";
 import EffectV2Navigator from "@/features/effect-v2/EffectV2Navigator";
 import ItemNavigator from "@/features/item/ItemNavigator";
+import ForgeGlowNavigator from "@/features/forge-glow/ForgeGlowNavigator";
 import MapNavigator from "@/features/map/MapNavigator";
 import BuildingsNavigator from "@/features/buildings/BuildingsNavigator";
 import { Route, Routes } from "react-router";
@@ -15,6 +16,7 @@ export default function WorkspaceNavigator() {
           <Route path="/characters" element={<CharacterNavigator/>} />
           <Route path="/effects" element={<EffectV2Navigator />} />
           <Route path="/items" element={<ItemNavigator />} />
+          <Route path="/forge-glows" element={<ForgeGlowNavigator />} />
           <Route path="/maps" element={<MapNavigator />} />
           <Route path="/buildings" element={<BuildingsNavigator />} />
           <Route path="*" element={<div />} />
