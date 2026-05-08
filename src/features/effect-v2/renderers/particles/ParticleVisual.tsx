@@ -24,7 +24,7 @@ import {
   applyTextureSampling,
   composePkoRenderState,
 } from "@/features/effect/pkoStateEmulation";
-import { createPkoTextureFactorColor } from "@/features/effect/color";
+import { createPkoTextureFactorColor, setPkoTextureFactorColor } from "@/features/effect/color";
 import { ParticleOpacityContext } from "./particleOpacityContext";
 export { ParticleOpacityProvider } from "./particleOpacityContext";
 
@@ -59,6 +59,12 @@ export function ParticleVisual({
   onNestedEffectComplete,
 }: ParticleVisualProps) {
   const opacityScale = useContext(ParticleOpacityContext);
+  const directMaterialRef = useRef<THREE.MeshBasicMaterial>(null);
+  const particleRef = useRef(particle);
+  const opacityScaleRef = useRef(opacityScale);
+  const materialColorRef = useRef(new THREE.Color());
+  particleRef.current = particle;
+  opacityScaleRef.current = opacityScale;
   const currentProject = useAtomValue(currentProjectAtom);
   const modelName = system.modelName.trim();
   const isNestedEffect = modelName.toLowerCase().endsWith(".eff");
@@ -91,6 +97,21 @@ export function ParticleVisual({
     }));
   }, [modelTexture, system.minFilter, system.magFilter]);
 
+  useFrame(() => {
+    const material = directMaterialRef.current;
+    const current = particleRef.current;
+    if (!material || !current) return;
+
+    setPkoTextureFactorColor(
+      materialColorRef.current,
+      current.color.r,
+      current.color.g,
+      current.color.b,
+    );
+    material.color.copy(materialColorRef.current);
+    material.opacity = current.alpha * opacityScaleRef.current;
+  });
+
   if (isNestedEffect && effFiles.length === 0) return null;
 
   if (effFiles.length > 1) {
@@ -104,6 +125,7 @@ export function ParticleVisual({
   ) : (builtinGeometry ?? modelGeometry) && !waitingForModelTexture ? (
     <mesh geometry={builtinGeometry ?? modelGeometry!}>
       <meshBasicMaterial
+        ref={directMaterialRef}
         color={materialColor}
         opacity={(particle?.alpha ?? 1) * opacityScale}
         map={modelTexture}
