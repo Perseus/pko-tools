@@ -19,6 +19,7 @@ import { ActionKernelProvider, CommandPalette } from "./features/actions";
 const CharacterPage = lazy(() => import("./pages/characters"));
 const EffectsPage = lazy(() => import("./pages/effects-v2"));
 const ItemsPage = lazy(() => import("./pages/items"));
+const ForgeGlowsPage = lazy(() => import("./pages/forge-glows"));
 const MapsPage = lazy(() => import("./pages/maps"));
 const BuildingsPage = lazy(() => import("./pages/buildings"));
 const ProjectCreator = lazy(() => import("./pages/project-creator/ProjectCreator"));
@@ -59,6 +60,7 @@ function App() {
                 <Route path="/characters" element={<CharacterPage/>} />
                 <Route path="/effects" element={<EffectsPage />} />
                 <Route path="/items" element={<ItemsPage />} />
+                <Route path="/forge-glows" element={<ForgeGlowsPage />} />
                 <Route path="/maps" element={<MapsPage />} />
                 <Route path="/buildings" element={<BuildingsPage />} />
                 <Route path="*" element={<div />} />

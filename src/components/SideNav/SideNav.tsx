@@ -62,6 +62,11 @@ export default function SideNav() {
             isActive: pathname.startsWith("/items"),
           },
           {
+            title: "Forge Glows",
+            url: "/forge-glows",
+            isActive: pathname.startsWith("/forge-glows"),
+          },
+          {
             title: "Maps",
             url: "/maps",
             isActive: pathname.startsWith("/maps"),
