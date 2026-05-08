@@ -690,6 +690,29 @@ describe("ParticleVisual", () => {
     expect(material.color.b).toBeCloseTo(expected.b);
   });
 
+  it("premultiplies additive particle quads without writing framebuffer alpha", async () => {
+    const renderer = await ReactThreeTestRenderer.create(
+      <TimeProvider value={testTimeSource}>
+        <ParticleVisual
+          system={createSystem({
+            modelName: "RectPlane",
+            srcBlend: 5,
+            destBlend: 2,
+          })}
+          particle={createParticle({ alpha: 0.5 })}
+        />
+      </TimeProvider>
+    );
+
+    const mesh = renderer.scene.findAll((node) => node.type === "Mesh")[0].instance as THREE.Mesh;
+    const material = mesh.material as THREE.MeshBasicMaterial;
+    expect(material.premultipliedAlpha).toBe(true);
+    expect(material.blendSrc).toBe(THREE.OneFactor);
+    expect(material.blendDst).toBe(THREE.OneFactor);
+    expect(material.blendSrcAlpha).toBe(THREE.ZeroFactor);
+    expect(material.blendDstAlpha).toBe(THREE.OneFactor);
+  });
+
   it("multiplies nested .eff opacity by parent particle alpha like CMPModelEff SetAlpha", async () => {
     mockUseLoadEffect.mockReturnValue([{
       version: 7,
