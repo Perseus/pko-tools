@@ -69,10 +69,11 @@ export default function HitSubEffect({
         geometry.botRadius ?? 0.5,
         geometry.height ?? 1.0,
         geometry.segments ?? 16,
+        geometry.bottomUvV,
       );
       default: return null;
     }
-  }, [geometry.type, geometry.topRadius, geometry.botRadius, geometry.height, geometry.segments]);
+  }, [geometry.type, geometry.topRadius, geometry.botRadius, geometry.height, geometry.segments, geometry.bottomUvV]);
 
   // Load texture once per sub-effect
   useEffect(() => {
@@ -189,7 +190,6 @@ export default function HitSubEffect({
     >
       {builtinGeometry && <primitive object={builtinGeometry} attach="geometry" />}
       {geometry.type === "plane" && !builtinGeometry && <planeGeometry args={[1, 1]} />}
-      {geometry.type === "sphere" && <sphereGeometry args={[0.7, 24, 24]} />}
       {geometry.type === "model" && <boxGeometry args={[0.5, 0.5, 0.5]} />}
       <shaderMaterial
         vertexShader={subEffectVertexShader}

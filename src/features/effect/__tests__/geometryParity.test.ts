@@ -6,8 +6,11 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  createCylinderGeometry,
+  createRectPlaneGeometry,
   createRectGeometry,
   createRectZGeometry,
+  createTrianglePlaneGeometry,
   createTriangleGeometry,
   resolveGeometry,
 } from "@/features/effect/rendering";
@@ -132,8 +135,27 @@ describe("Geometry Parity — C++ truth table", () => {
       expect(geo.type).toBe("rectPlane");
     });
 
-    // NOTE: createRectPlaneGeometry doesn't exist yet — this test validates the target behavior.
-    // After Phase 2, this will import and test the new function.
+    it("matches exact C++ vertex positions", () => {
+      const geo = createRectPlaneGeometry();
+      const positions = getPositions(geo);
+      expect(positions).toEqual([
+        [-0.5, -0.5, 0],
+        [-0.5, 0.5, 0],
+        [0.5, 0.5, 0],
+        [0.5, -0.5, 0],
+      ]);
+    });
+
+    it("matches exact C++ UV coordinates", () => {
+      const geo = createRectPlaneGeometry();
+      const uvs = getUVs(geo);
+      expect(uvs).toEqual([
+        [0, 1],
+        [0, 0],
+        [1, 0],
+        [1, 1],
+      ]);
+    });
   });
 
   describe("RectZ (CreateRectZ) — YZ plane, X=0, Y/Z range [0,1]", () => {
@@ -224,12 +246,36 @@ describe("Geometry Parity — C++ truth table", () => {
       expect(geo.type).toBe("trianglePlane");
     });
 
-    // NOTE: createTrianglePlaneGeometry will be tested after it's created in Phase 2.
+    it("matches exact C++ vertex positions", () => {
+      const geo = createTrianglePlaneGeometry();
+      const positions = getPositions(geo);
+      expect(positions).toEqual([
+        [0, 0.5, 0],
+        [-0.5, -0.5, 0],
+        [0.5, -0.5, 0],
+      ]);
+    });
+
+    it("matches exact C++ UV coordinates", () => {
+      const geo = createTrianglePlaneGeometry();
+      const uvs = getUVs(geo);
+      expect(uvs).toEqual([
+        [0.5, 0],
+        [0, 1],
+        [1, 1],
+      ]);
+    });
+  });
+
+  describe("Sphere", () => {
+    it("does not resolve to a procedural built-in because the C++ client never creates a Sphere mesh", () => {
+      const geo = resolveGeometry({ ...baseSubEffect, modelName: "Sphere" });
+
+      expect(geo).toEqual({ type: "model", modelName: "Sphere" });
+    });
   });
 
   describe("Cylinder (CreateCylinder) — Z-axis, base at Z=0", () => {
-    // These tests will use createCylinderGeometry() once it exists.
-    // For now, test that resolveGeometry returns type "cylinder" with correct params.
     it("resolveGeometry returns cylinder type", () => {
       const geo = resolveGeometry({
         ...baseSubEffect,
@@ -241,6 +287,47 @@ describe("Geometry Parity — C++ truth table", () => {
       });
       expect(geo.type).toBe("cylinder");
       expect(geo.height).toBe(2.0);
+    });
+
+    it("creates cylinder geometry along Z with base at 0 and top at height", () => {
+      const geo = createCylinderGeometry(0.5, 0.5, 2, 8);
+      const positions = getPositions(geo);
+      const zValues = positions.map(([, , z]) => z);
+
+      expect(Math.min(...zValues)).toBeCloseTo(0);
+      expect(Math.max(...zValues)).toBeCloseTo(2);
+    });
+
+    it("matches C++ top/bottom triangle-strip vertex order and UVs", () => {
+      const geo = createCylinderGeometry(0.5, 1, 2, 4);
+      const positions = getPositions(geo);
+      const uvs = getUVs(geo);
+
+      expect(positions).toHaveLength(10);
+      expect(positions).toEqual([
+        [0, 0.5, 2],
+        [0, 1, 0],
+        [0.5, 0, 2],
+        [1, 0, 0],
+        [0, -0.5, 2],
+        [0, -1, 0],
+        [-0.5, 0, 2],
+        [-1, 0, 0],
+        [0, 0.5, 2],
+        [0, 1, 0],
+      ]);
+      expect(uvs).toEqual([
+        [1, 0],
+        [1, 1],
+        [0.75, 0],
+        [0.75, 1],
+        [0.5, 0],
+        [0.5, 1],
+        [0.25, 0],
+        [0.25, 1],
+        [0, 0],
+        [0, 1],
+      ]);
     });
   });
 
@@ -256,6 +343,104 @@ describe("Geometry Parity — C++ truth table", () => {
       });
       expect(geo.type).toBe("cylinder");
       expect(geo.height).toBe(3.0);
+    });
+
+    it("preserves Cone topRadius=0 instead of replacing it with a cylinder default", () => {
+      const geo = resolveGeometry({
+        ...baseSubEffect,
+        modelName: "Cone",
+        topRadius: 0,
+        botRadius: 1.0,
+        height: 3.0,
+        segments: 12,
+      });
+
+      expect(geo.type).toBe("cylinder");
+      expect(geo.topRadius).toBe(0);
+      expect(geo.botRadius).toBe(1.0);
+    });
+
+    it("defaults Cone topRadius to 0 when runtime effect data omits the field", () => {
+      const coneWithoutTopRadius = {
+        ...baseSubEffect,
+        modelName: "Cone",
+        topRadius: undefined,
+        botRadius: 1.0,
+        height: 3.0,
+        segments: 12,
+      } as unknown as SubEffect;
+
+      const geo = resolveGeometry(coneWithoutTopRadius);
+
+      expect(geo.type).toBe("cylinder");
+      expect(geo.topRadius).toBe(0);
+      expect(geo.botRadius).toBe(1.0);
+    });
+
+    it("defaults per-frame Cone topRadius to 0 when runtime param data omits the field", () => {
+      const coneWithoutPerFrameTopRadius = {
+        ...baseSubEffect,
+        modelName: "Cone",
+        useParam: 1,
+        perFrameCylinder: [
+          { segments: 8, height: 3.0, botRadius: 2.0 },
+        ],
+      } as unknown as SubEffect;
+
+      const geo = resolveGeometry(coneWithoutPerFrameTopRadius, 0);
+
+      expect(geo.type).toBe("cylinder");
+      expect(geo.topRadius).toBe(0);
+      expect(geo.botRadius).toBe(2.0);
+    });
+
+    it("preserves per-frame topRadius=0 for deformable cone frames", () => {
+      const geo = resolveGeometry({
+        ...baseSubEffect,
+        modelName: "Cone",
+        useParam: 1,
+        perFrameCylinder: [
+          { segments: 8, height: 3.0, topRadius: 0, botRadius: 2.0 },
+        ],
+      }, 0);
+
+      expect(geo.type).toBe("cylinder");
+      expect(geo.topRadius).toBe(0);
+      expect(geo.botRadius).toBe(2.0);
+    });
+
+    it("uses C++ cone UVs with bottom V=1.5 instead of cylinder V=1.0", () => {
+      const config = resolveGeometry({
+        ...baseSubEffect,
+        modelName: "Cone",
+        topRadius: 0,
+        botRadius: 1,
+        height: 2,
+        segments: 4,
+      });
+      expect(config.type).toBe("cylinder");
+
+      const geo = createCylinderGeometry(
+        config.topRadius,
+        config.botRadius,
+        config.height,
+        config.segments,
+        config.bottomUvV,
+      );
+      const uvs = getUVs(geo);
+
+      expect(uvs).toEqual([
+        [1, 0],
+        [1, 1.5],
+        [0.75, 0],
+        [0.75, 1.5],
+        [0.5, 0],
+        [0.5, 1.5],
+        [0.25, 0],
+        [0.25, 1.5],
+        [0, 0],
+        [0, 1.5],
+      ]);
     });
   });
 });

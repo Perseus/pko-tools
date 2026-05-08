@@ -12,11 +12,16 @@
 import * as THREE from "three";
 import type { SubEffect, Vec3, Vec4 } from "@/types/effect";
 import { interpolateUVCoords, getTexListFrameIndex } from "@/features/effect/animation";
+import { createCylinderGeometry } from "@/features/effect/rendering";
+import { setPkoTextureFactorColor } from "@/features/effect/color";
 
 // Reusable scratch objects — module-level to avoid per-frame GC
 const _rotaAxis = new THREE.Vector3();
 const _rotaQuat = new THREE.Quaternion();
 const _baseEuler = new THREE.Euler(0, 0, 0, "YXZ");
+const _parentWorldQuat = new THREE.Quaternion();
+const _parentInverseQuat = new THREE.Quaternion();
+const _desiredWorldQuat = new THREE.Quaternion();
 
 export interface SubEffectFrameOptions {
   sub: SubEffect;
@@ -62,11 +67,18 @@ export function applySubEffectFrame(
   mesh.scale.set(scale[0], scale[1], scale[2]);
 
   // 3. Rotation + RotaLoop
-  // PKO billboard logic: billboard flag controls facing camera.
-  // effectType=4 (Model) uses VS index 1 which overrides billboard.
-  const isModelEffect = sub.effectType === 4;
-  const isBillboard = sub.billboard && !isModelEffect;
+  // PKO billboard logic: billboard flag controls facing camera. effectType
+  // controls texture/UV animation, not whether billboard is honored.
+  const isBillboard = sub.billboard;
   const isRotaBoard = sub.rotaBoard;
+  const rotationAngle: Vec3 = isBillboard && !isRotaBoard ? [0, 0, 0] : angle;
+
+  if (!isBillboard || isRotaBoard) {
+    // C++ always builds a fresh transform matrix from current state. Even a
+    // zero-axis rotaLoop must not leave the previous Three quaternion behind.
+    _baseEuler.set(rotationAngle[0], rotationAngle[1], rotationAngle[2], "YXZ");
+    mesh.quaternion.setFromEuler(_baseEuler);
+  }
 
   if (sub.rotaLoop && !(isBillboard && !isRotaBoard)) {
     // Apply rotaLoop unless billboard+!rotaBoard (PKO discards everything)
@@ -75,34 +87,42 @@ export function applySubEffectFrame(
     if (_rotaAxis.lengthSq() > 0.0001) {
       _rotaAxis.normalize();
       const rotaAngle = playbackTime * speed;
-      _baseEuler.set(angle[0], angle[1], angle[2], "YXZ");
-      mesh.quaternion.setFromEuler(_baseEuler);
       _rotaQuat.setFromAxisAngle(_rotaAxis, rotaAngle);
       mesh.quaternion.premultiply(_rotaQuat);
     }
-  } else if (!isBillboard) {
-    // Non-billboard, no rotaLoop: just apply frame rotation
-    _baseEuler.set(angle[0], angle[1], angle[2], "YXZ");
-    mesh.quaternion.setFromEuler(_baseEuler);
   }
 
   // 4. Billboard
   if (isBillboard) {
-    if (!isRotaBoard) {
-      // billboard + !rotaBoard: discard all rotation, just face camera
-      mesh.lookAt(camera.position);
+    // C++ billboard matrix is inverse view with translation cleared. In Three,
+    // write the local quaternion that yields the desired world orientation under
+    // any parent particle/effect transform.
+    const parent = mesh.parent;
+    if (parent) {
+      parent.updateWorldMatrix(true, false);
+      parent.getWorldQuaternion(_parentWorldQuat);
     } else {
-      // billboard + rotaBoard: compose current rotation with billboard
-      _rotaQuat.copy(mesh.quaternion);
-      mesh.lookAt(camera.position);
-      mesh.quaternion.multiply(_rotaQuat);
+      _parentWorldQuat.identity();
     }
+
+    // CMPModelEff keeps the current sub-effect rotation only when rotaBoard is
+    // set, then applies the inverse-view billboard matrix. A parent particle
+    // billboard bind supplies position for billboard sub-effects, not another
+    // camera-facing rotation, so compose the desired world orientation from the
+    // camera basis plus this sub-effect's own local rotation only.
+    _desiredWorldQuat.copy(camera.quaternion);
+    if (isRotaBoard) {
+      _desiredWorldQuat.multiply(mesh.quaternion);
+    }
+
+    _parentInverseQuat.copy(_parentWorldQuat).invert();
+    mesh.quaternion.copy(_parentInverseQuat).multiply(_desiredWorldQuat);
   }
 
   // 5. Color / opacity
   const mat = mesh.material as THREE.MeshBasicMaterial;
   if (mat) {
-    mat.color.setRGB(color[0], color[1], color[2]);
+    setPkoTextureFactorColor(mat.color, color[0], color[1], color[2]);
     let opacity = Math.min(Math.max(color[3], 0), 1);
     if (opts.forgeAlpha !== undefined) {
       opacity *= opts.forgeAlpha;
@@ -145,14 +165,13 @@ export function applySubEffectFrame(
   // 8. Deformable cylinder — vertex position interpolation when useParam > 0
   if (
     sub.useParam > 0 &&
-    sub.perFrameCylinder.length > 1 &&
+    sub.perFrameCylinder.length > 0 &&
     opts.isCylinder &&
     opts.cylinderCache &&
-    mesh.geometry &&
-    opts.lerp > 0.001
+    mesh.geometry
   ) {
     const curParams = sub.perFrameCylinder[opts.frameIndex];
-    const nxtParams = sub.perFrameCylinder[opts.nextFrameIndex];
+    const nxtParams = sub.perFrameCylinder[opts.nextFrameIndex] ?? curParams;
     if (curParams && nxtParams) {
       const curPos = getCachedCylinderPositions(opts.cylinderCache, curParams);
       const nxtPos = getCachedCylinderPositions(opts.cylinderCache, nxtParams);
@@ -184,16 +203,16 @@ function getCachedCylinderPositions(
   cache: Map<string, Float32Array>,
   params: { topRadius?: number; botRadius?: number; height?: number; segments?: number },
 ): Float32Array {
-  const topRadius = params.topRadius || 0.5;
-  const botRadius = params.botRadius || 0.5;
-  const height = params.height || 1.0;
-  const segments = Math.max(params.segments || 16, 3);
+  const topRadius = params.topRadius ?? 0.5;
+  const botRadius = params.botRadius ?? 0.5;
+  const height = params.height ?? 1.0;
+  const segments = Math.max(params.segments ?? 16, 3);
   const key = `${topRadius}:${botRadius}:${height}:${segments}`;
 
   const existing = cache.get(key);
   if (existing) return existing;
 
-  const geometry = new THREE.CylinderGeometry(topRadius, botRadius, height, segments);
+  const geometry = createCylinderGeometry(topRadius, botRadius, height, segments);
   const positions = new Float32Array(
     (geometry.getAttribute("position").array as Float32Array).slice(),
   );

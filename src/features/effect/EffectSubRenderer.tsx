@@ -124,10 +124,11 @@ export default function EffectSubRenderer({
         geometry.botRadius ?? 0.5,
         geometry.height ?? 1.0,
         geometry.segments ?? 16,
+        geometry.bottomUvV,
       );
       default: return null;
     }
-  }, [geometry.type, geometry.topRadius, geometry.botRadius, geometry.height, geometry.segments]);
+  }, [geometry.type, geometry.topRadius, geometry.botRadius, geometry.height, geometry.segments, geometry.bottomUvV]);
 
   const modelGeometry = useEffectModel(
     geometry.type === "model" ? geometry.modelName : undefined,
@@ -448,7 +449,6 @@ export default function EffectSubRenderer({
     >
       {builtinGeometry && <primitive object={builtinGeometry} attach="geometry" />}
       {geometry.type === "plane" && !builtinGeometry && <planeGeometry args={[1, 1]} />}
-      {geometry.type === "sphere" && <sphereGeometry args={[0.7, 24, 24]} />}
       {geometry.type === "model" && modelGeometry && (
         <primitive object={modelGeometry} attach="geometry" />
       )}

@@ -14,6 +14,8 @@ import {
   D3DBLEND_ONE,
   D3DBLEND_SRCALPHA,
   D3DBLEND_INVSRCALPHA,
+  D3DBLEND_DESTALPHA,
+  D3DBLEND_INVDESTALPHA,
   D3DBLEND_SRCCOLOR,
   D3DBLEND_DESTCOLOR,
   D3DBLEND_SRCALPHA_SAT,
@@ -41,6 +43,29 @@ describe("mapBlendFactor", () => {
   it("returns null for unknown values", () => {
     expect(mapBlendFactor(99)).toBeNull();
     expect(mapBlendFactor(0)).toBeNull();
+  });
+});
+
+describe("applyPkoRenderState blend backbuffer parity", () => {
+  it("normalizes destination alpha blends for PKO's opaque effect backbuffer", () => {
+    const mat = new THREE.MeshBasicMaterial();
+
+    applyPkoRenderState(mat, {
+      ...getPkoTechniqueState(0),
+      srcBlend: D3DBLEND_SRCALPHA,
+      destBlend: D3DBLEND_DESTALPHA,
+    });
+
+    expect(mat.blendSrc).toBe(THREE.SrcAlphaFactor);
+    expect(mat.blendDst).toBe(THREE.OneFactor);
+
+    applyPkoRenderState(mat, {
+      ...getPkoTechniqueState(0),
+      srcBlend: D3DBLEND_SRCALPHA,
+      destBlend: D3DBLEND_INVDESTALPHA,
+    });
+
+    expect(mat.blendDst).toBe(THREE.ZeroFactor);
   });
 });
 
@@ -191,7 +216,7 @@ describe("applyPkoRenderState", () => {
 
 describe("Technique Address Mode Parity — eff.fx truth table", () => {
   // From eff.fx shader source:
-  // Tech 0: WRAP, WRAP
+  // Tech 0: CLAMP, CLAMP
   // Tech 1: WRAP, WRAP
   // Tech 2: CLAMP, CLAMP
   // Tech 3: CLAMP, CLAMP
@@ -201,7 +226,7 @@ describe("Technique Address Mode Parity — eff.fx truth table", () => {
 
   const addressTable: [number, number, number][] = [
     // [technique, expectedAddressU, expectedAddressV]
-    [0, D3DTADDRESS_WRAP, D3DTADDRESS_WRAP],
+    [0, D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP],
     [1, D3DTADDRESS_WRAP, D3DTADDRESS_WRAP],
     [2, D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP],
     [3, D3DTADDRESS_CLAMP, D3DTADDRESS_CLAMP],
@@ -237,5 +262,19 @@ describe("applyTextureSampling", () => {
 
   it("handles null texture gracefully", () => {
     expect(() => applyTextureSampling(null)).not.toThrow();
+  });
+
+  it("preserves existing address modes when only filters are overridden", () => {
+    const tex = new THREE.DataTexture(new Uint8Array(4), 1, 1);
+    tex.wrapS = THREE.RepeatWrapping;
+    tex.wrapT = THREE.MirroredRepeatWrapping;
+
+    applyTextureSampling(tex, {
+      minFilter: D3DTEXF_POINT,
+      magFilter: D3DTEXF_LINEAR,
+    });
+
+    expect(tex.wrapS).toBe(THREE.RepeatWrapping);
+    expect(tex.wrapT).toBe(THREE.MirroredRepeatWrapping);
   });
 });

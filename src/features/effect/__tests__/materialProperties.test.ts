@@ -38,6 +38,14 @@ describe("effect material configuration", () => {
       expect(blendSrc).toBe(THREE.SrcAlphaSaturateFactor);
     });
 
+    it("normalizes destination alpha factors for the opaque PKO backbuffer", () => {
+      const destAlpha = resolveBlendFactors(5, 7);
+      expect(destAlpha.blendDst).toBe(THREE.OneFactor);
+
+      const inverseDestAlpha = resolveBlendFactors(5, 8);
+      expect(inverseDestAlpha.blendDst).toBe(THREE.ZeroFactor);
+    });
+
     it("falls back to SrcAlphaFactor for unknown values", () => {
       const { blendSrc } = resolveBlendFactors(99, 2);
       expect(blendSrc).toBe(THREE.SrcAlphaFactor);

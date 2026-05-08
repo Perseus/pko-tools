@@ -345,10 +345,6 @@ function formatGeometryLabel(
       return `TriangleZ ${fmt(scale[1])} x ${fmt(scale[2])}`;
     case "plane":
       return `Plane ${fmt(scale[0])} x ${fmt(scale[1])}`;
-    case "sphere": {
-      const radius = 0.7 * ((Math.abs(scale[0]) + Math.abs(scale[1]) + Math.abs(scale[2])) / 3);
-      return `Sphere r=${fmt(radius)}`;
-    }
     case "cylinder": {
       const radialScale = (Math.abs(scale[0]) + Math.abs(scale[1])) / 2;
       const topRadius = (geometry.topRadius ?? 0.5) * radialScale;
