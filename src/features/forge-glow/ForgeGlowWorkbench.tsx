@@ -1,7 +1,8 @@
 import { Canvas } from "@react-three/fiber";
-import { GizmoHelper, GizmoViewport, OrbitControls } from "@react-three/drei";
+import { GizmoHelper, GizmoViewport, OrbitControls, useGLTF } from "@react-three/drei";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useEffect, useMemo, useState } from "react";
+import * as THREE from "three";
 import { PackageOpen, Play, Plus, RotateCcw, Save, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +10,7 @@ import { Label } from "@/components/ui/label";
 import { CanvasErrorBoundary } from "@/components/CanvasErrorBoundary";
 import { useToast } from "@/hooks/use-toast";
 import { exportForgeGlowPackage, saveForgeGlowDraft } from "@/commands/forge-glow";
+import { loadItemModel } from "@/commands/item";
 import { currentProjectAtom } from "@/store/project";
 import {
   activeForgeGlowDraftAtom,
@@ -24,6 +26,7 @@ import {
   PkoZUpCamera,
 } from "@/features/effect-v2/zUpScene";
 import {
+  buildForgeGlowPreview,
   createForgeGlowVariant,
   getEffectiveForgeGlowRows,
   getForgeGlowVariant,
@@ -32,6 +35,8 @@ import {
   upsertForgeGlowParticleOverride,
 } from "./forgeGlowDraft";
 import type { EffectiveForgeGlowRow, ForgeGlowVariant } from "@/types/forge-glow";
+import { useGltfResource } from "@/hooks/use-gltf-resource";
+import { computeItemDummyLineSpan } from "@/features/item/itemParticleDummySpan";
 
 function PlaybackControls() {
   const [playback, setPlayback] = useAtom(effectV2PlaybackAtom);
@@ -60,34 +65,96 @@ function PlaybackControls() {
   );
 }
 
-function ForgeGlowPreview({
+function ForgeGlowHostModel({
+  gltfJson,
   rows,
   opacityScale,
 }: {
+  gltfJson: string | null;
+  rows: EffectiveForgeGlowRow[];
+  opacityScale: number;
+}) {
+  const uri = useGltfResource(gltfJson);
+  if (!uri) return null;
+
+  return <ForgeGlowHostModelScene uri={uri} rows={rows} opacityScale={opacityScale} />;
+}
+
+function ForgeGlowHostModelScene({
+  uri,
+  rows,
+  opacityScale,
+}: {
+  uri: string;
   rows: EffectiveForgeGlowRow[];
   opacityScale: number;
 }) {
   const project = useAtomValue(currentProjectAtom);
+  const { scene } = useGLTF(uri);
+
+  useEffect(() => {
+    return () => {
+      if (uri) useGLTF.clear(uri);
+    };
+  }, [uri]);
+
+  const dummyPoints = useMemo(() => {
+    scene.updateMatrixWorld(true);
+    const sceneWorldInverse = new THREE.Matrix4().copy(scene.matrixWorld).invert();
+    const dummies: { id: number; matrix: THREE.Matrix4; name: string }[] = [];
+
+    scene.traverse((child) => {
+      if (child.userData?.type === "dummy") {
+        dummies.push({
+          id: child.userData.id ?? 0,
+          matrix: new THREE.Matrix4().multiplyMatrices(
+            sceneWorldInverse,
+            child.matrixWorld,
+          ),
+          name: child.name,
+        });
+      }
+
+      if (child.name === "glow_overlay" || child.userData?.glowOverlay === true) {
+        child.visible = false;
+      }
+    });
+
+    return dummies;
+  }, [scene, uri]);
+
+  const dummyLineSpan = useMemo(
+    () => computeItemDummyLineSpan(dummyPoints),
+    [dummyPoints],
+  );
+
   return (
-    <>
+    <group rotation={[-Math.PI / 2, 0, 0]}>
+      <primitive object={scene} />
       {rows
         .filter((row) => row.enabled && row.parFile)
-        .map((row, index) => (
+        .map((row) => {
+          const dummy = dummyPoints.find((point) => point.id === row.dummyId);
+          return (
           <group
             key={`${row.laneTier}:${row.parFile}:${row.scale}`}
-            position={[index * 0.35, 0, 0]}
-            scale={row.scale}
+            matrix={dummy?.matrix ?? undefined}
+            matrixAutoUpdate={!dummy}
           >
-            <ParticleEffectRenderer
-              particleEffectName={row.parFile ?? ""}
-              projectId={project?.id}
-              loop
-              opacityScale={opacityScale}
-              respectHiddenState={false}
-            />
+            <group scale={row.scale || 1}>
+              <ParticleEffectRenderer
+                particleEffectName={(row.parFile ?? "").replace(/\.par$/i, "")}
+                projectId={project?.id}
+                loop
+                dummyLineSpan={dummyLineSpan}
+                opacityScale={opacityScale}
+                respectHiddenState={false}
+              />
+            </group>
           </group>
-        ))}
-    </>
+          );
+        })}
+    </group>
   );
 }
 
@@ -132,6 +199,7 @@ export default function ForgeGlowWorkbench() {
   const { toast } = useToast();
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [gltfJson, setGltfJson] = useState<string | null>(null);
 
   const variant = useMemo(
     () => (draft ? getForgeGlowVariant(draft, variantId) : null),
@@ -148,10 +216,34 @@ export default function ForgeGlowWorkbench() {
   }, [effectiveRows, selectedLane]);
   const opacityScale = variant?.overrides.alpha ?? draft?.sourceRecipe.alpha ?? 1;
   const readonly = !variant || variant.readonly;
+  const forgePreview = useMemo(
+    () => (draft ? buildForgeGlowPreview(draft, variantId) : null),
+    [draft, variantId],
+  );
 
   useEffect(() => {
     setPlayback((value) => ({ ...value, time: 0, playing: false, loop: true }));
   }, [draft?.id, variantId, selectedLane, setPlayback]);
+
+  useEffect(() => {
+    if (!currentProject?.id || !draft?.sourceRecipe.weaponModelId || draft.sourceRecipe.weaponModelId === "0") {
+      setGltfJson(null);
+      return;
+    }
+
+    let cancelled = false;
+    loadItemModel(currentProject.id, draft.sourceRecipe.weaponModelId)
+      .then((json) => {
+        if (!cancelled) setGltfJson(json);
+      })
+      .catch(() => {
+        if (!cancelled) setGltfJson(null);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentProject?.id, draft?.sourceRecipe.weaponModelId]);
 
   function updateVariant(updater: (variant: ForgeGlowVariant) => ForgeGlowVariant) {
     if (!draft || readonly || !variant) return;
@@ -249,7 +341,11 @@ export default function ForgeGlowWorkbench() {
               <PkoZUpCamera />
               <PlaybackClock />
               <GlobalTimeProvider>
-                <ForgeGlowPreview rows={previewRows} opacityScale={opacityScale} />
+                <ForgeGlowHostModel
+                  gltfJson={gltfJson}
+                  rows={previewRows}
+                  opacityScale={forgePreview?.alpha ?? opacityScale}
+                />
               </GlobalTimeProvider>
               <OrbitControls makeDefault />
               <gridHelper

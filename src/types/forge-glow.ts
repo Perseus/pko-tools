@@ -22,6 +22,7 @@ export type ForgeRecipeParticleRow = {
 export type ResolvedForgeRecipe = {
   weaponItemId: number;
   weaponName: string;
+  weaponModelId: string;
   charType: number;
   totalLevel: number;
   effectLevel: number;

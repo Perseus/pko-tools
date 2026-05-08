@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildForgeGlowPreview,
   getEffectiveForgeGlowRows,
   upsertForgeGlowParticleOverride,
 } from "../forgeGlowDraft";
@@ -42,6 +43,7 @@ function draft(): ForgeGlowDraft {
     sourceRecipe: {
       weaponItemId: 1000,
       weaponName: "Sword",
+      weaponModelId: "01010001",
       charType: 0,
       totalLevel: 9,
       effectLevel: 2,
@@ -95,5 +97,22 @@ describe("forge glow draft helpers", () => {
       laneTier: 1,
       scale: 2,
     });
+  });
+
+  it("builds an item-viewer forge preview from effective rows", () => {
+    const nextDraft = draft();
+    nextDraft.variants[0].overrides.particleRows[0].enabled = true;
+    const preview = buildForgeGlowPreview(nextDraft, "variant-a");
+
+    expect(preview.alpha).toBe(0.5);
+    expect(preview.effect_level).toBe(2);
+    expect(preview.particles).toEqual([
+      {
+        par_file: "custom.par",
+        dummy_id: 7,
+        scale: 1.25,
+        effect_id: 102,
+      },
+    ]);
   });
 });

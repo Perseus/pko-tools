@@ -34,6 +34,8 @@ pub struct ForgeRecipeParticleRow {
 pub struct ResolvedForgeRecipe {
     pub weapon_item_id: u32,
     pub weapon_name: String,
+    #[serde(default)]
+    pub weapon_model_id: String,
     pub char_type: u32,
     pub total_level: u32,
     pub effect_level: u32,
@@ -65,6 +67,7 @@ impl ResolvedForgeRecipe {
         Self {
             weapon_item_id: trace.weapon_item_id,
             weapon_name: trace.weapon_name,
+            weapon_model_id: trace.weapon_model_id,
             char_type: trace.char_type,
             total_level: trace.total_level,
             effect_level: trace.effect_level,
@@ -166,6 +169,7 @@ impl ForgeGlowDraft {
             ResolvedForgeRecipe {
                 weapon_item_id: 5001,
                 weapon_name: "Test Sword".to_string(),
+                weapon_model_id: "01010001".to_string(),
                 char_type: 0,
                 total_level: 9,
                 effect_level: 2,
