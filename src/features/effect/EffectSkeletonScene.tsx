@@ -156,11 +156,11 @@ function EffectSkeletonProxy({
         geometry.botRadius ?? 0.5,
         geometry.height ?? 1,
         geometry.segments ?? 16,
+        geometry.bottomUvV,
       );
-      case "sphere": return new THREE.SphereGeometry(0.7, 16, 16);
       default: return null;
     }
-  }, [geometry.botRadius, geometry.height, geometry.segments, geometry.topRadius, geometry.type]);
+  }, [geometry.botRadius, geometry.height, geometry.segments, geometry.topRadius, geometry.type, geometry.bottomUvV]);
 
   const modelGeometry = useEffectModel(
     geometry.type === "model" ? geometry.modelName : undefined,

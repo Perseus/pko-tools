@@ -33,7 +33,13 @@ function createGeometry(sub: SubEffect): THREE.BufferGeometry {
   const name = (sub.modelName || "").toLowerCase();
 
   if (name === "cylinder" || name === "cone")
-    return createCylinderGeometry(sub.topRadius || 0.5, sub.botRadius || 0.5, sub.height || 1, sub.segments || 16);
+    return createCylinderGeometry(
+      sub.topRadius ?? 0.5,
+      sub.botRadius ?? 0.5,
+      sub.height ?? 1,
+      sub.segments ?? 16,
+      name === "cone" ? 1.5 : 1,
+    );
   if (name === "rect" || name === "") return createRectGeometry();
   if (name === "rectplane") return createRectPlaneGeometry();
   if (name === "rectz") return createRectZGeometry();

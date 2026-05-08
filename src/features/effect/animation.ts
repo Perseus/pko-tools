@@ -47,6 +47,32 @@ export function getFrameDurations(subEffect: SubEffect): number[] {
 }
 
 /**
+ * Frame index for PKO texture-style timers.
+ *
+ * C++ CTexList::GetCurTexture and CTexFrame::GetCurTexture advance only when
+ * accumulated time is strictly greater than frameTime, so exact boundaries
+ * still use the previous frame.
+ */
+export function getPkoTimedFrameIndex(
+  elapsedTime: number,
+  frameTime: number,
+  frameCount: number,
+  loop: boolean,
+): number | null {
+  if (frameCount <= 0) return null;
+  if (frameCount === 1) return 0;
+  if (frameTime <= 0) return null;
+
+  const rawTime = Number.isFinite(elapsedTime) ? Math.max(elapsedTime, 0) : 0;
+  if (rawTime <= 0) return 0;
+
+  const rawIndex = Math.max(Math.ceil(rawTime / frameTime) - 1, 0);
+  if (loop) return rawIndex % frameCount;
+
+  return Math.min(rawIndex, frameCount - 1);
+}
+
+/**
  * Compute interpolated frame data for a sub-effect at a given elapsed time.
  *
  * Finds the current keyframe from elapsed time, computes a lerp factor within
@@ -97,10 +123,10 @@ export function interpolateFrame(
     accumulator += durations[i];
   }
 
-  // Next frame for interpolation target
-  const nextFrameIndex = loop
-    ? (frameIndex + 1) % frameCount
-    : Math.min(frameIndex + 1, frameCount - 1);
+  // C++ CMPModelEff::FrameMove wraps the interpolation target on the final
+  // live frame regardless of the effect loop flag. Non-looping effects stop
+  // only after the final frame duration expires.
+  const nextFrameIndex = frameIndex >= frameCount - 1 ? 0 : frameIndex + 1;
 
   // Interpolate all properties between current and next keyframe
   const curSize: Vec3 = subEffect.frameSizes[frameIndex] ?? [1, 1, 1];
@@ -116,15 +142,14 @@ export function interpolateFrame(
   // frameTexTime is the per-texture-frame duration; texture frames cycle independently.
   let texFrameIndex = 0;
   const texCount = subEffect.frameTexNames.length;
-  if (texCount > 1 && subEffect.frameTexTime > 0) {
-    const texCycleDuration = subEffect.frameTexTime * texCount;
-    const texTime = loop
-      ? ((t % texCycleDuration) + texCycleDuration) % texCycleDuration
-      : Math.min(t, texCycleDuration);
-    texFrameIndex = Math.min(
-      Math.floor(texTime / subEffect.frameTexTime),
-      texCount - 1,
-    );
+  const timedTexFrameIndex = getPkoTimedFrameIndex(
+    t,
+    subEffect.frameTexTime,
+    texCount,
+    loop,
+  );
+  if (timedTexFrameIndex !== null) {
+    texFrameIndex = timedTexFrameIndex;
   }
 
   return {
@@ -159,9 +184,19 @@ export function interpolateUVCoords(
   loop: boolean,
 ): InterpolatedUVs | null {
   if (subEffect.effectType !== 2) return null;
-  if (subEffect.coordList.length === 0 || subEffect.coordFrameTime <= 0) return null;
+  if (subEffect.coordList.length === 0) return null;
 
   const coordCount = subEffect.coordList.length;
+  if (coordCount === 1) {
+    return {
+      uvs: subEffect.coordList[0],
+      uvFrameIndex: 0,
+      uvLerp: 0,
+    };
+  }
+
+  if (subEffect.coordFrameTime <= 0) return null;
+
   const cycleDuration = subEffect.coordFrameTime * coordCount;
 
   let t = elapsedTime;
@@ -175,9 +210,12 @@ export function interpolateUVCoords(
   const uvFrameIndex = Math.min(Math.floor(rawIndex), coordCount - 1);
   const uvLerp = rawIndex - uvFrameIndex;
 
-  const nextIndex = loop
-    ? (uvFrameIndex + 1) % coordCount
-    : Math.min(uvFrameIndex + 1, coordCount - 1);
+  // C++ CTexCoordList::GetCurCoord does not lerp the final UV frame back to
+  // frame 0. It holds the final frame until the timer advances and wraps.
+  const nextIndex =
+    uvFrameIndex === coordCount - 1
+      ? uvFrameIndex
+      : uvFrameIndex + 1;
 
   const curUVs = subEffect.coordList[uvFrameIndex];
   const nxtUVs = subEffect.coordList[nextIndex];
@@ -212,19 +250,15 @@ export function getTexListFrameIndex(
   loop: boolean,
 ): number | null {
   if (subEffect.effectType !== 3) return null;
-  if (subEffect.texList.length === 0 || subEffect.texFrameTime <= 0) return null;
+  if (subEffect.texList.length === 0) return null;
 
   const texCount = subEffect.texList.length;
-  const cycleDuration = subEffect.texFrameTime * texCount;
-
-  let t = elapsedTime;
-  if (loop && cycleDuration > 0) {
-    t = ((t % cycleDuration) + cycleDuration) % cycleDuration;
-  } else {
-    t = Math.max(0, Math.min(t, cycleDuration));
-  }
-
-  return Math.min(Math.floor(t / subEffect.texFrameTime), texCount - 1);
+  return getPkoTimedFrameIndex(
+    elapsedTime,
+    subEffect.texFrameTime,
+    texCount,
+    loop,
+  );
 }
 
 /**

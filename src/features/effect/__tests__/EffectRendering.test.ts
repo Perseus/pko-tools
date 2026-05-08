@@ -92,7 +92,10 @@ describe("effect rendering helpers", () => {
     expect(resolveGeometry({ ...baseSubEffect, modelName: "" }).type).toBe("rect");
     expect(resolveGeometry({ ...baseSubEffect, modelName: "Rect" }).type).toBe("rect");
     expect(resolveGeometry({ ...baseSubEffect, modelName: "RectPlane" }).type).toBe("rectPlane");
-    expect(resolveGeometry({ ...baseSubEffect, modelName: "Sphere" }).type).toBe("sphere");
+    expect(resolveGeometry({ ...baseSubEffect, modelName: "Sphere" })).toEqual({
+      type: "model",
+      modelName: "Sphere",
+    });
   });
 
   it("resolves model geometry for non-built-in names", () => {

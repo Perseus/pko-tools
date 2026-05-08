@@ -9,6 +9,7 @@ import {
   D3DBLEND_ONE,
 } from "@/features/effect/pkoStateEmulation";
 import { resolveBlendFactors } from "@/features/effect/rendering";
+import { buildEffectMaterialProps } from "@/features/effect/buildEffectMaterialProps";
 import { createSubEffectFixture } from "./fixtures";
 
 describe("state snapshot: technique states", () => {
@@ -143,6 +144,45 @@ describe("state snapshot: sub-effect material state", () => {
     expect(snap.transparent).toBe(false);
     expect(snap.depthWrite).toBe(true);
     expect(snap.blending).toBe(THREE.NormalBlending);
+  });
+
+  it("technique 1 disables alpha blending even when the sub-effect alpha flag is true", () => {
+    const props = buildEffectMaterialProps(
+      createSubEffectFixture({ alpha: true, srcBlend: 5, destBlend: 2 }),
+      null,
+      getPkoTechniqueState(1),
+    );
+
+    expect(props.transparent).toBe(false);
+    expect(props.blending).toBe(THREE.NoBlending);
+    expect(props.depthWrite).toBe(true);
+  });
+
+  it("source-style alpha sub-effects render as transparent custom-blended quads", () => {
+    const props = buildEffectMaterialProps(
+      createSubEffectFixture({ alpha: true, srcBlend: 5, destBlend: 2 }),
+      null,
+      composePkoRenderState(0, { srcBlend: 5, destBlend: 2 }),
+    );
+
+    expect(props.transparent).toBe(true);
+    expect(props.blending).toBe(THREE.CustomBlending);
+    expect(props.blendSrc).toBe(THREE.SrcAlphaFactor);
+    expect(props.blendDst).toBe(THREE.OneFactor);
+    expect(props.depthWrite).toBe(false);
+    expect(props.alphaTest).toBe(0);
+  });
+
+  it("opaque alpha=false sub-effects intentionally ignore texture alpha", () => {
+    const props = buildEffectMaterialProps(
+      createSubEffectFixture({ alpha: false, srcBlend: 5, destBlend: 2 }),
+      null,
+      composePkoRenderState(0, { srcBlend: 5, destBlend: 2 }),
+    );
+
+    expect(props.transparent).toBe(false);
+    expect(props.blending).toBe(THREE.NormalBlending);
+    expect(props.depthWrite).toBe(true);
   });
 });
 

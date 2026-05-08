@@ -25,7 +25,7 @@ export default function CylinderMeshEditor() {
   if (!subEffect) return null;
 
   const modelName = subEffect.modelName.trim();
-  if (modelName !== "Cylinder" && modelName !== "Cone" && modelName !== "Sphere") {
+  if (modelName !== "Cylinder" && modelName !== "Cone") {
     return null;
   }
 
@@ -81,10 +81,10 @@ export default function CylinderMeshEditor() {
             title="Create separate mesh params for each keyframe, allowing geometry to animate over time"
             onClick={() => {
               const base: CylinderParams = {
-                segments: subEffect!.segments || 16,
-                height: subEffect!.height || 1,
-                topRadius: subEffect!.topRadius || 0.5,
-                botRadius: subEffect!.botRadius || 0.5,
+                segments: subEffect!.segments ?? 16,
+                height: subEffect!.height ?? 1,
+                topRadius: subEffect!.topRadius ?? 0.5,
+                botRadius: subEffect!.botRadius ?? 0.5,
               };
               updateSubEffect({
                 useParam: 1,

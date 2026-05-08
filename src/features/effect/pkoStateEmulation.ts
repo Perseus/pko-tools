@@ -53,8 +53,7 @@ export interface PkoTechniqueState {
   destBlend?: number;
 }
 
-/** Default PKO effect technique state (technique 0 base).
- * eff.fx: technique 0 uses WRAP addressing (most techniques do). */
+/** Default PKO effect technique state (technique 0 base). */
 export const DEFAULT_PKO_TECHNIQUE: PkoTechniqueState = {
   zEnable: true,
   zWriteEnable: false,
@@ -65,8 +64,8 @@ export const DEFAULT_PKO_TECHNIQUE: PkoTechniqueState = {
   cullMode: D3DCULL_NONE,
   minFilter: D3DTEXF_LINEAR,
   magFilter: D3DTEXF_LINEAR,
-  addressU: D3DTADDRESS_WRAP,
-  addressV: D3DTADDRESS_WRAP,
+  addressU: D3DTADDRESS_CLAMP,
+  addressV: D3DTADDRESS_CLAMP,
 };
 
 /** Per-technique state overrides (techniques 0-6). */
@@ -214,8 +213,12 @@ export function applyTextureSampling(
     options.magFilter ?? D3DTEXF_LINEAR,
     false
   ) as THREE.MagnificationTextureFilter;
-  texture.wrapS = mapTextureAddress(options.addressU ?? D3DTADDRESS_CLAMP);
-  texture.wrapT = mapTextureAddress(options.addressV ?? D3DTADDRESS_CLAMP);
+  if (options.addressU !== undefined) {
+    texture.wrapS = mapTextureAddress(options.addressU);
+  }
+  if (options.addressV !== undefined) {
+    texture.wrapT = mapTextureAddress(options.addressV);
+  }
   texture.needsUpdate = true;
 }
 
@@ -224,8 +227,8 @@ function applyBlendToMaterial(
   srcBlend: number | undefined,
   dstBlend: number | undefined,
 ): void {
-  const src = mapBlendFactor(srcBlend ?? D3DBLEND_SRCALPHA);
-  const dst = mapBlendFactor(dstBlend ?? D3DBLEND_INVSRCALPHA);
+  const src = mapEffectBackbufferBlendFactor(srcBlend ?? D3DBLEND_SRCALPHA);
+  const dst = mapEffectBackbufferBlendFactor(dstBlend ?? D3DBLEND_INVSRCALPHA);
   if (!src || !dst) {
     material.transparent = true;
     material.blending = THREE.NormalBlending;
@@ -238,6 +241,19 @@ function applyBlendToMaterial(
   material.blendDst = dst as THREE.BlendingDstFactor;
   material.blendEquation = THREE.AddEquation as THREE.BlendingEquation;
   material.depthWrite = false;
+}
+
+function mapEffectBackbufferBlendFactor(
+  value: number,
+): THREE.BlendingSrcFactor | THREE.BlendingDstFactor | null {
+  switch (Number(value)) {
+    case D3DBLEND_DESTALPHA:
+      return THREE.OneFactor;
+    case D3DBLEND_INVDESTALPHA:
+      return THREE.ZeroFactor;
+    default:
+      return mapBlendFactor(value);
+  }
 }
 
 /** Apply PKO render state to a Three.js material. */

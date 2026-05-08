@@ -24,7 +24,7 @@ vi.mock("three/examples/jsm/loaders/GLTFLoader.js", () => {
   return { GLTFLoader: MockGLTFLoader };
 });
 
-function buildMockScene(): THREE.Group {
+function buildMockScene(dummy?: { id: number; position: [number, number, number] }): THREE.Group {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute(
     "position",
@@ -33,13 +33,24 @@ function buildMockScene(): THREE.Group {
   const mesh = new THREE.Mesh(geo);
   const scene = new THREE.Group();
   scene.add(mesh);
+  if (dummy) {
+    const dummyNode = new THREE.Object3D();
+    dummyNode.name = `Dummy${dummy.id}`;
+    dummyNode.userData = { type: "dummy", id: dummy.id };
+    dummyNode.position.set(...dummy.position);
+    scene.add(dummyNode);
+  }
   return scene;
 }
 
 // Import after mocks
 const { loadEffectModel } = await import("@/commands/effect");
 const mockLoadEffectModel = vi.mocked(loadEffectModel);
-const { useEffectModel } = await import("../useEffectModel");
+const {
+  extractEffectModelDummyPoints,
+  useEffectModel,
+  useEffectModelDummies,
+} = await import("../useEffectModel");
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -106,5 +117,91 @@ describe("useEffectModel", () => {
     expect(result.current).toBe(first);
     // Not called again — cache hit on rerender
     expect(mockLoadEffectModel).toHaveBeenCalledTimes(0);
+  });
+
+  it("clears stale geometry while loading a different uncached model", async () => {
+    mockLoadEffectModel.mockResolvedValue("{}");
+
+    const { result, rerender } = renderHook(
+      ({ modelName }) => useEffectModel(modelName, "proj-switch"),
+      { initialProps: { modelName: "first_model" } },
+    );
+
+    await waitFor(() => {
+      expect(parseOnLoad).not.toBeNull();
+    });
+
+    await act(async () => {
+      parseOnLoad!({ scene: buildMockScene() });
+    });
+
+    expect(result.current).toBeInstanceOf(THREE.BufferGeometry);
+
+    parseOnLoad = null;
+    rerender({ modelName: "second_model" });
+
+    expect(result.current).toBeNull();
+    expect(mockLoadEffectModel).toHaveBeenLastCalledWith("proj-switch", "second_model");
+  });
+
+  it("clears stale geometry when a changed model fails to load", async () => {
+    mockLoadEffectModel.mockResolvedValueOnce("{}");
+
+    const { result, rerender } = renderHook(
+      ({ modelName }) => useEffectModel(modelName, "proj-fail"),
+      { initialProps: { modelName: "loaded_model" } },
+    );
+
+    await waitFor(() => {
+      expect(parseOnLoad).not.toBeNull();
+    });
+
+    await act(async () => {
+      parseOnLoad!({ scene: buildMockScene() });
+    });
+
+    expect(result.current).toBeInstanceOf(THREE.BufferGeometry);
+
+    parseOnLoad = null;
+    mockLoadEffectModel.mockRejectedValueOnce(new Error("missing model"));
+    rerender({ modelName: "missing_model" });
+
+    await waitFor(() => {
+      expect(mockLoadEffectModel).toHaveBeenLastCalledWith("proj-fail", "missing_model");
+    });
+
+    expect(result.current).toBeNull();
+  });
+
+  it("extracts helper dummy nodes in scene-local space", () => {
+    const scene = buildMockScene({ id: 3, position: [1, 2, 3] });
+    scene.position.set(10, 0, 0);
+
+    const dummies = extractEffectModelDummyPoints(scene);
+
+    expect(dummies).toHaveLength(1);
+    expect(dummies[0].id).toBe(3);
+    expect(dummies[0].name).toBe("Dummy3");
+    expect(dummies[0].position.toArray()).toEqual([1, 2, 3]);
+  });
+
+  it("returns dummy points after async load", async () => {
+    mockLoadEffectModel.mockResolvedValue("{}");
+
+    const { result } = renderHook(() => useEffectModelDummies("dummy_model", "proj-dummy"));
+    expect(result.current).toEqual([]);
+
+    await waitFor(() => {
+      expect(parseOnLoad).not.toBeNull();
+    });
+
+    await act(async () => {
+      parseOnLoad!({ scene: buildMockScene({ id: 5, position: [4, 0, 2] }) });
+    });
+
+    expect(result.current).toHaveLength(1);
+    expect(result.current[0].id).toBe(5);
+    expect(result.current[0].position.toArray()).toEqual([4, 0, 2]);
+    expect(mockLoadEffectModel).toHaveBeenCalledWith("proj-dummy", "dummy_model");
   });
 });

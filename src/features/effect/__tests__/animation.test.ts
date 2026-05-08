@@ -136,13 +136,13 @@ describe("interpolateFrame", () => {
     expect(result.size[0]).toBeCloseTo(2.0);
   });
 
-  it("does not wrap nextFrameIndex when not looping", () => {
-    // At t=1.5 (frame 1, lerp=0.5), not looping: next stays at frame 1
+  it("matches CMPModelEff by wrapping the last interpolation target to frame 0 even when not looping", () => {
+    // At t=1.5 (frame 1, lerp=0.5), the source still targets frame 0.
     const result = interpolateFrame(baseSubEffect, 1.5, false);
     expect(result.frameIndex).toBe(1);
-    expect(result.nextFrameIndex).toBe(1);
-    // No interpolation beyond last frame: stays at frame 1 values
-    expect(result.size[0]).toBeCloseTo(3.0);
+    expect(result.nextFrameIndex).toBe(0);
+    // C++ computes t_iNextFrame=0 on the final live frame, then stops after the frame duration expires.
+    expect(result.size[0]).toBeCloseTo(2.0);
   });
 
   it("handles single-frame effect with no interpolation", () => {
@@ -191,12 +191,13 @@ describe("interpolateFrame", () => {
     };
     // t=0.0 → tex index 0
     expect(interpolateFrame(sub, 0.0, false).texFrameIndex).toBe(0);
-    // t=0.25 → tex index 1
-    expect(interpolateFrame(sub, 0.25, false).texFrameIndex).toBe(1);
-    // t=0.5 → tex index 2
-    expect(interpolateFrame(sub, 0.5, false).texFrameIndex).toBe(2);
-    // t=0.75 → tex index 3
-    expect(interpolateFrame(sub, 0.75, false).texFrameIndex).toBe(3);
+    // C++ texture timers advance only after passing the boundary.
+    expect(interpolateFrame(sub, 0.25, false).texFrameIndex).toBe(0);
+    expect(interpolateFrame(sub, 0.26, false).texFrameIndex).toBe(1);
+    expect(interpolateFrame(sub, 0.5, false).texFrameIndex).toBe(1);
+    expect(interpolateFrame(sub, 0.51, false).texFrameIndex).toBe(2);
+    expect(interpolateFrame(sub, 0.75, false).texFrameIndex).toBe(2);
+    expect(interpolateFrame(sub, 0.76, false).texFrameIndex).toBe(3);
   });
 
   it("wraps texFrameIndex when looping", () => {
@@ -205,9 +206,7 @@ describe("interpolateFrame", () => {
       frameTexTime: 0.5,
       frameTexNames: ["a", "b"],
     };
-    // cycle=1.0, t=1.5 → wraps to 0.5 → index 1
-    expect(interpolateFrame(sub, 1.5, true).texFrameIndex).toBe(1);
-    // t=2.0 → wraps to 0.0 → index 0
+    expect(interpolateFrame(sub, 1.5, true).texFrameIndex).toBe(0);
     expect(interpolateFrame(sub, 2.0, true).texFrameIndex).toBe(0);
   });
 
@@ -275,6 +274,22 @@ describe("interpolateUVCoords", () => {
     expect(result!.uvs[1]).toEqual([1, 0]);
   });
 
+  it("returns the only UV frame even when coordFrameTime is zero", () => {
+    const singleFrame: SubEffect = {
+      ...uvSubEffect,
+      coordFrameTime: 0,
+      coordList: [
+        [[0.25, 0.25], [1, 0.25], [1, 1], [0.25, 1]],
+      ],
+    };
+
+    const result = interpolateUVCoords(singleFrame, 10, true);
+    expect(result).not.toBeNull();
+    expect(result!.uvFrameIndex).toBe(0);
+    expect(result!.uvLerp).toBe(0);
+    expect(result!.uvs[0]).toEqual([0.25, 0.25]);
+  });
+
   it("interpolates UVs at midpoint", () => {
     const result = interpolateUVCoords(uvSubEffect, 0.5, false);
     expect(result).not.toBeNull();
@@ -291,6 +306,15 @@ describe("interpolateUVCoords", () => {
     expect(result).not.toBeNull();
     expect(result!.uvFrameIndex).toBe(0);
     expect(result!.uvLerp).toBeCloseTo(0.5);
+  });
+
+  it("holds the final UV frame instead of interpolating back to the first frame", () => {
+    // C++ CTexCoordList::GetCurCoord sets nextIndex=currentIndex on the final frame.
+    const result = interpolateUVCoords(uvSubEffect, 1.5, true);
+    expect(result).not.toBeNull();
+    expect(result!.uvFrameIndex).toBe(1);
+    expect(result!.uvLerp).toBeCloseTo(0.5);
+    expect(result!.uvs[0]).toEqual([0.5, 0.5]);
   });
 });
 
@@ -314,10 +338,27 @@ describe("getTexListFrameIndex", () => {
     expect(getTexListFrameIndex(texSubEffect, 0, false)).toBe(0);
   });
 
+  it("returns the only texture UV frame even when texFrameTime is zero", () => {
+    const singleFrame: SubEffect = {
+      ...texSubEffect,
+      texFrameTime: 0,
+      texList: [
+        [[0.25, 0.25], [1, 0.25], [1, 1], [0.25, 1]],
+      ],
+    };
+
+    expect(getTexListFrameIndex(singleFrame, 10, true)).toBe(0);
+  });
+
   it("snaps to frame index without interpolation", () => {
     expect(getTexListFrameIndex(texSubEffect, 0.4, false)).toBe(0);
-    expect(getTexListFrameIndex(texSubEffect, 0.5, false)).toBe(1);
-    expect(getTexListFrameIndex(texSubEffect, 1.0, false)).toBe(2);
+    expect(getTexListFrameIndex(texSubEffect, 0.51, false)).toBe(1);
+    expect(getTexListFrameIndex(texSubEffect, 1.01, false)).toBe(2);
+  });
+
+  it("keeps the previous texture UV frame at exact frame-time boundaries", () => {
+    expect(getTexListFrameIndex(texSubEffect, 0.5, false)).toBe(0);
+    expect(getTexListFrameIndex(texSubEffect, 1.0, false)).toBe(1);
   });
 
   it("wraps when looping", () => {
