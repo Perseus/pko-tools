@@ -15,9 +15,7 @@ use crate::map::scene_model::decode_dds_with_alpha;
 use super::model::{EffFile, ParFile};
 
 /// Collect all unique texture names referenced by .eff and .par files.
-pub fn collect_texture_names(
-    effect_dir: &Path,
-) -> Result<HashSet<String>> {
+pub fn collect_texture_names(effect_dir: &Path) -> Result<HashSet<String>> {
     let mut names = HashSet::new();
 
     for entry in std::fs::read_dir(effect_dir)?.filter_map(|e| e.ok()) {
@@ -142,8 +140,7 @@ fn decode_texture_to_image(data: &[u8], ext: &str) -> Option<image::DynamicImage
     const PKO_TGA_FOOTER_SIZE: usize = 48;
     if decoded.len() > PKO_TGA_FOOTER_SIZE {
         let footer_start = decoded.len() - PKO_TGA_FOOTER_SIZE;
-        let has_tga_footer =
-            decoded[footer_start + 1] <= 1 && decoded[footer_start + 2] == 2;
+        let has_tga_footer = decoded[footer_start + 1] <= 1 && decoded[footer_start + 2] == 2;
 
         if has_tga_footer {
             // Variant 1: ARGB pixels before the footer
@@ -278,12 +275,10 @@ pub fn export_effect_textures(
                     .or_else(|| name.strip_suffix(".png"))
                     .unwrap_or(name);
 
-                let found = ["tga", "dds", "bmp", "png"]
-                    .iter()
-                    .find_map(|ext| {
-                        let key = format!("{}.{}", base, ext);
-                        lookup.get(&key).cloned()
-                    });
+                let found = ["tga", "dds", "bmp", "png"].iter().find_map(|ext| {
+                    let key = format!("{}.{}", base, ext);
+                    lookup.get(&key).cloned()
+                });
 
                 match found {
                     Some(p) => p,
@@ -397,11 +392,7 @@ mod tests {
         let png_count = std::fs::read_dir(&tex_out)
             .unwrap()
             .filter_map(|e| e.ok())
-            .filter(|e| {
-                e.path()
-                    .extension()
-                    .map_or(false, |ext| ext == "png")
-            })
+            .filter(|e| e.path().extension().map_or(false, |ext| ext == "png"))
             .count();
 
         // PNG count may be less than success count due to name collisions

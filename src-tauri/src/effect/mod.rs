@@ -4,6 +4,7 @@ pub mod export;
 pub mod model;
 pub mod par_loader;
 pub mod texture_export;
+pub mod trace;
 
 use std::path::Path;
 

@@ -554,9 +554,7 @@ pub fn export_alpha_mask_array(
     let atlas = match load_alpha_atlas(project_dir) {
         Some(img) => img,
         None => {
-            eprintln!(
-                "Warning: alpha mask atlas (total.tga) not found — cannot export mask array"
-            );
+            eprintln!("Warning: alpha mask atlas (total.tga) not found — cannot export mask array");
             return Ok(None);
         }
     };
@@ -612,16 +610,31 @@ pub fn build_tile_layer_grid(parsed_map: &ParsedMap) -> Vec<u8> {
     for ty in 0..h {
         for tx in 0..w {
             let (layers, exists) = match super::terrain::get_tile(parsed_map, tx, ty) {
-                Some(tile) => (unpack_tile_layers(tile.bt_tile_info, tile.dw_tile_info), 1u8),
+                Some(tile) => (
+                    unpack_tile_layers(tile.bt_tile_info, tile.dw_tile_info),
+                    1u8,
+                ),
                 // Missing section: no data in .map file. The original engine returns
                 // _pDefaultTile (btTexNo=22, height=-2.0) at runtime. We write zeros
                 // for the layer data and exists=0 so Unity can apply the fallback.
                 None => (
                     [
-                        TileLayer { tex_id: 0, alpha: 0 },
-                        TileLayer { tex_id: 0, alpha: 0 },
-                        TileLayer { tex_id: 0, alpha: 0 },
-                        TileLayer { tex_id: 0, alpha: 0 },
+                        TileLayer {
+                            tex_id: 0,
+                            alpha: 0,
+                        },
+                        TileLayer {
+                            tex_id: 0,
+                            alpha: 0,
+                        },
+                        TileLayer {
+                            tex_id: 0,
+                            alpha: 0,
+                        },
+                        TileLayer {
+                            tex_id: 0,
+                            alpha: 0,
+                        },
                     ],
                     0u8,
                 ),

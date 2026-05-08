@@ -8,8 +8,8 @@
 
 extern crate kaitai;
 use kaitai::*;
+use std::cell::{Cell, Ref, RefCell};
 use std::convert::{TryFrom, TryInto};
-use std::cell::{Ref, Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 /**
@@ -46,20 +46,44 @@ impl KStruct for PkoMap {
         let _rrc = self_rc._root.get_value().borrow().upgrade();
         let _prc = self_rc._parent.get_value().borrow().upgrade();
         let _r = _rrc.as_ref().unwrap();
-        let t = Self::read_into::<_, PkoMap_MapHeader>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+        let t = Self::read_into::<_, PkoMap_MapHeader>(
+            &*_io,
+            Some(self_rc._root.clone()),
+            Some(self_rc._self.clone()),
+        )?
+        .into();
         *self_rc.header.borrow_mut() = t;
         *self_rc.section_index.borrow_mut() = Vec::new();
-        let l_section_index = ((((*self_rc.header().n_width() as i32) / (*self_rc.header().n_section_width() as i32)) as i32) * (((*self_rc.header().n_height() as i32) / (*self_rc.header().n_section_height() as i32)) as i32));
+        let l_section_index = ((((*self_rc.header().n_width() as i32)
+            / (*self_rc.header().n_section_width() as i32))
+            as i32)
+            * (((*self_rc.header().n_height() as i32)
+                / (*self_rc.header().n_section_height() as i32)) as i32));
         for _i in 0..l_section_index {
-            let f = |t : &mut PkoMap_SectionPtr| Ok(t.set_params((((*self_rc.header().n_section_width() as i32) * (*self_rc.header().n_section_height() as i32))).try_into().map_err(|_| KError::CastError)?, (*self_rc.header().n_map_flag()).try_into().map_err(|_| KError::CastError)?));
-            let t = Self::read_into_with_init::<_, PkoMap_SectionPtr>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()), &f)?.into();
+            let f = |t: &mut PkoMap_SectionPtr| {
+                Ok(t.set_params(
+                    ((*self_rc.header().n_section_width() as i32)
+                        * (*self_rc.header().n_section_height() as i32))
+                        .try_into()
+                        .map_err(|_| KError::CastError)?,
+                    (*self_rc.header().n_map_flag())
+                        .try_into()
+                        .map_err(|_| KError::CastError)?,
+                ))
+            };
+            let t = Self::read_into_with_init::<_, PkoMap_SectionPtr>(
+                &*_io,
+                Some(self_rc._root.clone()),
+                Some(self_rc._self.clone()),
+                &f,
+            )?
+            .into();
             self_rc.section_index.borrow_mut().push(t);
         }
         Ok(())
     }
 }
-impl PkoMap {
-}
+impl PkoMap {}
 impl PkoMap {
     pub fn header(&self) -> Ref<'_, OptRc<PkoMap_MapHeader>> {
         self.header.borrow()
@@ -113,8 +137,7 @@ impl KStruct for PkoMap_MapHeader {
         Ok(())
     }
 }
-impl PkoMap_MapHeader {
-}
+impl PkoMap_MapHeader {}
 impl PkoMap_MapHeader {
     pub fn n_map_flag(&self) -> Ref<'_, i32> {
         self.n_map_flag.borrow()
@@ -175,7 +198,12 @@ impl KStruct for PkoMap_SectionNew {
         *self_rc.tiles.borrow_mut() = Vec::new();
         let l_tiles = *self_rc.tile_count();
         for _i in 0..l_tiles {
-            let t = Self::read_into::<_, PkoMap_TileNew>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+            let t = Self::read_into::<_, PkoMap_TileNew>(
+                &*_io,
+                Some(self_rc._root.clone()),
+                Some(self_rc._self.clone()),
+            )?
+            .into();
             self_rc.tiles.borrow_mut().push(t);
         }
         Ok(())
@@ -191,8 +219,7 @@ impl PkoMap_SectionNew {
         *self.tile_count.borrow_mut() = tile_count;
     }
 }
-impl PkoMap_SectionNew {
-}
+impl PkoMap_SectionNew {}
 impl PkoMap_SectionNew {
     pub fn tiles(&self) -> Ref<'_, Vec<OptRc<PkoMap_TileNew>>> {
         self.tiles.borrow()
@@ -233,7 +260,12 @@ impl KStruct for PkoMap_SectionOld {
         *self_rc.tiles.borrow_mut() = Vec::new();
         let l_tiles = *self_rc.tile_count();
         for _i in 0..l_tiles {
-            let t = Self::read_into::<_, PkoMap_TileOld>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+            let t = Self::read_into::<_, PkoMap_TileOld>(
+                &*_io,
+                Some(self_rc._root.clone()),
+                Some(self_rc._self.clone()),
+            )?
+            .into();
             self_rc.tiles.borrow_mut().push(t);
         }
         Ok(())
@@ -249,8 +281,7 @@ impl PkoMap_SectionOld {
         *self.tile_count.borrow_mut() = tile_count;
     }
 }
-impl PkoMap_SectionOld {
-}
+impl PkoMap_SectionOld {}
 impl PkoMap_SectionOld {
     pub fn tiles(&self) -> Ref<'_, Vec<OptRc<PkoMap_TileOld>>> {
         self.tiles.borrow()
@@ -284,7 +315,10 @@ impl From<&PkoMap_SectionPtr_Section> for OptRc<PkoMap_SectionOld> {
         if let PkoMap_SectionPtr_Section::PkoMap_SectionOld(x) = v {
             return x.clone();
         }
-        panic!("expected PkoMap_SectionPtr_Section::PkoMap_SectionOld, got {:?}", v)
+        panic!(
+            "expected PkoMap_SectionPtr_Section::PkoMap_SectionOld, got {:?}",
+            v
+        )
     }
 }
 impl From<OptRc<PkoMap_SectionOld>> for PkoMap_SectionPtr_Section {
@@ -297,7 +331,10 @@ impl From<&PkoMap_SectionPtr_Section> for OptRc<PkoMap_SectionNew> {
         if let PkoMap_SectionPtr_Section::PkoMap_SectionNew(x) = v {
             return x.clone();
         }
-        panic!("expected PkoMap_SectionPtr_Section::PkoMap_SectionNew, got {:?}", v)
+        panic!(
+            "expected PkoMap_SectionPtr_Section::PkoMap_SectionNew, got {:?}",
+            v
+        )
     }
 }
 impl From<OptRc<PkoMap_SectionNew>> for PkoMap_SectionPtr_Section {
@@ -343,9 +380,7 @@ impl PkoMap_SectionPtr {
     }
 }
 impl PkoMap_SectionPtr {
-    pub fn section(
-        &self
-    ) -> KResult<Ref<'_, Option<PkoMap_SectionPtr_Section>>> {
+    pub fn section(&self) -> KResult<Ref<'_, Option<PkoMap_SectionPtr_Section>>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -360,13 +395,37 @@ impl PkoMap_SectionPtr {
             io.seek(*self.offset() as usize)?;
             match *self.map_flag() {
                 780626 => {
-                    let f = |t : &mut PkoMap_SectionOld| Ok(t.set_params((*self.tile_count()).try_into().map_err(|_| KError::CastError)?));
-                    let t = Self::read_into_with_init::<BytesReader, PkoMap_SectionOld>(&io, Some(self._root.clone()), Some(self._self.clone()), &f)?.into();
+                    let f = |t: &mut PkoMap_SectionOld| {
+                        Ok(t.set_params(
+                            (*self.tile_count())
+                                .try_into()
+                                .map_err(|_| KError::CastError)?,
+                        ))
+                    };
+                    let t = Self::read_into_with_init::<BytesReader, PkoMap_SectionOld>(
+                        &io,
+                        Some(self._root.clone()),
+                        Some(self._self.clone()),
+                        &f,
+                    )?
+                    .into();
                     *self.section.borrow_mut() = Some(t);
                 }
                 780627 => {
-                    let f = |t : &mut PkoMap_SectionNew| Ok(t.set_params((*self.tile_count()).try_into().map_err(|_| KError::CastError)?));
-                    let t = Self::read_into_with_init::<BytesReader, PkoMap_SectionNew>(&io, Some(self._root.clone()), Some(self._self.clone()), &f)?.into();
+                    let f = |t: &mut PkoMap_SectionNew| {
+                        Ok(t.set_params(
+                            (*self.tile_count())
+                                .try_into()
+                                .map_err(|_| KError::CastError)?,
+                        ))
+                    };
+                    let t = Self::read_into_with_init::<BytesReader, PkoMap_SectionNew>(
+                        &io,
+                        Some(self._root.clone()),
+                        Some(self._self.clone()),
+                        &f,
+                    )?
+                    .into();
                     *self.section.borrow_mut() = Some(t);
                 }
                 _ => {}
@@ -451,9 +510,7 @@ impl KStruct for PkoMap_TileNew {
     }
 }
 impl PkoMap_TileNew {
-    pub fn alpha0(
-        &self
-    ) -> KResult<Ref<'_, i8>> {
+    pub fn alpha0(&self) -> KResult<Ref<'_, i8>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -465,9 +522,7 @@ impl PkoMap_TileNew {
         *self.alpha0.borrow_mut() = (15) as i8;
         Ok(self.alpha0.borrow())
     }
-    pub fn alpha1(
-        &self
-    ) -> KResult<Ref<'_, i32>> {
+    pub fn alpha1(&self) -> KResult<Ref<'_, i32>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -476,12 +531,11 @@ impl PkoMap_TileNew {
             return Ok(self.alpha1.borrow());
         }
         self.f_alpha1.set(true);
-        *self.alpha1.borrow_mut() = (((((*self.dw_tile_info() as u32) >> (22 as u32)) as i32) & (15 as i32))) as i32;
+        *self.alpha1.borrow_mut() =
+            ((((*self.dw_tile_info() as u32) >> (22 as u32)) as i32) & (15 as i32)) as i32;
         Ok(self.alpha1.borrow())
     }
-    pub fn alpha2(
-        &self
-    ) -> KResult<Ref<'_, i32>> {
+    pub fn alpha2(&self) -> KResult<Ref<'_, i32>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -490,12 +544,11 @@ impl PkoMap_TileNew {
             return Ok(self.alpha2.borrow());
         }
         self.f_alpha2.set(true);
-        *self.alpha2.borrow_mut() = (((((*self.dw_tile_info() as u32) >> (12 as u32)) as i32) & (15 as i32))) as i32;
+        *self.alpha2.borrow_mut() =
+            ((((*self.dw_tile_info() as u32) >> (12 as u32)) as i32) & (15 as i32)) as i32;
         Ok(self.alpha2.borrow())
     }
-    pub fn alpha3(
-        &self
-    ) -> KResult<Ref<'_, i32>> {
+    pub fn alpha3(&self) -> KResult<Ref<'_, i32>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -504,12 +557,11 @@ impl PkoMap_TileNew {
             return Ok(self.alpha3.borrow());
         }
         self.f_alpha3.set(true);
-        *self.alpha3.borrow_mut() = (((((*self.dw_tile_info() as u32) >> (2 as u32)) as i32) & (15 as i32))) as i32;
+        *self.alpha3.borrow_mut() =
+            ((((*self.dw_tile_info() as u32) >> (2 as u32)) as i32) & (15 as i32)) as i32;
         Ok(self.alpha3.borrow())
     }
-    pub fn height_m(
-        &self
-    ) -> KResult<Ref<'_, f64>> {
+    pub fn height_m(&self) -> KResult<Ref<'_, f64>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -518,12 +570,10 @@ impl PkoMap_TileNew {
             return Ok(self.height_m.borrow());
         }
         self.f_height_m.set(true);
-        *self.height_m.borrow_mut() = (((*self.c_height() as f64) * (0.1 as f64))) as f64;
+        *self.height_m.borrow_mut() = ((*self.c_height() as f64) * (0.1 as f64)) as f64;
         Ok(self.height_m.borrow())
     }
-    pub fn tex0(
-        &self
-    ) -> KResult<Ref<'_, u8>> {
+    pub fn tex0(&self) -> KResult<Ref<'_, u8>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -535,9 +585,7 @@ impl PkoMap_TileNew {
         *self.tex0.borrow_mut() = (*self.bt_tile_info()) as u8;
         Ok(self.tex0.borrow())
     }
-    pub fn tex1(
-        &self
-    ) -> KResult<Ref<'_, i32>> {
+    pub fn tex1(&self) -> KResult<Ref<'_, i32>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -546,12 +594,11 @@ impl PkoMap_TileNew {
             return Ok(self.tex1.borrow());
         }
         self.f_tex1.set(true);
-        *self.tex1.borrow_mut() = (((((*self.dw_tile_info() as u32) >> (26 as u32)) as i32) & (63 as i32))) as i32;
+        *self.tex1.borrow_mut() =
+            ((((*self.dw_tile_info() as u32) >> (26 as u32)) as i32) & (63 as i32)) as i32;
         Ok(self.tex1.borrow())
     }
-    pub fn tex2(
-        &self
-    ) -> KResult<Ref<'_, i32>> {
+    pub fn tex2(&self) -> KResult<Ref<'_, i32>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -560,12 +607,11 @@ impl PkoMap_TileNew {
             return Ok(self.tex2.borrow());
         }
         self.f_tex2.set(true);
-        *self.tex2.borrow_mut() = (((((*self.dw_tile_info() as u32) >> (16 as u32)) as i32) & (63 as i32))) as i32;
+        *self.tex2.borrow_mut() =
+            ((((*self.dw_tile_info() as u32) >> (16 as u32)) as i32) & (63 as i32)) as i32;
         Ok(self.tex2.borrow())
     }
-    pub fn tex3(
-        &self
-    ) -> KResult<Ref<'_, i32>> {
+    pub fn tex3(&self) -> KResult<Ref<'_, i32>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -574,7 +620,8 @@ impl PkoMap_TileNew {
             return Ok(self.tex3.borrow());
         }
         self.f_tex3.set(true);
-        *self.tex3.borrow_mut() = (((((*self.dw_tile_info() as u32) >> (6 as u32)) as i32) & (63 as i32))) as i32;
+        *self.tex3.borrow_mut() =
+            ((((*self.dw_tile_info() as u32) >> (6 as u32)) as i32) & (63 as i32)) as i32;
         Ok(self.tex3.borrow())
     }
 }
@@ -685,9 +732,7 @@ impl KStruct for PkoMap_TileOld {
     }
 }
 impl PkoMap_TileOld {
-    pub fn alpha0(
-        &self
-    ) -> KResult<Ref<'_, u8>> {
+    pub fn alpha0(&self) -> KResult<Ref<'_, u8>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -699,9 +744,7 @@ impl PkoMap_TileOld {
         *self.alpha0.borrow_mut() = (self.t()[1 as usize]) as u8;
         Ok(self.alpha0.borrow())
     }
-    pub fn alpha1(
-        &self
-    ) -> KResult<Ref<'_, u8>> {
+    pub fn alpha1(&self) -> KResult<Ref<'_, u8>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -713,9 +756,7 @@ impl PkoMap_TileOld {
         *self.alpha1.borrow_mut() = (self.t()[3 as usize]) as u8;
         Ok(self.alpha1.borrow())
     }
-    pub fn alpha2(
-        &self
-    ) -> KResult<Ref<'_, u8>> {
+    pub fn alpha2(&self) -> KResult<Ref<'_, u8>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -727,9 +768,7 @@ impl PkoMap_TileOld {
         *self.alpha2.borrow_mut() = (self.t()[5 as usize]) as u8;
         Ok(self.alpha2.borrow())
     }
-    pub fn alpha3(
-        &self
-    ) -> KResult<Ref<'_, u8>> {
+    pub fn alpha3(&self) -> KResult<Ref<'_, u8>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -741,9 +780,7 @@ impl PkoMap_TileOld {
         *self.alpha3.borrow_mut() = (self.t()[7 as usize]) as u8;
         Ok(self.alpha3.borrow())
     }
-    pub fn height_m(
-        &self
-    ) -> KResult<Ref<'_, f64>> {
+    pub fn height_m(&self) -> KResult<Ref<'_, f64>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -752,12 +789,10 @@ impl PkoMap_TileOld {
             return Ok(self.height_m.borrow());
         }
         self.f_height_m.set(true);
-        *self.height_m.borrow_mut() = (((*self.s_height() as f64) / (100.0 as f64))) as f64;
+        *self.height_m.borrow_mut() = ((*self.s_height() as f64) / (100.0 as f64)) as f64;
         Ok(self.height_m.borrow())
     }
-    pub fn tex0(
-        &self
-    ) -> KResult<Ref<'_, u8>> {
+    pub fn tex0(&self) -> KResult<Ref<'_, u8>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -769,9 +804,7 @@ impl PkoMap_TileOld {
         *self.tex0.borrow_mut() = (self.t()[0 as usize]) as u8;
         Ok(self.tex0.borrow())
     }
-    pub fn tex1(
-        &self
-    ) -> KResult<Ref<'_, u8>> {
+    pub fn tex1(&self) -> KResult<Ref<'_, u8>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -783,9 +816,7 @@ impl PkoMap_TileOld {
         *self.tex1.borrow_mut() = (self.t()[2 as usize]) as u8;
         Ok(self.tex1.borrow())
     }
-    pub fn tex2(
-        &self
-    ) -> KResult<Ref<'_, u8>> {
+    pub fn tex2(&self) -> KResult<Ref<'_, u8>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -797,9 +828,7 @@ impl PkoMap_TileOld {
         *self.tex2.borrow_mut() = (self.t()[4 as usize]) as u8;
         Ok(self.tex2.borrow())
     }
-    pub fn tex3(
-        &self
-    ) -> KResult<Ref<'_, u8>> {
+    pub fn tex3(&self) -> KResult<Ref<'_, u8>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();

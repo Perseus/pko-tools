@@ -168,12 +168,7 @@ pub fn encode_all_grids(
         &grids_dir.join("terrain_height.png"),
     )?;
 
-    encode_i16_grid_png(
-        region_bytes,
-        map_w,
-        map_h,
-        &grids_dir.join("region.png"),
-    )?;
+    encode_i16_grid_png(region_bytes, map_w, map_h, &grids_dir.join("region.png"))?;
 
     encode_u8_grid_png(area_bytes, map_w, map_h, &grids_dir.join("area.png"))?;
 
@@ -217,9 +212,7 @@ mod tests {
         let path = tmp.path().join("collision.png");
 
         // 4x4 grid: top-left 2x2 blocked, rest walkable
-        let grid: Vec<u8> = vec![
-            1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-        ];
+        let grid: Vec<u8> = vec![1, 1, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
 
         encode_collision_png(&grid, 4, 4, &path).unwrap();
 
@@ -345,10 +338,10 @@ mod tests {
         // Tile (0,1): base=0, all zeros, exists=0 (missing section)
         // Tile (1,1): base=22, zeros, exists=1
         let grid: Vec<u8> = vec![
-            1, 2, 3, 4, 5, 6, 7, 1,   // tile (0,0)
+            1, 2, 3, 4, 5, 6, 7, 1, // tile (0,0)
             10, 11, 12, 13, 14, 15, 0, 1, // tile (1,0)
-            0, 0, 0, 0, 0, 0, 0, 0,   // tile (0,1) missing
-            22, 0, 0, 0, 0, 0, 0, 1,  // tile (1,1)
+            0, 0, 0, 0, 0, 0, 0, 0, // tile (0,1) missing
+            22, 0, 0, 0, 0, 0, 0, 1, // tile (1,1)
         ];
 
         encode_tile_layer_pngs(&grid, 2, 2, &tex_path, &alpha_path).unwrap();

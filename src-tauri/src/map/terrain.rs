@@ -13,8 +13,8 @@ use serde_json::value::RawValue;
 
 use super::{MapEntry, MapMetadata};
 use crate::effect::model::EffFile;
-use crate::map::scene_model::LoadedSceneModels;
 use crate::map::obj_loader;
+use crate::map::scene_model::LoadedSceneModels;
 use crate::map::scene_obj::ParsedObjFile;
 use crate::math::coord_transform::CoordTransform;
 
@@ -1085,17 +1085,29 @@ pub fn build_terrain_glb(
         let i1 = tri[1] as usize;
         let i2 = tri[2] as usize;
 
-        let p0 = [positions[i0*3], positions[i0*3+1], positions[i0*3+2]];
-        let p1 = [positions[i1*3], positions[i1*3+1], positions[i1*3+2]];
-        let p2 = [positions[i2*3], positions[i2*3+1], positions[i2*3+2]];
+        let p0 = [
+            positions[i0 * 3],
+            positions[i0 * 3 + 1],
+            positions[i0 * 3 + 2],
+        ];
+        let p1 = [
+            positions[i1 * 3],
+            positions[i1 * 3 + 1],
+            positions[i1 * 3 + 2],
+        ];
+        let p2 = [
+            positions[i2 * 3],
+            positions[i2 * 3 + 1],
+            positions[i2 * 3 + 2],
+        ];
 
-        let e1 = [p1[0]-p0[0], p1[1]-p0[1], p1[2]-p0[2]];
-        let e2 = [p2[0]-p0[0], p2[1]-p0[1], p2[2]-p0[2]];
+        let e1 = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+        let e2 = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
 
         let n = [
-            e1[1]*e2[2] - e1[2]*e2[1],
-            e1[2]*e2[0] - e1[0]*e2[2],
-            e1[0]*e2[1] - e1[1]*e2[0],
+            e1[1] * e2[2] - e1[2] * e2[1],
+            e1[2] * e2[0] - e1[0] * e2[2],
+            e1[0] * e2[1] - e1[1] * e2[0],
         ];
 
         for &idx in &[i0, i1, i2] {
@@ -1105,9 +1117,11 @@ pub fn build_terrain_glb(
         }
     }
     for n in &mut normals {
-        let len = (n[0]*n[0] + n[1]*n[1] + n[2]*n[2]).sqrt();
+        let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
         if len > 1e-8 {
-            n[0] /= len; n[1] /= len; n[2] /= len;
+            n[0] /= len;
+            n[1] /= len;
+            n[2] /= len;
         } else {
             *n = [0.0, 1.0, 0.0];
         }
@@ -1158,7 +1172,9 @@ pub fn build_terrain_glb(
         byte_length: USize64(pos_len as u64),
         byte_offset: Some(USize64(pos_off as u64)),
         target: Some(Checked::Valid(gltf::buffer::Target::ArrayBuffer)),
-        byte_stride: None, extensions: None, extras: None,
+        byte_stride: None,
+        extensions: None,
+        extras: None,
         name: Some("positions_view".into()),
     });
     let pos_acc_idx = accessors.len();
@@ -1171,7 +1187,10 @@ pub fn build_terrain_glb(
         min: Some(serde_json::to_value(pos_min)?),
         max: Some(serde_json::to_value(pos_max)?),
         name: Some("position_accessor".into()),
-        normalized: false, sparse: None, extensions: None, extras: None,
+        normalized: false,
+        sparse: None,
+        extensions: None,
+        extras: None,
     });
 
     // Normals
@@ -1183,7 +1202,9 @@ pub fn build_terrain_glb(
         byte_length: USize64(norm_len as u64),
         byte_offset: Some(USize64(norm_off as u64)),
         target: Some(Checked::Valid(gltf::buffer::Target::ArrayBuffer)),
-        byte_stride: None, extensions: None, extras: None,
+        byte_stride: None,
+        extensions: None,
+        extras: None,
         name: Some("normals_view".into()),
     });
     let norm_acc_idx = accessors.len();
@@ -1193,9 +1214,13 @@ pub fn build_terrain_glb(
         component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
         count: USize64(vertex_count as u64),
         type_: Checked::Valid(gltf::accessor::Type::Vec3),
-        min: None, max: None,
+        min: None,
+        max: None,
         name: Some("normal_accessor".into()),
-        normalized: false, sparse: None, extensions: None, extras: None,
+        normalized: false,
+        sparse: None,
+        extensions: None,
+        extras: None,
     });
 
     // Colors (VEC4)
@@ -1206,7 +1231,9 @@ pub fn build_terrain_glb(
         byte_length: USize64(col_len as u64),
         byte_offset: Some(USize64(col_off as u64)),
         target: Some(Checked::Valid(gltf::buffer::Target::ArrayBuffer)),
-        byte_stride: None, extensions: None, extras: None,
+        byte_stride: None,
+        extensions: None,
+        extras: None,
         name: Some("colors_view".into()),
     });
     let col_acc_idx = accessors.len();
@@ -1216,9 +1243,13 @@ pub fn build_terrain_glb(
         component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
         count: USize64(vertex_count as u64),
         type_: Checked::Valid(gltf::accessor::Type::Vec4),
-        min: None, max: None,
+        min: None,
+        max: None,
         name: Some("color_accessor".into()),
-        normalized: false, sparse: None, extensions: None, extras: None,
+        normalized: false,
+        sparse: None,
+        extensions: None,
+        extras: None,
     });
 
     // Indices
@@ -1229,7 +1260,9 @@ pub fn build_terrain_glb(
         byte_length: USize64(idx_len as u64),
         byte_offset: Some(USize64(idx_off as u64)),
         target: Some(Checked::Valid(gltf::buffer::Target::ElementArrayBuffer)),
-        byte_stride: None, extensions: None, extras: None,
+        byte_stride: None,
+        extensions: None,
+        extras: None,
         name: Some("indices_view".into()),
     });
     let idx_acc_idx = accessors.len();
@@ -1239,9 +1272,13 @@ pub fn build_terrain_glb(
         component_type: Checked::Valid(GenericComponentType(ComponentType::U32)),
         count: USize64(indices.len() as u64),
         type_: Checked::Valid(gltf::accessor::Type::Scalar),
-        min: None, max: None,
+        min: None,
+        max: None,
         name: Some("index_accessor".into()),
-        normalized: false, sparse: None, extensions: None, extras: None,
+        normalized: false,
+        sparse: None,
+        extensions: None,
+        extras: None,
     });
 
     // UVs (optional, if atlas provided)
@@ -1253,7 +1290,9 @@ pub fn build_terrain_glb(
             byte_length: USize64(uv_len as u64),
             byte_offset: Some(USize64(uv_off as u64)),
             target: Some(Checked::Valid(gltf::buffer::Target::ArrayBuffer)),
-            byte_stride: None, extensions: None, extras: None,
+            byte_stride: None,
+            extensions: None,
+            extras: None,
             name: Some("uv_view".into()),
         });
         let uv_acc = accessors.len();
@@ -1263,9 +1302,13 @@ pub fn build_terrain_glb(
             component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
             count: USize64(vertex_count as u64),
             type_: Checked::Valid(gltf::accessor::Type::Vec2),
-            min: None, max: None,
+            min: None,
+            max: None,
             name: Some("uv_accessor".into()),
-            normalized: false, sparse: None, extensions: None, extras: None,
+            normalized: false,
+            sparse: None,
+            extensions: None,
+            extras: None,
         });
         Some(uv_acc)
     } else {
@@ -1281,7 +1324,8 @@ pub fn build_terrain_glb(
         // Encode atlas as JPEG
         let mut jpg_buf = std::io::Cursor::new(Vec::new());
         let encoder = image::codecs::jpeg::JpegEncoder::new_with_quality(&mut jpg_buf, 85);
-        atlas_img.write_with_encoder(encoder)
+        atlas_img
+            .write_with_encoder(encoder)
             .map_err(|e| anyhow!("Failed to encode atlas JPEG: {}", e))?;
         let jpg_bytes = jpg_buf.into_inner();
 
@@ -1297,7 +1341,9 @@ pub fn build_terrain_glb(
             byte_length: USize64(jpg_bytes.len() as u64),
             byte_offset: Some(USize64(img_offset as u64)),
             target: None, // image buffer views have no target
-            byte_stride: None, extensions: None, extras: None,
+            byte_stride: None,
+            extensions: None,
+            extras: None,
             name: Some("atlas_image_view".into()),
         });
 
@@ -1306,7 +1352,8 @@ pub fn build_terrain_glb(
             mime_type: Some(gltf::image::MimeType("image/jpeg".to_string())),
             uri: None, // embedded in GLB binary
             name: Some("terrain_atlas".into()),
-            extensions: None, extras: None,
+            extensions: None,
+            extras: None,
         });
 
         samplers.push(gltf::texture::Sampler {
@@ -1315,20 +1362,23 @@ pub fn build_terrain_glb(
             wrap_s: Checked::Valid(gltf::texture::WrappingMode::ClampToEdge),
             wrap_t: Checked::Valid(gltf::texture::WrappingMode::ClampToEdge),
             name: Some("terrain_sampler".into()),
-            extensions: None, extras: None,
+            extensions: None,
+            extras: None,
         });
 
         textures.push(gltf::Texture {
             sampler: Some(gltf::Index::new(0)),
             source: gltf::Index::new(0),
             name: Some("terrain_texture".into()),
-            extensions: None, extras: None,
+            extensions: None,
+            extras: None,
         });
 
         Some(gltf::texture::Info {
             index: gltf::Index::new(0),
             tex_coord: 0,
-            extensions: None, extras: None,
+            extensions: None,
+            extras: None,
         })
     } else {
         None
@@ -1365,11 +1415,15 @@ pub fn build_terrain_glb(
             metallic_factor: gltf::material::StrengthFactor(0.0),
             roughness_factor: gltf::material::StrengthFactor(1.0),
             metallic_roughness_texture: None,
-            extensions: None, extras: None,
+            extensions: None,
+            extras: None,
         },
-        normal_texture: None, occlusion_texture: None, emissive_texture: None,
+        normal_texture: None,
+        occlusion_texture: None,
+        emissive_texture: None,
         emissive_factor: gltf::material::EmissiveFactor([0.0, 0.0, 0.0]),
-        extensions: None, extras: None,
+        extensions: None,
+        extras: None,
         name: Some("terrain_material".into()),
     };
 
@@ -1378,13 +1432,17 @@ pub fn build_terrain_glb(
         indices: Some(gltf::Index::new(idx_acc_idx as u32)),
         material: Some(gltf::Index::new(0)),
         mode: Checked::Valid(gltf::mesh::Mode::Triangles),
-        targets: None, extensions: None, extras: None,
+        targets: None,
+        extensions: None,
+        extras: None,
     };
 
     let mesh = gltf::Mesh {
         name: Some("terrain".into()),
         primitives: vec![primitive],
-        weights: None, extensions: None, extras: None,
+        weights: None,
+        extensions: None,
+        extras: None,
     };
 
     // ----- Step 7: Build scene nodes -----
@@ -1428,7 +1486,12 @@ pub fn build_terrain_glb(
             let rotation = if *rotation_y_deg != 0.0 {
                 let angle_rad = rotation_y_deg.to_radians();
                 let half = angle_rad / 2.0;
-                Some(gltf::scene::UnitQuaternion([0.0, half.sin(), 0.0, half.cos()]))
+                Some(gltf::scene::UnitQuaternion([
+                    0.0,
+                    half.sin(),
+                    0.0,
+                    half.cos(),
+                ]))
             } else {
                 None
             };
@@ -1459,13 +1522,16 @@ pub fn build_terrain_glb(
         root_children.push(gltf::Index::new(buildings_parent_idx));
 
         // Now push all building child nodes
-        for (obj_id, position, rotation_y_deg, scale, source_glb) in
-            &metadata.building_placements
-        {
+        for (obj_id, position, rotation_y_deg, scale, source_glb) in &metadata.building_placements {
             let rotation = if *rotation_y_deg != 0.0 {
                 let angle_rad = rotation_y_deg.to_radians();
                 let half = angle_rad / 2.0;
-                Some(gltf::scene::UnitQuaternion([0.0, half.sin(), 0.0, half.cos()]))
+                Some(gltf::scene::UnitQuaternion([
+                    0.0,
+                    half.sin(),
+                    0.0,
+                    half.cos(),
+                ]))
             } else {
                 None
             };
@@ -1500,9 +1566,15 @@ pub fn build_terrain_glb(
     let light_node_idx = nodes.len() as u32;
 
     // Normalize light direction
-    let ld_len = (light_dir[0]*light_dir[0] + light_dir[1]*light_dir[1] + light_dir[2]*light_dir[2]).sqrt();
+    let ld_len =
+        (light_dir[0] * light_dir[0] + light_dir[1] * light_dir[1] + light_dir[2] * light_dir[2])
+            .sqrt();
     let ld = if ld_len > 1e-8 {
-        [light_dir[0]/ld_len, light_dir[1]/ld_len, light_dir[2]/ld_len]
+        [
+            light_dir[0] / ld_len,
+            light_dir[1] / ld_len,
+            light_dir[2] / ld_len,
+        ]
     } else {
         [0.0, -1.0, 0.0] // default downward
     };
@@ -1511,7 +1583,7 @@ pub fn build_terrain_glb(
     // from = [0, 0, -1], to = ld
     // axis = cross(from, to), angle = acos(dot(from, to))
     let from = [0.0f32, 0.0, -1.0];
-    let dot = from[0]*ld[0] + from[1]*ld[1] + from[2]*ld[2];
+    let dot = from[0] * ld[0] + from[1] * ld[1] + from[2] * ld[2];
     let light_rotation = if dot > 0.9999 {
         // Same direction, identity quaternion
         [0.0, 0.0, 0.0, 1.0]
@@ -1520,16 +1592,16 @@ pub fn build_terrain_glb(
         [0.0, 1.0, 0.0, 0.0]
     } else {
         let axis = [
-            from[1]*ld[2] - from[2]*ld[1],
-            from[2]*ld[0] - from[0]*ld[2],
-            from[0]*ld[1] - from[1]*ld[0],
+            from[1] * ld[2] - from[2] * ld[1],
+            from[2] * ld[0] - from[0] * ld[2],
+            from[0] * ld[1] - from[1] * ld[0],
         ];
-        let axis_len = (axis[0]*axis[0] + axis[1]*axis[1] + axis[2]*axis[2]).sqrt();
-        let axis = [axis[0]/axis_len, axis[1]/axis_len, axis[2]/axis_len];
+        let axis_len = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+        let axis = [axis[0] / axis_len, axis[1] / axis_len, axis[2] / axis_len];
         let angle = dot.acos();
         let half = angle / 2.0;
         let s = half.sin();
-        [axis[0]*s, axis[1]*s, axis[2]*s, half.cos()]
+        [axis[0] * s, axis[1] * s, axis[2] * s, half.cos()]
     };
 
     nodes.push(gltf::Node {
@@ -1575,7 +1647,9 @@ pub fn build_terrain_glb(
         nodes: vec![gltf::Index::new(root_node_idx)],
         name: Some("MapScene".into()),
         extensions: None,
-        extras: Some(RawValue::from_string(serde_json::to_string(&scene_extras)?)?),
+        extras: Some(RawValue::from_string(serde_json::to_string(
+            &scene_extras,
+        )?)?),
     };
 
     // ----- Step 10: Assemble glTF root -----
@@ -1605,7 +1679,8 @@ pub fn build_terrain_glb(
     // Single buffer covering all binary data
     let buffer = gltf::Buffer {
         byte_length: USize64(bin.len() as u64),
-        extensions: None, extras: None,
+        extensions: None,
+        extras: None,
         name: Some("terrain_buffer".into()),
         uri: None, // embedded in GLB
     };
@@ -1678,17 +1753,29 @@ pub fn compute_global_normals(parsed_map: &ParsedMap, ct: &CoordTransform) -> Ve
 
             // Triangle winding reversed (CCW for glTF): v00,v10,v01 and v10,v11,v01
             for &(i0, i1, i2) in &[(v00, v10, v01), (v10, v11, v01)] {
-                let p0 = [positions[i0*3], positions[i0*3+1], positions[i0*3+2]];
-                let p1 = [positions[i1*3], positions[i1*3+1], positions[i1*3+2]];
-                let p2 = [positions[i2*3], positions[i2*3+1], positions[i2*3+2]];
+                let p0 = [
+                    positions[i0 * 3],
+                    positions[i0 * 3 + 1],
+                    positions[i0 * 3 + 2],
+                ];
+                let p1 = [
+                    positions[i1 * 3],
+                    positions[i1 * 3 + 1],
+                    positions[i1 * 3 + 2],
+                ];
+                let p2 = [
+                    positions[i2 * 3],
+                    positions[i2 * 3 + 1],
+                    positions[i2 * 3 + 2],
+                ];
 
-                let e1 = [p1[0]-p0[0], p1[1]-p0[1], p1[2]-p0[2]];
-                let e2 = [p2[0]-p0[0], p2[1]-p0[1], p2[2]-p0[2]];
+                let e1 = [p1[0] - p0[0], p1[1] - p0[1], p1[2] - p0[2]];
+                let e2 = [p2[0] - p0[0], p2[1] - p0[1], p2[2] - p0[2]];
 
                 let n = [
-                    e1[1]*e2[2] - e1[2]*e2[1],
-                    e1[2]*e2[0] - e1[0]*e2[2],
-                    e1[0]*e2[1] - e1[1]*e2[0],
+                    e1[1] * e2[2] - e1[2] * e2[1],
+                    e1[2] * e2[0] - e1[0] * e2[2],
+                    e1[0] * e2[1] - e1[1] * e2[0],
                 ];
 
                 for &idx in &[i0, i1, i2] {
@@ -1702,9 +1789,11 @@ pub fn compute_global_normals(parsed_map: &ParsedMap, ct: &CoordTransform) -> Ve
 
     // Normalize
     for n in &mut normals {
-        let len = (n[0]*n[0] + n[1]*n[1] + n[2]*n[2]).sqrt();
+        let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
         if len > 1e-8 {
-            n[0] /= len; n[1] /= len; n[2] /= len;
+            n[0] /= len;
+            n[1] /= len;
+            n[2] /= len;
         } else {
             *n = [0.0, 1.0, 0.0];
         }
@@ -1755,7 +1844,8 @@ pub fn build_terrain_section_glb(
             let gvx = tile_x0 as usize + lx; // global vertex X
             let gvy = tile_z0 as usize + ly; // global vertex Z
 
-            let (height, r, g, b) = match get_render_vertex_tile(parsed_map, gvx as i32, gvy as i32) {
+            let (height, r, g, b) = match get_render_vertex_tile(parsed_map, gvx as i32, gvy as i32)
+            {
                 Some(tile) => {
                     let (cr, cg, cb) = rgb565_to_float(tile.s_color);
                     (tile_height(tile), cr, cg, cb)
@@ -1868,7 +1958,9 @@ pub fn build_terrain_section_glb(
         byte_length: USize64(pos_len as u64),
         byte_offset: Some(USize64(pos_off as u64)),
         target: Some(Checked::Valid(gltf::buffer::Target::ArrayBuffer)),
-        byte_stride: None, extensions: None, extras: None,
+        byte_stride: None,
+        extensions: None,
+        extras: None,
         name: None,
     });
     let pos_acc_idx = accessors.len();
@@ -1881,7 +1973,10 @@ pub fn build_terrain_section_glb(
         min: Some(serde_json::to_value(pos_min)?),
         max: Some(serde_json::to_value(pos_max)?),
         name: None,
-        normalized: false, sparse: None, extensions: None, extras: None,
+        normalized: false,
+        sparse: None,
+        extensions: None,
+        extras: None,
     });
 
     // Normals
@@ -1892,7 +1987,9 @@ pub fn build_terrain_section_glb(
         byte_length: USize64(norm_len as u64),
         byte_offset: Some(USize64(norm_off as u64)),
         target: Some(Checked::Valid(gltf::buffer::Target::ArrayBuffer)),
-        byte_stride: None, extensions: None, extras: None,
+        byte_stride: None,
+        extensions: None,
+        extras: None,
         name: None,
     });
     let norm_acc_idx = accessors.len();
@@ -1902,8 +1999,13 @@ pub fn build_terrain_section_glb(
         component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
         count: USize64(vertex_count as u64),
         type_: Checked::Valid(gltf::accessor::Type::Vec3),
-        min: None, max: None, name: None,
-        normalized: false, sparse: None, extensions: None, extras: None,
+        min: None,
+        max: None,
+        name: None,
+        normalized: false,
+        sparse: None,
+        extensions: None,
+        extras: None,
     });
 
     // Colors (VEC4)
@@ -1914,7 +2016,9 @@ pub fn build_terrain_section_glb(
         byte_length: USize64(col_len as u64),
         byte_offset: Some(USize64(col_off as u64)),
         target: Some(Checked::Valid(gltf::buffer::Target::ArrayBuffer)),
-        byte_stride: None, extensions: None, extras: None,
+        byte_stride: None,
+        extensions: None,
+        extras: None,
         name: None,
     });
     let col_acc_idx = accessors.len();
@@ -1924,8 +2028,13 @@ pub fn build_terrain_section_glb(
         component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
         count: USize64(vertex_count as u64),
         type_: Checked::Valid(gltf::accessor::Type::Vec4),
-        min: None, max: None, name: None,
-        normalized: false, sparse: None, extensions: None, extras: None,
+        min: None,
+        max: None,
+        name: None,
+        normalized: false,
+        sparse: None,
+        extensions: None,
+        extras: None,
     });
 
     // Indices
@@ -1936,7 +2045,9 @@ pub fn build_terrain_section_glb(
         byte_length: USize64(idx_len as u64),
         byte_offset: Some(USize64(idx_off as u64)),
         target: Some(Checked::Valid(gltf::buffer::Target::ElementArrayBuffer)),
-        byte_stride: None, extensions: None, extras: None,
+        byte_stride: None,
+        extensions: None,
+        extras: None,
         name: None,
     });
     let idx_acc_idx = accessors.len();
@@ -1946,8 +2057,13 @@ pub fn build_terrain_section_glb(
         component_type: Checked::Valid(GenericComponentType(ComponentType::U32)),
         count: USize64(indices.len() as u64),
         type_: Checked::Valid(gltf::accessor::Type::Scalar),
-        min: None, max: None, name: None,
-        normalized: false, sparse: None, extensions: None, extras: None,
+        min: None,
+        max: None,
+        name: None,
+        normalized: false,
+        sparse: None,
+        extensions: None,
+        extras: None,
     });
 
     // UVs (optional)
@@ -1959,7 +2075,9 @@ pub fn build_terrain_section_glb(
             byte_length: USize64(uv_len as u64),
             byte_offset: Some(USize64(uv_off as u64)),
             target: Some(Checked::Valid(gltf::buffer::Target::ArrayBuffer)),
-            byte_stride: None, extensions: None, extras: None,
+            byte_stride: None,
+            extensions: None,
+            extras: None,
             name: None,
         });
         let uv_acc = accessors.len();
@@ -1969,8 +2087,13 @@ pub fn build_terrain_section_glb(
             component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
             count: USize64(vertex_count as u64),
             type_: Checked::Valid(gltf::accessor::Type::Vec2),
-            min: None, max: None, name: None,
-            normalized: false, sparse: None, extensions: None, extras: None,
+            min: None,
+            max: None,
+            name: None,
+            normalized: false,
+            sparse: None,
+            extensions: None,
+            extras: None,
         });
         Some(uv_acc)
     } else {
@@ -2018,11 +2141,15 @@ pub fn build_terrain_section_glb(
             metallic_factor: gltf::material::StrengthFactor(0.0),
             roughness_factor: gltf::material::StrengthFactor(1.0),
             metallic_roughness_texture: None,
-            extensions: None, extras: None,
+            extensions: None,
+            extras: None,
         },
-        normal_texture: None, occlusion_texture: None, emissive_texture: None,
+        normal_texture: None,
+        occlusion_texture: None,
+        emissive_texture: None,
         emissive_factor: gltf::material::EmissiveFactor([0.0, 0.0, 0.0]),
-        extensions: None, extras: None,
+        extensions: None,
+        extras: None,
         name: Some(format!("section_{}_{}_mat", sx, sz)),
     };
 
@@ -2031,13 +2158,17 @@ pub fn build_terrain_section_glb(
         indices: Some(gltf::Index::new(idx_acc_idx as u32)),
         material: Some(gltf::Index::new(0)),
         mode: Checked::Valid(gltf::mesh::Mode::Triangles),
-        targets: None, extensions: None, extras: None,
+        targets: None,
+        extensions: None,
+        extras: None,
     };
 
     let mesh = gltf::Mesh {
         name: Some(format!("section_{}_{}", sx, sz)),
         primitives: vec![primitive],
-        weights: None, extensions: None, extras: None,
+        weights: None,
+        extensions: None,
+        extras: None,
     };
 
     // Single node referencing the mesh
@@ -2050,12 +2181,14 @@ pub fn build_terrain_section_glb(
     let scene = gltf::Scene {
         nodes: vec![gltf::Index::new(0)],
         name: None,
-        extensions: None, extras: None,
+        extensions: None,
+        extras: None,
     };
 
     let buffer = gltf::Buffer {
         byte_length: USize64(bin.len() as u64),
-        extensions: None, extras: None,
+        extensions: None,
+        extras: None,
         name: None,
         uri: None,
     };
@@ -2129,13 +2262,16 @@ pub fn build_metadata_only_glb(
         });
         root_children.push(gltf::Index::new(buildings_parent_idx));
 
-        for (obj_id, position, rotation_y_deg, scale, source_glb) in
-            &metadata.building_placements
-        {
+        for (obj_id, position, rotation_y_deg, scale, source_glb) in &metadata.building_placements {
             let rotation = if *rotation_y_deg != 0.0 {
                 let angle_rad = rotation_y_deg.to_radians();
                 let half = angle_rad / 2.0;
-                Some(gltf::scene::UnitQuaternion([0.0, half.sin(), 0.0, half.cos()]))
+                Some(gltf::scene::UnitQuaternion([
+                    0.0,
+                    half.sin(),
+                    0.0,
+                    half.cos(),
+                ]))
             } else {
                 None
             };
@@ -2166,31 +2302,37 @@ pub fn build_metadata_only_glb(
     let light_dir = metadata.light_direction;
     let light_node_idx = nodes.len() as u32;
 
-    let ld_len = (light_dir[0]*light_dir[0] + light_dir[1]*light_dir[1] + light_dir[2]*light_dir[2]).sqrt();
+    let ld_len =
+        (light_dir[0] * light_dir[0] + light_dir[1] * light_dir[1] + light_dir[2] * light_dir[2])
+            .sqrt();
     let ld = if ld_len > 1e-8 {
-        [light_dir[0]/ld_len, light_dir[1]/ld_len, light_dir[2]/ld_len]
+        [
+            light_dir[0] / ld_len,
+            light_dir[1] / ld_len,
+            light_dir[2] / ld_len,
+        ]
     } else {
         [0.0, -1.0, 0.0]
     };
 
     let from = [0.0f32, 0.0, -1.0];
-    let dot = from[0]*ld[0] + from[1]*ld[1] + from[2]*ld[2];
+    let dot = from[0] * ld[0] + from[1] * ld[1] + from[2] * ld[2];
     let light_rotation = if dot > 0.9999 {
         [0.0, 0.0, 0.0, 1.0]
     } else if dot < -0.9999 {
         [0.0, 1.0, 0.0, 0.0]
     } else {
         let axis = [
-            from[1]*ld[2] - from[2]*ld[1],
-            from[2]*ld[0] - from[0]*ld[2],
-            from[0]*ld[1] - from[1]*ld[0],
+            from[1] * ld[2] - from[2] * ld[1],
+            from[2] * ld[0] - from[0] * ld[2],
+            from[0] * ld[1] - from[1] * ld[0],
         ];
-        let axis_len = (axis[0]*axis[0] + axis[1]*axis[1] + axis[2]*axis[2]).sqrt();
-        let axis = [axis[0]/axis_len, axis[1]/axis_len, axis[2]/axis_len];
+        let axis_len = (axis[0] * axis[0] + axis[1] * axis[1] + axis[2] * axis[2]).sqrt();
+        let axis = [axis[0] / axis_len, axis[1] / axis_len, axis[2] / axis_len];
         let angle = dot.acos();
         let half = angle / 2.0;
         let s = half.sin();
-        [axis[0]*s, axis[1]*s, axis[2]*s, half.cos()]
+        [axis[0] * s, axis[1] * s, axis[2] * s, half.cos()]
     };
 
     nodes.push(gltf::Node {
@@ -2236,7 +2378,9 @@ pub fn build_metadata_only_glb(
         nodes: vec![gltf::Index::new(root_node_idx)],
         name: Some("MapScene".into()),
         extensions: None,
-        extras: Some(RawValue::from_string(serde_json::to_string(&scene_extras)?)?),
+        extras: Some(RawValue::from_string(serde_json::to_string(
+            &scene_extras,
+        )?)?),
     };
 
     // Light definition
@@ -2247,8 +2391,10 @@ pub fn build_metadata_only_glb(
         intensity: 1.0,
         name: Some("sun".into()),
         type_: Checked::Valid(khr_lights_punctual::Type::Directional),
-        range: None, spot: None,
-        extensions: None, extras: Default::default(),
+        range: None,
+        spot: None,
+        extensions: None,
+        extras: Default::default(),
     };
 
     let root_ext = gltf::extensions::root::Root {
@@ -2681,7 +2827,11 @@ pub fn export_mapdata(
     out.extend_from_slice(&compressed_block_size.to_le_bytes()); // [24:28]
     out.extend_from_slice(&raw_block_size.to_le_bytes()); // [28:32]
 
-    assert_eq!(out.len(), MAPDATA_HEADER_SIZE as usize, "header must be exactly 32 bytes");
+    assert_eq!(
+        out.len(),
+        MAPDATA_HEADER_SIZE as usize,
+        "header must be exactly 32 bytes"
+    );
 
     // Collision bitmap (uncompressed)
     out.extend_from_slice(&collision_bitmap);
@@ -2764,7 +2914,6 @@ fn load_effect_file(project_dir: &Path, eff_filename: &str) -> Option<EffFile> {
 
     None
 }
-
 
 /// Get metadata for a map without building the full glTF.
 pub fn get_metadata(project_dir: &Path, map_name: &str) -> Result<MapMetadata> {
@@ -2999,12 +3148,7 @@ mod tests {
         // Vertex order for 1x1 grid: (0,0), (1,0), (0,1), (1,1)
         // Boundary clamping: +1 edge vertices clamp to their loaded neighbor,
         // so all four vertices share the same tile height (no cliff).
-        let expected = [
-            1.0f32,
-            1.0f32,
-            1.0f32,
-            1.0f32,
-        ];
+        let expected = [1.0f32, 1.0f32, 1.0f32, 1.0f32];
         for (actual, exp) in y_values.iter().zip(expected.iter()) {
             assert!(
                 (actual - exp).abs() < 0.0001,
@@ -3392,7 +3536,11 @@ mod tests {
         // (1,0) → get_tile(1,0) = tile(1,0), c_height=-5 → -500mm
         assert_eq!(read_i16(1), -500, "vertex (1,0) → tile (1,0) c_height=-5");
         // (2,0) → get_tile(2,0) → out of range (n_width=2) → UNDERWATER_HEIGHT = -2000mm
-        assert_eq!(read_i16(2), -2000, "vertex (2,0) → edge → UNDERWATER_HEIGHT");
+        assert_eq!(
+            read_i16(2),
+            -2000,
+            "vertex (2,0) → edge → UNDERWATER_HEIGHT"
+        );
 
         // Row 1: vertices (0,1), (1,1), (2,1)
         // (0,1) → get_tile(0,1) = tile(0,1), c_height=0 → 0mm
@@ -3400,12 +3548,28 @@ mod tests {
         // (1,1) → get_tile(1,1) = tile(1,1), c_height=127 → 12700mm
         assert_eq!(read_i16(4), 12700, "vertex (1,1) → tile (1,1) c_height=127");
         // (2,1) → out of range → UNDERWATER_HEIGHT
-        assert_eq!(read_i16(5), -2000, "vertex (2,1) → edge → UNDERWATER_HEIGHT");
+        assert_eq!(
+            read_i16(5),
+            -2000,
+            "vertex (2,1) → edge → UNDERWATER_HEIGHT"
+        );
 
         // Row 2: vertices (0,2), (1,2), (2,2) — all edge (vy=2 >= n_height=2)
-        assert_eq!(read_i16(6), -2000, "vertex (0,2) → edge → UNDERWATER_HEIGHT");
-        assert_eq!(read_i16(7), -2000, "vertex (1,2) → edge → UNDERWATER_HEIGHT");
-        assert_eq!(read_i16(8), -2000, "vertex (2,2) → edge → UNDERWATER_HEIGHT");
+        assert_eq!(
+            read_i16(6),
+            -2000,
+            "vertex (0,2) → edge → UNDERWATER_HEIGHT"
+        );
+        assert_eq!(
+            read_i16(7),
+            -2000,
+            "vertex (1,2) → edge → UNDERWATER_HEIGHT"
+        );
+        assert_eq!(
+            read_i16(8),
+            -2000,
+            "vertex (2,2) → edge → UNDERWATER_HEIGHT"
+        );
     }
 
     #[test]
@@ -3862,9 +4026,7 @@ mod tests {
         let tiles_per_sec = (section_size * section_size) as usize;
         let mut sections = Vec::new();
         for _ in 0..(sec_x * sec_y) {
-            let tiles: Vec<MapTile> = (0..tiles_per_sec)
-                .map(|_| make_tile(5))
-                .collect();
+            let tiles: Vec<MapTile> = (0..tiles_per_sec).map(|_| make_tile(5)).collect();
             sections.push(Some(MapSection { tiles }));
         }
         ParsedMap {
@@ -3905,8 +4067,13 @@ mod tests {
         let ct = CoordTransform::new();
         let normals = compute_global_normals(&map, &ct);
         for n in &normals {
-            let len = (n[0]*n[0] + n[1]*n[1] + n[2]*n[2]).sqrt();
-            assert!((len - 1.0).abs() < 0.001, "non-unit normal: {:?} len={}", n, len);
+            let len = (n[0] * n[0] + n[1] * n[1] + n[2] * n[2]).sqrt();
+            assert!(
+                (len - 1.0).abs() < 0.001,
+                "non-unit normal: {:?} len={}",
+                n,
+                len
+            );
         }
     }
 
@@ -3916,8 +4083,8 @@ mod tests {
         let ct = CoordTransform::new();
         let normals = compute_global_normals(&map, &ct);
         // Section (0,0) covers tiles [0..2) x [0..2) with section_tile_size=2
-        let (json, bin) = build_terrain_section_glb(&map, false, &normals, 2, 0, 0, &ct)
-            .expect("section glb");
+        let (json, bin) =
+            build_terrain_section_glb(&map, false, &normals, 2, 0, 0, &ct).expect("section glb");
         let root: serde_json::Value = serde_json::from_str(&json).expect("parse");
         // 2x2 tiles → 3x3 = 9 vertices
         let pos_acc = root["accessors"][0]["count"].as_u64().unwrap();
@@ -3931,23 +4098,30 @@ mod tests {
         let ct = CoordTransform::new();
         let normals = compute_global_normals(&map, &ct);
         // Section (1,1) covers tiles [2..4) x [2..4)
-        let (json, bin) = build_terrain_section_glb(&map, false, &normals, 2, 1, 1, &ct)
-            .expect("section glb");
+        let (json, bin) =
+            build_terrain_section_glb(&map, false, &normals, 2, 1, 1, &ct).expect("section glb");
         let root: serde_json::Value = serde_json::from_str(&json).expect("parse");
 
         // Verify positions use local coords 0..2 (not global 2..4)
         let pos_acc_idx = root["meshes"][0]["primitives"][0]["attributes"]["POSITION"]
-            .as_u64().unwrap() as usize;
+            .as_u64()
+            .unwrap() as usize;
         let accessor = &root["accessors"][pos_acc_idx];
         let min = accessor["min"].as_array().unwrap();
         let max = accessor["max"].as_array().unwrap();
 
         // X min should be 0 (local), not 2 (global)
-        assert!((min[0].as_f64().unwrap() - 0.0).abs() < 0.01,
-            "X min should be 0 (local), got {}", min[0]);
+        assert!(
+            (min[0].as_f64().unwrap() - 0.0).abs() < 0.01,
+            "X min should be 0 (local), got {}",
+            min[0]
+        );
         // X max should be 2 (section_tile_size), not 4
-        assert!((max[0].as_f64().unwrap() - 2.0).abs() < 0.01,
-            "X max should be 2 (local), got {}", max[0]);
+        assert!(
+            (max[0].as_f64().unwrap() - 2.0).abs() < 0.01,
+            "X max should be 2 (local), got {}",
+            max[0]
+        );
         assert!(!bin.is_empty());
     }
 
@@ -3956,13 +4130,15 @@ mod tests {
         let map = make_test_map(4, 4, 2);
         let ct = CoordTransform::new();
         let normals = compute_global_normals(&map, &ct);
-        let (json, _bin) = build_terrain_section_glb(&map, true, &normals, 2, 0, 0, &ct)
-            .expect("section glb");
+        let (json, _bin) =
+            build_terrain_section_glb(&map, true, &normals, 2, 0, 0, &ct).expect("section glb");
         let root: serde_json::Value = serde_json::from_str(&json).expect("parse");
 
         // Section GLBs should have no images (atlas URI removed for import speed)
-        assert!(root["images"].as_array().map_or(true, |a| a.is_empty()),
-            "section GLBs should not reference terrain_atlas.png");
+        assert!(
+            root["images"].as_array().map_or(true, |a| a.is_empty()),
+            "section GLBs should not reference terrain_atlas.png"
+        );
     }
 
     #[test]
@@ -3982,11 +4158,15 @@ mod tests {
         let root: serde_json::Value = serde_json::from_str(&json).expect("parse");
 
         // No meshes
-        assert!(root["meshes"].as_array().map_or(true, |a| a.is_empty()),
-            "metadata GLB should have no meshes");
+        assert!(
+            root["meshes"].as_array().map_or(true, |a| a.is_empty()),
+            "metadata GLB should have no meshes"
+        );
         // Has SpawnPoint node
         let nodes = root["nodes"].as_array().unwrap();
-        let spawn = nodes.iter().find(|n| n["name"].as_str() == Some("SpawnPoint"));
+        let spawn = nodes
+            .iter()
+            .find(|n| n["name"].as_str() == Some("SpawnPoint"));
         assert!(spawn.is_some(), "should have SpawnPoint node");
         // Has scene extras with map_name
         let extras = root["scenes"][0]["extras"].as_object().unwrap();
@@ -4090,7 +4270,8 @@ mod tests {
         //   tile_layer: 4*4*8 = 128
         //   tile_color: 4*4*2 = 32
         //   Total: 402
-        let expected_raw = 8*8*2 + 5*5*2 + 4*4*1 + 4*4*2 + 4*4*1 + 4*4*8 + 4*4*2;
+        let expected_raw =
+            8 * 8 * 2 + 5 * 5 * 2 + 4 * 4 * 1 + 4 * 4 * 2 + 4 * 4 * 1 + 4 * 4 * 8 + 4 * 4 * 2;
         assert_eq!(raw_size, expected_raw, "raw block size mismatch");
 
         // Verify total file size matches result

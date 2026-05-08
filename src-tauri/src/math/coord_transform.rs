@@ -71,20 +71,15 @@ impl CoordTransform {
         // Row-major m[row][col] transposed into cgmath column-major:
         // cgmath col j = input row j
         let d3d = Matrix4::new(
-            m[0][0], m[0][1], m[0][2], m[0][3],
-            m[1][0], m[1][1], m[1][2], m[1][3],
-            m[2][0], m[2][1], m[2][2], m[2][3],
-            m[3][0], m[3][1], m[3][2], m[3][3],
+            m[0][0], m[0][1], m[0][2], m[0][3], m[1][0], m[1][1], m[1][2], m[1][3], m[2][0],
+            m[2][1], m[2][2], m[2][3], m[3][0], m[3][1], m[3][2], m[3][3],
         );
 
         // Basis change matrix B (and B^-1 = B^T for orthogonal B)
         // Maps (x,y,z) -> (x, z, y) — Y↔Z swap, det=-1 (LH→RH)
         // cgmath::Matrix4::new() is column-major
         let b = Matrix4::new(
-            1.0,  0.0, 0.0, 0.0,
-            0.0,  0.0, 1.0, 0.0,
-            0.0,  1.0, 0.0, 0.0,
-            0.0,  0.0, 0.0, 1.0,
+            1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         );
         let b_inv = b.transpose(); // B is orthogonal, so B^-1 = B^T
 
@@ -107,18 +102,13 @@ impl CoordTransform {
     pub fn matrix4_col_major(&self, m: [f32; 16]) -> [f32; 16] {
         // Feed directly into cgmath (already column-major)
         let mat = Matrix4::new(
-            m[0], m[1], m[2], m[3],
-            m[4], m[5], m[6], m[7],
-            m[8], m[9], m[10], m[11],
-            m[12], m[13], m[14], m[15],
+            m[0], m[1], m[2], m[3], m[4], m[5], m[6], m[7], m[8], m[9], m[10], m[11], m[12], m[13],
+            m[14], m[15],
         );
 
         let b = Matrix4::new(
             // Maps (x,y,z) -> (x, z, y) — Y↔Z swap, det=-1 (LH→RH)
-            1.0,  0.0, 0.0, 0.0,
-            0.0,  0.0, 1.0, 0.0,
-            0.0,  1.0, 0.0, 0.0,
-            0.0,  0.0, 0.0, 1.0,
+            1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
         );
         let b_inv = b.transpose();
 
@@ -126,10 +116,22 @@ impl CoordTransform {
 
         // Output column-major [f32; 16]
         [
-            result[0][0], result[0][1], result[0][2], result[0][3],
-            result[1][0], result[1][1], result[1][2], result[1][3],
-            result[2][0], result[2][1], result[2][2], result[2][3],
-            result[3][0], result[3][1], result[3][2], result[3][3],
+            result[0][0],
+            result[0][1],
+            result[0][2],
+            result[0][3],
+            result[1][0],
+            result[1][1],
+            result[1][2],
+            result[1][3],
+            result[2][0],
+            result[2][1],
+            result[2][2],
+            result[2][3],
+            result[3][0],
+            result[3][1],
+            result[3][2],
+            result[3][3],
         ]
     }
 
@@ -194,15 +196,16 @@ mod tests {
     #[test]
     fn standard_quaternion_swizzle() {
         let ct = CoordTransform::new();
-        assert_arr4_eq(
-            ct.quaternion([0.1, 0.2, 0.3, 0.9]),
-            [-0.1, -0.3, -0.2, 0.9],
-        );
+        assert_arr4_eq(ct.quaternion([0.1, 0.2, 0.3, 0.9]), [-0.1, -0.3, -0.2, 0.9]);
     }
 
     /// Helper: verify quaternion-position consistency.
     /// Rotate in source space then convert == convert both then rotate.
-    fn assert_quaternion_position_consistency(ct: &CoordTransform, src_q: [f32; 4], src_p: [f32; 3]) {
+    fn assert_quaternion_position_consistency(
+        ct: &CoordTransform,
+        src_q: [f32; 4],
+        src_p: [f32; 3],
+    ) {
         let q = Quaternion::new(src_q[3], src_q[0], src_q[1], src_q[2]);
         let p = Vector3::new(src_p[0], src_p[1], src_p[2]);
 

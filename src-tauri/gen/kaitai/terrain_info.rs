@@ -8,8 +8,8 @@
 
 extern crate kaitai;
 use kaitai::*;
+use std::cell::{Cell, Ref, RefCell};
 use std::convert::{TryFrom, TryInto};
-use std::cell::{Ref, Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 /**
@@ -17,7 +17,7 @@ use std::rc::{Rc, Weak};
  * The file layout is:
  * 1) u4 record_size (sizeof(MPTerrainInfo))
  * 2) repeated MPTerrainInfo records to EOF
- * 
+ *
  * For the original 32-bit client, record_size is 120 bytes.
  * Important: terrain IDs are stored in each entry as `n_id` and are 1-based in this file.
  * The Kaitai `entries` array is 0-based, so `entries[21]` has `n_id = 22`.
@@ -61,7 +61,12 @@ impl KStruct for TerrainInfo {
         {
             let mut _i = 0;
             while !_io.is_eof() {
-                let t = Self::read_into::<_, TerrainInfo_TerrainInfoEntry>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+                let t = Self::read_into::<_, TerrainInfo_TerrainInfoEntry>(
+                    &*_io,
+                    Some(self_rc._root.clone()),
+                    Some(self_rc._self.clone()),
+                )?
+                .into();
                 self_rc.entries.borrow_mut().push(t);
                 _i += 1;
             }
@@ -70,9 +75,7 @@ impl KStruct for TerrainInfo {
     }
 }
 impl TerrainInfo {
-    pub fn entry_count(
-        &self
-    ) -> KResult<Ref<'_, i32>> {
+    pub fn entry_count(&self) -> KResult<Ref<'_, i32>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -84,9 +87,7 @@ impl TerrainInfo {
         *self.entry_count.borrow_mut() = (self.entries().len()) as i32;
         Ok(self.entry_count.borrow())
     }
-    pub fn has_expected_record_size(
-        &self
-    ) -> KResult<Ref<'_, bool>> {
+    pub fn has_expected_record_size(&self) -> KResult<Ref<'_, bool>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -95,7 +96,8 @@ impl TerrainInfo {
             return Ok(self.has_expected_record_size.borrow());
         }
         self.f_has_expected_record_size.set(true);
-        *self.has_expected_record_size.borrow_mut() = (((*self.record_size() as u32) == (120 as u32))) as bool;
+        *self.has_expected_record_size.borrow_mut() =
+            ((*self.record_size() as u32) == (120 as u32)) as bool;
         Ok(self.has_expected_record_size.borrow())
     }
 }
@@ -162,7 +164,15 @@ impl KStruct for TerrainInfo_TerrainInfoEntry {
         let _r = _rrc.as_ref().unwrap();
         *self_rc.b_exist_raw.borrow_mut() = _io.read_u4le()?.into();
         *self_rc.n_index.borrow_mut() = _io.read_s4le()?.into();
-        *self_rc.sz_data_name.borrow_mut() = bytes_to_str(&bytes_terminate(&bytes_strip_right(&_io.read_bytes(72 as usize)?.into(), 0).into(), 0, false).into(), "ASCII")?;
+        *self_rc.sz_data_name.borrow_mut() = bytes_to_str(
+            &bytes_terminate(
+                &bytes_strip_right(&_io.read_bytes(72 as usize)?.into(), 0).into(),
+                0,
+                false,
+            )
+            .into(),
+            "ASCII",
+        )?;
         *self_rc.dw_last_use_tick.borrow_mut() = _io.read_u4le()?.into();
         *self_rc.b_enable_raw.borrow_mut() = _io.read_u4le()?.into();
         *self_rc.p_data.borrow_mut() = _io.read_u4le()?.into();
@@ -179,9 +189,7 @@ impl KStruct for TerrainInfo_TerrainInfoEntry {
     }
 }
 impl TerrainInfo_TerrainInfoEntry {
-    pub fn b_enable(
-        &self
-    ) -> KResult<Ref<'_, bool>> {
+    pub fn b_enable(&self) -> KResult<Ref<'_, bool>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -190,12 +198,10 @@ impl TerrainInfo_TerrainInfoEntry {
             return Ok(self.b_enable.borrow());
         }
         self.f_b_enable.set(true);
-        *self.b_enable.borrow_mut() = (((*self.b_enable_raw() as u32) != (0 as u32))) as bool;
+        *self.b_enable.borrow_mut() = ((*self.b_enable_raw() as u32) != (0 as u32)) as bool;
         Ok(self.b_enable.borrow())
     }
-    pub fn b_exist(
-        &self
-    ) -> KResult<Ref<'_, bool>> {
+    pub fn b_exist(&self) -> KResult<Ref<'_, bool>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -204,12 +210,10 @@ impl TerrainInfo_TerrainInfoEntry {
             return Ok(self.b_exist.borrow());
         }
         self.f_b_exist.set(true);
-        *self.b_exist.borrow_mut() = (((*self.b_exist_raw() as u32) != (0 as u32))) as bool;
+        *self.b_exist.borrow_mut() = ((*self.b_exist_raw() as u32) != (0 as u32)) as bool;
         Ok(self.b_exist.borrow())
     }
-    pub fn is_underwater_type(
-        &self
-    ) -> KResult<Ref<'_, bool>> {
+    pub fn is_underwater_type(&self) -> KResult<Ref<'_, bool>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -218,7 +222,7 @@ impl TerrainInfo_TerrainInfoEntry {
             return Ok(self.is_underwater_type.borrow());
         }
         self.f_is_underwater_type.set(true);
-        *self.is_underwater_type.borrow_mut() = (((*self.bt_type() as u8) == (1 as u8))) as bool;
+        *self.is_underwater_type.borrow_mut() = ((*self.bt_type() as u8) == (1 as u8)) as bool;
         Ok(self.is_underwater_type.borrow())
     }
 }

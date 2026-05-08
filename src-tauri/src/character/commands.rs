@@ -238,8 +238,8 @@ pub async fn get_character_actions(
 ) -> Result<Vec<CharacterAction>, String> {
     let project_id =
         uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
-    let project = crate::projects::project::Project::get_project(project_id)
-        .map_err(|e| e.to_string())?;
+    let project =
+        crate::projects::project::Project::get_project(project_id).map_err(|e| e.to_string())?;
     let project_dir = project.project_directory.as_ref();
 
     let action_table_path = project_dir.join("scripts/txt/CharacterAction.tx");
@@ -247,13 +247,10 @@ pub async fn get_character_actions(
 
     let action_table = crate::animation::action_table::load_action_table(&action_table_path)
         .map_err(|e| e.to_string())?;
-    let pose_table = crate::animation::pose_info::load_poseinfo(&poseinfo_path)
-        .map_err(|e| e.to_string())?;
+    let pose_table =
+        crate::animation::pose_info::load_poseinfo(&poseinfo_path).map_err(|e| e.to_string())?;
 
-    let actions = action_table
-        .get(&char_type_id)
-        .cloned()
-        .unwrap_or_default();
+    let actions = action_table.get(&char_type_id).cloned().unwrap_or_default();
 
     let result: Vec<CharacterAction> = actions
         .into_iter()

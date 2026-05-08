@@ -104,7 +104,10 @@ fn resolve_forge_particles(
     Ok(particles)
 }
 
-fn choose_probe_effect(project_dir: &Path, resolved_particles: &[(String, i32, f32)]) -> (String, i32, f32) {
+fn choose_probe_effect(
+    project_dir: &Path,
+    resolved_particles: &[(String, i32, f32)],
+) -> (String, i32, f32) {
     if let Some(found) = resolved_particles
         .iter()
         .find(|(name, _, _)| name.eq_ignore_ascii_case("jjry03.par"))
@@ -255,7 +258,8 @@ fn main() -> anyhow::Result<()> {
     println!("  Y extent = [{min_y:.4}, {max_y:.4}]");
     println!("  Z extent = [{min_z:.4}, {max_z:.4}]");
 
-    let (axis_label, axis_vec, forward_span, backward_min) = dominant_weapon_axis(&vertices_in_dummy);
+    let (axis_label, axis_vec, forward_span, backward_min) =
+        dominant_weapon_axis(&vertices_in_dummy);
     println!(
         "  Dominant forward axis from dummy = {}  forward_span={:.4}  backward_min={:.4}",
         axis_label, forward_span, backward_min
@@ -264,7 +268,11 @@ fn main() -> anyhow::Result<()> {
 
     let eff_bytes = std::fs::read(&eff_path)?;
     let eff = EffFile::from_bytes(&eff_bytes)?;
-    println!("\nLoaded effect: {}  sub_effects={}", eff_path.display(), eff.sub_effects.len());
+    println!(
+        "\nLoaded effect: {}  sub_effects={}",
+        eff_path.display(),
+        eff.sub_effects.len()
+    );
 
     let interesting = [
         ("smallest ring", 0usize),
@@ -276,7 +284,11 @@ fn main() -> anyhow::Result<()> {
     println!("\nRaw effect keyframes:");
     for (label, idx) in interesting {
         if let Some(sub) = eff.sub_effects.get(idx) {
-            let pos = sub.frame_positions.first().copied().unwrap_or([0.0, 0.0, 0.0]);
+            let pos = sub
+                .frame_positions
+                .first()
+                .copied()
+                .unwrap_or([0.0, 0.0, 0.0]);
             let ang = sub.frame_angles.first().copied().unwrap_or([0.0, 0.0, 0.0]);
             let size = sub.frame_sizes.first().copied().unwrap_or([1.0, 1.0, 1.0]);
             println!(
@@ -290,9 +302,30 @@ fn main() -> anyhow::Result<()> {
     }
 
     let sample_positions = [
-        ("smallest ring", eff.sub_effects.get(0).and_then(|s| s.frame_positions.first()).copied().unwrap_or([0.0, 0.0, 0.0])),
-        ("largest ring", eff.sub_effects.get(4).and_then(|s| s.frame_positions.first()).copied().unwrap_or([0.0, 0.0, 0.0])),
-        ("hilt core", eff.sub_effects.get(5).and_then(|s| s.frame_positions.first()).copied().unwrap_or([0.0, 0.0, 0.0])),
+        (
+            "smallest ring",
+            eff.sub_effects
+                .get(0)
+                .and_then(|s| s.frame_positions.first())
+                .copied()
+                .unwrap_or([0.0, 0.0, 0.0]),
+        ),
+        (
+            "largest ring",
+            eff.sub_effects
+                .get(4)
+                .and_then(|s| s.frame_positions.first())
+                .copied()
+                .unwrap_or([0.0, 0.0, 0.0]),
+        ),
+        (
+            "hilt core",
+            eff.sub_effects
+                .get(5)
+                .and_then(|s| s.frame_positions.first())
+                .copied()
+                .unwrap_or([0.0, 0.0, 0.0]),
+        ),
     ];
 
     println!("\nAttachment comparison in dummy-local weapon space:");
@@ -330,7 +363,12 @@ fn main() -> anyhow::Result<()> {
 
     let tip_raw = vertices_in_dummy
         .iter()
-        .max_by(|a, b| a.to_vec().dot(axis_vec).partial_cmp(&b.to_vec().dot(axis_vec)).unwrap())
+        .max_by(|a, b| {
+            a.to_vec()
+                .dot(axis_vec)
+                .partial_cmp(&b.to_vec().dot(axis_vec))
+                .unwrap()
+        })
         .copied()
         .unwrap_or_else(|| point([0.0, 0.0, 0.0]));
     let tip_proj = tip_raw.to_vec().dot(axis_vec);
@@ -340,7 +378,10 @@ fn main() -> anyhow::Result<()> {
     let ring_proj_swapped = smallest_swapped.dot(axis_vec);
 
     println!("\nBlade-axis projection against actual weapon mesh:");
-    println!("  Weapon tip projection on {} = {:.4}", axis_label, tip_proj);
+    println!(
+        "  Weapon tip projection on {} = {:.4}",
+        axis_label, tip_proj
+    );
     println!(
         "  Current  hilt={:.4}  smallest-ring={:.4}  delta={:.4}",
         hilt_proj_current,
@@ -358,7 +399,12 @@ fn main() -> anyhow::Result<()> {
         .sub_effects
         .get(7)
         .ok_or_else(|| anyhow::anyhow!("Effect has no sub[7] for rect trail probe"))?;
-    let sub7_pos = vec(sub7.frame_positions.first().copied().unwrap_or([0.0, 0.0, 0.0])) * effect_scale;
+    let sub7_pos = vec(sub7
+        .frame_positions
+        .first()
+        .copied()
+        .unwrap_or([0.0, 0.0, 0.0]))
+        * effect_scale;
     let rect_local_vertices = [
         point([-0.5, 0.0, 0.0]),
         point([-0.5, 0.0, 1.0]),
@@ -366,17 +412,22 @@ fn main() -> anyhow::Result<()> {
         point([0.5, 0.0, 0.0]),
     ];
     let size = sub7.frame_sizes.first().copied().unwrap_or([1.0, 1.0, 1.0]);
-    let scale = Matrix4::from_nonuniform_scale(size[0] * effect_scale, size[1] * effect_scale, size[2] * effect_scale);
-    let angle = sub7.frame_angles.first().copied().unwrap_or([0.0, 0.0, 0.0]);
+    let scale = Matrix4::from_nonuniform_scale(
+        size[0] * effect_scale,
+        size[1] * effect_scale,
+        size[2] * effect_scale,
+    );
+    let angle = sub7
+        .frame_angles
+        .first()
+        .copied()
+        .unwrap_or([0.0, 0.0, 0.0]);
     let rot_x = Matrix4::from_angle_x(cgmath::Rad(angle[0]));
     let rot_y = Matrix4::from_angle_y(cgmath::Rad(angle[1]));
     let rot_z = Matrix4::from_angle_z(cgmath::Rad(angle[2]));
     let local = Matrix4::from_translation(sub7_pos) * rot_y * rot_x * rot_z * scale;
     let swap = Matrix4::new(
-        1.0, 0.0, 0.0, 0.0,
-        0.0, 0.0, 1.0, 0.0,
-        0.0, 1.0, 0.0, 0.0,
-        0.0, 0.0, 0.0, 1.0,
+        1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0,
     );
     println!("\nSub[7] rect trail vertices in dummy-local space:");
     for (idx, v) in rect_local_vertices.iter().enumerate() {

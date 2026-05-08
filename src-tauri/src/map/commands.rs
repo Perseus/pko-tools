@@ -1,14 +1,17 @@
-use std::sync::Arc;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use tauri::State;
 
-use crate::AppState;
 use crate::projects::project::Project;
+use crate::AppState;
 
-use super::terrain;
 use super::lmo_types::BuildingMetadata;
-use super::{BuildingEntry, MapEntry, MapExportResult, MapMetadata, MapPlacementPage, MapPlacementRecord, MapPlacementSummary};
+use super::terrain;
+use super::{
+    BuildingEntry, MapEntry, MapExportResult, MapMetadata, MapPlacementPage, MapPlacementRecord,
+    MapPlacementSummary,
+};
 
 fn load_map_placements_cached(
     app_state: &AppState,
@@ -35,10 +38,10 @@ fn load_map_placements_cached(
 
     let data = std::fs::read(&obj_path).map_err(|e| e.to_string())?;
     let parsed = super::obj_loader::load_obj(&data).map_err(|e| e.to_string())?;
-    let building_info = super::scene_obj_info::load_scene_obj_info(project_dir)
-        .map_err(|e| e.to_string())?;
-    let effect_info = crate::item::sceneffect::load_scene_effect_info(project_dir)
-        .map_err(|e| e.to_string())?;
+    let building_info =
+        super::scene_obj_info::load_scene_obj_info(project_dir).map_err(|e| e.to_string())?;
+    let effect_info =
+        crate::item::sceneffect::load_scene_effect_info(project_dir).map_err(|e| e.to_string())?;
 
     let mut placements = Vec::with_capacity(parsed.objects.len());
     for (index, obj) in parsed.objects.iter().enumerate() {
@@ -211,11 +214,7 @@ pub async fn query_map_placements(
     }
 
     let total = filtered.len() as u32;
-    let items = filtered
-        .into_iter()
-        .skip(offset)
-        .take(limit)
-        .collect();
+    let items = filtered.into_iter().skip(offset).take(limit).collect();
 
     Ok(MapPlacementPage {
         total,
@@ -415,5 +414,9 @@ pub async fn get_building_metadata(
 
     let lmo = super::lmo_loader::load_lmo(&lmo_path).map_err(|e| e.to_string())?;
 
-    Ok(super::lmo_types::build_metadata(&lmo, building_id, &info.filename))
+    Ok(super::lmo_types::build_metadata(
+        &lmo,
+        building_id,
+        &info.filename,
+    ))
 }

@@ -663,8 +663,7 @@ pub async fn trace_forge_combination(
             .find(|e| e.id == refine_effect_id)
     });
 
-    let light_id = effect_entry
-        .and_then(|entry| (entry.light_id != 0).then_some(entry.light_id));
+    let light_id = effect_entry.and_then(|entry| (entry.light_id != 0).then_some(entry.light_id));
     let lit_entry = if let Some(lid) = light_id {
         let lit_info =
             lit::get_item_lit_info(project_dir, lid as u32).map_err(|e| e.to_string())?;
@@ -688,18 +687,16 @@ pub async fn trace_forge_combination(
     if let Some(effect_entry) = effect_entry {
         for tier in 0..4 {
             let flat_idx = char_idx * 4 + tier;
-            let base_effect_id = effect_entry
-                .effect_ids
-                .get(flat_idx)
-                .copied()
-                .unwrap_or(0) as i32;
+            let base_effect_id = effect_entry.effect_ids.get(flat_idx).copied().unwrap_or(0) as i32;
             if base_effect_id == 0 {
                 continue;
             }
 
             let final_effect_id = (base_effect_id as u32) * 10 + effect_level;
             let dummy_id = effect_entry.dummy_ids.get(tier).copied().unwrap_or(0) as i32;
-            let par_file = scene_effects.get(&final_effect_id).map(|entry| entry.filename.clone());
+            let par_file = scene_effects
+                .get(&final_effect_id)
+                .map(|entry| entry.filename.clone());
 
             particles.push(ForgeTraceParticle {
                 lane_tier: tier as u32,

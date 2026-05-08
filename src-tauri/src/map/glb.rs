@@ -35,8 +35,8 @@ pub fn write_glb(json_str: &str, bin_data: &[u8], path: &Path) -> Result<()> {
         + CHUNK_HEADER_SIZE
         + bin_chunk_length as u32;
 
-    let file =
-        std::fs::File::create(path).with_context(|| format!("Failed to create GLB: {}", path.display()))?;
+    let file = std::fs::File::create(path)
+        .with_context(|| format!("Failed to create GLB: {}", path.display()))?;
     let mut w = std::io::BufWriter::new(file);
 
     // File header
@@ -125,8 +125,12 @@ mod tests {
 
         // BIN chunk starts after header + JSON chunk header + JSON data
         let bin_offset = (GLB_HEADER_SIZE + CHUNK_HEADER_SIZE + json_chunk_len) as usize;
-        let bin_chunk_len =
-            u32::from_le_bytes([data[bin_offset], data[bin_offset + 1], data[bin_offset + 2], data[bin_offset + 3]]);
+        let bin_chunk_len = u32::from_le_bytes([
+            data[bin_offset],
+            data[bin_offset + 1],
+            data[bin_offset + 2],
+            data[bin_offset + 3],
+        ]);
         assert_eq!(bin_chunk_len % 4, 0);
     }
 
@@ -143,8 +147,7 @@ mod tests {
         let data = std::fs::read(&path).unwrap();
 
         // Extract JSON chunk
-        let json_chunk_len =
-            u32::from_le_bytes([data[12], data[13], data[14], data[15]]) as usize;
+        let json_chunk_len = u32::from_le_bytes([data[12], data[13], data[14], data[15]]) as usize;
         let json_bytes = &data[20..20 + json_chunk_len];
 
         // Trim padding spaces

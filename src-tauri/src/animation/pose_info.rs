@@ -53,8 +53,7 @@ impl PoseTable {
 }
 
 pub fn load_poseinfo(path: impl AsRef<Path>) -> Result<PoseTable> {
-    let data = std::fs::read(path.as_ref())
-        .map_err(|e| anyhow!("Failed to read poseinfo: {e}"))?;
+    let data = std::fs::read(path.as_ref()).map_err(|e| anyhow!("Failed to read poseinfo: {e}"))?;
     load_poseinfo_from_bytes(&data)
 }
 
@@ -127,10 +126,7 @@ mod tests {
         let entry = &table.entries[0];
         assert_eq!(entry.pose_id, 1);
         assert_eq!(entry.name, "Normal Wait");
-        assert_eq!(
-            entry.weapon_variants,
-            [1, 55, 109, 163, 217, 271, 325]
-        );
+        assert_eq!(entry.weapon_variants, [1, 55, 109, 163, 217, 271, 325]);
     }
 
     #[test]

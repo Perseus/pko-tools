@@ -1732,7 +1732,10 @@ fn build_single_material(
                             let rgba = img.to_rgba8();
                             let mut png_data = Vec::new();
                             let mut cursor = std::io::Cursor::new(&mut png_data);
-                            if image::DynamicImage::ImageRgba8(rgba).write_to(&mut cursor, image::ImageFormat::Png).is_ok() {
+                            if image::DynamicImage::ImageRgba8(rgba)
+                                .write_to(&mut cursor, image::ImageFormat::Png)
+                                .is_ok()
+                            {
                                 let data_uri = format!(
                                     "data:image/png;base64,{}",
                                     BASE64_STANDARD.encode(&png_data)

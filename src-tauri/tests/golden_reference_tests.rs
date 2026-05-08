@@ -38,39 +38,35 @@ fn snapshot_lab_0724() {
 #[test]
 fn snapshot_eff_lighty() {
     let data = std::fs::read(fixture("lighty.eff")).expect("read lighty.eff");
-    let eff = pko_tools_lib::effect::eff_loader::load_eff(&data)
-        .expect("parse lighty.eff");
+    let eff = pko_tools_lib::effect::eff_loader::load_eff(&data).expect("parse lighty.eff");
     assert_yaml_snapshot!(eff);
 }
 
 #[test]
 fn snapshot_obj_hell5() {
     let data = std::fs::read(fixture("hell5.obj")).expect("read hell5.obj");
-    let obj = pko_tools_lib::map::obj_loader::load_obj(&data)
-        .expect("parse hell5.obj");
+    let obj = pko_tools_lib::map::obj_loader::load_obj(&data).expect("parse hell5.obj");
     assert_yaml_snapshot!(obj);
 }
 
 #[test]
 fn snapshot_par_00000001() {
     let data = std::fs::read(fixture("00000001.par")).expect("read 00000001.par");
-    let par = pko_tools_lib::effect::par_loader::load_par(&data)
-        .expect("parse 00000001.par");
+    let par = pko_tools_lib::effect::par_loader::load_par(&data).expect("parse 00000001.par");
     assert_yaml_snapshot!(par);
 }
 
 #[test]
 fn snapshot_lit() {
-    let entries = pko_tools_lib::map::lit::parse_lit_tx(&fixture("lit.lit"))
-        .expect("parse lit.lit");
+    let entries =
+        pko_tools_lib::map::lit::parse_lit_tx(&fixture("lit.lit")).expect("parse lit.lit");
     assert_yaml_snapshot!(entries);
 }
 
 #[test]
 fn snapshot_poseinfo() {
-    let table = pko_tools_lib::animation::pose_info::load_poseinfo(
-        &fixture("characterposeinfo.bin"),
-    )
-    .expect("parse characterposeinfo.bin");
+    let table =
+        pko_tools_lib::animation::pose_info::load_poseinfo(&fixture("characterposeinfo.bin"))
+            .expect("parse characterposeinfo.bin");
     assert_yaml_snapshot!(table);
 }

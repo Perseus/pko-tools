@@ -8,8 +8,8 @@
 
 extern crate kaitai;
 use kaitai::*;
+use std::cell::{Cell, Ref, RefCell};
 use std::convert::{TryFrom, TryInto};
-use std::cell::{Ref, Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 /**
@@ -55,9 +55,11 @@ impl KStruct for PkoEff {
         *self_rc.version.borrow_mut() = _io.read_u4le()?.into();
         *self_rc.idx_tech.borrow_mut() = _io.read_s4le()?.into();
         *self_rc.use_path.borrow_mut() = _io.read_u1()?.into();
-        *self_rc.path_name.borrow_mut() = bytes_to_str(&_io.read_bytes(32 as usize)?.into(), "ASCII")?;
+        *self_rc.path_name.borrow_mut() =
+            bytes_to_str(&_io.read_bytes(32 as usize)?.into(), "ASCII")?;
         *self_rc.use_sound.borrow_mut() = _io.read_u1()?.into();
-        *self_rc.sound_name.borrow_mut() = bytes_to_str(&_io.read_bytes(32 as usize)?.into(), "ASCII")?;
+        *self_rc.sound_name.borrow_mut() =
+            bytes_to_str(&_io.read_bytes(32 as usize)?.into(), "ASCII")?;
         *self_rc.rotating.borrow_mut() = _io.read_u1()?.into();
         let t = Self::read_into::<_, PkoEff_Vec3>(&*_io, Some(self_rc._root.clone()), None)?.into();
         *self_rc.rota_axis.borrow_mut() = t;
@@ -66,15 +68,26 @@ impl KStruct for PkoEff {
         *self_rc.effects.borrow_mut() = Vec::new();
         let l_effects = *self_rc.effect_count();
         for _i in 0..l_effects {
-            let f = |t : &mut PkoEff_Effect| Ok(t.set_params((*self_rc.version()).try_into().map_err(|_| KError::CastError)?));
-            let t = Self::read_into_with_init::<_, PkoEff_Effect>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()), &f)?.into();
+            let f = |t: &mut PkoEff_Effect| {
+                Ok(t.set_params(
+                    (*self_rc.version())
+                        .try_into()
+                        .map_err(|_| KError::CastError)?,
+                ))
+            };
+            let t = Self::read_into_with_init::<_, PkoEff_Effect>(
+                &*_io,
+                Some(self_rc._root.clone()),
+                Some(self_rc._self.clone()),
+                &f,
+            )?
+            .into();
             self_rc.effects.borrow_mut().push(t);
         }
         Ok(())
     }
 }
-impl PkoEff {
-}
+impl PkoEff {}
 impl PkoEff {
     pub fn version(&self) -> Ref<'_, u32> {
         self.version.borrow()
@@ -171,8 +184,7 @@ impl KStruct for PkoEff_Color4f {
         Ok(())
     }
 }
-impl PkoEff_Color4f {
-}
+impl PkoEff_Color4f {}
 impl PkoEff_Color4f {
     pub fn r(&self) -> Ref<'_, f32> {
         self.r.borrow()
@@ -234,8 +246,7 @@ impl KStruct for PkoEff_CylinderParam {
         Ok(())
     }
 }
-impl PkoEff_CylinderParam {
-}
+impl PkoEff_CylinderParam {}
 impl PkoEff_CylinderParam {
     pub fn segments(&self) -> Ref<'_, i32> {
         self.segments.borrow()
@@ -323,7 +334,8 @@ impl KStruct for PkoEff_Effect {
         let _rrc = self_rc._root.get_value().borrow().upgrade();
         let _prc = self_rc._parent.get_value().borrow().upgrade();
         let _r = _rrc.as_ref().unwrap();
-        *self_rc.effect_name.borrow_mut() = bytes_to_str(&_io.read_bytes(32 as usize)?.into(), "ASCII")?;
+        *self_rc.effect_name.borrow_mut() =
+            bytes_to_str(&_io.read_bytes(32 as usize)?.into(), "ASCII")?;
         *self_rc.effect_type.borrow_mut() = _io.read_s4le()?.into();
         *self_rc.src_blend.borrow_mut() = _io.read_s4le()?.into();
         *self_rc.dest_blend.borrow_mut() = _io.read_s4le()?.into();
@@ -332,30 +344,41 @@ impl KStruct for PkoEff_Effect {
         *self_rc.frame_time.borrow_mut() = Vec::new();
         let l_frame_time = *self_rc.frame_count();
         for _i in 0..l_frame_time {
-            self_rc.frame_time.borrow_mut().push(_io.read_f4le()?.into());
+            self_rc
+                .frame_time
+                .borrow_mut()
+                .push(_io.read_f4le()?.into());
         }
         *self_rc.frame_size.borrow_mut() = Vec::new();
         let l_frame_size = *self_rc.frame_count();
         for _i in 0..l_frame_size {
-            let t = Self::read_into::<_, PkoEff_Vec3>(&*_io, Some(self_rc._root.clone()), None)?.into();
+            let t =
+                Self::read_into::<_, PkoEff_Vec3>(&*_io, Some(self_rc._root.clone()), None)?.into();
             self_rc.frame_size.borrow_mut().push(t);
         }
         *self_rc.frame_angle.borrow_mut() = Vec::new();
         let l_frame_angle = *self_rc.frame_count();
         for _i in 0..l_frame_angle {
-            let t = Self::read_into::<_, PkoEff_Vec3>(&*_io, Some(self_rc._root.clone()), None)?.into();
+            let t =
+                Self::read_into::<_, PkoEff_Vec3>(&*_io, Some(self_rc._root.clone()), None)?.into();
             self_rc.frame_angle.borrow_mut().push(t);
         }
         *self_rc.frame_pos.borrow_mut() = Vec::new();
         let l_frame_pos = *self_rc.frame_count();
         for _i in 0..l_frame_pos {
-            let t = Self::read_into::<_, PkoEff_Vec3>(&*_io, Some(self_rc._root.clone()), None)?.into();
+            let t =
+                Self::read_into::<_, PkoEff_Vec3>(&*_io, Some(self_rc._root.clone()), None)?.into();
             self_rc.frame_pos.borrow_mut().push(t);
         }
         *self_rc.frame_color.borrow_mut() = Vec::new();
         let l_frame_color = *self_rc.frame_count();
         for _i in 0..l_frame_color {
-            let t = Self::read_into::<_, PkoEff_Color4f>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+            let t = Self::read_into::<_, PkoEff_Color4f>(
+                &*_io,
+                Some(self_rc._root.clone()),
+                Some(self_rc._self.clone()),
+            )?
+            .into();
             self_rc.frame_color.borrow_mut().push(t);
         }
         *self_rc.texcoord_ver_count.borrow_mut() = _io.read_u2le()?.into();
@@ -364,21 +387,47 @@ impl KStruct for PkoEff_Effect {
         *self_rc.texcoord_lists.borrow_mut() = Vec::new();
         let l_texcoord_lists = *self_rc.texcoord_coord_count();
         for _i in 0..l_texcoord_lists {
-            let f = |t : &mut PkoEff_TexcoordCoordSet| Ok(t.set_params((*self_rc.texcoord_ver_count()).try_into().map_err(|_| KError::CastError)?));
-            let t = Self::read_into_with_init::<_, PkoEff_TexcoordCoordSet>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()), &f)?.into();
+            let f = |t: &mut PkoEff_TexcoordCoordSet| {
+                Ok(t.set_params(
+                    (*self_rc.texcoord_ver_count())
+                        .try_into()
+                        .map_err(|_| KError::CastError)?,
+                ))
+            };
+            let t = Self::read_into_with_init::<_, PkoEff_TexcoordCoordSet>(
+                &*_io,
+                Some(self_rc._root.clone()),
+                Some(self_rc._self.clone()),
+                &f,
+            )?
+            .into();
             self_rc.texcoord_lists.borrow_mut().push(t);
         }
         *self_rc.tex_count.borrow_mut() = _io.read_u2le()?.into();
         *self_rc.tex_frame_time.borrow_mut() = _io.read_f4le()?.into();
-        *self_rc.tex_name.borrow_mut() = bytes_to_str(&_io.read_bytes(32 as usize)?.into(), "ASCII")?;
+        *self_rc.tex_name.borrow_mut() =
+            bytes_to_str(&_io.read_bytes(32 as usize)?.into(), "ASCII")?;
         *self_rc.tex_lists.borrow_mut() = Vec::new();
         let l_tex_lists = *self_rc.tex_count();
         for _i in 0..l_tex_lists {
-            let f = |t : &mut PkoEff_TexListEntry| Ok(t.set_params((*self_rc.texcoord_ver_count()).try_into().map_err(|_| KError::CastError)?));
-            let t = Self::read_into_with_init::<_, PkoEff_TexListEntry>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()), &f)?.into();
+            let f = |t: &mut PkoEff_TexListEntry| {
+                Ok(t.set_params(
+                    (*self_rc.texcoord_ver_count())
+                        .try_into()
+                        .map_err(|_| KError::CastError)?,
+                ))
+            };
+            let t = Self::read_into_with_init::<_, PkoEff_TexListEntry>(
+                &*_io,
+                Some(self_rc._root.clone()),
+                Some(self_rc._self.clone()),
+                &f,
+            )?
+            .into();
             self_rc.tex_lists.borrow_mut().push(t);
         }
-        *self_rc.model_name.borrow_mut() = bytes_to_str(&_io.read_bytes(32 as usize)?.into(), "ASCII")?;
+        *self_rc.model_name.borrow_mut() =
+            bytes_to_str(&_io.read_bytes(32 as usize)?.into(), "ASCII")?;
         *self_rc.billboard.borrow_mut() = _io.read_u1()?.into();
         *self_rc.vs_index.borrow_mut() = _io.read_s4le()?.into();
         if ((*self_rc.version() as u32) > (1 as u32)) {
@@ -403,7 +452,10 @@ impl KStruct for PkoEff_Effect {
             *self_rc.texframe_names.borrow_mut() = Vec::new();
             let l_texframe_names = *self_rc.texframe_count();
             for _i in 0..l_texframe_names {
-                self_rc.texframe_names.borrow_mut().push(bytes_to_str(&_io.read_bytes(32 as usize)?.into(), "ASCII")?);
+                self_rc
+                    .texframe_names
+                    .borrow_mut()
+                    .push(bytes_to_str(&_io.read_bytes(32 as usize)?.into(), "ASCII")?);
             }
         }
         if ((*self_rc.version() as u32) > (2 as u32)) {
@@ -412,11 +464,18 @@ impl KStruct for PkoEff_Effect {
         if ((*self_rc.version() as u32) > (3 as u32)) {
             *self_rc.use_param.borrow_mut() = _io.read_s4le()?.into();
         }
-        if  ((((*self_rc.version() as u32) > (3 as u32))) && (((*self_rc.use_param() as i32) > (0 as i32))))  {
+        if (((*self_rc.version() as u32) > (3 as u32))
+            && ((*self_rc.use_param() as i32) > (0 as i32)))
+        {
             *self_rc.cylinder_params.borrow_mut() = Vec::new();
             let l_cylinder_params = *self_rc.frame_count();
             for _i in 0..l_cylinder_params {
-                let t = Self::read_into::<_, PkoEff_CylinderParam>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+                let t = Self::read_into::<_, PkoEff_CylinderParam>(
+                    &*_io,
+                    Some(self_rc._root.clone()),
+                    Some(self_rc._self.clone()),
+                )?
+                .into();
                 self_rc.cylinder_params.borrow_mut().push(t);
             }
         }
@@ -424,7 +483,12 @@ impl KStruct for PkoEff_Effect {
             *self_rc.rota_loop.borrow_mut() = _io.read_u1()?.into();
         }
         if ((*self_rc.version() as u32) > (4 as u32)) {
-            let t = Self::read_into::<_, PkoEff_Vec4>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+            let t = Self::read_into::<_, PkoEff_Vec4>(
+                &*_io,
+                Some(self_rc._root.clone()),
+                Some(self_rc._self.clone()),
+            )?
+            .into();
             *self_rc.rota_loop_v.borrow_mut() = t;
         }
         if ((*self_rc.version() as u32) > (5 as u32)) {
@@ -446,8 +510,7 @@ impl PkoEff_Effect {
         *self.version.borrow_mut() = version;
     }
 }
-impl PkoEff_Effect {
-}
+impl PkoEff_Effect {}
 impl PkoEff_Effect {
     pub fn effect_name(&self) -> Ref<'_, String> {
         self.effect_name.borrow()
@@ -663,7 +726,8 @@ impl KStruct for PkoEff_TexListEntry {
         *self_rc.coords.borrow_mut() = Vec::new();
         let l_coords = *self_rc.ver_count();
         for _i in 0..l_coords {
-            let t = Self::read_into::<_, PkoEff_Vec2>(&*_io, Some(self_rc._root.clone()), None)?.into();
+            let t =
+                Self::read_into::<_, PkoEff_Vec2>(&*_io, Some(self_rc._root.clone()), None)?.into();
             self_rc.coords.borrow_mut().push(t);
         }
         Ok(())
@@ -679,8 +743,7 @@ impl PkoEff_TexListEntry {
         *self.ver_count.borrow_mut() = ver_count;
     }
 }
-impl PkoEff_TexListEntry {
-}
+impl PkoEff_TexListEntry {}
 impl PkoEff_TexListEntry {
     pub fn coords(&self) -> Ref<'_, Vec<OptRc<PkoEff_Vec2>>> {
         self.coords.borrow()
@@ -721,7 +784,8 @@ impl KStruct for PkoEff_TexcoordCoordSet {
         *self_rc.coords.borrow_mut() = Vec::new();
         let l_coords = *self_rc.ver_count();
         for _i in 0..l_coords {
-            let t = Self::read_into::<_, PkoEff_Vec2>(&*_io, Some(self_rc._root.clone()), None)?.into();
+            let t =
+                Self::read_into::<_, PkoEff_Vec2>(&*_io, Some(self_rc._root.clone()), None)?.into();
             self_rc.coords.borrow_mut().push(t);
         }
         Ok(())
@@ -737,8 +801,7 @@ impl PkoEff_TexcoordCoordSet {
         *self.ver_count.borrow_mut() = ver_count;
     }
 }
-impl PkoEff_TexcoordCoordSet {
-}
+impl PkoEff_TexcoordCoordSet {}
 impl PkoEff_TexcoordCoordSet {
     pub fn coords(&self) -> Ref<'_, Vec<OptRc<PkoEff_Vec2>>> {
         self.coords.borrow()
@@ -781,8 +844,7 @@ impl KStruct for PkoEff_Vec2 {
         Ok(())
     }
 }
-impl PkoEff_Vec2 {
-}
+impl PkoEff_Vec2 {}
 impl PkoEff_Vec2 {
     pub fn x(&self) -> Ref<'_, f32> {
         self.x.borrow()
@@ -832,8 +894,7 @@ impl KStruct for PkoEff_Vec3 {
         Ok(())
     }
 }
-impl PkoEff_Vec3 {
-}
+impl PkoEff_Vec3 {}
 impl PkoEff_Vec3 {
     pub fn x(&self) -> Ref<'_, f32> {
         self.x.borrow()
@@ -890,8 +951,7 @@ impl KStruct for PkoEff_Vec4 {
         Ok(())
     }
 }
-impl PkoEff_Vec4 {
-}
+impl PkoEff_Vec4 {}
 impl PkoEff_Vec4 {
     pub fn x(&self) -> Ref<'_, f32> {
         self.x.borrow()

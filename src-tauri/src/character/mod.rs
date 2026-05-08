@@ -201,11 +201,20 @@ impl Character {
         })
     }
 
-    pub fn get_gltf_json(&self, project_dir: &Path, ct: Option<&CoordTransform>) -> anyhow::Result<String> {
+    pub fn get_gltf_json(
+        &self,
+        project_dir: &Path,
+        ct: Option<&CoordTransform>,
+    ) -> anyhow::Result<String> {
         self.get_gltf_json_with_split(project_dir, ct, true)
     }
 
-    pub fn get_gltf_json_with_split(&self, project_dir: &Path, ct: Option<&CoordTransform>, split_animations: bool) -> anyhow::Result<String> {
+    pub fn get_gltf_json_with_split(
+        &self,
+        project_dir: &Path,
+        ct: Option<&CoordTransform>,
+        split_animations: bool,
+    ) -> anyhow::Result<String> {
         let parts = self.get_parts();
         let mut model_locations = vec![];
 
@@ -289,8 +298,7 @@ impl Character {
         if use_split {
             let action_table =
                 super::animation::action_table::load_action_table(&action_table_path)?;
-            let pose_table =
-                super::animation::pose_info::load_poseinfo(&poseinfo_path)?;
+            let pose_table = super::animation::pose_info::load_poseinfo(&poseinfo_path)?;
 
             // Action table is keyed by Action ID (CharacterInfo column 20), not character ID.
             // C++ source: SMallMap.cpp:1688 uses sActionID for LoadPose.

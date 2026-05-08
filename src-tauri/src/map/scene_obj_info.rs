@@ -184,8 +184,7 @@ pub fn parse_scene_obj_info_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, Scen
             point_range,
             point_attenuation,
         ) = if has_derived_fields {
-            let display_name =
-                read_cstr(chunk, SCENE_OBJ_SZNAME_OFFSET, SCENE_OBJ_SZNAME_LEN);
+            let display_name = read_cstr(chunk, SCENE_OBJ_SZNAME_OFFSET, SCENE_OBJ_SZNAME_LEN);
             let obj_type = read_i32(chunk, SCENE_OBJ_NTYPE_OFFSET);
             let shade_flag = read_bool(chunk, SCENE_OBJ_BSHADE_FLAG_OFFSET);
             let enable_point_light = read_bool(chunk, SCENE_OBJ_BENABLE_POINT_LIGHT_OFFSET);
@@ -361,12 +360,8 @@ mod tests {
         assert!(shaded > 100, "expected many shaded entries, got {}", shaded);
 
         // Should have various object types
-        let types: std::collections::HashSet<i32> =
-            map.values().map(|v| v.obj_type).collect();
-        assert!(
-            types.contains(&0),
-            "should have type 0 (normal buildings)"
-        );
+        let types: std::collections::HashSet<i32> = map.values().map(|v| v.obj_type).collect();
+        assert!(types.contains(&0), "should have type 0 (normal buildings)");
         eprintln!(
             "Object types present: {:?}, shaded: {}/{}",
             types,
@@ -386,10 +381,7 @@ mod tests {
         let map = parse_scene_obj_info_bin(&data).unwrap();
 
         // Count entries with fade data
-        let fade_entries: Vec<_> = map
-            .values()
-            .filter(|v| v.fade_obj_num > 0)
-            .collect();
+        let fade_entries: Vec<_> = map.values().filter(|v| v.fade_obj_num > 0).collect();
 
         eprintln!(
             "Buildings with fade data: {}/{} total entries",
@@ -413,7 +405,11 @@ mod tests {
             );
             eprintln!(
                 "  id={}, file={}, fade_num={}, seq={:?}, coeff={}",
-                entry.id, entry.filename, entry.fade_obj_num, entry.fade_obj_seq, entry.fade_coefficient
+                entry.id,
+                entry.filename,
+                entry.fade_obj_num,
+                entry.fade_obj_seq,
+                entry.fade_coefficient
             );
         }
     }

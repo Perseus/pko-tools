@@ -48,9 +48,7 @@ fn read_u32_le(r: &mut impl std::io::Read) -> std::io::Result<u32> {
 
 use super::{
     model::LW_MAX_TEXTURESTAGE_NUM,
-    texture::{
-        CharMaterialTextureInfo, MaterialTextureInfoTransparencyType, RenderStateAtom,
-    },
+    texture::{CharMaterialTextureInfo, MaterialTextureInfoTransparencyType, RenderStateAtom},
     GLTFFieldsToAggregate,
 };
 
@@ -940,8 +938,7 @@ impl CharacterMeshInfo {
     ) -> gltf::json::mesh::Primitive {
         let vertex_position_accessor_index =
             self.get_vertex_position_accessor(fields_to_aggregate, ct);
-        let vertex_normal_accessor_index =
-            self.get_vertex_normal_accessor(fields_to_aggregate, ct);
+        let vertex_normal_accessor_index = self.get_vertex_normal_accessor(fields_to_aggregate, ct);
         let vertex_indices_accessor_index = self.get_vertex_index_accessor(fields_to_aggregate, ct);
 
         let material_index =
@@ -1194,9 +1191,7 @@ impl CharacterMeshInfo {
                             let mut texcoords: Vec<LwVector2> = vec![];
 
                             for _ in 0..accessor.count() {
-                                texcoords.push(
-                                    LwVector2::read_from(&mut reader).unwrap(),
-                                );
+                                texcoords.push(LwVector2::read_from(&mut reader).unwrap());
                             }
 
                             // only supporting one texcoord vec for now
@@ -1485,8 +1480,7 @@ impl CharacterMeshInfo {
 
                     let mut reader = std::io::Cursor::new(data_as_slice);
                     for _ in 0..accessor.count() {
-                        let vertex =
-                            LwVector3::read_from(&mut reader)?;
+                        let vertex = LwVector3::read_from(&mut reader)?;
                         mesh.vertex_seq.push(vertex);
                     }
                 }
@@ -1500,8 +1494,7 @@ impl CharacterMeshInfo {
 
                     let mut reader = std::io::Cursor::new(data_as_slice);
                     for _ in 0..accessor.count() {
-                        let vertex_normal =
-                            LwVector3::read_from(&mut reader)?;
+                        let vertex_normal = LwVector3::read_from(&mut reader)?;
                         mesh.normal_seq.push(vertex_normal);
                     }
                 }
@@ -1571,9 +1564,7 @@ impl CharacterMeshInfo {
                     let mut texcoords: Vec<LwVector2> = vec![];
 
                     for _ in 0..accessor.count() {
-                        texcoords.push(
-                            LwVector2::read_from(&mut reader).unwrap(),
-                        );
+                        texcoords.push(LwVector2::read_from(&mut reader).unwrap());
                     }
                     mesh.texcoord_seq[0] = texcoords;
                 }
@@ -1836,8 +1827,7 @@ impl CharacterMeshInfo {
 
                     let mut reader = std::io::Cursor::new(data_as_slice);
                     for _ in 0..accessor.count() {
-                        let vertex =
-                            LwVector3::read_from(&mut reader)?;
+                        let vertex = LwVector3::read_from(&mut reader)?;
                         mesh.vertex_seq.push(vertex);
                     }
                 }
@@ -1851,8 +1841,7 @@ impl CharacterMeshInfo {
 
                     let mut reader = std::io::Cursor::new(data_as_slice);
                     for _ in 0..accessor.count() {
-                        let vertex_normal =
-                            LwVector3::read_from(&mut reader)?;
+                        let vertex_normal = LwVector3::read_from(&mut reader)?;
                         mesh.normal_seq.push(vertex_normal);
                     }
                 }
@@ -1922,9 +1911,7 @@ impl CharacterMeshInfo {
                     let mut texcoords: Vec<LwVector2> = vec![];
 
                     for _ in 0..accessor.count() {
-                        texcoords.push(
-                            LwVector2::read_from(&mut reader).unwrap(),
-                        );
+                        texcoords.push(LwVector2::read_from(&mut reader).unwrap());
                     }
                     mesh.texcoord_seq[0] = texcoords;
                 }

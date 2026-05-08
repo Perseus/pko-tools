@@ -88,10 +88,7 @@ pub fn export_par_json(data: &[u8]) -> Result<String> {
 
 /// Export all .eff files from a directory to JSON.
 /// Returns (success_count, error_count).
-pub fn export_all_eff(
-    effect_dir: &Path,
-    output_dir: &Path,
-) -> Result<(usize, usize)> {
+pub fn export_all_eff(effect_dir: &Path, output_dir: &Path) -> Result<(usize, usize)> {
     let eff_out = output_dir.join("effects");
     std::fs::create_dir_all(&eff_out)?;
 
@@ -135,10 +132,7 @@ pub fn export_all_eff(
 
 /// Export all .par files from a directory to JSON.
 /// Returns (success_count, error_count).
-pub fn export_all_par(
-    effect_dir: &Path,
-    output_dir: &Path,
-) -> Result<(usize, usize)> {
+pub fn export_all_par(effect_dir: &Path, output_dir: &Path) -> Result<(usize, usize)> {
     let par_out = output_dir.join("particles");
     std::fs::create_dir_all(&par_out)?;
 
@@ -242,7 +236,10 @@ mod tests {
 
         // Y-flip: (x,y,z) -> (x,-y,z) for positions and direction vectors
         assert_eq!(eff.rota_vec, [1.0, -2.0, 3.0]);
-        assert_eq!(eff.sub_effects[0].frame_positions[0], [100.0, -200.0, 300.0]);
+        assert_eq!(
+            eff.sub_effects[0].frame_positions[0],
+            [100.0, -200.0, 300.0]
+        );
         // Sizes unchanged
         assert_eq!(eff.sub_effects[0].frame_sizes[0], [1.0, 2.0, 3.0]);
         // Angles unchanged (rotation convention preserved)

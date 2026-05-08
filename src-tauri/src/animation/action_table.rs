@@ -102,7 +102,11 @@ fn parse_action_line(line: &[u8]) -> Option<ActionRange> {
         .filter_map(|seg| {
             let s = std::str::from_utf8(seg).ok()?;
             let s = s.trim();
-            if s.is_empty() { None } else { Some(s) }
+            if s.is_empty() {
+                None
+            } else {
+                Some(s)
+            }
         })
         .collect();
 
