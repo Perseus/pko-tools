@@ -2124,6 +2124,19 @@ impl CharacterMeshInfo {
             );
         }
 
+        if !self.blend_seq.is_empty() && !self.bone_index_seq.is_empty() {
+            let (joint_indices_accessor_index, weights_accessor_index) =
+                self.get_joint_and_weight_accessors(fields_to_aggregate);
+            attributes.insert(
+                Checked::Valid(Semantic::Joints(0)),
+                Index::new(joint_indices_accessor_index as u32),
+            );
+            attributes.insert(
+                Checked::Valid(Semantic::Weights(0)),
+                Index::new(weights_accessor_index as u32),
+            );
+        }
+
         let mode = match &self.header.pt_type {
             D3DPrimitiveType::TriangleList => gltf::mesh::Mode::Triangles,
             D3DPrimitiveType::TriangleStrip => gltf::mesh::Mode::TriangleStrip,

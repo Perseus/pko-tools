@@ -1,13 +1,15 @@
 import { useRef, useMemo, useEffect, useState, useContext } from "react";
 import { useFrame } from "@react-three/fiber";
 import * as THREE from "three";
-import { SubEffect } from "@/types/effect";
+import { clone as cloneSkeleton } from "three/examples/jsm/utils/SkeletonUtils.js";
+import type { SubEffect, Vec4 } from "@/types/effect";
 import { currentProjectAtom } from "@/store/project";
 import { useAtomValue } from "jotai";
 import { useTimeSource } from "../TimeContext";
 import { useEffectTexture } from "../useEffectTexture";
 import { resolveFrameTextureName } from "../frameTexture";
-import { useEffectModel } from "@/features/effect/useEffectModel";
+import type { EffectModelResource } from "@/features/effect/useEffectModel";
+import { useEffectModelResource } from "@/features/effect/useEffectModel";
 import {
   resolveGeometry,
   createRectGeometry,
@@ -24,6 +26,7 @@ import {
   applyTextureSampling,
   composePkoRenderState,
 } from "@/features/effect/pkoStateEmulation";
+import { setPkoTextureFactorColor } from "@/features/effect/color";
 import { ParticleOpacityContext } from "./particles/particleOpacityContext";
 
 interface SubEffectRendererProps {
@@ -91,11 +94,13 @@ export function SubEffectRenderer({ subEffect, idxTech = 0, onComplete }: SubEff
     geometryConfig,
   ]);
 
-  const modelGeometry = useEffectModel(
+  const modelResource = useEffectModelResource(
     geometryConfig.type === "model" ? geometryConfig.modelName : undefined,
     currentProject?.id,
   );
 
+  const hasAnimatedModel = Boolean(modelResource && modelResource.animations.length > 0);
+  const modelGeometry = modelResource?.geometry ?? null;
   const geometry = builtinGeometry ?? modelGeometry;
 
   // Compute total duration
@@ -212,7 +217,146 @@ export function SubEffectRenderer({ subEffect, idxTech = 0, onComplete }: SubEff
     });
   });
 
-  if (!geometry || waitingForTexture) return null;
+  if (waitingForTexture) return null;
+
+  if (hasAnimatedModel && modelResource) {
+    return (
+      <EffectModelSceneInstance
+        cylinderCache={cylinderCacheRef.current}
+        material={material}
+        modelResource={modelResource}
+        onComplete={onCompleteRef.current}
+        particleOpacityScale={particleOpacityScale}
+        subEffect={subEffect}
+        techniqueState={techniqueState}
+        timeSource={timeSource}
+        totalDuration={totalDuration}
+      />
+    );
+  }
+
+  if (!geometry) return null;
 
   return <mesh ref={meshRef} geometry={geometry} material={material} />;
+}
+
+interface EffectModelSceneInstanceProps {
+  cylinderCache: Map<string, Float32Array>;
+  material: THREE.MeshBasicMaterial;
+  modelResource: EffectModelResource;
+  onComplete?: () => void;
+  particleOpacityScale: number;
+  subEffect: SubEffect;
+  techniqueState: ReturnType<typeof composePkoRenderState>;
+  timeSource: ReturnType<typeof useTimeSource>;
+  totalDuration: number;
+}
+
+function EffectModelSceneInstance({
+  cylinderCache,
+  material,
+  modelResource,
+  onComplete,
+  particleOpacityScale,
+  subEffect,
+  techniqueState,
+  timeSource,
+  totalDuration,
+}: EffectModelSceneInstanceProps) {
+  const rootRef = useRef<THREE.Group>(null);
+  const firedRef = useRef(false);
+  const scene = useMemo(
+    () => cloneSkeleton(modelResource.scene) as THREE.Group,
+    [modelResource],
+  );
+  const mixer = useMemo(() => new THREE.AnimationMixer(scene), [scene]);
+
+  useEffect(() => {
+    scene.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (mesh.isMesh) {
+        mesh.material = material;
+      }
+    });
+  }, [material, scene]);
+
+  useEffect(() => {
+    const actions = modelResource.animations.map((clip) => {
+      const action = mixer.clipAction(clip, scene);
+      action.reset();
+      action.play();
+      return action;
+    });
+
+    return () => {
+      actions.forEach((action) => action.stop());
+      mixer.stopAllAction();
+      modelResource.animations.forEach((clip) => mixer.uncacheClip(clip));
+      mixer.uncacheRoot(scene);
+    };
+  }, [mixer, modelResource.animations, scene]);
+
+  const getLocalPlaybackTime = (rawTime: number): number => {
+    if (totalDuration <= 0) return rawTime;
+    if (timeSource.loop) return rawTime % totalDuration;
+    return Math.min(rawTime, totalDuration);
+  };
+
+  useFrame(({ camera }) => {
+    if (!rootRef.current || subEffect.frameTimes.length === 0) return;
+
+    const rawTime = timeSource.getTime();
+    const localTime = getLocalPlaybackTime(rawTime);
+    const clipDuration = modelResource.animations[0]?.duration ?? 0;
+    mixer.setTime(clipDuration > 0 ? localTime % clipDuration : localTime);
+
+    if (
+      !timeSource.loop &&
+      !firedRef.current &&
+      rawTime >= totalDuration &&
+      totalDuration > 0
+    ) {
+      firedRef.current = true;
+      onComplete?.();
+    }
+
+    const frame = interpolateFrame(subEffect, localTime, timeSource.loop);
+    applyEffectMaterialFrame(material, frame.color, particleOpacityScale);
+    applySubEffectFrame(rootRef.current as unknown as THREE.Mesh, camera, {
+      sub: subEffect,
+      position: frame.position,
+      scale: frame.size,
+      angle: frame.angle,
+      color: frame.color,
+      playbackTime: localTime,
+      frameIndex: frame.frameIndex,
+      nextFrameIndex: frame.nextFrameIndex,
+      lerp: frame.lerp,
+      forgeAlpha: particleOpacityScale,
+      isCylinder: false,
+      cylinderCache,
+    });
+    scene.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (mesh.isMesh) {
+        mesh.material = material;
+      }
+    });
+    applyTextureSampling(material.map, techniqueState);
+  });
+
+  return (
+    <group ref={rootRef}>
+      <primitive object={scene} />
+    </group>
+  );
+}
+
+function applyEffectMaterialFrame(
+  material: THREE.MeshBasicMaterial,
+  color: Vec4,
+  particleOpacityScale: number,
+) {
+  setPkoTextureFactorColor(material.color, color[0], color[1], color[2]);
+  material.opacity = Math.min(Math.max(color[3], 0), 1) * particleOpacityScale;
 }

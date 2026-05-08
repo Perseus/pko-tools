@@ -10,9 +10,11 @@ export interface EffectModelDummyPoint {
   name: string;
 }
 
-interface EffectModelResource {
+export interface EffectModelResource {
   geometry: THREE.BufferGeometry | null;
   dummies: EffectModelDummyPoint[];
+  scene: THREE.Group;
+  animations: THREE.AnimationClip[];
 }
 
 const resourceCache = new Map<string, EffectModelResource>();
@@ -55,6 +57,8 @@ function parseGltfJson(json: string): Promise<EffectModelResource> {
         resolve({
           geometry: found,
           dummies: extractEffectModelDummyPoints(gltf.scene),
+          scene: gltf.scene,
+          animations: gltf.animations ?? [],
         });
       },
       (err) => reject(err),
@@ -62,7 +66,7 @@ function parseGltfJson(json: string): Promise<EffectModelResource> {
   });
 }
 
-function useEffectModelResource(
+export function useEffectModelResource(
   modelName: string | undefined,
   projectId: string | undefined
 ): EffectModelResource | null {

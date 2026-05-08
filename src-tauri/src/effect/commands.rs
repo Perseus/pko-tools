@@ -2,10 +2,16 @@ use std::path::Path;
 use std::str::FromStr;
 
 use base64::Engine;
+use gltf::json::{
+    accessor::{ComponentType, GenericComponentType},
+    animation::{Channel, Sampler, Target},
+    validation::{Checked, USize64},
+};
 use serde::Serialize;
 
 use crate::character::{model::CharacterGeometricModel, GLTFFieldsToAggregate};
 use crate::item::model::decode_pko_texture;
+use crate::map::lmo_types::LmoBoneAnimData;
 use crate::map::scene_model::decode_dds_with_alpha;
 use crate::projects::project::Project;
 
@@ -13,6 +19,7 @@ use super::{model::EffFile, model::ParFile, scan_effects_directory, scan_par_fil
 // Effect data is in D3D Y-up LH space. Transforms match Three.js "YXZ" Euler
 // directly (confirmed via matrix comparison with game client debug dumps).
 // No coordinate conversion needed for standalone viewing.
+const EFFECT_MODEL_ANIMATION_FPS: f32 = 30.0;
 
 #[tauri::command]
 pub async fn list_effects(project_id: String) -> Result<Vec<String>, String> {
@@ -754,13 +761,32 @@ pub fn build_effect_model_gltf(project_dir: &Path, model_name: &str) -> Result<S
         weights: None,
     };
 
+    let mut nodes = Vec::new();
+    let skin = geom
+        .bone_animation
+        .as_ref()
+        .and_then(|bone_anim| append_effect_model_bone_animation(&mut fields, &mut nodes, bone_anim));
+
+    let root_joint_nodes = if let Some(bone_anim) = geom.bone_animation.as_ref() {
+        collect_root_joint_nodes(bone_anim, 0)
+    } else {
+        Vec::new()
+    };
+
     let mesh_node = gltf::json::Node {
         mesh: Some(gltf::json::Index::new(0)),
         name: Some(model_name.to_string()),
+        skin,
+        children: if root_joint_nodes.is_empty() {
+            None
+        } else {
+            Some(root_joint_nodes)
+        },
         ..Default::default()
     };
     let helper_nodes = geom.get_gltf_helper_nodes_for_mesh(0, None);
-    let (nodes, scene_node_indices) = build_effect_model_scene_nodes(mesh_node, helper_nodes);
+    let scene_node_indices =
+        append_effect_model_scene_nodes(&mut nodes, mesh_node, helper_nodes);
 
     let scene = gltf::json::Scene {
         name: Some("Scene".to_string()),
@@ -782,25 +808,277 @@ pub fn build_effect_model_gltf(project_dir: &Path, model_name: &str) -> Result<S
         nodes,
         scenes: vec![scene],
         scene: Some(gltf::json::Index::new(0)),
+        animations: fields.animation,
+        skins: fields.skin,
         ..Default::default()
     };
 
     serde_json::to_string(&root).map_err(|e| format!("Failed to serialize glTF: {}", e))
 }
 
-fn build_effect_model_scene_nodes(
+fn append_effect_model_scene_nodes(
+    nodes: &mut Vec<gltf::json::Node>,
     mesh_node: gltf::json::Node,
     helper_nodes: Vec<gltf::json::Node>,
-) -> (
-    Vec<gltf::json::Node>,
-    Vec<gltf::json::Index<gltf::json::Node>>,
-) {
-    let mut nodes = vec![mesh_node];
+) -> Vec<gltf::json::Index<gltf::json::Node>> {
+    let first_scene_node = nodes.len() as u32;
+    nodes.push(mesh_node);
     nodes.extend(helper_nodes);
-    let scene_node_indices = (0..nodes.len())
-        .map(|i| gltf::json::Index::new(i as u32))
+    (first_scene_node..nodes.len() as u32)
+        .map(gltf::json::Index::new)
+        .collect()
+}
+
+fn collect_root_joint_nodes(
+    bone_anim: &LmoBoneAnimData,
+    first_joint_node_idx: u32,
+) -> Vec<gltf::json::Index<gltf::json::Node>> {
+    bone_anim
+        .bones
+        .iter()
+        .enumerate()
+        .filter(|(_, bone)| bone.parent_id == u32::MAX)
+        .map(|(idx, _)| gltf::json::Index::new(first_joint_node_idx + idx as u32))
+        .collect()
+}
+
+fn append_effect_model_bone_animation(
+    fields: &mut GLTFFieldsToAggregate,
+    nodes: &mut Vec<gltf::json::Node>,
+    bone_anim: &LmoBoneAnimData,
+) -> Option<gltf::json::Index<gltf::json::Skin>> {
+    if bone_anim.bones.is_empty() || bone_anim.inv_bind_matrices.is_empty() {
+        return None;
+    }
+
+    let bone_count = bone_anim.bones.len();
+    let first_joint_node_idx = nodes.len() as u32;
+    let mut joint_node_indices = Vec::with_capacity(bone_count);
+
+    for (idx, bone) in bone_anim.bones.iter().enumerate() {
+        let (translation, rotation) = bone_anim
+            .keyframes
+            .get(idx)
+            .and_then(|kf| kf.translations.first().zip(kf.rotations.first()))
+            .map(|(t, r)| (*t, *r))
+            .unwrap_or(([0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]));
+
+        let node_idx = nodes.len() as u32;
+        joint_node_indices.push(node_idx);
+        nodes.push(gltf::json::Node {
+            name: Some(format!("effect_model_bone_{}", bone.name)),
+            translation: Some(translation.into()),
+            rotation: Some(gltf::json::scene::UnitQuaternion(rotation)),
+            ..Default::default()
+        });
+    }
+
+    let mut children_by_bone = vec![Vec::<gltf::json::Index<gltf::json::Node>>::new(); bone_count];
+    for (idx, bone) in bone_anim.bones.iter().enumerate() {
+        if bone.parent_id != u32::MAX {
+            let parent = bone.parent_id as usize;
+            if parent < bone_count {
+                children_by_bone[parent].push(gltf::json::Index::new(first_joint_node_idx + idx as u32));
+            }
+        }
+    }
+    for (idx, children) in children_by_bone.into_iter().enumerate() {
+        if !children.is_empty() {
+            nodes[(first_joint_node_idx + idx as u32) as usize].children = Some(children);
+        }
+    }
+
+    let mut ibm_data = Vec::with_capacity(bone_count * 16);
+    for matrix in bone_anim.inv_bind_matrices.iter().take(bone_count) {
+        for col in 0..4 {
+            for row in 0..4 {
+                ibm_data.push(matrix[col][row]);
+            }
+        }
+    }
+    let inverse_bind_matrices = add_effect_model_f32_accessor(
+        fields,
+        &ibm_data,
+        "effect_model_inverse_bind_matrices",
+        gltf::json::accessor::Type::Mat4,
+        16,
+    );
+
+    let skin_index = fields.skin.len() as u32;
+    fields.skin.push(gltf::json::Skin {
+        inverse_bind_matrices: Some(gltf::json::Index::new(inverse_bind_matrices)),
+        joints: joint_node_indices
+            .iter()
+            .map(|idx| gltf::json::Index::new(*idx))
+            .collect(),
+        skeleton: Some(gltf::json::Index::new(first_joint_node_idx)),
+        name: Some("effect_model_skin".to_string()),
+        extensions: None,
+        extras: None,
+    });
+
+    append_effect_model_animation(fields, bone_anim, &joint_node_indices);
+
+    Some(gltf::json::Index::new(skin_index))
+}
+
+fn append_effect_model_animation(
+    fields: &mut GLTFFieldsToAggregate,
+    bone_anim: &LmoBoneAnimData,
+    joint_node_indices: &[u32],
+) {
+    let frame_count = bone_anim.frame_num as usize;
+    if frame_count <= 1 {
+        return;
+    }
+
+    let times: Vec<f32> = (0..frame_count)
+        .map(|frame| frame as f32 / EFFECT_MODEL_ANIMATION_FPS)
         .collect();
-    (nodes, scene_node_indices)
+    let time_accessor = add_effect_model_f32_accessor(
+        fields,
+        &times,
+        "effect_model_bone_time",
+        gltf::json::accessor::Type::Scalar,
+        1,
+    );
+
+    let mut samplers = Vec::new();
+    let mut channels = Vec::new();
+
+    for (bone_idx, keyframes) in bone_anim.keyframes.iter().enumerate() {
+        if bone_idx >= joint_node_indices.len() {
+            break;
+        }
+
+        if keyframes.translations.len() == frame_count {
+            let translations: Vec<f32> = keyframes
+                .translations
+                .iter()
+                .flat_map(|t| t.iter().copied())
+                .collect();
+            let output = add_effect_model_f32_accessor(
+                fields,
+                &translations,
+                &format!("effect_model_bone_{}_translation", bone_idx),
+                gltf::json::accessor::Type::Vec3,
+                3,
+            );
+            let sampler = samplers.len() as u32;
+            samplers.push(Sampler {
+                input: gltf::json::Index::new(time_accessor),
+                output: gltf::json::Index::new(output),
+                interpolation: Checked::Valid(gltf::json::animation::Interpolation::Linear),
+                extensions: None,
+                extras: None,
+            });
+            channels.push(Channel {
+                sampler: gltf::json::Index::new(sampler),
+                target: Target {
+                    node: gltf::json::Index::new(joint_node_indices[bone_idx]),
+                    path: Checked::Valid(gltf::json::animation::Property::Translation),
+                    extensions: None,
+                    extras: None,
+                },
+                extensions: None,
+                extras: None,
+            });
+        }
+
+        if keyframes.rotations.len() == frame_count {
+            let rotations: Vec<f32> = keyframes
+                .rotations
+                .iter()
+                .flat_map(|r| r.iter().copied())
+                .collect();
+            let output = add_effect_model_f32_accessor(
+                fields,
+                &rotations,
+                &format!("effect_model_bone_{}_rotation", bone_idx),
+                gltf::json::accessor::Type::Vec4,
+                4,
+            );
+            let sampler = samplers.len() as u32;
+            samplers.push(Sampler {
+                input: gltf::json::Index::new(time_accessor),
+                output: gltf::json::Index::new(output),
+                interpolation: Checked::Valid(gltf::json::animation::Interpolation::Linear),
+                extensions: None,
+                extras: None,
+            });
+            channels.push(Channel {
+                sampler: gltf::json::Index::new(sampler),
+                target: Target {
+                    node: gltf::json::Index::new(joint_node_indices[bone_idx]),
+                    path: Checked::Valid(gltf::json::animation::Property::Rotation),
+                    extensions: None,
+                    extras: None,
+                },
+                extensions: None,
+                extras: None,
+            });
+        }
+    }
+
+    if !channels.is_empty() {
+        fields.animation.push(gltf::json::Animation {
+            name: Some("EffectModelBoneAnimation".to_string()),
+            samplers,
+            channels,
+            extensions: None,
+            extras: None,
+        });
+    }
+}
+
+fn add_effect_model_f32_accessor(
+    fields: &mut GLTFFieldsToAggregate,
+    data: &[f32],
+    name: &str,
+    accessor_type: gltf::json::accessor::Type,
+    components_per_element: usize,
+) -> u32 {
+    let bytes: Vec<u8> = data.iter().flat_map(|value| value.to_le_bytes()).collect();
+    let buffer_index = fields.buffer.len() as u32;
+    let buffer_view_index = fields.buffer_view.len() as u32;
+    let accessor_index = fields.accessor.len() as u32;
+
+    fields.buffer.push(gltf::json::Buffer {
+        byte_length: USize64(bytes.len() as u64),
+        extensions: None,
+        extras: None,
+        name: Some(format!("{}_buffer", name)),
+        uri: Some(format!(
+            "data:application/octet-stream;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(&bytes)
+        )),
+    });
+    fields.buffer_view.push(gltf::json::buffer::View {
+        buffer: gltf::json::Index::new(buffer_index),
+        byte_length: USize64(bytes.len() as u64),
+        byte_offset: Some(USize64(0)),
+        byte_stride: None,
+        target: Some(Checked::Valid(gltf::json::buffer::Target::ArrayBuffer)),
+        extensions: None,
+        extras: None,
+        name: Some(format!("{}_view", name)),
+    });
+    fields.accessor.push(gltf::json::Accessor {
+        buffer_view: Some(gltf::json::Index::new(buffer_view_index)),
+        byte_offset: Some(USize64(0)),
+        component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
+        count: USize64((data.len() / components_per_element) as u64),
+        extensions: None,
+        extras: None,
+        max: None,
+        min: None,
+        name: Some(format!("{}_accessor", name)),
+        normalized: false,
+        sparse: None,
+        type_: Checked::Valid(accessor_type),
+    });
+
+    accessor_index
 }
 
 #[tauri::command]
@@ -842,6 +1120,41 @@ mod tests {
     }
 
     #[test]
+    fn effect_model_gltf_preserves_gunwing_bone_animation() {
+        let project_dir = Path::new("E:/gamedev/mp-client-source/Client/client");
+        if !project_dir.join("model/effect/gunwing.lgo").exists() {
+            eprintln!(
+                "Skipping effect_model_gltf_preserves_gunwing_bone_animation: source client not found"
+            );
+            return;
+        }
+
+        let json_str = build_effect_model_gltf(project_dir, "gunwing.lgo")
+            .expect("gunwing effect model should build");
+        let root: gltf::json::Root = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(root.skins.len(), 1, "gunwing.lgo should keep its skin");
+        assert!(
+            !root.animations.is_empty(),
+            "gunwing.lgo should keep its embedded bone animation"
+        );
+
+        let attrs = &root.meshes[0].primitives[0].attributes;
+        assert!(
+            attrs.contains_key(&gltf::json::validation::Checked::Valid(
+                gltf::json::mesh::Semantic::Joints(0),
+            )),
+            "skinned effect model primitive should include JOINTS_0"
+        );
+        assert!(
+            attrs.contains_key(&gltf::json::validation::Checked::Valid(
+                gltf::json::mesh::Semantic::Weights(0),
+            )),
+            "skinned effect model primitive should include WEIGHTS_0"
+        );
+    }
+
+    #[test]
     fn effect_model_scene_keeps_helper_nodes_addressable() {
         let mesh_node = gltf::json::Node {
             mesh: Some(gltf::json::Index::new(0)),
@@ -853,7 +1166,8 @@ mod tests {
             ..Default::default()
         };
 
-        let (nodes, scene_nodes) = build_effect_model_scene_nodes(mesh_node, vec![helper_node]);
+        let mut nodes = Vec::new();
+        let scene_nodes = append_effect_model_scene_nodes(&mut nodes, mesh_node, vec![helper_node]);
 
         assert_eq!(nodes.len(), 2);
         assert_eq!(nodes[0].name.as_deref(), Some("weapon"));
