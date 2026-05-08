@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{path::Path, str::FromStr};
 
 use serde::{Deserialize, Serialize};
 
@@ -586,18 +586,13 @@ pub struct ForgeTraceResult {
     pub particles: Vec<ForgeTraceParticle>,
 }
 
-#[tauri::command]
-pub async fn trace_forge_combination(
-    project_id: String,
+pub(crate) fn resolve_forge_combination(
+    project_id: uuid::Uuid,
+    project_dir: &Path,
     weapon_item_id: u32,
     char_type: u32,
     gems: Vec<ForgeTraceGemInput>,
 ) -> Result<ForgeTraceResult, String> {
-    let project_id =
-        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
-    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
-    let project_dir = project.project_directory.as_ref();
-
     let weapon_item = get_item(project_id, weapon_item_id).map_err(|e| e.to_string())?;
     let stone_info = refine::load_stone_info(project_dir).map_err(|e| e.to_string())?;
     let refine_info_table =
@@ -725,6 +720,26 @@ pub async fn trace_forge_combination(
         lit_entry,
         particles,
     })
+}
+
+#[tauri::command]
+pub async fn trace_forge_combination(
+    project_id: String,
+    weapon_item_id: u32,
+    char_type: u32,
+    gems: Vec<ForgeTraceGemInput>,
+) -> Result<ForgeTraceResult, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+
+    resolve_forge_combination(
+        project_id,
+        project.project_directory.as_ref(),
+        weapon_item_id,
+        char_type,
+        gems,
+    )
 }
 
 // ============================================================================

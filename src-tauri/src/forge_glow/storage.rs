@@ -28,7 +28,10 @@ pub fn sanitize_slug(value: &str) -> String {
 }
 
 pub fn drafts_dir(project_dir: &Path) -> PathBuf {
-    project_dir.join("pko-tools").join("forge-glows").join("drafts")
+    project_dir
+        .join("pko-tools")
+        .join("forge-glows")
+        .join("drafts")
 }
 
 pub fn draft_path(project_dir: &Path, draft_id: &str) -> PathBuf {
