@@ -664,6 +664,32 @@ describe("ParticleVisual", () => {
     expect(material.opacity).toBeCloseTo(0.125);
   });
 
+  it("keeps direct particle material color and alpha in sync with mutable lifecycle state", async () => {
+    const particle = createParticle({ alpha: 1, color: new THREE.Color(1, 1, 1) });
+
+    const renderer = await ReactThreeTestRenderer.create(
+      <TimeProvider value={testTimeSource}>
+        <ParticleVisual system={createSystem({ modelName: "RectPlane" })} particle={particle} />
+      </TimeProvider>
+    );
+
+    const mesh = renderer.scene.findAll((node) => node.type === "Mesh")[0].instance as THREE.Mesh;
+    const material = mesh.material as THREE.MeshBasicMaterial;
+
+    particle.alpha = 0.25;
+    particle.color.setRGB(0.5, 1, 0.5);
+
+    await act(async () => {
+      await renderer.advanceFrames(1, 1 / 60);
+    });
+
+    const expected = new THREE.Color().setRGB(0.5, 1, 0.5, THREE.SRGBColorSpace);
+    expect(material.opacity).toBeCloseTo(0.25);
+    expect(material.color.r).toBeCloseTo(expected.r);
+    expect(material.color.g).toBeCloseTo(expected.g);
+    expect(material.color.b).toBeCloseTo(expected.b);
+  });
+
   it("multiplies nested .eff opacity by parent particle alpha like CMPModelEff SetAlpha", async () => {
     mockUseLoadEffect.mockReturnValue([{
       version: 7,
