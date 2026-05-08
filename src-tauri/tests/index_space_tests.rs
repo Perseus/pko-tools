@@ -118,7 +118,8 @@ fn bone_index_seq_references_lab_array_not_enumerate_index() {
             lgo_path.file_name().unwrap().to_string_lossy()
         );
 
-        let lgo_model = CharacterGeometricModel::from_file(lgo_path.clone()).expect("Failed to parse LGO");
+        let lgo_model =
+            CharacterGeometricModel::from_file(lgo_path.clone()).expect("Failed to parse LGO");
 
         // Extract mesh_info from the model
         let lgo = match &lgo_model.mesh_info {

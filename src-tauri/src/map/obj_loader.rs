@@ -216,6 +216,10 @@ mod tests {
             total += parsed.objects.len();
         }
 
-        eprintln!("Loaded {} .obj files, {} total objects", obj_files.len(), total);
+        eprintln!(
+            "Loaded {} .obj files, {} total objects",
+            obj_files.len(),
+            total
+        );
     }
 }

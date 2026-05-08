@@ -38,10 +38,7 @@ pub struct SharedExportResult {
 /// 6. shared_manifest.json (inventory of everything exported)
 pub fn export_shared_assets(project_dir: &Path, output_dir: &Path) -> Result<SharedExportResult> {
     // Atomic write: export to temp dir, rename on success
-    let temp_dir = output_dir.with_file_name(format!(
-        ".shared-export-tmp-{}",
-        std::process::id()
-    ));
+    let temp_dir = output_dir.with_file_name(format!(".shared-export-tmp-{}", std::process::id()));
     if temp_dir.exists() {
         std::fs::remove_dir_all(&temp_dir)?;
     }
@@ -55,12 +52,13 @@ pub fn export_shared_assets(project_dir: &Path, output_dir: &Path) -> Result<Sha
             if output_dir.exists() {
                 std::fs::remove_dir_all(output_dir)?;
             }
-            std::fs::rename(&temp_dir, output_dir)
-                .with_context(|| format!(
+            std::fs::rename(&temp_dir, output_dir).with_context(|| {
+                format!(
                     "Failed to rename temp dir {} to {}",
                     temp_dir.display(),
                     output_dir.display()
-                ))?;
+                )
+            })?;
             export_result.output_dir = output_dir.to_string_lossy().to_string();
             Ok(export_result)
         }
@@ -76,8 +74,7 @@ fn export_shared_assets_inner(project_dir: &Path, output_dir: &Path) -> Result<S
     // 1. Export ALL terrain textures
     eprintln!("[shared] Exporting all terrain textures...");
     let terrain_textures =
-        super::texture::export_all_terrain_textures(project_dir, output_dir)
-            .unwrap_or_default();
+        super::texture::export_all_terrain_textures(project_dir, output_dir).unwrap_or_default();
     let total_terrain_textures = terrain_textures.len() as u32;
 
     // 2. Export alpha masks
@@ -118,7 +115,10 @@ fn export_shared_assets_inner(project_dir: &Path, output_dir: &Path) -> Result<S
     });
 
     let manifest_json = serde_json::to_string_pretty(&manifest)?;
-    std::fs::write(output_dir.join("shared_manifest.json"), manifest_json.as_bytes())?;
+    std::fs::write(
+        output_dir.join("shared_manifest.json"),
+        manifest_json.as_bytes(),
+    )?;
 
     eprintln!("[shared] Export complete: {} terrain textures, {} buildings ({} failed), {} effect textures, {} water textures",
         total_terrain_textures, buildings_exported, buildings_failed, total_effect_textures, total_water_textures);
@@ -136,11 +136,12 @@ fn export_shared_assets_inner(project_dir: &Path, output_dir: &Path) -> Result<S
 
 /// Export shared assets v2: geometry-only GLBs with external texture URIs.
 /// Scene textures should be exported separately via `export_scene_textures()`.
-pub fn export_shared_assets_v2(project_dir: &Path, output_dir: &Path) -> Result<SharedExportResult> {
-    let temp_dir = output_dir.with_file_name(format!(
-        ".shared-v2-export-tmp-{}",
-        std::process::id()
-    ));
+pub fn export_shared_assets_v2(
+    project_dir: &Path,
+    output_dir: &Path,
+) -> Result<SharedExportResult> {
+    let temp_dir =
+        output_dir.with_file_name(format!(".shared-v2-export-tmp-{}", std::process::id()));
     if temp_dir.exists() {
         std::fs::remove_dir_all(&temp_dir)?;
     }
@@ -170,7 +171,10 @@ pub fn export_shared_assets_v2(project_dir: &Path, output_dir: &Path) -> Result<
     }
 }
 
-fn export_shared_assets_v2_inner(project_dir: &Path, output_dir: &Path) -> Result<SharedExportResult> {
+fn export_shared_assets_v2_inner(
+    project_dir: &Path,
+    output_dir: &Path,
+) -> Result<SharedExportResult> {
     // Export buildings with external texture URIs (no embedded textures)
     let ct = CoordTransform::new();
     let (buildings_exported, buildings_failed, _manifest) =
@@ -267,7 +271,11 @@ pub fn export_scene_textures(project_dir: &Path, output_dir: &Path) -> Result<u3
         }
     }
 
-    eprintln!("[shared] Exported {} scene textures to {}", count, out_dir.display());
+    eprintln!(
+        "[shared] Exported {} scene textures to {}",
+        count,
+        out_dir.display()
+    );
     Ok(count)
 }
 
@@ -288,14 +296,17 @@ fn dds_to_ktx2(dds: &[u8]) -> Option<Vec<u8>> {
 
     // Map DDS FourCC to Vulkan format
     let (vk_format, block_size): (u32, u32) = match fourcc {
-        b"DXT1" => (131, 8),   // VK_FORMAT_BC1_RGBA_UNORM_BLOCK
-        b"DXT3" => (135, 16),  // VK_FORMAT_BC2_UNORM_BLOCK
-        b"DXT5" => (137, 16),  // VK_FORMAT_BC3_UNORM_BLOCK
+        b"DXT1" => (131, 8),  // VK_FORMAT_BC1_RGBA_UNORM_BLOCK
+        b"DXT3" => (135, 16), // VK_FORMAT_BC2_UNORM_BLOCK
+        b"DXT5" => (137, 16), // VK_FORMAT_BC3_UNORM_BLOCK
         _ => return None,
     };
 
     // Calculate mip level sizes and offsets
-    struct MipLevel { offset: u64, size: u64 }
+    struct MipLevel {
+        offset: u64,
+        size: u64,
+    }
     let mut levels = Vec::new();
     let mut mw = width;
     let mut mh = height;
@@ -305,7 +316,10 @@ fn dds_to_ktx2(dds: &[u8]) -> Option<Vec<u8>> {
         let bw = ((mw + 3) / 4).max(1);
         let bh = ((mh + 3) / 4).max(1);
         let size = (bw * bh * block_size) as u64;
-        levels.push(MipLevel { offset: data_offset, size });
+        levels.push(MipLevel {
+            offset: data_offset,
+            size,
+        });
         data_offset += size;
         mw = (mw / 2).max(1);
         mh = (mh / 2).max(1);
@@ -327,20 +341,20 @@ fn dds_to_ktx2(dds: &[u8]) -> Option<Vec<u8>> {
 
     // KTX2 identifier (12 bytes)
     out[0..12].copy_from_slice(&[
-        0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A
+        0xAB, 0x4B, 0x54, 0x58, 0x20, 0x32, 0x30, 0xBB, 0x0D, 0x0A, 0x1A, 0x0A,
     ]);
 
     // Header fields (little-endian)
     let h = &mut out[12..80];
-    h[0..4].copy_from_slice(&vk_format.to_le_bytes());       // vkFormat
-    h[4..8].copy_from_slice(&4u32.to_le_bytes());             // typeSize (4 for block-compressed)
-    h[8..12].copy_from_slice(&width.to_le_bytes());           // pixelWidth
-    h[12..16].copy_from_slice(&height.to_le_bytes());         // pixelHeight
-    h[16..20].copy_from_slice(&0u32.to_le_bytes());           // pixelDepth (0 = 2D)
-    h[20..24].copy_from_slice(&0u32.to_le_bytes());           // layerCount (0 = not array)
-    h[24..28].copy_from_slice(&1u32.to_le_bytes());           // faceCount (1 = not cubemap)
-    h[28..32].copy_from_slice(&mip_count.to_le_bytes());      // levelCount
-    h[32..36].copy_from_slice(&0u32.to_le_bytes());           // supercompressionScheme (0 = none)
+    h[0..4].copy_from_slice(&vk_format.to_le_bytes()); // vkFormat
+    h[4..8].copy_from_slice(&4u32.to_le_bytes()); // typeSize (4 for block-compressed)
+    h[8..12].copy_from_slice(&width.to_le_bytes()); // pixelWidth
+    h[12..16].copy_from_slice(&height.to_le_bytes()); // pixelHeight
+    h[16..20].copy_from_slice(&0u32.to_le_bytes()); // pixelDepth (0 = 2D)
+    h[20..24].copy_from_slice(&0u32.to_le_bytes()); // layerCount (0 = not array)
+    h[24..28].copy_from_slice(&1u32.to_le_bytes()); // faceCount (1 = not cubemap)
+    h[28..32].copy_from_slice(&mip_count.to_le_bytes()); // levelCount
+    h[32..36].copy_from_slice(&0u32.to_le_bytes()); // supercompressionScheme (0 = none)
 
     // DFD/KVD/SGD byte offsets and lengths — all zero (no data format descriptor, no key/value)
     // h[36..68] = zeros (dfdByteOffset, dfdByteLength, kvdByteOffset, kvdByteLength, sgdByteOffset, sgdByteLength)
@@ -365,8 +379,7 @@ fn dds_to_ktx2(dds: &[u8]) -> Option<Vec<u8>> {
             return None; // DDS file truncated
         }
         let dst_start = ktx2_offset as usize;
-        out[dst_start..dst_start + level.size as usize]
-            .copy_from_slice(&dds[src_start..src_end]);
+        out[dst_start..dst_start + level.size as usize].copy_from_slice(&dds[src_start..src_end]);
 
         ktx2_offset += level.size;
     }
@@ -544,10 +557,7 @@ fn export_all_buildings(
 
 /// Export all effect textures by loading ALL effects from sceneffectinfo and
 /// collecting every referenced texture across all sub-effects.
-fn export_all_effect_textures(
-    project_dir: &Path,
-    output_dir: &Path,
-) -> HashMap<String, String> {
+fn export_all_effect_textures(project_dir: &Path, output_dir: &Path) -> HashMap<String, String> {
     let effect_info =
         crate::item::sceneffect::load_scene_effect_info(project_dir).unwrap_or_default();
 
@@ -558,8 +568,7 @@ fn export_all_effect_textures(
         if let Some(eff_file) = load_effect_file(project_dir, &eff_info.filename) {
             if let Ok(serde_json::Value::Object(mut eff_obj)) = serde_json::to_value(&eff_file) {
                 eff_obj.insert("filename".to_string(), serde_json::json!(eff_info.filename));
-                effect_definitions
-                    .insert(eff_id.to_string(), serde_json::Value::Object(eff_obj));
+                effect_definitions.insert(eff_id.to_string(), serde_json::Value::Object(eff_obj));
             }
         }
     }
@@ -656,9 +665,10 @@ fn copy_effect_textures(
                     source_path = Some(candidate);
                     break;
                 }
-                let candidate_lc = project_dir
-                    .join(dir)
-                    .join(format!("{}.{}", stem.to_lowercase(), ext));
+                let candidate_lc =
+                    project_dir
+                        .join(dir)
+                        .join(format!("{}.{}", stem.to_lowercase(), ext));
                 if candidate_lc.exists() {
                     source_path = Some(candidate_lc);
                     break;
@@ -767,7 +777,8 @@ struct SharedManifestData<'a> {
 
 /// Build the shared_manifest.json content.
 fn build_shared_manifest(data: &SharedManifestData) -> serde_json::Value {
-    let tex_map: serde_json::Map<String, serde_json::Value> = data.terrain_textures
+    let tex_map: serde_json::Map<String, serde_json::Value> = data
+        .terrain_textures
         .iter()
         .map(|(id, path)| (id.to_string(), serde_json::json!(path)))
         .collect();
@@ -791,7 +802,8 @@ fn build_shared_manifest(data: &SharedManifestData) -> serde_json::Value {
         obj.insert("alpha_masks".into(), serde_json::json!(mask_paths));
     }
 
-    let eff_map: serde_json::Map<String, serde_json::Value> = data.effect_textures
+    let eff_map: serde_json::Map<String, serde_json::Value> = data
+        .effect_textures
         .iter()
         .map(|(name, path)| (name.clone(), serde_json::json!(path)))
         .collect();

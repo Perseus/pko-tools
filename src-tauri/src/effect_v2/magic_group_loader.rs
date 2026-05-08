@@ -29,7 +29,10 @@ use super::model::{MagicGroupEntry, MagicGroupTable};
 ///   --- Total: 216 bytes ---
 pub fn load_magic_group(data: &[u8]) -> Result<MagicGroupTable> {
     if data.len() < 4 {
-        return Err(anyhow!("MagicGroupInfo.bin too small: {} bytes", data.len()));
+        return Err(anyhow!(
+            "MagicGroupInfo.bin too small: {} bytes",
+            data.len()
+        ));
     }
 
     let record_size = u32::from_le_bytes(data[0..4].try_into()?) as usize;
@@ -68,7 +71,10 @@ fn read_i32(data: &[u8], offset: usize) -> i32 {
 
 fn parse_group_record(data: &[u8]) -> Result<Option<MagicGroupEntry>> {
     if data.len() < 216 {
-        return Err(anyhow!("Group record too small: {} bytes (need 216)", data.len()));
+        return Err(anyhow!(
+            "Group record too small: {} bytes (need 216)",
+            data.len()
+        ));
     }
 
     // CRawDataInfo base (108 bytes)
@@ -124,14 +130,20 @@ mod tests {
             "../top-client/corsairs-online-public/client/scripts/table/MagicGroupInfo.bin",
         );
         if !path.exists() {
-            eprintln!("Skipping: MagicGroupInfo.bin not found at {}", path.display());
+            eprintln!(
+                "Skipping: MagicGroupInfo.bin not found at {}",
+                path.display()
+            );
             return;
         }
 
         let data = std::fs::read(path).unwrap();
         let table = load_magic_group(&data).unwrap();
 
-        assert_eq!(table.record_size, 216, "record_size should be 216 (sizeof Group_Param)");
+        assert_eq!(
+            table.record_size, 216,
+            "record_size should be 216 (sizeof Group_Param)"
+        );
 
         assert!(
             !table.entries.is_empty(),
@@ -152,15 +164,20 @@ mod tests {
 
         // Print first few entries for visual inspection
         for entry in table.entries.iter().take(5) {
-            let active_types: Vec<_> = entry.type_ids.iter()
+            let active_types: Vec<_> = entry
+                .type_ids
+                .iter()
                 .zip(&entry.counts)
                 .filter(|(&id, _)| id >= 0)
                 .map(|(&id, &count)| format!("{}x{}", id, count))
                 .collect();
             eprintln!(
                 "  ID={:4} name={:30} types=[{}] total={} render={}",
-                entry.id, entry.name, active_types.join(", "),
-                entry.total_count, entry.render_idx
+                entry.id,
+                entry.name,
+                active_types.join(", "),
+                entry.total_count,
+                entry.render_idx
             );
         }
     }

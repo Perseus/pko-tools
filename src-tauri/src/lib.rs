@@ -41,7 +41,8 @@ pub struct AppState {
     /// Cache of glTF JSON strings keyed by (project_id, character_id).
     pub character_gltf_cache: Mutex<HashMap<(uuid::Uuid, u32), String>>,
     /// Cache of parsed/enriched map placement records keyed by (project_id, map_name).
-    pub map_placement_cache: Mutex<HashMap<(uuid::Uuid, String), Arc<Vec<map::MapPlacementRecord>>>>,
+    pub map_placement_cache:
+        Mutex<HashMap<(uuid::Uuid, String), Arc<Vec<map::MapPlacementRecord>>>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -63,7 +64,8 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_mcp_bridge::init());
     }
 
-    builder.setup(|app| {
+    builder
+        .setup(|app| {
             let _ = projects::commands::init_directories();
             let preferences = preferences::Preferences::new();
             let mut state = AppState {

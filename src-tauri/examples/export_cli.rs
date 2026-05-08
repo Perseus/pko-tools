@@ -66,11 +66,19 @@ fn main() {
                         std::process::exit(1);
                     }
                 }
-                _ => { i += 1; }
+                _ => {
+                    i += 1;
+                }
             }
         }
 
-        export_characters(&client_dir, &output_dir, split_animations, char_id_filter, profile);
+        export_characters(
+            &client_dir,
+            &output_dir,
+            split_animations,
+            char_id_filter,
+            profile,
+        );
         return;
     }
 
@@ -92,9 +100,10 @@ fn main() {
 
         // 2. Export terrain textures (same as v1)
         eprintln!("[shared-v2] Exporting terrain textures...");
-        let terrain_count = pko_tools_lib::map::texture::export_all_terrain_textures(&client_dir, &output_dir)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let terrain_count =
+            pko_tools_lib::map::texture::export_all_terrain_textures(&client_dir, &output_dir)
+                .map(|m| m.len())
+                .unwrap_or(0);
         eprintln!("  Terrain textures: {}", terrain_count);
 
         // 3. Export alpha masks (same as v1)
@@ -106,7 +115,10 @@ fn main() {
         eprintln!("[shared-v2] Exporting buildings (geometry-only, external texture URIs)...");
         match pko_tools_lib::map::shared::export_shared_assets_v2(&client_dir, &output_dir) {
             Ok(result) => {
-                eprintln!("  Buildings exported: {} ({} failed)", result.total_buildings_exported, result.total_buildings_failed);
+                eprintln!(
+                    "  Buildings exported: {} ({} failed)",
+                    result.total_buildings_exported, result.total_buildings_failed
+                );
             }
             Err(e) => {
                 eprintln!("  Buildings FAILED: {:?}", e);
@@ -128,14 +140,24 @@ fn main() {
         eprintln!("  Client dir: {}", client_dir.display());
         eprintln!("  Output dir: {}", output_dir.display());
 
-        match pko_tools_lib::map::shared::export_shared_assets_with_profile(&client_dir, &output_dir, profile) {
+        match pko_tools_lib::map::shared::export_shared_assets_with_profile(
+            &client_dir,
+            &output_dir,
+            profile,
+        ) {
             Ok(result) => {
                 eprintln!("Shared export complete!");
                 eprintln!("  Terrain textures: {}", result.total_terrain_textures);
-                eprintln!("  Buildings exported: {} ({} failed)", result.total_buildings_exported, result.total_buildings_failed);
+                eprintln!(
+                    "  Buildings exported: {} ({} failed)",
+                    result.total_buildings_exported, result.total_buildings_failed
+                );
                 eprintln!("  Effect textures: {}", result.total_effect_textures);
                 eprintln!("  Water textures: {}", result.total_water_textures);
-                eprintln!("  Alpha masks: {}", if result.has_alpha_masks { "yes" } else { "no" });
+                eprintln!(
+                    "  Alpha masks: {}",
+                    if result.has_alpha_masks { "yes" } else { "no" }
+                );
             }
             Err(e) => {
                 eprintln!("Shared export failed: {:?}", e);
@@ -160,7 +182,9 @@ fn main() {
         eprintln!("Examples:");
         eprintln!("  export_cli ./top-client ./unity-export 07xmas2");
         eprintln!("  export_cli ./top-client ./unity-export/Shared --shared");
-        eprintln!("  export_cli ./top-client ./unity-export 07xmas2 --shared-dir ./unity-export/Shared");
+        eprintln!(
+            "  export_cli ./top-client ./unity-export 07xmas2 --shared-dir ./unity-export/Shared"
+        );
         eprintln!("  export_cli ./top-client ./unity-export --characters");
         eprintln!("  export_cli ./top-client ./unity-export --characters --char-id 1");
         eprintln!("  export_cli ./top-client ./unity-export 07xmas2 --profile standard");
@@ -183,7 +207,10 @@ fn main() {
                 if let Some(val) = args.get(i + 1) {
                     let shared_path = PathBuf::from(val);
                     if !shared_path.exists() {
-                        eprintln!("Shared assets directory does not exist: {}", shared_path.display());
+                        eprintln!(
+                            "Shared assets directory does not exist: {}",
+                            shared_path.display()
+                        );
                         eprintln!("Run `export_cli <client_dir> <output_dir> --shared` first.");
                         std::process::exit(1);
                     }
@@ -194,8 +221,12 @@ fn main() {
                     std::process::exit(1);
                 }
             }
-            "--profile" => { i += 2; } // already parsed globally
-            _ => { i += 1; }
+            "--profile" => {
+                i += 2;
+            } // already parsed globally
+            _ => {
+                i += 1;
+            }
         }
     }
 
@@ -203,7 +234,12 @@ fn main() {
     eprintln!("  Client dir: {}", client_dir.display());
     eprintln!("  Output dir: {}", output_dir.display());
 
-    match pko_tools_lib::map::terrain::export_map_for_unity(&client_dir, map_name, &output_dir, &options) {
+    match pko_tools_lib::map::terrain::export_map_for_unity(
+        &client_dir,
+        map_name,
+        &output_dir,
+        &options,
+    ) {
         Ok(result) => {
             eprintln!("Export complete!");
             eprintln!("  Terrain glTF: {}", result.terrain_gltf_path);
@@ -227,7 +263,10 @@ fn export_characters(
 ) {
     let char_info_path = client_dir.join("scripts/table/CharacterInfo.txt");
     if !char_info_path.exists() {
-        eprintln!("CharacterInfo.txt not found at {}", char_info_path.display());
+        eprintln!(
+            "CharacterInfo.txt not found at {}",
+            char_info_path.display()
+        );
         std::process::exit(1);
     }
 
@@ -244,7 +283,10 @@ fn export_characters(
     };
 
     if characters.is_empty() {
-        eprintln!("No characters found{}", char_id_filter.map_or(String::new(), |id| format!(" with id {}", id)));
+        eprintln!(
+            "No characters found{}",
+            char_id_filter.map_or(String::new(), |id| format!(" with id {}", id))
+        );
         std::process::exit(1);
     }
 
@@ -282,7 +324,9 @@ fn export_characters(
             // we'd need a parameter. For now, just use get_gltf_json since split is
             // the default when data files exist. The --no-split flag would require
             // a code path change in get_gltf_json. Log a note.
-            eprintln!("  [note] --no-split-animations not yet fully implemented, using auto-detect");
+            eprintln!(
+                "  [note] --no-split-animations not yet fully implemented, using auto-detect"
+            );
             character.get_gltf_json(client_dir, Some(&ct))
         };
 
@@ -319,7 +363,10 @@ fn export_characters(
     }
 
     eprintln!();
-    eprintln!("Character export complete: {} exported, {} failed", exported, failed);
+    eprintln!(
+        "Character export complete: {} exported, {} failed",
+        exported, failed
+    );
     if failed > 0 {
         std::process::exit(1);
     }

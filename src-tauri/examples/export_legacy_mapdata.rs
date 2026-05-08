@@ -18,11 +18,15 @@ fn main() {
     let map_path = client_dir.join("map").join(format!("{}.map", map_name));
     eprintln!("Loading {}", map_path.display());
     let map_data = std::fs::read(&map_path).expect("Failed to read .map file");
-    let parsed_map = pko_tools_lib::map::map_loader::load_map(&map_data).expect("Failed to parse .map");
+    let parsed_map =
+        pko_tools_lib::map::map_loader::load_map(&map_data).expect("Failed to parse .map");
 
-    eprintln!("Map: {}x{} tiles, {} sections",
-        parsed_map.header.n_width, parsed_map.header.n_height,
-        parsed_map.sections.len());
+    eprintln!(
+        "Map: {}x{} tiles, {} sections",
+        parsed_map.header.n_width,
+        parsed_map.header.n_height,
+        parsed_map.sections.len()
+    );
 
     // Export .mapdata
     if let Some(parent) = output_path.parent() {
@@ -33,11 +37,20 @@ fn main() {
         &parsed_map,
         32, // section_tile_size matching TerrainStreamer default
         &output_path,
-    ).expect("Failed to export .mapdata");
+    )
+    .expect("Failed to export .mapdata");
 
-    eprintln!("Written {} ({} bytes)", output_path.display(), result.total_size);
-    eprintln!("  Collision: {}x{} ({} bytes bitmap)",
-        result.collision_w, result.collision_h, result.collision_bitmap_size);
-    eprintln!("  Raw block: {} bytes, compressed: {} bytes",
-        result.raw_block_size, result.compressed_block_size);
+    eprintln!(
+        "Written {} ({} bytes)",
+        output_path.display(),
+        result.total_size
+    );
+    eprintln!(
+        "  Collision: {}x{} ({} bytes bitmap)",
+        result.collision_w, result.collision_h, result.collision_bitmap_size
+    );
+    eprintln!(
+        "  Raw block: {} bytes, compressed: {} bytes",
+        result.raw_block_size, result.compressed_block_size
+    );
 }

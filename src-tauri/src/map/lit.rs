@@ -140,9 +140,7 @@ mod tests {
 
     #[test]
     fn parse_lit_tx_file() {
-        let path = Path::new(
-            "../top-client/corsairs-online-public/client/scripts/txt/lit.tx",
-        );
+        let path = Path::new("../top-client/corsairs-online-public/client/scripts/txt/lit.tx");
         if !path.exists() {
             return;
         }
@@ -157,7 +155,10 @@ mod tests {
         assert_eq!(scene_entries[0].anim_type, 4);
         assert_eq!(scene_entries[0].color_op, 9);
         assert_eq!(scene_entries[0].textures.len(), 3);
-        assert_eq!(scene_entries[0].overlay_texture.as_deref(), Some("cobweb.TGA"));
+        assert_eq!(
+            scene_entries[0].overlay_texture.as_deref(),
+            Some("cobweb.TGA")
+        );
 
         // Character entries (type 0)
         let char_entries: Vec<_> = entries.iter().filter(|e| e.obj_type == 0).collect();

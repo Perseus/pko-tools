@@ -505,12 +505,13 @@ impl ParEffPath {
 
         for i in 0..segment_count {
             write_vec3(writer, self.directions[i])?;
-        }
-        for i in 0..segment_count {
-            // eff_path_dist_slot: value + 2 padding floats
+            // CEffPath::SavePath writes sizeof(D3DXVECTOR3) bytes from
+            // &m_vecDist[i]. C++ LoadPath only needs each segment's first
+            // float after the overlapping writes settle, but writing the next
+            // two distances preserves the source layout more closely.
             write_f32(writer, self.distances[i])?;
-            write_f32(writer, 0.0)?;
-            write_f32(writer, 0.0)?;
+            write_f32(writer, self.distances.get(i + 1).copied().unwrap_or(0.0))?;
+            write_f32(writer, self.distances.get(i + 2).copied().unwrap_or(0.0))?;
         }
 
         Ok(())
@@ -548,6 +549,64 @@ impl ParChaModel {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::d3d::D3DBlend;
+
+    fn sub_effect_fixture() -> SubEffect {
+        SubEffect {
+            effect_name: "TestEffect".to_string(),
+            effect_type: 0,
+            src_blend: D3DBlend::SrcAlpha,
+            dest_blend: D3DBlend::InvSrcAlpha,
+            length: 1.0,
+            frame_count: 1,
+            frame_times: vec![1.0],
+            frame_sizes: vec![[1.0, 1.0, 1.0]],
+            frame_angles: vec![[0.0, 0.0, 0.0]],
+            frame_positions: vec![[0.0, 0.0, 0.0]],
+            frame_colors: vec![[1.0, 1.0, 1.0, 1.0]],
+            ver_count: 4,
+            coord_count: 0,
+            coord_frame_time: 0.0,
+            coord_list: vec![],
+            tex_count: 1,
+            tex_frame_time: 0.0,
+            tex_name: "spark.tga".to_string(),
+            tex_list: vec![vec![[0.0, 0.0]; 4]],
+            model_name: "RectPlane".to_string(),
+            billboard: true,
+            vs_index: 0,
+            segments: 0,
+            height: 0.0,
+            top_radius: 0.0,
+            bot_radius: 0.0,
+            frame_tex_count: 0,
+            frame_tex_time: 0.0,
+            frame_tex_names: vec![],
+            frame_tex_time2: 0.0,
+            use_param: 0,
+            per_frame_cylinder: vec![],
+            rota_loop: false,
+            rota_loop_vec: [0.0, 0.0, 0.0, 0.0],
+            alpha: false,
+            rota_board: false,
+        }
+    }
+
+    fn effect_with_version(version: u32, sub_effect: SubEffect) -> EffFile {
+        EffFile {
+            version,
+            idx_tech: 0,
+            use_path: false,
+            path_name: String::new(),
+            use_sound: false,
+            sound_name: String::new(),
+            rotating: false,
+            rota_vec: [0.0, 0.0, 0.0],
+            rota_vel: 0.0,
+            eff_num: 1,
+            sub_effects: vec![sub_effect],
+        }
+    }
 
     #[test]
     fn minimal_effect_roundtrip() {
@@ -571,5 +630,43 @@ mod tests {
         assert_eq!(parsed.version, 7);
         assert_eq!(parsed.eff_num, 0);
         assert!(parsed.sub_effects.is_empty());
+    }
+
+    #[test]
+    fn legacy_effect_versions_default_alpha_and_rota_board_like_cpp_constructor() {
+        let effect = effect_with_version(5, sub_effect_fixture());
+
+        let bytes = effect.to_bytes().expect("serialize effect");
+        let parsed = EffFile::from_bytes(&bytes).expect("parse effect");
+
+        assert!(parsed.sub_effects[0].alpha);
+        assert!(parsed.sub_effects[0].rota_board);
+    }
+
+    #[test]
+    fn version_6_reads_alpha_but_defaults_rota_board_like_cpp_constructor() {
+        let mut sub = sub_effect_fixture();
+        sub.alpha = false;
+        let effect = effect_with_version(6, sub);
+
+        let bytes = effect.to_bytes().expect("serialize effect");
+        let parsed = EffFile::from_bytes(&bytes).expect("parse effect");
+
+        assert!(!parsed.sub_effects[0].alpha);
+        assert!(parsed.sub_effects[0].rota_board);
+    }
+
+    #[test]
+    fn version_7_reads_alpha_and_rota_board_from_file() {
+        let mut sub = sub_effect_fixture();
+        sub.alpha = false;
+        sub.rota_board = false;
+        let effect = effect_with_version(7, sub);
+
+        let bytes = effect.to_bytes().expect("serialize effect");
+        let parsed = EffFile::from_bytes(&bytes).expect("parse effect");
+
+        assert!(!parsed.sub_effects[0].alpha);
+        assert!(!parsed.sub_effects[0].rota_board);
     }
 }

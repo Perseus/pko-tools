@@ -1,14 +1,13 @@
 use std::path::Path;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{bail, Context, Result};
 
 use super::lmo_types::{
-    LmoAnimData, LmoBoneAnimData, LmoBoneInfo, LmoBoneKeyframes, BoneKeyType,
-    LmoGeomObject, LmoMaterial, LmoModel, LmoMtlOpacAnim, LmoOpacityKeyframe,
-    LmoSubset, LmoTexImgAnim, LmoTexUvAnim, MaterialRenderState,
-    D3DRS_ALPHATESTENABLE, D3DRS_SRCBLEND, D3DRS_DESTBLEND, D3DRS_ALPHAREF,
-    D3DRS_CULLMODE, D3DRS_ALPHAFUNC, D3DCMP_GREATER, LW_INVALID_INDEX,
-    TRANSP_FILTER, TRANSP_SUBTRACTIVE, decompose_matrix43,
+    decompose_matrix43, BoneKeyType, LmoAnimData, LmoBoneAnimData, LmoBoneInfo, LmoBoneKeyframes,
+    LmoGeomObject, LmoMaterial, LmoModel, LmoMtlOpacAnim, LmoOpacityKeyframe, LmoSubset,
+    LmoTexImgAnim, LmoTexUvAnim, MaterialRenderState, D3DCMP_GREATER, D3DRS_ALPHAFUNC,
+    D3DRS_ALPHAREF, D3DRS_ALPHATESTENABLE, D3DRS_CULLMODE, D3DRS_DESTBLEND, D3DRS_SRCBLEND,
+    LW_INVALID_INDEX, TRANSP_FILTER, TRANSP_SUBTRACTIVE,
 };
 
 use crate::kaitai_gen::pko_lmo::*;
@@ -68,7 +67,8 @@ pub(crate) fn kaitai_to_lmo(data: &[u8], parse_animations: bool) -> Result<LmoMo
         }
 
         // Access geometry chunk via lazy instance
-        let body_opt = entry_rc.body_geometry()
+        let body_opt = entry_rc
+            .body_geometry()
             .map_err(|e| anyhow::anyhow!("Kaitai body_geometry error: {:?}", e))?
             .clone();
 
@@ -99,21 +99,26 @@ fn convert_geometry_chunk(
     let header = chunk.header().clone();
 
     // Extract header fields
-    let id = *header.id()
+    let id = *header
+        .id()
         .map_err(|e| anyhow::anyhow!("header.id error: {:?}", e))?;
-    let parent_id = *header.parent_id()
+    let parent_id = *header
+        .parent_id()
         .map_err(|e| anyhow::anyhow!("header.parent_id error: {:?}", e))?;
-    let obj_type = *header.geom_type()
+    let obj_type = *header
+        .geom_type()
         .map_err(|e| anyhow::anyhow!("header.geom_type error: {:?}", e))?;
 
     // Extract mat_local (4x4 matrix)
-    let mat_local_rc = header.mat_local()
+    let mat_local_rc = header
+        .mat_local()
         .map_err(|e| anyhow::anyhow!("header.mat_local error: {:?}", e))?
         .clone();
     let mat_local = extract_matrix44(&mat_local_rc);
 
     // Parse materials
-    let mtl_size = *header.mtl_size()
+    let mtl_size = *header
+        .mtl_size()
         .map_err(|e| anyhow::anyhow!("header.mtl_size error: {:?}", e))?;
     let mut materials = if mtl_size > 0 {
         let mtl_section = chunk.material().clone();
@@ -123,13 +128,34 @@ fn convert_geometry_chunk(
     };
 
     // Parse mesh
-    let mesh_size = *header.mesh_size()
+    let mesh_size = *header
+        .mesh_size()
         .map_err(|e| anyhow::anyhow!("header.mesh_size error: {:?}", e))?;
-    let (vertices, normals, texcoords, vertex_colors, mut indices, subsets, mesh_alpha, blend_weights, bone_indices) = if mesh_size > 0 {
+    let (
+        vertices,
+        normals,
+        texcoords,
+        vertex_colors,
+        mut indices,
+        subsets,
+        mesh_alpha,
+        blend_weights,
+        bone_indices,
+    ) = if mesh_size > 0 {
         let mesh_section = chunk.mesh().clone();
         convert_mesh_section(&mesh_section, file_version)?
     } else {
-        (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new(), MaterialRenderState::default(), Vec::new(), Vec::new())
+        (
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            MaterialRenderState::default(),
+            Vec::new(),
+            Vec::new(),
+        )
     };
 
     // Workaround: Kaitai runtime BytesReader clone bug — _io.pos() returns 0
@@ -138,11 +164,14 @@ fn convert_geometry_chunk(
     // indices from raw mesh bytes at the correct offset.
     if mesh_size > 0 && !indices.is_empty() {
         let mesh_section = chunk.mesh().clone();
-        let header_kind = *mesh_section.header_kind()
+        let header_kind = *mesh_section
+            .header_kind()
             .map_err(|e| anyhow::anyhow!("header_kind: {:?}", e))?;
         if header_kind == 0 {
-            let index_num = *mesh_section.index_num()
-                .map_err(|e| anyhow::anyhow!("index_num: {:?}", e))? as usize;
+            let index_num = *mesh_section
+                .index_num()
+                .map_err(|e| anyhow::anyhow!("index_num: {:?}", e))?
+                as usize;
             let mesh_raw = chunk.mesh_raw().clone();
             let expected_index_bytes = index_num * 4;
             let raw_len = mesh_raw.len();
@@ -150,13 +179,11 @@ fn convert_geometry_chunk(
             if raw_len >= expected_index_bytes + 8 {
                 let tail_offset = raw_len - expected_index_bytes;
                 if tail_offset == expected_index_bytes + 8
-                    || (raw_len > expected_index_bytes
-                        && raw_len - expected_index_bytes >= 8
-                        && {
-                            // Check if kaitai's indices look wrong (first value >= vertex count)
-                            let vcount = vertices.len() as u32;
-                            !indices.is_empty() && indices[0] >= vcount && vcount > 0
-                        })
+                    || (raw_len > expected_index_bytes && raw_len - expected_index_bytes >= 8 && {
+                        // Check if kaitai's indices look wrong (first value >= vertex count)
+                        let vcount = vertices.len() as u32;
+                        !indices.is_empty() && indices[0] >= vcount && vcount > 0
+                    })
                 {
                     // Re-read indices from the correct offset (skip the 8-byte legacy pair)
                     let idx_start = raw_len - expected_index_bytes;
@@ -165,8 +192,10 @@ fn convert_geometry_chunk(
                         let off = idx_start + i * 4;
                         if off + 4 <= raw_len {
                             let val = u32::from_le_bytes([
-                                mesh_raw[off], mesh_raw[off+1],
-                                mesh_raw[off+2], mesh_raw[off+3],
+                                mesh_raw[off],
+                                mesh_raw[off + 1],
+                                mesh_raw[off + 2],
+                                mesh_raw[off + 3],
                             ]);
                             fixed_indices.push(val);
                         }
@@ -191,7 +220,8 @@ fn convert_geometry_chunk(
     }
 
     // Parse animations
-    let anim_size = *header.anim_size()
+    let anim_size = *header
+        .anim_size()
         .map_err(|e| anyhow::anyhow!("header.anim_size error: {:?}", e))?;
     let (animation, bone_animation, texuv_anims, teximg_anims, mtlopac_anims) =
         if parse_animations && anim_size > 0 {
@@ -232,7 +262,8 @@ fn convert_material_section(
     _file_version: u32,
 ) -> Result<Vec<LmoMaterial>> {
     // Determine material format version — mirrors native parser logic
-    let format_hint = *section.format_hint()
+    let format_hint = *section
+        .format_hint()
         .map_err(|e| anyhow::anyhow!("format_hint error: {:?}", e))?;
     let mtl_format = match format_hint {
         0 => MtlFormat::V0000,
@@ -252,10 +283,7 @@ fn convert_material_section(
     Ok(materials)
 }
 
-fn convert_mtl_entry(
-    entry: &OptRc<PkoLmo_MtlEntry>,
-    mtl_format: MtlFormat,
-) -> Result<LmoMaterial> {
+fn convert_mtl_entry(entry: &OptRc<PkoLmo_MtlEntry>, mtl_format: MtlFormat) -> Result<LmoMaterial> {
     match mtl_format {
         MtlFormat::V0000 => {
             let info = entry.as_0000().clone();
@@ -288,7 +316,15 @@ fn convert_mtl_0000(info: &OptRc<PkoLmo_MtlTexInfo0000>) -> Result<LmoMaterial> 
     // Texture filename — stage 0 only
     let tex_filename = extract_tex_filename_0000(&info.tex_seq().clone());
 
-    build_lmo_material(opacity, transp_type, diffuse, ambient, emissive, rs, tex_filename)
+    build_lmo_material(
+        opacity,
+        transp_type,
+        diffuse,
+        ambient,
+        emissive,
+        rs,
+        tex_filename,
+    )
 }
 
 /// Convert V0001 material (has opacity/transp, old render state set).
@@ -310,7 +346,15 @@ fn convert_mtl_0001(info: &OptRc<PkoLmo_MtlTexInfo0001>) -> Result<LmoMaterial> 
     // Texture filename — stage 0 only
     let tex_filename = extract_tex_filename_0001(&info.tex_seq().clone());
 
-    build_lmo_material(opacity, transp_type, diffuse, ambient, emissive, rs, tex_filename)
+    build_lmo_material(
+        opacity,
+        transp_type,
+        diffuse,
+        ambient,
+        emissive,
+        rs,
+        tex_filename,
+    )
 }
 
 /// Convert Current-format material (has opacity/transp, new render state atoms).
@@ -327,7 +371,15 @@ fn convert_mtl_current(info: &OptRc<PkoLmo_MtlTexInfoCurrent>) -> Result<LmoMate
     // Texture filename — stage 0 only
     let tex_filename = extract_tex_filename_current(&info.tex_seq().clone());
 
-    build_lmo_material(opacity, transp_type, diffuse, ambient, emissive, rs, tex_filename)
+    build_lmo_material(
+        opacity,
+        transp_type,
+        diffuse,
+        ambient,
+        emissive,
+        rs,
+        tex_filename,
+    )
 }
 
 fn build_lmo_material(
@@ -361,9 +413,7 @@ fn build_lmo_material(
     })
 }
 
-fn extract_material_colors(
-    mtl: &OptRc<PkoLmo_Material>,
-) -> ([f32; 4], [f32; 4], [f32; 4]) {
+fn extract_material_colors(mtl: &OptRc<PkoLmo_Material>) -> ([f32; 4], [f32; 4], [f32; 4]) {
     let dif = mtl.dif().clone();
     let diffuse = [*dif.r(), *dif.g(), *dif.b(), *dif.a()];
 
@@ -378,16 +428,16 @@ fn extract_material_colors(
 
 /// Read old-format render state set (V0000/V0001).
 /// Semantic parity #3: forces ALPHAREF=129, ALPHAFUNC=D3DCMP_GREATER
-fn read_old_format_render_state(
-    rs_set: &OptRc<PkoLmo_RenderStateSet28>,
-) -> MaterialRenderState {
+fn read_old_format_render_state(rs_set: &OptRc<PkoLmo_RenderStateSet28>) -> MaterialRenderState {
     let mut rs = MaterialRenderState::default();
     let values = rs_set.values().clone();
 
     // The old format has 2 sets × 8 entries = 16 render_state_value entries.
     // Only process the first 8 (set 0).
     for (i, val_rc) in values.iter().enumerate() {
-        if i >= 8 { break; }
+        if i >= 8 {
+            break;
+        }
         let state = *val_rc.state();
         let value = *val_rc.value();
 
@@ -463,23 +513,33 @@ fn read_current_render_state_atoms(
 fn extract_cstr_from_bytes(raw: &[u8]) -> Option<String> {
     let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
     let s = String::from_utf8_lossy(&raw[..end]).to_string();
-    if s.is_empty() { None } else { Some(s) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 fn extract_tex_filename_0000(stages: &[OptRc<PkoLmo_TexInfo0000>]) -> Option<String> {
-    if stages.is_empty() { return None; }
+    if stages.is_empty() {
+        return None;
+    }
     let stage0 = &stages[0];
     extract_cstr_from_bytes(&stage0.file_name())
 }
 
 fn extract_tex_filename_0001(stages: &[OptRc<PkoLmo_TexInfo0001>]) -> Option<String> {
-    if stages.is_empty() { return None; }
+    if stages.is_empty() {
+        return None;
+    }
     let stage0 = &stages[0];
     extract_cstr_from_bytes(&stage0.file_name())
 }
 
 fn extract_tex_filename_current(stages: &[OptRc<PkoLmo_TexInfoCurrent>]) -> Option<String> {
-    if stages.is_empty() { return None; }
+    if stages.is_empty() {
+        return None;
+    }
     let stage0 = &stages[0];
     extract_cstr_from_bytes(&stage0.file_name())
 }
@@ -492,12 +552,25 @@ fn extract_tex_filename_current(stages: &[OptRc<PkoLmo_TexInfoCurrent>]) -> Opti
 fn convert_mesh_section(
     section: &OptRc<PkoLmo_MeshSection>,
     _file_version: u32,
-) -> Result<(Vec<[f32; 3]>, Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<u32>, Vec<u32>, Vec<LmoSubset>, MaterialRenderState, Vec<[f32; 4]>, Vec<[u8; 4]>)> {
-    let vertex_num = *section.vertex_num()
+) -> Result<(
+    Vec<[f32; 3]>,
+    Vec<[f32; 3]>,
+    Vec<[f32; 2]>,
+    Vec<u32>,
+    Vec<u32>,
+    Vec<LmoSubset>,
+    MaterialRenderState,
+    Vec<[f32; 4]>,
+    Vec<[u8; 4]>,
+)> {
+    let vertex_num = *section
+        .vertex_num()
         .map_err(|e| anyhow::anyhow!("vertex_num error: {:?}", e))? as usize;
-    let _fvf = *section.fvf()
+    let _fvf = *section
+        .fvf()
         .map_err(|e| anyhow::anyhow!("fvf error: {:?}", e))?;
-    let header_kind = *section.header_kind()
+    let header_kind = *section
+        .header_kind()
         .map_err(|e| anyhow::anyhow!("header_kind error: {:?}", e))?;
 
     // Vertices
@@ -508,7 +581,8 @@ fn convert_mesh_section(
     }
 
     // Normals
-    let has_normals = *section.has_normals()
+    let has_normals = *section
+        .has_normals()
         .map_err(|e| anyhow::anyhow!("has_normals error: {:?}", e))?;
     let mut normals = Vec::new();
     if has_normals {
@@ -532,7 +606,8 @@ fn convert_mesh_section(
     }
 
     // Vertex colors
-    let has_diffuse = *section.has_diffuse()
+    let has_diffuse = *section
+        .has_diffuse()
         .map_err(|e| anyhow::anyhow!("has_diffuse error: {:?}", e))?;
     let mut vertex_colors = Vec::new();
     if has_diffuse {
@@ -560,7 +635,8 @@ fn convert_mesh_section(
     };
 
     // Blend weights and bone indices (for skinned meshes)
-    let has_blend = *section.has_blend_data()
+    let has_blend = *section
+        .has_blend_data()
         .map_err(|e| anyhow::anyhow!("has_blend_data error: {:?}", e))?;
     let mut blend_weights = Vec::new();
     let mut bone_indices = Vec::new();
@@ -569,7 +645,11 @@ fn convert_mesh_section(
         let bone_index_lut: Vec<u32> = if header_kind == 2 {
             section.bone_index_seq_u4().clone()
         } else {
-            section.bone_index_seq_u1().iter().map(|&v| v as u32).collect()
+            section
+                .bone_index_seq_u1()
+                .iter()
+                .map(|&v| v as u32)
+                .collect()
         };
 
         let blend_seq = section.blend_seq().clone();
@@ -615,16 +695,29 @@ fn convert_mesh_section(
     // Mesh-level render states
     let mesh_alpha = extract_mesh_render_state(section, header_kind as i32)?;
 
-    Ok((vertices, normals, texcoords, vertex_colors, indices, subsets, mesh_alpha, blend_weights, bone_indices))
+    Ok((
+        vertices,
+        normals,
+        texcoords,
+        vertex_colors,
+        indices,
+        subsets,
+        mesh_alpha,
+        blend_weights,
+        bone_indices,
+    ))
 }
 
 fn extract_subsets(subset_seq: &[OptRc<PkoLmo_SubsetInfo>]) -> Vec<LmoSubset> {
-    subset_seq.iter().map(|s| LmoSubset {
-        primitive_num: *s.primitive_num(),
-        start_index: *s.start_index(),
-        vertex_num: *s.vertex_num(),
-        min_index: *s.min_index(),
-    }).collect()
+    subset_seq
+        .iter()
+        .map(|s| LmoSubset {
+            primitive_num: *s.primitive_num(),
+            start_index: *s.start_index(),
+            vertex_num: *s.vertex_num(),
+            min_index: *s.min_index(),
+        })
+        .collect()
 }
 
 fn extract_mesh_render_state(
@@ -662,22 +755,48 @@ fn extract_mesh_render_state(
 /// Forces ALPHAREF=129 and ALPHAFUNC=D3DCMP_GREATER (semantic parity #3).
 fn parse_old_rs_from_raw_bytes(raw: &[u8]) -> MaterialRenderState {
     let mut rs = MaterialRenderState::default();
-    if raw.len() < 128 { return rs; }
+    if raw.len() < 128 {
+        return rs;
+    }
 
     for i in 0..8 {
         let offset = i * 8;
-        let state = u32::from_le_bytes([raw[offset], raw[offset+1], raw[offset+2], raw[offset+3]]);
-        let value = u32::from_le_bytes([raw[offset+4], raw[offset+5], raw[offset+6], raw[offset+7]]);
+        let state = u32::from_le_bytes([
+            raw[offset],
+            raw[offset + 1],
+            raw[offset + 2],
+            raw[offset + 3],
+        ]);
+        let value = u32::from_le_bytes([
+            raw[offset + 4],
+            raw[offset + 5],
+            raw[offset + 6],
+            raw[offset + 7],
+        ]);
 
-        if state == LW_INVALID_INDEX { continue; }
+        if state == LW_INVALID_INDEX {
+            continue;
+        }
 
         match state {
-            D3DRS_ALPHATESTENABLE => { rs.alpha_enabled = value != 0; }
-            D3DRS_SRCBLEND => { rs.src_blend = Some(value); }
-            D3DRS_DESTBLEND => { rs.dest_blend = Some(value); }
-            D3DRS_ALPHAREF => { rs.alpha_ref = Some(129); } // forced
-            D3DRS_CULLMODE => { rs.cull_mode = Some(value); }
-            D3DRS_ALPHAFUNC => { rs.alpha_func = Some(D3DCMP_GREATER); } // forced
+            D3DRS_ALPHATESTENABLE => {
+                rs.alpha_enabled = value != 0;
+            }
+            D3DRS_SRCBLEND => {
+                rs.src_blend = Some(value);
+            }
+            D3DRS_DESTBLEND => {
+                rs.dest_blend = Some(value);
+            }
+            D3DRS_ALPHAREF => {
+                rs.alpha_ref = Some(129);
+            } // forced
+            D3DRS_CULLMODE => {
+                rs.cull_mode = Some(value);
+            }
+            D3DRS_ALPHAFUNC => {
+                rs.alpha_func = Some(D3DCMP_GREATER);
+            } // forced
             _ => {}
         }
     }
@@ -693,7 +812,13 @@ fn parse_old_rs_from_raw_bytes(raw: &[u8]) -> MaterialRenderState {
 pub(crate) fn convert_anim_section(
     section: &OptRc<PkoLmo_AnimSection>,
     file_version: u32,
-) -> Result<(Option<LmoAnimData>, Option<LmoBoneAnimData>, Vec<LmoTexUvAnim>, Vec<LmoTexImgAnim>, Vec<LmoMtlOpacAnim>)> {
+) -> Result<(
+    Option<LmoAnimData>,
+    Option<LmoBoneAnimData>,
+    Vec<LmoTexUvAnim>,
+    Vec<LmoTexImgAnim>,
+    Vec<LmoMtlOpacAnim>,
+)> {
     // Bone animation
     let data_bone_size = *section.data_bone_size();
     let bone_animation = if data_bone_size > 0 {
@@ -725,9 +850,13 @@ pub(crate) fn convert_anim_section(
     if file_version >= 0x1005 {
         let slots = section.anim_mtlopac().clone();
         for (subset_idx, slot_rc) in slots.iter().enumerate() {
-            if *slot_rc.blob_size() == 0 { continue; }
+            if *slot_rc.blob_size() == 0 {
+                continue;
+            }
             let data_opt = slot_rc.data().clone();
-            if data_opt.is_none() { continue; }
+            if data_opt.is_none() {
+                continue;
+            }
             let opac_data = &data_opt;
             let key_seq = opac_data.key_seq().clone();
             let mut keyframes = Vec::new();
@@ -752,12 +881,18 @@ pub(crate) fn convert_anim_section(
     let mut texuv_anims = Vec::new();
     for (slot_idx, slot_rc) in texuv_slots.iter().enumerate() {
         let size = texuv_sizes[slot_idx];
-        if size == 0 { continue; }
+        if size == 0 {
+            continue;
+        }
         let data_opt = slot_rc.data().clone();
-        if data_opt.is_none() { continue; }
+        if data_opt.is_none() {
+            continue;
+        }
         let uv_data = &data_opt;
         let frame_num = *uv_data.frame_num();
-        if frame_num == 0 || frame_num > 100_000 { continue; }
+        if frame_num == 0 || frame_num > 100_000 {
+            continue;
+        }
         let mat_seq = uv_data.mat_seq().clone();
         let mut matrices = Vec::with_capacity(frame_num as usize);
         for mat_rc in &mat_seq {
@@ -779,14 +914,22 @@ pub(crate) fn convert_anim_section(
     let mut teximg_anims = Vec::new();
     for (slot_idx, slot_rc) in teximg_slots.iter().enumerate() {
         let size = teximg_sizes[slot_idx];
-        if size == 0 { continue; }
+        if size == 0 {
+            continue;
+        }
         let data_opt = slot_rc.data().clone();
-        if data_opt.is_none() { continue; }
+        if data_opt.is_none() {
+            continue;
+        }
         let img_data = &data_opt;
         // For file_version == 0, teximg has legacy_payload (raw bytes), skip it
-        if *img_data.version() == 0 { continue; }
+        if *img_data.version() == 0 {
+            continue;
+        }
         let data_num = *img_data.data_num();
-        if data_num == 0 || data_num > 1000 { continue; }
+        if data_num == 0 || data_num > 1000 {
+            continue;
+        }
         let data_seq = img_data.data_seq().clone();
         let mut textures = Vec::new();
         for tex_rc in &data_seq {
@@ -805,7 +948,13 @@ pub(crate) fn convert_anim_section(
         }
     }
 
-    Ok((animation, bone_animation, texuv_anims, teximg_anims, mtlopac_anims))
+    Ok((
+        animation,
+        bone_animation,
+        texuv_anims,
+        teximg_anims,
+        mtlopac_anims,
+    ))
 }
 
 /// Convert Kaitai bone animation data to domain types.
@@ -836,7 +985,10 @@ pub(crate) fn convert_bone_animation(
     let mut bones = Vec::with_capacity(bone_num);
     for b in &base_seq {
         let name_bytes = b.name().clone();
-        let end = name_bytes.iter().position(|&c| c == 0).unwrap_or(name_bytes.len());
+        let end = name_bytes
+            .iter()
+            .position(|&c| c == 0)
+            .unwrap_or(name_bytes.len());
         let name = String::from_utf8_lossy(&name_bytes[..end]).to_string();
         bones.push(LmoBoneInfo {
             name,
@@ -983,10 +1135,8 @@ fn decompose_matrix44_to_tq(raw: &[[f32; 4]; 4]) -> ([f32; 3], [f32; 4]) {
     let translation = [raw[3][0], raw[3][1], raw[3][2]];
     // Convert to flat 12-element array for decompose_matrix43
     let flat: [f32; 12] = [
-        raw[0][0], raw[0][1], raw[0][2],
-        raw[1][0], raw[1][1], raw[1][2],
-        raw[2][0], raw[2][1], raw[2][2],
-        raw[3][0], raw[3][1], raw[3][2],
+        raw[0][0], raw[0][1], raw[0][2], raw[1][0], raw[1][1], raw[1][2], raw[2][0], raw[2][1],
+        raw[2][2], raw[3][0], raw[3][1], raw[3][2],
     ];
     let (_, q) = decompose_matrix43(&flat);
     (translation, q)
@@ -994,10 +1144,18 @@ fn decompose_matrix44_to_tq(raw: &[[f32; 4]; 4]) -> ([f32; 3], [f32; 4]) {
 
 pub(crate) fn extract_matrix43_array(mat: &OptRc<PkoLmo_Matrix43>) -> [f32; 12] {
     [
-        *mat.m11(), *mat.m12(), *mat.m13(),
-        *mat.m21(), *mat.m22(), *mat.m23(),
-        *mat.m31(), *mat.m32(), *mat.m33(),
-        *mat.m41(), *mat.m42(), *mat.m43(),
+        *mat.m11(),
+        *mat.m12(),
+        *mat.m13(),
+        *mat.m21(),
+        *mat.m22(),
+        *mat.m23(),
+        *mat.m31(),
+        *mat.m32(),
+        *mat.m33(),
+        *mat.m41(),
+        *mat.m42(),
+        *mat.m43(),
     ]
 }
 
@@ -1023,10 +1181,14 @@ mod tests {
         let mut failed = Vec::new();
 
         for dir in &client_dirs {
-            if !dir.exists() { continue; }
+            if !dir.exists() {
+                continue;
+            }
             for entry in std::fs::read_dir(dir).unwrap() {
                 let path = entry.unwrap().path();
-                if path.extension() != Some("lmo".as_ref()) { continue; }
+                if path.extension() != Some("lmo".as_ref()) {
+                    continue;
+                }
 
                 let data = std::fs::read(&path).unwrap();
                 if let Err(e) = kaitai_to_lmo(&data, true) {
@@ -1040,7 +1202,9 @@ mod tests {
         assert!(
             failed.is_empty(),
             "FAILURES ({}/{} files):\n{}",
-            failed.len(), tested, failed.join("\n")
+            failed.len(),
+            tested,
+            failed.join("\n")
         );
         eprintln!("All {} .lmo files parsed successfully", tested);
     }

@@ -47,7 +47,8 @@ fn bone_index_seq_values_in_bounds() {
             lgo_path.file_name().unwrap().to_string_lossy()
         );
 
-        let lgo_model = CharacterGeometricModel::from_file(lgo_path.clone()).expect("Failed to parse LGO");
+        let lgo_model =
+            CharacterGeometricModel::from_file(lgo_path.clone()).expect("Failed to parse LGO");
 
         let lgo = match &lgo_model.mesh_info {
             Some(mesh) => mesh,
@@ -95,7 +96,8 @@ fn vertex_blend_indices_in_bounds() {
             lgo_path.file_name().unwrap().to_string_lossy()
         );
 
-        let lgo_model = CharacterGeometricModel::from_file(lgo_path.clone()).expect("Failed to parse LGO");
+        let lgo_model =
+            CharacterGeometricModel::from_file(lgo_path.clone()).expect("Failed to parse LGO");
 
         let lgo = match &lgo_model.mesh_info {
             Some(mesh) => mesh,
@@ -142,7 +144,8 @@ fn bone_weights_sum_to_one() {
 
     for lgo_entry in lgo_files {
         let lgo_path = lgo_entry.path();
-        let lgo_model = CharacterGeometricModel::from_file(lgo_path.clone()).expect("Failed to parse LGO");
+        let lgo_model =
+            CharacterGeometricModel::from_file(lgo_path.clone()).expect("Failed to parse LGO");
 
         let lgo = match &lgo_model.mesh_info {
             Some(mesh) => mesh,
@@ -195,7 +198,8 @@ fn bone_index_num_matches_sequence_length() {
 
     for lgo_entry in lgo_files {
         let lgo_path = lgo_entry.path();
-        let lgo_model = CharacterGeometricModel::from_file(lgo_path.clone()).expect("Failed to parse LGO");
+        let lgo_model =
+            CharacterGeometricModel::from_file(lgo_path.clone()).expect("Failed to parse LGO");
 
         let lgo = match &lgo_model.mesh_info {
             Some(mesh) => mesh,

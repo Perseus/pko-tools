@@ -8,14 +8,14 @@
 
 extern crate kaitai;
 use kaitai::*;
+use std::cell::{Cell, Ref, RefCell};
 use std::convert::{TryFrom, TryInto};
-use std::cell::{Ref, Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 /**
  * Source of truth: lwAnimDataBone::Load(const char* file) and
  * lwAnimDataBone::Load(FILE* fp, DWORD version) in lwExpObj.cpp.
- * 
+ *
  * Binary layout:
  *   - u32 version (loader accepts only >= 0x1000 for .lab files)
  *   - lwBoneInfoHeader
@@ -56,38 +56,75 @@ impl KStruct for PkoLab {
         let _prc = self_rc._parent.get_value().borrow().upgrade();
         let _r = _rrc.as_ref().unwrap();
         *self_rc.version.borrow_mut() = _io.read_u4le()?.into();
-        let t = Self::read_into::<_, PkoLab_BoneInfoHeader>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+        let t = Self::read_into::<_, PkoLab_BoneInfoHeader>(
+            &*_io,
+            Some(self_rc._root.clone()),
+            Some(self_rc._self.clone()),
+        )?
+        .into();
         *self_rc.header.borrow_mut() = t;
         *self_rc.base_seq.borrow_mut() = Vec::new();
         let l_base_seq = *self_rc.header().bone_num();
         for _i in 0..l_base_seq {
-            let t = Self::read_into::<_, PkoLab_BoneBaseInfo>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+            let t = Self::read_into::<_, PkoLab_BoneBaseInfo>(
+                &*_io,
+                Some(self_rc._root.clone()),
+                Some(self_rc._self.clone()),
+            )?
+            .into();
             self_rc.base_seq.borrow_mut().push(t);
         }
         *self_rc.invmat_seq.borrow_mut() = Vec::new();
         let l_invmat_seq = *self_rc.header().bone_num();
         for _i in 0..l_invmat_seq {
-            let t = Self::read_into::<_, PkoLab_Matrix44>(&*_io, Some(self_rc._root.clone()), None)?.into();
+            let t =
+                Self::read_into::<_, PkoLab_Matrix44>(&*_io, Some(self_rc._root.clone()), None)?
+                    .into();
             self_rc.invmat_seq.borrow_mut().push(t);
         }
         *self_rc.dummy_seq.borrow_mut() = Vec::new();
         let l_dummy_seq = *self_rc.header().dummy_num();
         for _i in 0..l_dummy_seq {
-            let t = Self::read_into::<_, PkoLab_BoneDummyInfo>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+            let t = Self::read_into::<_, PkoLab_BoneDummyInfo>(
+                &*_io,
+                Some(self_rc._root.clone()),
+                Some(self_rc._self.clone()),
+            )?
+            .into();
             self_rc.dummy_seq.borrow_mut().push(t);
         }
         *self_rc.key_seq.borrow_mut() = Vec::new();
         let l_key_seq = *self_rc.header().bone_num();
         for _i in 0..l_key_seq {
-            let f = |t : &mut PkoLab_BoneKeyInfo| Ok(t.set_params((*self_rc.header().key_type()).try_into().map_err(|_| KError::CastError)?, (*self_rc.header().frame_num()).try_into().map_err(|_| KError::CastError)?, (*self_rc.version()).try_into().map_err(|_| KError::CastError)?, (*self_rc.base_seq()[_i as usize].parent_id()).try_into().map_err(|_| KError::CastError)?));
-            let t = Self::read_into_with_init::<_, PkoLab_BoneKeyInfo>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()), &f)?.into();
+            let f = |t: &mut PkoLab_BoneKeyInfo| {
+                Ok(t.set_params(
+                    (*self_rc.header().key_type())
+                        .try_into()
+                        .map_err(|_| KError::CastError)?,
+                    (*self_rc.header().frame_num())
+                        .try_into()
+                        .map_err(|_| KError::CastError)?,
+                    (*self_rc.version())
+                        .try_into()
+                        .map_err(|_| KError::CastError)?,
+                    (*self_rc.base_seq()[_i as usize].parent_id())
+                        .try_into()
+                        .map_err(|_| KError::CastError)?,
+                ))
+            };
+            let t = Self::read_into_with_init::<_, PkoLab_BoneKeyInfo>(
+                &*_io,
+                Some(self_rc._root.clone()),
+                Some(self_rc._self.clone()),
+                &f,
+            )?
+            .into();
             self_rc.key_seq.borrow_mut().push(t);
         }
         Ok(())
     }
 }
-impl PkoLab {
-}
+impl PkoLab {}
 impl PkoLab {
     pub fn version(&self) -> Ref<'_, u32> {
         self.version.borrow()
@@ -157,8 +194,7 @@ impl KStruct for PkoLab_BoneBaseInfo {
         Ok(())
     }
 }
-impl PkoLab_BoneBaseInfo {
-}
+impl PkoLab_BoneBaseInfo {}
 impl PkoLab_BoneBaseInfo {
     pub fn name(&self) -> Ref<'_, Vec<u8>> {
         self.name.borrow()
@@ -209,13 +245,13 @@ impl KStruct for PkoLab_BoneDummyInfo {
         let _r = _rrc.as_ref().unwrap();
         *self_rc.id.borrow_mut() = _io.read_u4le()?.into();
         *self_rc.parent_bone_id.borrow_mut() = _io.read_u4le()?.into();
-        let t = Self::read_into::<_, PkoLab_Matrix44>(&*_io, Some(self_rc._root.clone()), None)?.into();
+        let t =
+            Self::read_into::<_, PkoLab_Matrix44>(&*_io, Some(self_rc._root.clone()), None)?.into();
         *self_rc.mat.borrow_mut() = t;
         Ok(())
     }
 }
-impl PkoLab_BoneDummyInfo {
-}
+impl PkoLab_BoneDummyInfo {}
 impl PkoLab_BoneDummyInfo {
     pub fn id(&self) -> Ref<'_, u32> {
         self.id.borrow()
@@ -269,14 +305,19 @@ impl KStruct for PkoLab_BoneInfoHeader {
         *self_rc.frame_num.borrow_mut() = _io.read_u4le()?.into();
         *self_rc.dummy_num.borrow_mut() = _io.read_u4le()?.into();
         *self_rc.key_type.borrow_mut() = _io.read_u4le()?.into();
-        if !( ((((*self_rc.key_type() as u32) == (1 as u32))) || (((*self_rc.key_type() as u32) == (2 as u32))) || (((*self_rc.key_type() as u32) == (3 as u32)))) ) {
-            return Err(KError::ValidationFailed(ValidationFailedError { kind: ValidationKind::NotAnyOf, src_path: "/types/bone_info_header/seq/3".to_string() }));
+        if !(((*self_rc.key_type() as u32) == (1 as u32))
+            || ((*self_rc.key_type() as u32) == (2 as u32))
+            || ((*self_rc.key_type() as u32) == (3 as u32)))
+        {
+            return Err(KError::ValidationFailed(ValidationFailedError {
+                kind: ValidationKind::NotAnyOf,
+                src_path: "/types/bone_info_header/seq/3".to_string(),
+            }));
         }
         Ok(())
     }
 }
-impl PkoLab_BoneInfoHeader {
-}
+impl PkoLab_BoneInfoHeader {}
 impl PkoLab_BoneInfoHeader {
     pub fn bone_num(&self) -> Ref<'_, u32> {
         self.bone_num.borrow()
@@ -341,7 +382,12 @@ impl KStruct for PkoLab_BoneKeyInfo {
             *self_rc.mat43_seq.borrow_mut() = Vec::new();
             let l_mat43_seq = *self_rc.frame_num();
             for _i in 0..l_mat43_seq {
-                let t = Self::read_into::<_, PkoLab_Matrix43>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+                let t = Self::read_into::<_, PkoLab_Matrix43>(
+                    &*_io,
+                    Some(self_rc._root.clone()),
+                    Some(self_rc._self.clone()),
+                )?
+                .into();
                 self_rc.mat43_seq.borrow_mut().push(t);
             }
         }
@@ -349,7 +395,12 @@ impl KStruct for PkoLab_BoneKeyInfo {
             *self_rc.mat44_seq.borrow_mut() = Vec::new();
             let l_mat44_seq = *self_rc.frame_num();
             for _i in 0..l_mat44_seq {
-                let t = Self::read_into::<_, PkoLab_Matrix44>(&*_io, Some(self_rc._root.clone()), None)?.into();
+                let t = Self::read_into::<_, PkoLab_Matrix44>(
+                    &*_io,
+                    Some(self_rc._root.clone()),
+                    None,
+                )?
+                .into();
                 self_rc.mat44_seq.borrow_mut().push(t);
             }
         }
@@ -357,7 +408,12 @@ impl KStruct for PkoLab_BoneKeyInfo {
             *self_rc.pos_seq.borrow_mut() = Vec::new();
             let l_pos_seq = *self_rc.pos_num()?;
             for _i in 0..l_pos_seq {
-                let t = Self::read_into::<_, PkoLab_Vector3>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+                let t = Self::read_into::<_, PkoLab_Vector3>(
+                    &*_io,
+                    Some(self_rc._root.clone()),
+                    Some(self_rc._self.clone()),
+                )?
+                .into();
                 self_rc.pos_seq.borrow_mut().push(t);
             }
         }
@@ -365,7 +421,12 @@ impl KStruct for PkoLab_BoneKeyInfo {
             *self_rc.quat_seq.borrow_mut() = Vec::new();
             let l_quat_seq = *self_rc.frame_num();
             for _i in 0..l_quat_seq {
-                let t = Self::read_into::<_, PkoLab_Quaternion>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+                let t = Self::read_into::<_, PkoLab_Quaternion>(
+                    &*_io,
+                    Some(self_rc._root.clone()),
+                    Some(self_rc._self.clone()),
+                )?
+                .into();
                 self_rc.quat_seq.borrow_mut().push(t);
             }
         }
@@ -401,9 +462,7 @@ impl PkoLab_BoneKeyInfo {
     }
 }
 impl PkoLab_BoneKeyInfo {
-    pub fn pos_num(
-        &self
-    ) -> KResult<Ref<'_, u32>> {
+    pub fn pos_num(&self) -> KResult<Ref<'_, u32>> {
         let _io = self._io.borrow();
         let _rrc = self._root.get_value().borrow().upgrade();
         let _prc = self._parent.get_value().borrow().upgrade();
@@ -412,7 +471,15 @@ impl PkoLab_BoneKeyInfo {
             return Ok(self.pos_num.borrow());
         }
         self.f_pos_num.set(true);
-        *self.pos_num.borrow_mut() = (if ((*self.version() as i32) >= (4099 as i32)) { *self.frame_num() } else { if (*self.parent_id() == 4294967295u32) { *self.frame_num() } else { 1 } }) as u32;
+        *self.pos_num.borrow_mut() = (if ((*self.version() as i32) >= (4099 as i32)) {
+            *self.frame_num()
+        } else {
+            if (*self.parent_id() == 4294967295u32) {
+                *self.frame_num()
+            } else {
+                1
+            }
+        }) as u32;
         Ok(self.pos_num.borrow())
     }
 }
@@ -493,8 +560,7 @@ impl KStruct for PkoLab_Matrix43 {
         Ok(())
     }
 }
-impl PkoLab_Matrix43 {
-}
+impl PkoLab_Matrix43 {}
 impl PkoLab_Matrix43 {
     pub fn m11(&self) -> Ref<'_, f32> {
         self.m11.borrow()
@@ -620,8 +686,7 @@ impl KStruct for PkoLab_Matrix44 {
         Ok(())
     }
 }
-impl PkoLab_Matrix44 {
-}
+impl PkoLab_Matrix44 {}
 impl PkoLab_Matrix44 {
     pub fn m11(&self) -> Ref<'_, f32> {
         self.m11.borrow()
@@ -743,8 +808,7 @@ impl KStruct for PkoLab_Quaternion {
         Ok(())
     }
 }
-impl PkoLab_Quaternion {
-}
+impl PkoLab_Quaternion {}
 impl PkoLab_Quaternion {
     pub fn x(&self) -> Ref<'_, f32> {
         self.x.borrow()
@@ -804,8 +868,7 @@ impl KStruct for PkoLab_Vector3 {
         Ok(())
     }
 }
-impl PkoLab_Vector3 {
-}
+impl PkoLab_Vector3 {}
 impl PkoLab_Vector3 {
     pub fn x(&self) -> Ref<'_, f32> {
         self.x.borrow()

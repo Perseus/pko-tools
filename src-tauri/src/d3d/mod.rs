@@ -379,10 +379,7 @@ mod tests {
 
     #[test]
     fn d3d_enums_serialize_as_string_variants() {
-        assert_eq!(
-            serde_json::to_string(&D3DFormat::DXT1).unwrap(),
-            "\"DXT1\""
-        );
+        assert_eq!(serde_json::to_string(&D3DFormat::DXT1).unwrap(), "\"DXT1\"");
         assert_eq!(
             serde_json::to_string(&D3DPool::Managed).unwrap(),
             "\"Managed\""

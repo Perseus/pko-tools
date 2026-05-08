@@ -96,8 +96,8 @@ fn collect_ksy_files(root: &Path) -> Result<Vec<PathBuf>, String> {
         let entries = fs::read_dir(&dir)
             .map_err(|e| format!("failed to read directory {}: {e}", dir.display()))?;
         for entry in entries {
-            let entry = entry
-                .map_err(|e| format!("failed to read entry in {}: {e}", dir.display()))?;
+            let entry =
+                entry.map_err(|e| format!("failed to read entry in {}: {e}", dir.display()))?;
             let path = entry.path();
             if path.is_dir() {
                 stack.push(path);

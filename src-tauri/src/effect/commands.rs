@@ -5,6 +5,8 @@ use base64::Engine;
 use serde::Serialize;
 
 use crate::character::{model::CharacterGeometricModel, GLTFFieldsToAggregate};
+use crate::item::model::decode_pko_texture;
+use crate::map::scene_model::decode_dds_with_alpha;
 use crate::projects::project::Project;
 
 use super::{model::EffFile, model::ParFile, scan_effects_directory, scan_par_files};
@@ -67,22 +69,14 @@ pub async fn save_effect(
 }
 
 #[tauri::command]
-pub async fn load_par_file(
-    project_id: String,
-    par_name: String,
-) -> Result<ParFile, String> {
+pub async fn load_par_file(project_id: String, par_name: String) -> Result<ParFile, String> {
     let project_id =
         uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
     let par_path = par_file_path(project.project_directory.as_ref(), &par_name);
 
-    let bytes = std::fs::read(&par_path).map_err(|e| {
-        format!(
-            "Failed to read par file {}: {}",
-            par_path.display(),
-            e
-        )
-    })?;
+    let bytes = std::fs::read(&par_path)
+        .map_err(|e| format!("Failed to read par file {}: {}", par_path.display(), e))?;
     ParFile::from_bytes(&bytes).map_err(|e| e.to_string())
 }
 
@@ -115,8 +109,13 @@ pub struct DecodedTexture {
 #[tauri::command]
 pub async fn decode_texture(path: String) -> Result<DecodedTexture, String> {
     let resolved = resolve_case_insensitive(&path).unwrap_or_else(|| path.clone().into());
-    let bytes =
+    let raw_bytes =
         std::fs::read(&resolved).map_err(|e| format!("Failed to read texture {}: {}", path, e))?;
+    let bytes = decode_pko_texture(&raw_bytes);
+
+    if let Some(img) = decode_dds_with_alpha(&bytes) {
+        return Ok(decoded_texture_from_image(img));
+    }
 
     // Try standard image decoding first (handles valid TGA, BMP, PNG, etc.)
     let ext = path.rsplit('.').next().unwrap_or("").to_lowercase();
@@ -130,26 +129,12 @@ pub async fn decode_texture(path: String) -> Result<DecodedTexture, String> {
 
     if let Some(fmt) = format {
         if let Ok(img) = image::load_from_memory_with_format(&bytes, fmt) {
-            let rgba = img.to_rgba8();
-            let (w, h) = rgba.dimensions();
-            let data = base64::engine::general_purpose::STANDARD.encode(rgba.as_raw());
-            return Ok(DecodedTexture {
-                width: w,
-                height: h,
-                data,
-            });
+            return Ok(decoded_texture_from_image(img));
         }
     }
     // Also try auto-detection
     if let Ok(img) = image::load_from_memory(&bytes) {
-        let rgba = img.to_rgba8();
-        let (w, h) = rgba.dimensions();
-        let data = base64::engine::general_purpose::STANDARD.encode(rgba.as_raw());
-        return Ok(DecodedTexture {
-            width: w,
-            height: h,
-            data,
-        });
+        return Ok(decoded_texture_from_image(img));
     }
 
     // Fallback: paletted (color-mapped) TGA.
@@ -187,6 +172,17 @@ pub async fn decode_texture(path: String) -> Result<DecodedTexture, String> {
     }
 
     Err(format!("Unable to decode texture: {}", path))
+}
+
+fn decoded_texture_from_image(img: image::DynamicImage) -> DecodedTexture {
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    let data = base64::engine::general_purpose::STANDARD.encode(rgba.as_raw());
+    DecodedTexture {
+        width: w,
+        height: h,
+        data,
+    }
 }
 
 /// Try decoding raw PKO pixel data at both 4bpp (BGRA) and 3bpp (BGR).
@@ -411,7 +407,8 @@ fn try_decode_paletted_tga(bytes: &[u8]) -> Option<DecodedTexture> {
         for y in 0..height {
             let src_row = y * row_bytes;
             let dst_row = (height - 1 - y) * row_bytes;
-            flipped[dst_row..dst_row + row_bytes].copy_from_slice(&rgba[src_row..src_row + row_bytes]);
+            flipped[dst_row..dst_row + row_bytes]
+                .copy_from_slice(&rgba[src_row..src_row + row_bytes]);
         }
         rgba = flipped;
     }
@@ -606,24 +603,24 @@ pub async fn load_path_file(
     parse_csf_points(&bytes).map_err(|e| format!("Failed to parse CSF file: {}", e))
 }
 
-/// Parse a .csf path file: "csf" header (3 bytes) + version (i32) + count (i32) + Vec3[count]
+/// Parse a .csf path file: "csf\0" header (4 bytes) + version (i32) + count (i32) + Vec3[count].
+/// C++ remaps each D3DXVECTOR3 from client coordinates as x, -z, y after reading.
 fn parse_csf_points(bytes: &[u8]) -> Result<Vec<[f32; 3]>, String> {
-    if bytes.len() < 11 {
+    if bytes.len() < 12 {
         return Err("File too small for CSF header".to_string());
     }
 
-    // Check "csf" header
-    if &bytes[0..3] != b"csf" {
+    if &bytes[0..4] != b"csf\0" {
         return Err("Invalid CSF header".to_string());
     }
 
     let _version = i32::from_le_bytes(
-        bytes[3..7]
+        bytes[4..8]
             .try_into()
             .map_err(|_| "Failed to read version")?,
     );
     let count = i32::from_le_bytes(
-        bytes[7..11]
+        bytes[8..12]
             .try_into()
             .map_err(|_| "Failed to read count")?,
     );
@@ -633,7 +630,7 @@ fn parse_csf_points(bytes: &[u8]) -> Result<Vec<[f32; 3]>, String> {
     }
     let count = count as usize;
 
-    let expected_size = 11 + count * 12; // 3 floats × 4 bytes each
+    let expected_size = 12 + count * 12; // 3 floats x 4 bytes each
     if bytes.len() < expected_size {
         return Err(format!(
             "File too small: expected {} bytes for {} points, got {}",
@@ -644,7 +641,7 @@ fn parse_csf_points(bytes: &[u8]) -> Result<Vec<[f32; 3]>, String> {
     }
 
     let mut points = Vec::with_capacity(count);
-    let mut offset = 11;
+    let mut offset = 12;
     for _ in 0..count {
         let x = f32::from_le_bytes(
             bytes[offset..offset + 4]
@@ -661,7 +658,7 @@ fn parse_csf_points(bytes: &[u8]) -> Result<Vec<[f32; 3]>, String> {
                 .try_into()
                 .map_err(|_| "Failed to read float")?,
         );
-        points.push([x, y, z]);
+        points.push([x, -z, y]);
         offset += 12;
     }
 
@@ -696,7 +693,10 @@ fn effect_file_path(project_dir: &std::path::Path, effect_name: &str) -> std::pa
 }
 
 /// Resolve an effect model .lgo path with case-insensitive filename matching.
-fn resolve_effect_model_path(project_dir: &Path, model_name: &str) -> Option<std::path::PathBuf> {
+pub fn resolve_effect_model_path(
+    project_dir: &Path,
+    model_name: &str,
+) -> Option<std::path::PathBuf> {
     let name = model_name.strip_suffix(".lgo").unwrap_or(model_name);
     let target = format!("{}.lgo", name).to_lowercase();
     let dir = project_dir.join("model/effect");
@@ -719,7 +719,7 @@ fn resolve_effect_model_path(project_dir: &Path, model_name: &str) -> Option<std
 /// Load an effect .lgo model and return a minimal glTF JSON string containing
 /// only geometry (POSITION, NORMAL, TEXCOORD_0, indices). No materials, skins,
 /// or animations — the effect system provides its own textures and blending.
-fn build_effect_model_gltf(project_dir: &Path, model_name: &str) -> Result<String, String> {
+pub fn build_effect_model_gltf(project_dir: &Path, model_name: &str) -> Result<String, String> {
     let lgo_path = resolve_effect_model_path(project_dir, model_name)
         .ok_or_else(|| format!("Effect model not found: {}", model_name))?;
 
@@ -754,15 +754,17 @@ fn build_effect_model_gltf(project_dir: &Path, model_name: &str) -> Result<Strin
         weights: None,
     };
 
-    let node = gltf::json::Node {
+    let mesh_node = gltf::json::Node {
         mesh: Some(gltf::json::Index::new(0)),
         name: Some(model_name.to_string()),
         ..Default::default()
     };
+    let helper_nodes = geom.get_gltf_helper_nodes_for_mesh(0, None);
+    let (nodes, scene_node_indices) = build_effect_model_scene_nodes(mesh_node, helper_nodes);
 
     let scene = gltf::json::Scene {
         name: Some("Scene".to_string()),
-        nodes: vec![gltf::json::Index::new(0)],
+        nodes: scene_node_indices,
         extensions: None,
         extras: None,
     };
@@ -777,13 +779,28 @@ fn build_effect_model_gltf(project_dir: &Path, model_name: &str) -> Result<Strin
         buffer_views: fields.buffer_view,
         accessors: fields.accessor,
         meshes: vec![mesh],
-        nodes: vec![node],
+        nodes,
         scenes: vec![scene],
         scene: Some(gltf::json::Index::new(0)),
         ..Default::default()
     };
 
     serde_json::to_string(&root).map_err(|e| format!("Failed to serialize glTF: {}", e))
+}
+
+fn build_effect_model_scene_nodes(
+    mesh_node: gltf::json::Node,
+    helper_nodes: Vec<gltf::json::Node>,
+) -> (
+    Vec<gltf::json::Node>,
+    Vec<gltf::json::Index<gltf::json::Node>>,
+) {
+    let mut nodes = vec![mesh_node];
+    nodes.extend(helper_nodes);
+    let scene_node_indices = (0..nodes.len())
+        .map(|i| gltf::json::Index::new(i as u32))
+        .collect();
+    (nodes, scene_node_indices)
 }
 
 #[tauri::command]
@@ -798,6 +815,8 @@ pub async fn load_effect_model(project_id: String, model_name: String) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::item::model::encode_pko_texture;
+    use base64::Engine;
 
     /// Verify build_effect_model_gltf produces valid glTF with 1 mesh, 1 scene,
     /// 0 skins, 0 animations, and 0 materials.
@@ -823,10 +842,34 @@ mod tests {
     }
 
     #[test]
-    fn test_decode_paletted_tga() {
-        let path = std::path::Path::new(
-            "../top-client/texture/effect/jb05.TGA",
+    fn effect_model_scene_keeps_helper_nodes_addressable() {
+        let mesh_node = gltf::json::Node {
+            mesh: Some(gltf::json::Index::new(0)),
+            name: Some("weapon".to_string()),
+            ..Default::default()
+        };
+        let helper_node = gltf::json::Node {
+            name: Some("Dummy1".to_string()),
+            ..Default::default()
+        };
+
+        let (nodes, scene_nodes) = build_effect_model_scene_nodes(mesh_node, vec![helper_node]);
+
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0].name.as_deref(), Some("weapon"));
+        assert_eq!(nodes[1].name.as_deref(), Some("Dummy1"));
+        assert_eq!(
+            scene_nodes
+                .iter()
+                .map(|idx| idx.value())
+                .collect::<Vec<_>>(),
+            vec![0, 1]
         );
+    }
+
+    #[test]
+    fn test_decode_paletted_tga() {
+        let path = std::path::Path::new("../top-client/texture/effect/jb05.TGA");
         if !path.exists() {
             eprintln!("Skipping: jb05.TGA not found at {}", path.display());
             return;
@@ -846,6 +889,117 @@ mod tests {
             .unwrap();
         assert_eq!(raw.len(), 128 * 128 * 4);
 
-        eprintln!("Decoded paletted TGA: {}x{}, {} bytes RGBA", decoded.width, decoded.height, raw.len());
+        eprintln!(
+            "Decoded paletted TGA: {}x{}, {} bytes RGBA",
+            decoded.width,
+            decoded.height,
+            raw.len()
+        );
+    }
+
+    #[test]
+    fn decode_texture_unwraps_pko_encoded_standard_images() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let path = temp.path().join("encoded.png");
+        let img = image::RgbaImage::from_pixel(16, 16, image::Rgba([12, 34, 56, 78]));
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .expect("encode png");
+        assert!(png.len() >= 88, "fixture must exercise PKO byte swapping");
+        std::fs::write(&path, encode_pko_texture(&png)).expect("write encoded texture");
+
+        let decoded =
+            tauri::async_runtime::block_on(decode_texture(path.to_string_lossy().to_string()))
+                .expect("decode pko encoded texture");
+        let raw = base64::engine::general_purpose::STANDARD
+            .decode(decoded.data)
+            .expect("base64 rgba");
+
+        assert_eq!(decoded.width, 16);
+        assert_eq!(decoded.height, 16);
+        assert!(raw.chunks_exact(4).all(|px| px == [12, 34, 56, 78]));
+    }
+
+    #[test]
+    fn decode_texture_preserves_dxt1_punch_through_alpha() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let path = temp.path().join("mask.dds");
+        let mut block = [0u8; 8];
+        block[0] = 0x00;
+        block[1] = 0x00;
+        block[2] = 0xff;
+        block[3] = 0xff;
+        block[4] = 0xff;
+        block[5] = 0xff;
+        block[6] = 0xff;
+        block[7] = 0xff;
+        let dds = build_dxt1_dds(4, 4, &block);
+        assert!(
+            decode_dds_with_alpha(&dds).is_some(),
+            "fixture should decode directly"
+        );
+        std::fs::write(&path, dds).expect("write dds");
+
+        let decoded =
+            tauri::async_runtime::block_on(decode_texture(path.to_string_lossy().to_string()))
+                .expect("decode dxt1 texture");
+        let raw = base64::engine::general_purpose::STANDARD
+            .decode(decoded.data)
+            .expect("base64 rgba");
+        let alpha_values: Vec<u8> = raw.chunks_exact(4).map(|px| px[3]).collect();
+
+        assert_eq!(decoded.width, 4);
+        assert_eq!(decoded.height, 4);
+        assert_eq!(
+            alpha_values.iter().filter(|&&alpha| alpha == 0).count(),
+            16,
+            "DXT1 punch-through block should decode as fully transparent",
+        );
+    }
+
+    fn build_dxt1_dds(width: u32, height: u32, dxt1_blocks: &[u8]) -> Vec<u8> {
+        const FOURCC_DXT1: u32 = u32::from_le_bytes(*b"DXT1");
+        let mut dds = Vec::new();
+        dds.extend_from_slice(b"DDS ");
+        dds.extend_from_slice(&124u32.to_le_bytes());
+        dds.extend_from_slice(&0x81007u32.to_le_bytes());
+        dds.extend_from_slice(&height.to_le_bytes());
+        dds.extend_from_slice(&width.to_le_bytes());
+        dds.extend_from_slice(&(dxt1_blocks.len() as u32).to_le_bytes());
+        dds.extend_from_slice(&0u32.to_le_bytes());
+        dds.extend_from_slice(&1u32.to_le_bytes());
+        for _ in 0..11 {
+            dds.extend_from_slice(&0u32.to_le_bytes());
+        }
+        dds.extend_from_slice(&32u32.to_le_bytes());
+        dds.extend_from_slice(&0x4u32.to_le_bytes());
+        dds.extend_from_slice(&FOURCC_DXT1.to_le_bytes());
+        dds.extend_from_slice(&0u32.to_le_bytes());
+        for _ in 0..4 {
+            dds.extend_from_slice(&0u32.to_le_bytes());
+        }
+        dds.extend_from_slice(&0x1000u32.to_le_bytes());
+        dds.extend_from_slice(&0u32.to_le_bytes());
+        dds.extend_from_slice(&0u32.to_le_bytes());
+        dds.extend_from_slice(&0u32.to_le_bytes());
+        dds.extend_from_slice(&0u32.to_le_bytes());
+        dds.extend_from_slice(dxt1_blocks);
+        dds
+    }
+
+    #[test]
+    fn parse_csf_points_matches_cpp_header_and_coordinate_remap() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"csf\0");
+        bytes.extend_from_slice(&1_i32.to_le_bytes());
+        bytes.extend_from_slice(&1_i32.to_le_bytes());
+        bytes.extend_from_slice(&2.0_f32.to_le_bytes());
+        bytes.extend_from_slice(&3.0_f32.to_le_bytes());
+        bytes.extend_from_slice(&4.0_f32.to_le_bytes());
+
+        let points = parse_csf_points(&bytes).expect("valid csf path");
+
+        assert_eq!(points, vec![[2.0, -4.0, 3.0]]);
     }
 }

@@ -34,4 +34,3 @@ pub struct ParsedObjFile {
     pub section_height: i32,
     pub objects: Vec<SceneObject>,
 }
-

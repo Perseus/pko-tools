@@ -553,11 +553,12 @@ impl LwBoneFile {
             // Pre-multiply by the parent bone's IBM to bridge the gap:
             // nodeMatrix = invBind_parent * dummy_mat
             // => boneGlobal * invBind * dummy_mat = correct skinning-space position
-            let combined = if let Some(&parent_idx) = bone_id_to_node_index.get(&dummy_info.parent_bone_id) {
-                LwMatrix44(self.invmat_seq[parent_idx].0 * dummy_info.mat.0)
-            } else {
-                dummy_info.mat.clone()
-            };
+            let combined =
+                if let Some(&parent_idx) = bone_id_to_node_index.get(&dummy_info.parent_bone_id) {
+                    LwMatrix44(self.invmat_seq[parent_idx].0 * dummy_info.mat.0)
+                } else {
+                    dummy_info.mat.clone()
+                };
             let mat = if let Some(ct) = ct {
                 ct.matrix4_col_major(combined.to_slice())
             } else {
@@ -858,7 +859,11 @@ impl LwBoneFile {
                     frame_rotation.0.v.z,
                     frame_rotation.0.s,
                 ];
-                let r = if let Some(ct) = ct { ct.quaternion(r) } else { r };
+                let r = if let Some(ct) = ct {
+                    ct.quaternion(r)
+                } else {
+                    r
+                };
                 keyframe_rotation_buffer_data.extend_from_slice(&r[0].to_le_bytes());
                 keyframe_rotation_buffer_data.extend_from_slice(&r[1].to_le_bytes());
                 keyframe_rotation_buffer_data.extend_from_slice(&r[2].to_le_bytes());
@@ -1179,7 +1184,11 @@ impl LwBoneFile {
 
                 for r in r_slice {
                     let q = [r.0.v.x, r.0.v.y, r.0.v.z, r.0.s];
-                    let q = if let Some(ct) = ct { ct.quaternion(q) } else { q };
+                    let q = if let Some(ct) = ct {
+                        ct.quaternion(q)
+                    } else {
+                        q
+                    };
                     rot_buf.extend_from_slice(&q[0].to_le_bytes());
                     rot_buf.extend_from_slice(&q[1].to_le_bytes());
                     rot_buf.extend_from_slice(&q[2].to_le_bytes());

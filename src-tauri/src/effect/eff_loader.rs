@@ -172,8 +172,8 @@ fn convert_effect(eff: &PkoEff_Effect, version: u32) -> Result<SubEffect> {
         per_frame_cylinder,
         rota_loop: *eff.rota_loop() != 0,
         rota_loop_vec,
-        alpha: *eff.alpha() != 0,
-        rota_board: *eff.rota_board() != 0,
+        alpha: version <= 5 || *eff.alpha() != 0,
+        rota_board: version <= 6 || *eff.rota_board() != 0,
     })
 }
 
@@ -259,11 +259,21 @@ mod tests {
                 let blend_key = format!("{:?}/{:?}", sub.src_blend, sub.dest_blend);
                 *blend_pair_freq.entry(blend_key).or_default() += 1;
 
-                if sub.billboard { billboard_count += 1; }
-                if sub.rota_board { rota_board_count += 1; }
-                if sub.rota_loop { rota_loop_count += 1; }
-                if sub.use_param > 0 { use_param_count += 1; }
-                if sub.alpha { alpha_count += 1; }
+                if sub.billboard {
+                    billboard_count += 1;
+                }
+                if sub.rota_board {
+                    rota_board_count += 1;
+                }
+                if sub.rota_loop {
+                    rota_loop_count += 1;
+                }
+                if sub.use_param > 0 {
+                    use_param_count += 1;
+                }
+                if sub.alpha {
+                    alpha_count += 1;
+                }
 
                 for size in &sub.frame_sizes {
                     if size[0] == 0.0 && size[1] == 0.0 && size[2] == 0.0 {
@@ -273,7 +283,11 @@ mod tests {
             }
         }
 
-        eprintln!("\n=== CORPUS FEATURE SWEEP ({} files, {} sub-effects) ===\n", eff_files.len(), total_sub_effects);
+        eprintln!(
+            "\n=== CORPUS FEATURE SWEEP ({} files, {} sub-effects) ===\n",
+            eff_files.len(),
+            total_sub_effects
+        );
 
         eprintln!("--- modelName frequency ---");
         let mut model_names: Vec<_> = model_name_freq.into_iter().collect();
@@ -353,7 +367,8 @@ mod tests {
             let reparsed = load_eff(&bytes).unwrap();
             let rebytes = reparsed.to_bytes().unwrap();
             assert_eq!(
-                bytes, rebytes,
+                bytes,
+                rebytes,
                 "{}: roundtrip bytes mismatch",
                 path.display()
             );
@@ -366,5 +381,134 @@ mod tests {
             eff_files.len(),
             total_sub_effects
         );
+    }
+
+    /// Optional real-client corpus gate: effect-level technique ids and
+    /// sub-effect type ids must stay within the C++ source-defined rendering
+    /// surface supported by the workbench.
+    #[test]
+    fn effect_feature_ids_from_env_fixture_dir_are_source_defined() {
+        let Ok(eff_dir) = std::env::var("PKO_EFF_FIXTURE_DIR") else {
+            eprintln!("Skipping EFF feature inventory: PKO_EFF_FIXTURE_DIR not set");
+            return;
+        };
+        let eff_dir = std::path::Path::new(&eff_dir);
+        assert!(
+            eff_dir.exists(),
+            "PKO_EFF_FIXTURE_DIR does not exist: {}",
+            eff_dir.display(),
+        );
+
+        let eff_files = collect_eff_files(eff_dir);
+        assert!(
+            !eff_files.is_empty(),
+            "No .eff files found in {}",
+            eff_dir.display()
+        );
+
+        let mut technique_counts = std::collections::BTreeMap::<i32, usize>::new();
+        let mut effect_type_counts = std::collections::BTreeMap::<i32, usize>::new();
+        let mut model_name_counts = std::collections::BTreeMap::<String, usize>::new();
+        let mut billboard_count = 0usize;
+        let mut rota_board_count = 0usize;
+        let mut rota_loop_count = 0usize;
+        let mut use_param_count = 0usize;
+        let mut alpha_count = 0usize;
+        let mut use_path_count = 0usize;
+        let mut rotating_count = 0usize;
+        let mut total_sub_effects = 0usize;
+
+        for path in &eff_files {
+            let data = std::fs::read(path).unwrap();
+            let parsed = load_eff(&data).unwrap_or_else(|e| panic!("{}: {}", path.display(), e));
+
+            assert!(
+                (0..=6).contains(&parsed.idx_tech),
+                "{}: unsupported eff.fx technique id {}",
+                path.display(),
+                parsed.idx_tech,
+            );
+            *technique_counts.entry(parsed.idx_tech).or_insert(0) += 1;
+            if parsed.use_path {
+                use_path_count += 1;
+            }
+            if parsed.rotating {
+                rotating_count += 1;
+            }
+
+            for sub in parsed.sub_effects {
+                assert!(
+                    (0..=4).contains(&sub.effect_type),
+                    "{}: unsupported I_Effect type id {}",
+                    path.display(),
+                    sub.effect_type,
+                );
+                total_sub_effects += 1;
+                *effect_type_counts.entry(sub.effect_type).or_insert(0) += 1;
+                *model_name_counts
+                    .entry(if sub.model_name.trim().is_empty() {
+                        "(empty)".to_string()
+                    } else {
+                        sub.model_name.trim().to_string()
+                    })
+                    .or_insert(0) += 1;
+
+                if sub.billboard {
+                    billboard_count += 1;
+                }
+                if sub.rota_board {
+                    rota_board_count += 1;
+                }
+                if sub.rota_loop {
+                    rota_loop_count += 1;
+                }
+                if sub.use_param > 0 {
+                    use_param_count += 1;
+                }
+                if sub.alpha {
+                    alpha_count += 1;
+                }
+            }
+        }
+
+        eprintln!(
+            "EFF feature inventory: {} files, {} sub-effects",
+            eff_files.len(),
+            total_sub_effects,
+        );
+        eprintln!("  techniques: {:?}", technique_counts);
+        eprintln!("  effect types: {:?}", effect_type_counts);
+        eprintln!(
+            "  flags: billboard={}, rotaBoard={}, rotaLoop={}, useParam={}, alpha={}, usePath={}, rotating={}",
+            billboard_count,
+            rota_board_count,
+            rota_loop_count,
+            use_param_count,
+            alpha_count,
+            use_path_count,
+            rotating_count,
+        );
+
+        let mut model_names: Vec<_> = model_name_counts.into_iter().collect();
+        model_names.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        eprintln!("  top model names:");
+        for (model_name, count) in model_names.into_iter().take(12) {
+            eprintln!("    {:>5} {}", count, model_name);
+        }
+    }
+
+    fn collect_eff_files(eff_dir: &std::path::Path) -> Vec<std::path::PathBuf> {
+        let mut eff_files: Vec<_> = std::fs::read_dir(eff_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.path()
+                    .extension()
+                    .map_or(false, |ext| ext.eq_ignore_ascii_case("eff"))
+            })
+            .map(|e| e.path())
+            .collect();
+        eff_files.sort();
+        eff_files
     }
 }

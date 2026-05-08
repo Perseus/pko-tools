@@ -8,8 +8,8 @@
 
 extern crate kaitai;
 use kaitai::*;
+use std::cell::{Cell, Ref, RefCell};
 use std::convert::{TryFrom, TryInto};
-use std::cell::{Ref, Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 /**
@@ -43,18 +43,27 @@ impl KStruct for PkoPoseinfo {
         let _rrc = self_rc._root.get_value().borrow().upgrade();
         let _prc = self_rc._parent.get_value().borrow().upgrade();
         let _r = _rrc.as_ref().unwrap();
-        let t = Self::read_into::<_, PkoPoseinfo_Header>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+        let t = Self::read_into::<_, PkoPoseinfo_Header>(
+            &*_io,
+            Some(self_rc._root.clone()),
+            Some(self_rc._self.clone()),
+        )?
+        .into();
         *self_rc.header.borrow_mut() = t;
         *self_rc.entries.borrow_mut() = Vec::new();
         for _i in 0..54 {
-            let t = Self::read_into::<_, PkoPoseinfo_PoseEntry>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+            let t = Self::read_into::<_, PkoPoseinfo_PoseEntry>(
+                &*_io,
+                Some(self_rc._root.clone()),
+                Some(self_rc._self.clone()),
+            )?
+            .into();
             self_rc.entries.borrow_mut().push(t);
         }
         Ok(())
     }
 }
-impl PkoPoseinfo {
-}
+impl PkoPoseinfo {}
 impl PkoPoseinfo {
     pub fn header(&self) -> Ref<'_, OptRc<PkoPoseinfo_Header>> {
         self.header.borrow()
@@ -100,8 +109,7 @@ impl KStruct for PkoPoseinfo_Header {
         Ok(())
     }
 }
-impl PkoPoseinfo_Header {
-}
+impl PkoPoseinfo_Header {}
 impl PkoPoseinfo_Header {
     pub fn max_id(&self) -> Ref<'_, u32> {
         self.max_id.borrow()
@@ -149,14 +157,16 @@ impl KStruct for PkoPoseinfo_PoseEntry {
         *self_rc.metadata.borrow_mut() = _io.read_bytes(36 as usize)?.into();
         *self_rc.weapon_variants.borrow_mut() = Vec::new();
         for _i in 0..7 {
-            self_rc.weapon_variants.borrow_mut().push(_io.read_s2le()?.into());
+            self_rc
+                .weapon_variants
+                .borrow_mut()
+                .push(_io.read_s2le()?.into());
         }
         *self_rc.padding.borrow_mut() = _io.read_bytes(2 as usize)?.into();
         Ok(())
     }
 }
-impl PkoPoseinfo_PoseEntry {
-}
+impl PkoPoseinfo_PoseEntry {}
 impl PkoPoseinfo_PoseEntry {
     pub fn unknown1(&self) -> Ref<'_, u32> {
         self.unknown1.borrow()
