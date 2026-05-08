@@ -64,6 +64,8 @@ export interface ParSystem {
   billboard: boolean;
   srcBlend: number;
   destBlend: number;
+  minFilter?: number;
+  magFilter?: number;
   life: number;
   velocity: number;
   direction: [number, number, number];

@@ -1,61 +1,125 @@
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import type { MutableRefObject } from "react";
+import { useFrame } from "@react-three/fiber";
+import * as THREE from "three";
 import { ParticleSystemProps } from "./types";
 import { ParticleVisual } from "./ParticleVisual";
-import { useParticleLifecycle, Particle } from "./useParticleLifecycle";
-import { randf } from "../../helpers";
-import { ParSystem } from "@/types/effect-v2";
-
-/**
- * Strip particles use the same spherical random velocity as Blast.
- * True ribbon/strip rendering (view-dependent geometry) is a Phase 5 task.
- * For now, renders using ParticleVisual like BlastSystem.
- * PKO→Three.js coordinate swap: [0]→X, [2]→Y, [1]→Z.
- */
-function initStripParticle(p: Particle, _i: number, system: ParSystem) {
-  p.dir.set(
-    randf(system.velocity) * (Math.random() < 0.5 ? system.direction[0] : -system.direction[0]),
-    randf(system.velocity) * system.direction[2],
-    randf(system.velocity) * (Math.random() < 0.5 ? system.direction[1] : -system.direction[1]),
-  );
-  p.accel.set(system.acceleration[0], system.acceleration[2], system.acceleration[1]);
-  p.pos.set(
-    randf(system.range[0]),
-    randf(system.range[2]),
-    randf(system.range[1]),
-  );
-}
-
-/**
- * Default physics: pos += dir*dt, dir += accel*dt.
- * Same as BlastSystem movement.
- */
-function moveStripParticle(p: Particle, _i: number, dt: number) {
-  p.pos.addScaledVector(p.dir, dt);
-  p.dir.addScaledVector(p.accel, dt);
-}
+import { Particle, useParticleLifecycle } from "./useParticleLifecycle";
+import { initStripParticle, moveStripParticle } from "./stripKinematics";
 
 /**
  * Type 6 — Ribbon/strip trail between points.
  * Currently renders as standard particles via ParticleVisual.
  * True strip/ribbon geometry (view-dependent) will be added in Phase 5.
  */
-export function StripSystem({ system, onComplete, loop }: ParticleSystemProps) {
+export function StripSystem({
+  system,
+  onComplete,
+  loop,
+  emitterPositionRef,
+  sourceDirectionRef,
+}: ParticleSystemProps) {
+  const sharedEffectElapsedRef = useRef(0);
+  const [, forceRender] = useReducer((n: number) => n + 1, 0);
+  const lastAliveSignatureRef = useRef("");
+  const isNestedEffect = system.modelName.trim().toLowerCase().endsWith(".eff");
+  const [nestedEffectComplete, setNestedEffectComplete] = useState(false);
+  const singleParticleSystem = useMemo(
+    () => ({ ...system, particleCount: 1 }),
+    [system],
+  );
+  const completionSentRef = useRef(false);
+
+  useEffect(() => {
+    setNestedEffectComplete(false);
+    completionSentRef.current = false;
+  }, [system.modelName, loop]);
+
+  const handleNestedEffectComplete = () => {
+    if (!isNestedEffect || loop || completionSentRef.current) return;
+    completionSentRef.current = true;
+    setNestedEffectComplete(true);
+    onComplete?.();
+  };
+
   const particlesRef = useParticleLifecycle({
-    system,
+    system: singleParticleSystem,
     loop,
     onComplete,
+    emitterPositionRef,
+    sharedEffectElapsedRef,
     initParticle: initStripParticle,
-    moveParticle: moveStripParticle,
+    moveParticle: (p, i, dt, s, pathOffset) =>
+      moveStripParticle(p, i, dt, s, emitterPositionRef?.current, pathOffset),
   });
 
-  const alive = particlesRef.current.filter((p) => p.alive);
+  useFrame(() => {
+    const aliveSignature = particlesRef.current
+      .filter((p) => p.alive)
+      .map((p) => p.index)
+      .join(",");
+    if (aliveSignature !== lastAliveSignatureRef.current) {
+      lastAliveSignatureRef.current = aliveSignature;
+      forceRender();
+    }
+  });
+
+  const alive = nestedEffectComplete ? [] : particlesRef.current.filter((p) => p.alive);
 
   return (
     <group>
       {alive.map((p) => (
-        <group key={p.index} position={p.pos} scale={p.size}>
-          <ParticleVisual system={system} particle={p} loop={loop} />
-        </group>
+        <StripParticleInstance
+          key={p.index}
+          particle={p}
+          system={system}
+          loop={loop}
+          sourceDirectionRef={sourceDirectionRef}
+          sharedEffectElapsedRef={sharedEffectElapsedRef}
+          onNestedEffectComplete={handleNestedEffectComplete}
+        />
       ))}
+    </group>
+  );
+}
+
+function StripParticleInstance({
+  particle,
+  system,
+  loop,
+  sourceDirectionRef,
+  sharedEffectElapsedRef,
+  onNestedEffectComplete,
+}: {
+  particle: Particle;
+  system: ParticleSystemProps["system"];
+  loop?: boolean;
+  sourceDirectionRef?: ParticleSystemProps["sourceDirectionRef"];
+  sharedEffectElapsedRef: MutableRefObject<number>;
+  onNestedEffectComplete?: () => void;
+}) {
+  const groupRef = useRef<THREE.Group>(null);
+  const particleRef = useRef(particle);
+  particleRef.current = particle;
+
+  useFrame(() => {
+    const group = groupRef.current;
+    if (!group) return;
+    const current = particleRef.current;
+    group.position.copy(current.pos);
+    group.scale.setScalar(current.size);
+  });
+
+  return (
+    <group ref={groupRef} position={particle.pos.clone()} scale={particle.size}>
+      <ParticleVisual
+        system={system}
+        particle={particle}
+        loop={loop}
+        sourceDirectionRef={sourceDirectionRef}
+        sharedEffectElapsedRef={sharedEffectElapsedRef}
+        onNestedEffectComplete={onNestedEffectComplete}
+      />
     </group>
   );
 }

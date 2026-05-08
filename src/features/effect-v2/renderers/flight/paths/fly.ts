@@ -17,6 +17,7 @@ export function flightFly(ctx: FlightContext, group: THREE.Group): void {
   }
 
   const dir = ctx.state.dir as THREE.Vector3;
+  ctx.sourceDirection = dir;
   const fDist = ctx.velocity * ctx.delta;
   ctx.state.curDist = (ctx.state.curDist as number) + fDist;
 

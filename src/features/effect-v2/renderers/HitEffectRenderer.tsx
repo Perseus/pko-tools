@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import * as THREE from "three";
 import { ArrivalInfo } from "./flight/FlightPathController";
 import { TriggeredClock } from "../TimeContext";
@@ -20,14 +20,31 @@ interface HitEffectRendererProps {
  * oriented along the incoming flight direction.
  * Delegates completion tracking to ParticleEffectRenderer.
  */
-export function HitEffectRenderer({ particleEffectName, arrival: _arrival, loop, onComplete }: HitEffectRendererProps) {
+export function HitEffectRenderer({ particleEffectName, arrival, loop, onComplete }: HitEffectRendererProps) {
   const groupRef = useRef<THREE.Group>(null);
+
+  useLayoutEffect(() => {
+    if (!groupRef.current) return;
+    applyHitEffectArrivalTransform(groupRef.current, arrival);
+  }, [arrival]);
 
   return (
     <group ref={groupRef}>
       <TriggeredClock>
-        <ParticleEffectRenderer particleEffectName={particleEffectName} loop={loop} onComplete={onComplete} />
+        <ParticleEffectRenderer
+          particleEffectName={particleEffectName}
+          loop={loop}
+          onComplete={onComplete}
+          sourceDirection={arrival.direction}
+        />
       </TriggeredClock>
     </group>
   );
+}
+
+export function applyHitEffectArrivalTransform(
+  group: THREE.Group,
+  arrival: ArrivalInfo,
+): void {
+  group.position.copy(arrival.position);
 }

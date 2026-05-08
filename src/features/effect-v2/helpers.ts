@@ -1,4 +1,4 @@
-import { BlendingDstFactor, DstAlphaFactor, DstColorFactor, OneFactor, OneMinusDstAlphaFactor, OneMinusDstColorFactor, OneMinusSrcAlphaFactor, OneMinusSrcColorFactor, SrcAlphaFactor, SrcColorFactor, ZeroFactor } from "three";
+import { BlendingDstFactor, DstColorFactor, OneFactor, OneMinusDstColorFactor, OneMinusSrcAlphaFactor, OneMinusSrcColorFactor, SrcAlphaFactor, SrcColorFactor, ZeroFactor } from "three";
 
 /*
   **
@@ -32,9 +32,9 @@ export function getThreeJSBlendFromD3D(d3dBlend: number): BlendingDstFactor {
     case 6:
       return OneMinusSrcAlphaFactor;
     case 7:
-      return DstAlphaFactor;
+      return OneFactor;
     case 8:
-      return OneMinusDstAlphaFactor;
+      return ZeroFactor;
     case 9:
       return DstColorFactor;
     case 10:

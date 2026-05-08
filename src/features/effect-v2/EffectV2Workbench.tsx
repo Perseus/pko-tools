@@ -1,7 +1,7 @@
 import { Canvas } from "@react-three/fiber";
 import { GizmoHelper, GizmoViewport, OrbitControls } from "@react-three/drei";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { effectV2SelectionAtom, effectV2PlaybackAtom, magicSingleTableAtom, effectV2HiddenSubEffectsAtom, effectV2HiddenParticleSystemsAtom, effectV2HiddenParticleSubEffectsAtom } from "@/store/effect-v2";
 import { MagicEffectRenderer } from "./renderers/MagicEffectRenderer";
 import { MagicGroupRenderer } from "./renderers/MagicGroupRenderer";
@@ -10,12 +10,24 @@ import { ParticleEffectRenderer } from "./renderers/ParticleEffectRenderer";
 import { PlaybackClock } from "./PlaybackClock";
 import { GlobalTimeProvider } from "./TimeContext";
 import { useLoadEffect } from "./useLoadEffect";
+import { PKO_Z_UP_GRID_ROTATION, PkoZUpCamera } from "./zUpScene";
 import { Button } from "@/components/ui/button";
-import { Play, Square, RotateCcw, Repeat } from "lucide-react";
+import { Download, Play, Square, RotateCcw, Repeat } from "lucide-react";
 import { EffectV2Selection, MagicSingleEntry, MagicGroupEntry, ParFile } from "@/types/effect-v2";
 import { EffectFile } from "@/types/effect";
 import { loadParFile, loadEffect } from "@/commands/effect";
 import { currentProjectAtom } from "@/store/project";
+import {
+  sampleEffectTraceSession,
+  serializeEffectTraceArtifact,
+  toEffectTraceArtifact,
+} from "./effectTrace";
+import {
+  estimateStandaloneParticlePreviewDuration,
+  getNestedParticleEffectNames,
+} from "./standaloneParticlePreview";
+
+const EFFECT_TRACE_SAMPLE_TIMES = [0, 0.1, 0.2, 0.5, 1, 1.5, 2, 3];
 
 function PlaybackBar() {
   const [playback, setPlayback] = useAtom(effectV2PlaybackAtom);
@@ -192,6 +204,7 @@ function MagicGroupInfoPanel({ entry }: { entry: MagicGroupEntry }) {
 function EffectFileInfoPanel({ fileName }: { fileName: string }) {
   const effFiles = useLoadEffect([fileName]);
   const eff = effFiles[0] ?? null;
+  const playback = useAtomValue(effectV2PlaybackAtom);
   const [hiddenIndices, setHiddenIndices] = useAtom(effectV2HiddenSubEffectsAtom);
 
   const toggleSubEffect = (index: number) => {
@@ -211,6 +224,23 @@ function EffectFileInfoPanel({ fileName }: { fileName: string }) {
     setHiddenIndices(new Set());
   }, [fileName, setHiddenIndices]);
 
+  const downloadTrace = () => {
+    if (!eff) return;
+    const session = sampleEffectTraceSession(eff, EFFECT_TRACE_SAMPLE_TIMES, playback.loop);
+    const artifact = toEffectTraceArtifact(session, {
+      source: "pko-tools",
+      effectName: fileName,
+      generatedAt: new Date().toISOString(),
+    });
+    const blob = new Blob([serializeEffectTraceArtifact(artifact)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `effect-trace-${fileName.replace(/[^a-z0-9_.-]+/gi, "_")}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="flex flex-col gap-3 text-sm">
       <div>
@@ -219,6 +249,16 @@ function EffectFileInfoPanel({ fileName }: { fileName: string }) {
       </div>
       {eff && (
         <>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 justify-start gap-2"
+            onClick={downloadTrace}
+            title="Export deterministic effect trace JSON for parity comparison"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Trace JSON
+          </Button>
           <div className="grid grid-cols-2 gap-2">
             <div>
               <div className="text-xs text-muted-foreground">Sub-effects</div>
@@ -421,10 +461,69 @@ function StandaloneEffectView({ fileName }: { fileName: string }) {
   return <EffectRenderer effect={effFiles[0]} />;
 }
 
-/** Standalone .par viewer — renders particle system at origin, looping. */
+/** Standalone .par viewer — renders particle system at origin under shared playback controls. */
 function StandaloneParticleView({ fileName }: { fileName: string }) {
+  const playback = useAtomValue(effectV2PlaybackAtom);
+  const setPlayback = useSetAtom(effectV2PlaybackAtom);
+  const currentProject = useAtomValue(currentProjectAtom);
+  const [previewPar, setPreviewPar] = useState<ParFile | null>(null);
+  const [previewReplayKey, setPreviewReplayKey] = useState(0);
+  const previewCompleteHandledRef = useRef(false);
   const baseName = fileName.replace(/\.par$/i, "");
-  return <ParticleEffectRenderer particleEffectName={baseName} loop />;
+  const nestedEffectNames = useMemo(() => getNestedParticleEffectNames(previewPar), [previewPar]);
+  const nestedEffects = useLoadEffect(nestedEffectNames);
+  const previewDuration = useMemo(
+    () => estimateStandaloneParticlePreviewDuration(previewPar, nestedEffects),
+    [previewPar, nestedEffects],
+  );
+
+  useEffect(() => {
+    if (!currentProject?.id) {
+      setPreviewPar(null);
+      return;
+    }
+
+    let cancelled = false;
+    loadParFile(currentProject.id, fileName)
+      .then((par) => {
+        if (!cancelled) setPreviewPar(par as ParFile);
+      })
+      .catch(() => {
+        if (!cancelled) setPreviewPar(null);
+      });
+
+    return () => { cancelled = true; };
+  }, [currentProject?.id, fileName]);
+
+  useEffect(() => {
+    previewCompleteHandledRef.current = false;
+  }, [baseName, previewReplayKey]);
+
+  const replayPreview = useCallback(() => {
+    if (previewCompleteHandledRef.current) return;
+    if (!playback.loop || !playback.playing || playback.time <= 0) return;
+    previewCompleteHandledRef.current = true;
+    setPlayback((current) => ({ ...current, time: 0 }));
+    setPreviewReplayKey((current) => current + 1);
+  }, [playback.loop, playback.playing, playback.time, setPlayback]);
+
+  const handlePreviewComplete = useCallback(() => {
+    replayPreview();
+  }, [replayPreview]);
+
+  useEffect(() => {
+    if (previewDuration > 0 && playback.time >= previewDuration) {
+      replayPreview();
+    }
+  }, [playback.time, previewDuration, replayPreview]);
+
+  return (
+    <ParticleEffectRenderer
+      key={`${baseName}:${previewReplayKey}`}
+      particleEffectName={baseName}
+      onComplete={handlePreviewComplete}
+    />
+  );
 }
 
 /** Renders the appropriate 3D content based on the current selection. */
@@ -489,12 +588,16 @@ export default function EffectV2Workbench() {
             <color attach="background" args={["#1e1e2e"]} />
             <ambientLight intensity={1} />
             <directionalLight position={[5, 5, 5]} />
+            <PkoZUpCamera />
             <PlaybackClock />
             <GlobalTimeProvider>
               <SceneContent selection={selection} />
             </GlobalTimeProvider>
             <OrbitControls makeDefault />
-            <gridHelper args={[40, 40, "#2f3239", "#1b1d22"]} />
+            <gridHelper
+              args={[40, 40, "#2f3239", "#1b1d22"]}
+              rotation={PKO_Z_UP_GRID_ROTATION}
+            />
             <GizmoHelper alignment="top-right" margin={[80, 80]}>
               <GizmoViewport axisColors={["#f73b3b", "#3bf751", "#3b8ef7"]} labelColor="white" />
             </GizmoHelper>

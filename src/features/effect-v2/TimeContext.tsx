@@ -3,6 +3,14 @@ import { useFrame } from "@react-three/fiber";
 import { useAtomValue } from "jotai";
 import { effectV2PlaybackAtom } from "@/store/effect-v2";
 
+export const effectV2RuntimeClock = {
+  time: 0,
+};
+
+export function syncEffectV2RuntimeClock(time: number): void {
+  effectV2RuntimeClock.time = Number.isFinite(time) ? Math.max(0, time) : 0;
+}
+
 /**
  * A time source for effect animation. Consumed by leaf renderers (RectPlane, Cylinder)
  * via useTimeSource(). Can be nested — each TriggeredClock creates a child time scope.
@@ -45,7 +53,7 @@ export function GlobalTimeProvider({ children }: { children: ReactNode }) {
 
   // Stable object — created once, getters read from ref
   const timeSource = useRef<TimeSource>({
-    getTime: () => playbackRef.current.time,
+    getTime: () => playbackRef.current.playing ? effectV2RuntimeClock.time : playbackRef.current.time,
     get playing() { return playbackRef.current.playing; },
     get loop() { return playbackRef.current.loop; },
   }).current;
