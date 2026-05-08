@@ -8,7 +8,7 @@ vi.mock("@/commands/effect", () => ({
 }));
 
 // Track the parse callback so we can trigger it manually
-let parseOnLoad: ((gltf: { scene: THREE.Group }) => void) | null = null;
+let parseOnLoad: ((gltf: { scene: THREE.Group; animations?: THREE.AnimationClip[] }) => void) | null = null;
 
 // Mock GLTFLoader.parse to capture the onLoad callback
 vi.mock("three/examples/jsm/loaders/GLTFLoader.js", () => {
@@ -16,7 +16,7 @@ vi.mock("three/examples/jsm/loaders/GLTFLoader.js", () => {
     parse(
       _data: ArrayBuffer,
       _path: string,
-      onLoad: (gltf: { scene: THREE.Group }) => void,
+      onLoad: (gltf: { scene: THREE.Group; animations?: THREE.AnimationClip[] }) => void,
     ) {
       parseOnLoad = onLoad;
     }
@@ -49,6 +49,7 @@ const mockLoadEffectModel = vi.mocked(loadEffectModel);
 const {
   extractEffectModelDummyPoints,
   useEffectModel,
+  useEffectModelResource,
   useEffectModelDummies,
 } = await import("../useEffectModel");
 
@@ -88,6 +89,26 @@ describe("useEffectModel", () => {
 
     expect(result.current).toBeInstanceOf(THREE.BufferGeometry);
     expect(mockLoadEffectModel).toHaveBeenCalledWith("proj-1", "wind01");
+  });
+
+  it("returns the parsed scene and animation clips for skinned effect models", async () => {
+    mockLoadEffectModel.mockResolvedValue("{}");
+    const clip = new THREE.AnimationClip("EffectModelBoneAnimation", 2, []);
+
+    const { result } = renderHook(() => useEffectModelResource("gunwing.lgo", "proj-anim"));
+
+    await waitFor(() => {
+      expect(parseOnLoad).not.toBeNull();
+    });
+
+    const scene = buildMockScene();
+    await act(async () => {
+      parseOnLoad!({ scene, animations: [clip] });
+    });
+
+    expect(result.current?.scene).toBe(scene);
+    expect(result.current?.animations).toEqual([clip]);
+    expect(result.current?.geometry).toBeInstanceOf(THREE.BufferGeometry);
   });
 
   it("returns cached geometry on subsequent renders", async () => {

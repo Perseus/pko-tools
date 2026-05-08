@@ -5,6 +5,7 @@ import { Provider, useSetAtom } from "jotai";
 import * as THREE from "three";
 import { currentProjectAtom } from "@/store/project";
 import type { SubEffect } from "@/types/effect";
+import type { EffectModelResource } from "@/features/effect/useEffectModel";
 import { SubEffectRenderer } from "../renderers/SubEffectRenderer";
 import { TimeProvider, TimeSource } from "../TimeContext";
 import { baseSubEffect, rotatingSubEffect } from "./fixtures";
@@ -14,10 +15,10 @@ const { mockUseEffectTexture } = vi.hoisted(() => ({
   mockUseEffectTexture: vi.fn((_texName: string) => null),
 }));
 
-const { mockUseEffectModel } = vi.hoisted(() => ({
-  mockUseEffectModel: vi.fn(
-    (_modelName: string | undefined, _projectId: string | undefined): THREE.BufferGeometry | null => null,
-  ),
+const { mockUseEffectModelResource } = vi.hoisted(() => ({
+  mockUseEffectModelResource: vi.fn<
+    (_modelName: string | undefined, _projectId: string | undefined) => EffectModelResource | null
+  >(() => null),
 }));
 
 // Mock the texture hook — no Tauri backend in tests
@@ -26,9 +27,27 @@ vi.mock("../useEffectTexture", () => ({
 }));
 
 vi.mock("@/features/effect/useEffectModel", () => ({
+  useEffectModelResource: (modelName: string | undefined, projectId: string | undefined) =>
+    mockUseEffectModelResource(modelName, projectId),
   useEffectModel: (modelName: string | undefined, projectId: string | undefined) =>
-    mockUseEffectModel(modelName, projectId),
+    mockUseEffectModelResource(modelName, projectId)?.geometry ?? null,
 }));
+
+function makeModelResource(
+  geometry: THREE.BufferGeometry | null,
+  animations: THREE.AnimationClip[] = [],
+): EffectModelResource {
+  const scene = new THREE.Group();
+  if (geometry) {
+    scene.add(new THREE.Mesh(geometry, new THREE.MeshBasicMaterial()));
+  }
+  return {
+    geometry,
+    dummies: [],
+    scene,
+    animations,
+  };
+}
 
 /** A static TimeSource for tests. */
 const testTimeSource: TimeSource = {
@@ -60,8 +79,8 @@ describe("SubEffectRenderer", () => {
   beforeEach(() => {
     mockUseEffectTexture.mockClear();
     mockUseEffectTexture.mockReturnValue(null);
-    mockUseEffectModel.mockClear();
-    mockUseEffectModel.mockReturnValue(null);
+    mockUseEffectModelResource.mockClear();
+    mockUseEffectModelResource.mockReturnValue(null);
   });
 
   it("renders a mesh for RectPlane", async () => {
@@ -113,7 +132,7 @@ describe("SubEffectRenderer", () => {
       "position",
       new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3),
     );
-    mockUseEffectModel.mockReturnValue(modelGeometry);
+    mockUseEffectModelResource.mockReturnValue(makeModelResource(modelGeometry));
 
     const lgoSubEffect = { ...baseSubEffect, modelName: "weapon.lgo" };
     const renderer = await ReactThreeTestRenderer.create(
@@ -125,7 +144,34 @@ describe("SubEffectRenderer", () => {
     const meshes = renderer.scene.findAll((node) => node.type === "Mesh");
     expect(meshes.length).toBe(1);
     expect((meshes[0].instance as THREE.Mesh).geometry).toBe(modelGeometry);
-    expect(mockUseEffectModel).toHaveBeenCalledWith("weapon.lgo", undefined);
+    expect(mockUseEffectModelResource).toHaveBeenCalledWith("weapon.lgo", undefined);
+  });
+
+  it("renders animated external .lgo model scenes instead of dropping animation resources", async () => {
+    const modelGeometry = new THREE.BufferGeometry();
+    modelGeometry.setAttribute(
+      "position",
+      new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 1, 0], 3),
+    );
+    const clip = new THREE.AnimationClip("bone_anim", 1, []);
+    mockUseEffectModelResource.mockReturnValue(makeModelResource(modelGeometry, [clip]));
+
+    const lgoSubEffect = { ...baseSubEffect, modelName: "gunwing.lgo" };
+    const renderer = await ReactThreeTestRenderer.create(
+      <TestTimeWrapper>
+        <SubEffectRenderer subEffect={lgoSubEffect} />
+      </TestTimeWrapper>
+    );
+
+    const root = renderer.scene.instance.children[0] as THREE.Group;
+    let renderedMesh: THREE.Mesh | null = null;
+    root.traverse((child) => {
+      const mesh = child as THREE.Mesh;
+      if (mesh.isMesh) renderedMesh = mesh;
+    });
+
+    expect(renderedMesh).not.toBeNull();
+    expect(renderedMesh!.geometry).toBe(modelGeometry);
   });
 
   it("renders when sub-effect has texName but no modelName", async () => {
