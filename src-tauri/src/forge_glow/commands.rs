@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use crate::item::commands::{resolve_forge_combination, ForgeTraceGemInput};
+use crate::item::info::get_item;
 use crate::projects::project::Project;
 
 use super::export;
@@ -33,6 +34,27 @@ fn trace_gems(inputs: &ForgeRecipeInputs) -> Vec<ForgeTraceGemInput> {
             level: gem.level,
         })
         .collect()
+}
+
+fn model_id_for_char_type(item: &crate::item::Item, char_type: u32) -> String {
+    match char_type {
+        0 => item.model_lance.clone(),
+        1 => item.model_carsise.clone(),
+        2 => item.model_phyllis.clone(),
+        3 => item.model_ami.clone(),
+        _ => item.model_lance.clone(),
+    }
+}
+
+fn hydrate_weapon_model_id(project_id: uuid::Uuid, draft: &mut ForgeGlowDraft) {
+    if !draft.source_recipe.weapon_model_id.trim().is_empty() {
+        return;
+    }
+
+    if let Ok(item) = get_item(project_id, draft.source_recipe.weapon_item_id) {
+        draft.source_recipe.weapon_model_id =
+            model_id_for_char_type(&item, draft.source_recipe.char_type);
+    }
 }
 
 #[tauri::command]
@@ -88,8 +110,11 @@ pub async fn load_forge_glow_draft(
     project_id: String,
     draft_id: String,
 ) -> Result<ForgeGlowDraft, String> {
-    let (_, project) = project_from_id(&project_id)?;
-    storage::load_draft(project.project_directory.as_ref(), &draft_id).map_err(|e| e.to_string())
+    let (uuid, project) = project_from_id(&project_id)?;
+    let mut draft = storage::load_draft(project.project_directory.as_ref(), &draft_id)
+        .map_err(|e| e.to_string())?;
+    hydrate_weapon_model_id(uuid, &mut draft);
+    Ok(draft)
 }
 
 #[tauri::command]
@@ -97,7 +122,8 @@ pub async fn save_forge_glow_draft(
     project_id: String,
     mut draft: ForgeGlowDraft,
 ) -> Result<ForgeGlowDraft, String> {
-    let (_, project) = project_from_id(&project_id)?;
+    let (uuid, project) = project_from_id(&project_id)?;
+    hydrate_weapon_model_id(uuid, &mut draft);
     draft.modified_at = now_stamp();
     storage::save_draft(project.project_directory.as_ref(), &draft).map_err(|e| e.to_string())?;
     Ok(draft)
@@ -115,9 +141,10 @@ pub async fn export_forge_glow_package(
     draft_id: String,
     variant_ids: Vec<String>,
 ) -> Result<ForgeGlowExportResult, String> {
-    let (_, project) = project_from_id(&project_id)?;
-    let draft = storage::load_draft(project.project_directory.as_ref(), &draft_id)
+    let (uuid, project) = project_from_id(&project_id)?;
+    let mut draft = storage::load_draft(project.project_directory.as_ref(), &draft_id)
         .map_err(|e| e.to_string())?;
+    hydrate_weapon_model_id(uuid, &mut draft);
     export::export_package(project.project_directory.as_ref(), &draft, &variant_ids)
         .map_err(|e| e.to_string())
 }

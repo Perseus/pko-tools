@@ -572,6 +572,7 @@ pub struct ForgeTraceParticle {
 pub struct ForgeTraceResult {
     pub weapon_item_id: u32,
     pub weapon_name: String,
+    pub weapon_model_id: String,
     pub char_type: u32,
     pub gems: Vec<ForgeTraceGemResolved>,
     pub total_level: u32,
@@ -594,6 +595,13 @@ pub(crate) fn resolve_forge_combination(
     gems: Vec<ForgeTraceGemInput>,
 ) -> Result<ForgeTraceResult, String> {
     let weapon_item = get_item(project_id, weapon_item_id).map_err(|e| e.to_string())?;
+    let weapon_model_id = match char_type {
+        0 => weapon_item.model_lance.clone(),
+        1 => weapon_item.model_carsise.clone(),
+        2 => weapon_item.model_phyllis.clone(),
+        3 => weapon_item.model_ami.clone(),
+        _ => weapon_item.model_lance.clone(),
+    };
     let stone_info = refine::load_stone_info(project_dir).map_err(|e| e.to_string())?;
     let refine_info_table =
         refine::load_item_refine_info(project_dir).map_err(|e| e.to_string())?;
@@ -707,6 +715,7 @@ pub(crate) fn resolve_forge_combination(
     Ok(ForgeTraceResult {
         weapon_item_id,
         weapon_name: weapon_item.name,
+        weapon_model_id,
         char_type,
         gems: resolved_gems,
         total_level,

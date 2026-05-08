@@ -5,6 +5,7 @@ import {
   ForgeGlowVariant,
   ForgeRecipeParticleRow,
 } from "@/types/forge-glow";
+import type { ForgeEffectPreview } from "@/types/item";
 
 export function getForgeGlowVariants(draft: ForgeGlowDraft): ForgeGlowVariant[] {
   return [draft.baselineVariant, ...draft.variants];
@@ -101,5 +102,28 @@ export function upsertForgeGlowParticleOverride(
           )
         : [...variant.overrides.particleRows, nextOverride],
     },
+  };
+}
+
+export function buildForgeGlowPreview(
+  draft: ForgeGlowDraft,
+  variantId: string,
+): ForgeEffectPreview {
+  const variant = getForgeGlowVariant(draft, variantId);
+  const rows = getEffectiveForgeGlowRows(draft, variantId);
+
+  return {
+    lit_id: variant.overrides.lightId ?? draft.sourceRecipe.lightId,
+    lit_entry: null,
+    effect_level: draft.sourceRecipe.effectLevel,
+    alpha: variant.overrides.alpha ?? draft.sourceRecipe.alpha,
+    particles: rows
+      .filter((row) => row.enabled && row.parFile)
+      .map((row) => ({
+        par_file: row.parFile ?? "",
+        dummy_id: row.dummyId,
+        scale: row.scale,
+        effect_id: row.finalEffectId,
+      })),
   };
 }
