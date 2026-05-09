@@ -3,6 +3,7 @@ import {
   ForgeGlowDraft,
   ForgeGlowDraftSummary,
   ForgeGlowExportResult,
+  ForgeGlowGemOption,
   ForgeRecipeInputs,
   ResolvedForgeRecipe,
 } from "@/types/forge-glow";
@@ -12,6 +13,12 @@ export const resolveForgeGlowRecipe = async (
   inputs: ForgeRecipeInputs,
 ): Promise<ResolvedForgeRecipe> => {
   return invoke("resolve_forge_glow_recipe", { projectId, inputs });
+};
+
+export const listForgeGlowGems = async (
+  projectId: string,
+): Promise<ForgeGlowGemOption[]> => {
+  return invoke("list_forge_glow_gems", { projectId });
 };
 
 export const createForgeGlowDraft = async (

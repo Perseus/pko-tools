@@ -5,7 +5,137 @@ import {
   ForgeGlowVariant,
   ForgeRecipeParticleRow,
 } from "@/types/forge-glow";
-import type { ForgeEffectPreview } from "@/types/item";
+import type { ForgeEffectPreview, ItemLitEntry, ItemLitInfo } from "@/types/item";
+
+export type ForgeGlowEffectFileKind = "par" | "eff";
+
+export type ForgeGlowDummyOption = {
+  id: number;
+  name: string;
+};
+
+export type ForgeGlowLitRecipe = {
+  lightId: number | null;
+  texture: string;
+  opacity: number | null;
+  blendMode: string;
+  animation: string;
+  summary: string;
+  steps: string[];
+};
+
+export function getForgeGlowEffectFileKind(fileName: string): ForgeGlowEffectFileKind | null {
+  const normalized = fileName.trim().toLowerCase();
+  if (normalized.endsWith(".par")) return "par";
+  if (normalized.endsWith(".eff")) return "eff";
+  return null;
+}
+
+export function stripForgeGlowEffectFileExtension(fileName: string): string {
+  return fileName.trim().replace(/\.(par|eff)$/i, "");
+}
+
+export function parseForgeGlowScaleInput(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed || trimmed === "." || trimmed === "-" || trimmed === "-.") return null;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+export function filterForgeGlowEffectFileOptions(
+  fileNames: string[],
+  query: string,
+  limit = 24,
+): string[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  const seen = new Set<string>();
+  return fileNames
+    .filter((fileName) => getForgeGlowEffectFileKind(fileName) !== null)
+    .filter((fileName) => {
+      const key = fileName.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return !normalizedQuery || key.includes(normalizedQuery);
+    })
+    .sort((left, right) => left.localeCompare(right, undefined, { sensitivity: "base" }))
+    .slice(0, limit);
+}
+
+export function describeForgeGlowBlendMode(transpType: number): string {
+  switch (transpType) {
+    case 0:
+      return "Alpha filter";
+    case 1:
+      return "Additive";
+    case 2:
+      return "SrcColor + One";
+    case 3:
+      return "SrcColor + InvSrcColor";
+    case 4:
+      return "SrcAlpha + DstAlpha";
+    case 5:
+      return "Subtractive";
+    default:
+      return `Blend ${transpType}`;
+  }
+}
+
+export function describeForgeGlowLitAnimation(animType: number): string {
+  switch (animType) {
+    case 0:
+      return "Static";
+    case 1:
+      return "120f UV rotation";
+    case 2:
+      return "120f UV scroll";
+    case 3:
+      return "360f V scroll";
+    case 4:
+      return "360f U scroll";
+    case 5:
+      return "360f UV scroll";
+    case 6:
+      return "360f UV scroll + rotation";
+    case 7:
+      return "360f UV scroll + reverse rotation";
+    case 8:
+      return "720f UV rotation";
+    default:
+      return `Animation ${animType}`;
+  }
+}
+
+export function buildForgeGlowLitRecipe(
+  lightId: number | null,
+  litEntry: ItemLitEntry | null,
+): ForgeGlowLitRecipe {
+  const texture = litEntry?.file || "No lit texture selected";
+  const opacity = litEntry?.opacity ?? null;
+  const blendMode = litEntry ? describeForgeGlowBlendMode(litEntry.transp_type) : "No blend mode";
+  const animation = litEntry ? describeForgeGlowLitAnimation(litEntry.anim_type) : "No animation";
+  const lightText = lightId == null ? "no light id" : `light ${lightId}`;
+
+  return {
+    lightId,
+    texture,
+    opacity,
+    blendMode,
+    animation,
+    summary: litEntry
+      ? `PKO renders ${lightText} by applying ${texture} to item subset 1.`
+      : `PKO will not render a lit glow for ${lightText}.`,
+    steps: [
+      `Resolve: ItemRefineEffectInfo light id selects an item.lit record.`,
+      `Texture: lit tier selects ${texture}; its pixels determine the visible color.`,
+      `Render: subset 1 uses ${blendMode}${opacity === null ? "" : ` at opacity ${opacity}`} with ${animation}.`,
+    ],
+  };
+}
+
+export function formatForgeGlowDummyOption(dummy: ForgeGlowDummyOption): string {
+  const name = dummy.name.trim();
+  return name ? `D${dummy.id} - ${name}` : `D${dummy.id}`;
+}
 
 export function getForgeGlowVariants(draft: ForgeGlowDraft): ForgeGlowVariant[] {
   return [draft.baselineVariant, ...draft.variants];
@@ -126,4 +256,13 @@ export function buildForgeGlowPreview(
         effect_id: row.finalEffectId,
       })),
   };
+}
+
+export function selectForgeGlowLitEntry(
+  litInfo: ItemLitInfo | null,
+  effectLevel: number,
+): ItemLitEntry | null {
+  if (!litInfo || litInfo.lits.length === 0) return null;
+  const tier = Math.max(0, Math.min(effectLevel, litInfo.lits.length - 1));
+  return litInfo.lits[tier] ?? litInfo.lits[0] ?? null;
 }

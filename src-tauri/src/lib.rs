@@ -130,6 +130,7 @@ pub fn run() {
             item::commands::get_forge_effect_preview,
             item::commands::trace_forge_combination,
             forge_glow::commands::resolve_forge_glow_recipe,
+            forge_glow::commands::list_forge_glow_gems,
             forge_glow::commands::create_forge_glow_draft,
             forge_glow::commands::list_forge_glow_drafts,
             forge_glow::commands::load_forge_glow_draft,

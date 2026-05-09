@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
   buildForgeGlowPreview,
+  buildForgeGlowLitRecipe,
+  filterForgeGlowEffectFileOptions,
+  formatForgeGlowDummyOption,
   getEffectiveForgeGlowRows,
+  getForgeGlowEffectFileKind,
+  parseForgeGlowScaleInput,
+  selectForgeGlowLitEntry,
+  stripForgeGlowEffectFileExtension,
   upsertForgeGlowParticleOverride,
 } from "../forgeGlowDraft";
 import { ForgeGlowDraft, ForgeGlowVariant } from "@/types/forge-glow";
@@ -114,5 +121,66 @@ describe("forge glow draft helpers", () => {
         effect_id: 102,
       },
     ]);
+  });
+
+  it("selects the lit glow entry for the forge effect tier", () => {
+    const entry = selectForgeGlowLitEntry(
+      {
+        item_id: 20,
+        descriptor: "forge",
+        file: "glow",
+        lits: [
+          { id: 1, file: "tier0.tga", anim_type: 1, transp_type: 1, opacity: 0.25 },
+          { id: 2, file: "tier1.tga", anim_type: 2, transp_type: 1, opacity: 0.5 },
+          { id: 3, file: "tier2.tga", anim_type: 3, transp_type: 1, opacity: 0.75 },
+        ],
+      },
+      2,
+    );
+
+    expect(entry?.file).toBe("tier2.tga");
+  });
+
+  it("recognizes top-level particle and effect files for forge glow rows", () => {
+    expect(getForgeGlowEffectFileKind("glow.par")).toBe("par");
+    expect(getForgeGlowEffectFileKind("glow.eff")).toBe("eff");
+    expect(getForgeGlowEffectFileKind("glow.txt")).toBeNull();
+    expect(stripForgeGlowEffectFileExtension("glow.eff")).toBe("glow");
+  });
+
+  it("keeps decimal scale edits parseable without forcing invalid partial text", () => {
+    expect(parseForgeGlowScaleInput("0.25")).toBe(0.25);
+    expect(parseForgeGlowScaleInput("1.")).toBe(1);
+    expect(parseForgeGlowScaleInput(".")).toBeNull();
+    expect(parseForgeGlowScaleInput("")).toBeNull();
+  });
+
+  it("filters renderable forge glow row files from par and eff catalogs", () => {
+    expect(
+      filterForgeGlowEffectFileOptions(
+        ["spark.par", "spark.eff", "notes.txt", "SPARK.PAR", "aura.eff"],
+        "spark",
+      ),
+    ).toEqual(["spark.eff", "spark.par"]);
+  });
+
+  it("describes the native lit recipe that drives the glow overlay", () => {
+    const recipe = buildForgeGlowLitRecipe(4, {
+      id: 3,
+      file: "green.tga",
+      anim_type: 6,
+      transp_type: 1,
+      opacity: 0.78,
+    });
+
+    expect(recipe.summary).toContain("light 4");
+    expect(recipe.texture).toBe("green.tga");
+    expect(recipe.blendMode).toBe("Additive");
+    expect(recipe.steps).toHaveLength(3);
+  });
+
+  it("formats discovered weapon dummies as selectable anchors", () => {
+    expect(formatForgeGlowDummyOption({ id: 2, name: "Dummy2" })).toBe("D2 - Dummy2");
+    expect(formatForgeGlowDummyOption({ id: 4, name: "" })).toBe("D4");
   });
 });

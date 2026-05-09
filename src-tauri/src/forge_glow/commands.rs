@@ -1,8 +1,10 @@
 use std::str::FromStr;
 
 use crate::item::commands::{resolve_forge_combination, ForgeTraceGemInput};
-use crate::item::info::get_item;
+use crate::item::info::{get_all_items, get_item};
+use crate::item::refine::{self, StoneInfoTable};
 use crate::projects::project::Project;
+use serde::Serialize;
 
 use super::export;
 use super::model::{
@@ -54,6 +56,143 @@ fn hydrate_weapon_model_id(project_id: uuid::Uuid, draft: &mut ForgeGlowDraft) {
     if let Ok(item) = get_item(project_id, draft.source_recipe.weapon_item_id) {
         draft.source_recipe.weapon_model_id =
             model_id_for_char_type(&item, draft.source_recipe.char_type);
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForgeGlowGemOption {
+    pub item_id: u32,
+    pub item_name: String,
+    pub stone_info_id: i32,
+    pub stone_type: i32,
+    pub equip_pos: Vec<i32>,
+    pub hint_func: String,
+}
+
+pub(crate) fn build_forge_glow_gem_options(
+    stone_info: &StoneInfoTable,
+    items: &[crate::item::Item],
+) -> Vec<ForgeGlowGemOption> {
+    let item_names = items
+        .iter()
+        .map(|item| (item.id, item.name.clone()))
+        .collect::<std::collections::HashMap<_, _>>();
+
+    let mut options = stone_info
+        .by_item_id
+        .values()
+        .filter_map(|stone| {
+            let item_id = u32::try_from(stone.item_id).ok()?;
+            let item_name = item_names.get(&item_id)?;
+            Some(ForgeGlowGemOption {
+                item_id,
+                item_name: item_name.clone(),
+                stone_info_id: stone.id,
+                stone_type: stone.stone_type,
+                equip_pos: stone.equip_pos.clone(),
+                hint_func: stone.hint_func.clone(),
+            })
+        })
+        .collect::<Vec<_>>();
+
+    options.sort_by_key(|option| option.item_id);
+    options
+}
+
+#[tauri::command]
+pub async fn list_forge_glow_gems(project_id: String) -> Result<Vec<ForgeGlowGemOption>, String> {
+    let (uuid, project) = project_from_id(&project_id)?;
+    let stone_info =
+        refine::load_stone_info(project.project_directory.as_ref()).map_err(|e| e.to_string())?;
+    let items = get_all_items(uuid).map_err(|e| e.to_string())?;
+    Ok(build_forge_glow_gem_options(&stone_info, &items))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::item::refine::StoneInfoEntry;
+    use std::collections::HashMap;
+
+    fn item(id: u32, name: &str) -> crate::item::Item {
+        crate::item::Item {
+            id,
+            name: name.to_string(),
+            icon_name: String::new(),
+            model_ground: "0".to_string(),
+            model_lance: "0".to_string(),
+            model_carsise: "0".to_string(),
+            model_phyllis: "0".to_string(),
+            model_ami: "0".to_string(),
+            item_type: 0,
+            display_effect: "0".to_string(),
+            bind_effect: "0".to_string(),
+            bind_effect_2: "0".to_string(),
+            description: String::new(),
+        }
+    }
+
+    #[test]
+    fn builds_sorted_gem_options_from_stone_info_and_item_info() {
+        let mut by_item_id = HashMap::new();
+        by_item_id.insert(
+            2002,
+            StoneInfoEntry {
+                id: 22,
+                item_id: 2002,
+                equip_pos: vec![1, 2, 3],
+                stone_type: 7,
+                hint_func: "HintB".to_string(),
+            },
+        );
+        by_item_id.insert(
+            1001,
+            StoneInfoEntry {
+                id: 11,
+                item_id: 1001,
+                equip_pos: vec![4, 5, 6],
+                stone_type: 3,
+                hint_func: "HintA".to_string(),
+            },
+        );
+        by_item_id.insert(
+            9999,
+            StoneInfoEntry {
+                id: 99,
+                item_id: 9999,
+                equip_pos: vec![],
+                stone_type: 1,
+                hint_func: "MissingItem".to_string(),
+            },
+        );
+
+        let options = build_forge_glow_gem_options(
+            &StoneInfoTable { by_item_id },
+            &[item(2002, "Gem B"), item(1001, "Gem A")],
+        );
+
+        assert_eq!(
+            options,
+            vec![
+                ForgeGlowGemOption {
+                    item_id: 1001,
+                    item_name: "Gem A".to_string(),
+                    stone_info_id: 11,
+                    stone_type: 3,
+                    equip_pos: vec![4, 5, 6],
+                    hint_func: "HintA".to_string(),
+                },
+                ForgeGlowGemOption {
+                    item_id: 2002,
+                    item_name: "Gem B".to_string(),
+                    stone_info_id: 22,
+                    stone_type: 7,
+                    equip_pos: vec![1, 2, 3],
+                    hint_func: "HintB".to_string(),
+                },
+            ],
+        );
     }
 }
 

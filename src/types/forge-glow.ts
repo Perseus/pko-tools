@@ -9,6 +9,15 @@ export type ForgeRecipeInputs = {
   gems: ForgeRecipeGemInput[];
 };
 
+export type ForgeGlowGemOption = {
+  itemId: number;
+  itemName: string;
+  stoneInfoId: number;
+  stoneType: number;
+  equipPos: number[];
+  hintFunc: string;
+};
+
 export type ForgeRecipeParticleRow = {
   laneTier: number;
   baseEffectId: number;
