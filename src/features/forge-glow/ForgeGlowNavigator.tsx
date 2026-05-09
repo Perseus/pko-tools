@@ -6,7 +6,13 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useToast } from "@/hooks/use-toast";
-import { createForgeGlowDraft, deleteForgeGlowDraft, listForgeGlowDrafts, loadForgeGlowDraft } from "@/commands/forge-glow";
+import {
+  createForgeGlowDraft,
+  deleteForgeGlowDraft,
+  listForgeGlowDrafts,
+  listForgeGlowGems,
+  loadForgeGlowDraft,
+} from "@/commands/forge-glow";
 import { getItemList } from "@/commands/item";
 import { currentProjectAtom } from "@/store/project";
 import {
@@ -14,7 +20,7 @@ import {
   forgeGlowDraftsAtom,
   selectedForgeGlowVariantIdAtom,
 } from "@/store/forge-glow";
-import type { ForgeRecipeInputs } from "@/types/forge-glow";
+import type { ForgeGlowGemOption, ForgeRecipeInputs } from "@/types/forge-glow";
 import type { Item } from "@/types/item";
 
 const CHAR_TYPES = [
@@ -24,9 +30,64 @@ const CHAR_TYPES = [
   { value: 3, label: "Ami" },
 ];
 
+const FORGE_GLOW_WEAPON_ITEM_TYPES = new Set([1, 2, 3, 4, 5, 6, 7, 8, 14, 15]);
+
 function numberValue(value: string): number {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function modelIdForCharType(item: Item, charType: number): string {
+  if (charType === 1) return item.model_carsise;
+  if (charType === 2) return item.model_phyllis;
+  if (charType === 3) return item.model_ami;
+  return item.model_lance;
+}
+
+function hasForgeGlowWeaponModelForChar(item: Item, charType: number): boolean {
+  const modelId = modelIdForCharType(item, charType).trim();
+  return modelId.length > 0 && modelId !== "0";
+}
+
+export function filterForgeGlowWeaponOptions(
+  items: Item[],
+  query: string,
+  charType: number,
+): Item[] {
+  const lower = query.trim().toLowerCase();
+  return items
+    .filter(
+      (item) =>
+        FORGE_GLOW_WEAPON_ITEM_TYPES.has(item.item_type) &&
+        hasForgeGlowWeaponModelForChar(item, charType),
+    )
+    .filter(
+      (item) =>
+        !lower ||
+        item.name.toLowerCase().includes(lower) ||
+        String(item.id).includes(lower),
+    )
+    .slice(0, 24);
+}
+
+export function formatGemOption(gem: ForgeGlowGemOption): string {
+  return `${gem.itemId} · ${gem.itemName} · type ${gem.stoneType}`;
+}
+
+function filterGemOptions(
+  options: ForgeGlowGemOption[],
+  query: string,
+): ForgeGlowGemOption[] {
+  const lower = query.trim().toLowerCase();
+  if (!lower) return options.slice(0, 12);
+  return options
+    .filter(
+      (gem) =>
+        gem.itemName.toLowerCase().includes(lower) ||
+        String(gem.itemId).includes(lower) ||
+        String(gem.stoneType).includes(lower),
+    )
+    .slice(0, 12);
 }
 
 export default function ForgeGlowNavigator() {
@@ -36,13 +97,15 @@ export default function ForgeGlowNavigator() {
   const setVariantId = useSetAtom(selectedForgeGlowVariantIdAtom);
   const { toast } = useToast();
   const [items, setItems] = useState<Item[]>([]);
+  const [gemOptions, setGemOptions] = useState<ForgeGlowGemOption[]>([]);
   const [query, setQuery] = useState("");
+  const [weaponPickerOpen, setWeaponPickerOpen] = useState(false);
   const [weaponItemId, setWeaponItemId] = useState("");
   const [charType, setCharType] = useState(0);
   const [gems, setGems] = useState([
-    { itemId: "", level: "1" },
-    { itemId: "", level: "1" },
-    { itemId: "", level: "1" },
+    { itemId: "", query: "", level: "1" },
+    { itemId: "", query: "", level: "1" },
+    { itemId: "", query: "", level: "1" },
   ]);
   const [creating, setCreating] = useState(false);
 
@@ -56,19 +119,24 @@ export default function ForgeGlowNavigator() {
     if (!currentProject) return;
     refreshDrafts().catch(() => setDrafts([]));
     getItemList(currentProject.id).then(setItems).catch(() => setItems([]));
+    listForgeGlowGems(currentProject.id)
+      .then(setGemOptions)
+      .catch(() => setGemOptions([]));
   }, [currentProject?.id]);
 
   const filteredItems = useMemo(() => {
-    const lower = query.trim().toLowerCase();
-    if (!lower) return [];
-    return items
-      .filter(
-        (item) =>
-          item.name.toLowerCase().includes(lower) ||
-          String(item.id).includes(lower),
-      )
-      .slice(0, 12);
-  }, [items, query]);
+    return filterForgeGlowWeaponOptions(items, query, charType);
+  }, [items, query, charType]);
+
+  useEffect(() => {
+    if (!items.length || !weaponItemId) return;
+    const selected = items.find((item) => item.id === numberValue(weaponItemId));
+    if (!selected || !hasForgeGlowWeaponModelForChar(selected, charType)) {
+      setWeaponItemId("");
+      setQuery("");
+      setWeaponPickerOpen(true);
+    }
+  }, [charType, items, weaponItemId]);
 
   async function createDraft() {
     if (!currentProject) return;
@@ -150,35 +218,44 @@ export default function ForgeGlowNavigator() {
             <Input
               id="forge-glow-search"
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Search id or name"
+              onFocus={() => setWeaponPickerOpen(true)}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setWeaponItemId("");
+                setWeaponPickerOpen(true);
+              }}
+              placeholder="Choose valid weapon"
             />
             <Button size="icon" variant="outline" className="shrink-0">
               <Search className="h-4 w-4" />
             </Button>
           </div>
-          {filteredItems.length > 0 && (
+          {weaponPickerOpen && filteredItems.length > 0 && (
             <div className="max-h-44 overflow-y-auto rounded-md border border-border bg-background">
               {filteredItems.map((item) => (
                 <button
                   key={item.id}
                   type="button"
-                  className="grid w-full grid-cols-[64px_1fr] gap-2 px-2 py-1.5 text-left text-xs hover:bg-muted"
+                  className="grid w-full grid-cols-[64px_1fr_48px] gap-2 px-2 py-1.5 text-left text-xs hover:bg-muted"
                   onClick={() => {
                     setWeaponItemId(String(item.id));
                     setQuery(item.name);
+                    setWeaponPickerOpen(false);
                   }}
                 >
                   <span className="font-mono text-muted-foreground">{item.id}</span>
                   <span className="truncate">{item.name}</span>
+                  <span className="text-right font-mono text-muted-foreground">
+                    T{item.item_type}
+                  </span>
                 </button>
               ))}
             </div>
           )}
           <Input
             value={weaponItemId}
-            onChange={(event) => setWeaponItemId(event.target.value)}
-            placeholder="Weapon item id"
+            readOnly
+            placeholder="Selected weapon id"
             inputMode="numeric"
           />
         </div>
@@ -199,33 +276,100 @@ export default function ForgeGlowNavigator() {
 
         <div className="space-y-2">
           <div className="text-xs font-medium text-muted-foreground">Gems</div>
-          {gems.map((gem, index) => (
-            <div key={index} className="grid grid-cols-[1fr_64px] gap-2">
-              <Input
-                value={gem.itemId}
-                onChange={(event) =>
-                  setGems((current) =>
-                    current.map((entry, idx) =>
-                      idx === index ? { ...entry, itemId: event.target.value } : entry,
-                    ),
-                  )
-                }
-                placeholder={`Gem ${index + 1} item id`}
-                inputMode="numeric"
-              />
-              <Input
-                value={gem.level}
-                onChange={(event) =>
-                  setGems((current) =>
-                    current.map((entry, idx) =>
-                      idx === index ? { ...entry, level: event.target.value } : entry,
-                    ),
-                  )
-                }
-                inputMode="numeric"
-              />
-            </div>
-          ))}
+          {gems.map((gem, index) => {
+            const selectedGem = gemOptions.find(
+              (option) => String(option.itemId) === gem.itemId,
+            );
+
+            return (
+              <div key={index} className="grid grid-cols-[1fr_64px] gap-2">
+                <div className="min-w-0 space-y-1">
+                  <Input
+                    value={gem.query}
+                    onChange={(event) => {
+                      const nextQuery = event.target.value;
+                      const exact = gemOptions.find(
+                        (option) =>
+                          String(option.itemId) === nextQuery.trim() ||
+                          formatGemOption(option) === nextQuery,
+                      );
+                      setGems((current) =>
+                        current.map((entry, idx) =>
+                          idx === index
+                            ? {
+                                ...entry,
+                                itemId: exact ? String(exact.itemId) : "",
+                                query: nextQuery,
+                              }
+                            : entry,
+                        ),
+                      );
+                    }}
+                    placeholder={`Search gem ${index + 1}`}
+                  />
+                  {selectedGem && (
+                    <div className="grid grid-cols-[56px_1fr_48px] gap-2 rounded-md bg-muted px-2 py-1 text-xs">
+                      <span className="font-mono text-muted-foreground">
+                        {selectedGem.itemId}
+                      </span>
+                      <span className="truncate font-medium">{selectedGem.itemName}</span>
+                      <span className="text-right font-mono text-muted-foreground">
+                        T{selectedGem.stoneType}
+                      </span>
+                    </div>
+                  )}
+                  {gem.query.trim() && !gem.itemId && (
+                    <div className="max-h-36 overflow-y-auto rounded-md border border-border bg-background">
+                      {filterGemOptions(gemOptions, gem.query).map((option) => (
+                        <button
+                          key={option.itemId}
+                          type="button"
+                          className="grid w-full grid-cols-[56px_1fr_48px] gap-2 px-2 py-1.5 text-left text-xs hover:bg-muted"
+                          onClick={() =>
+                            setGems((current) =>
+                              current.map((entry, idx) =>
+                                idx === index
+                                  ? {
+                                      ...entry,
+                                      itemId: String(option.itemId),
+                                      query: formatGemOption(option),
+                                    }
+                                  : entry,
+                              ),
+                            )
+                          }
+                        >
+                          <span className="font-mono text-muted-foreground">
+                            {option.itemId}
+                          </span>
+                          <span className="truncate">{option.itemName}</span>
+                          <span className="text-right font-mono text-muted-foreground">
+                            T{option.stoneType}
+                          </span>
+                        </button>
+                      ))}
+                      {filterGemOptions(gemOptions, gem.query).length === 0 && (
+                        <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                          No gem found.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <Input
+                  value={gem.level}
+                  onChange={(event) =>
+                    setGems((current) =>
+                      current.map((entry, idx) =>
+                        idx === index ? { ...entry, level: event.target.value } : entry,
+                      ),
+                    )
+                  }
+                  inputMode="numeric"
+                />
+              </div>
+            );
+          })}
         </div>
 
         <Button className="w-full gap-2" onClick={createDraft} disabled={creating}>

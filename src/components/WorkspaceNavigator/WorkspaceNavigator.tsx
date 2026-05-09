@@ -4,24 +4,32 @@ import ItemNavigator from "@/features/item/ItemNavigator";
 import ForgeGlowNavigator from "@/features/forge-glow/ForgeGlowNavigator";
 import MapNavigator from "@/features/map/MapNavigator";
 import BuildingsNavigator from "@/features/buildings/BuildingsNavigator";
-import { Route, Routes } from "react-router";
+import type { CSSProperties } from "react";
+import { Route, Routes, useLocation } from "react-router";
 import { Sidebar, SidebarContent } from "../ui/sidebar";
 
 export default function WorkspaceNavigator() {
+  const location = useLocation();
+  const sidebarStyle = location.pathname.startsWith("/forge-glows")
+    ? ({ "--sidebar-width": "22rem" } as CSSProperties)
+    : undefined;
+
   return (
-    <Sidebar side="right">
-      <SidebarContent>
-        <Routes>
-          <Route path="/" element={<div></div>} />
-          <Route path="/characters" element={<CharacterNavigator/>} />
-          <Route path="/effects" element={<EffectV2Navigator />} />
-          <Route path="/items" element={<ItemNavigator />} />
-          <Route path="/forge-glows" element={<ForgeGlowNavigator />} />
-          <Route path="/maps" element={<MapNavigator />} />
-          <Route path="/buildings" element={<BuildingsNavigator />} />
-          <Route path="*" element={<div />} />
-        </Routes>
-      </SidebarContent>
-    </Sidebar>
+    <div style={sidebarStyle}>
+      <Sidebar side="right">
+        <SidebarContent>
+          <Routes>
+            <Route path="/" element={<div></div>} />
+            <Route path="/characters" element={<CharacterNavigator/>} />
+            <Route path="/effects" element={<EffectV2Navigator />} />
+            <Route path="/items" element={<ItemNavigator />} />
+            <Route path="/forge-glows" element={<ForgeGlowNavigator />} />
+            <Route path="/maps" element={<MapNavigator />} />
+            <Route path="/buildings" element={<BuildingsNavigator />} />
+            <Route path="*" element={<div />} />
+          </Routes>
+        </SidebarContent>
+      </Sidebar>
+    </div>
   );
 }

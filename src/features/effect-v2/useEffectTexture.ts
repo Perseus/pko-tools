@@ -10,6 +10,15 @@ interface DecodedTexture {
   data: string; // base64-encoded RGBA
 }
 
+interface DecodedTextureBytes {
+  width: number;
+  height: number;
+  bytes: Uint8Array;
+}
+
+const decodedTextureCache = new Map<string, DecodedTextureBytes>();
+const decodedTextureInflight = new Map<string, Promise<DecodedTextureBytes>>();
+
 const EFFECT_TEXTURE_DIRS = [
   "texture/effect",
   "texture",
@@ -41,6 +50,40 @@ export function emulateD3dA8R8G8B8(rgba: Uint8Array): Uint8Array {
   return new Uint8Array(rgba);
 }
 
+export function clearEffectTextureCacheForTest(): void {
+  decodedTextureCache.clear();
+  decodedTextureInflight.clear();
+}
+
+export async function decodeEffectTextureCached(path: string): Promise<DecodedTextureBytes> {
+  const key = path.toLowerCase();
+  const cached = decodedTextureCache.get(key);
+  if (cached) return cached;
+
+  const pending = decodedTextureInflight.get(key);
+  if (pending) return pending;
+
+  const request = invoke<DecodedTexture>("decode_texture", { path })
+    .then((decoded: DecodedTexture) => {
+      const bytes = Uint8Array.from(atob(decoded.data), (c) => c.charCodeAt(0));
+      const result = {
+        width: decoded.width,
+        height: decoded.height,
+        bytes: emulateD3dA8R8G8B8(bytes),
+      };
+      decodedTextureCache.set(key, result);
+      decodedTextureInflight.delete(key);
+      return result;
+    })
+    .catch((err) => {
+      decodedTextureInflight.delete(key);
+      throw err;
+    });
+
+  decodedTextureInflight.set(key, request);
+  return request;
+}
+
 /**
  * Hook that loads a sub-effect's texture from the project's texture/effect/ directory.
  * Tries <name>.tga first. Returns a THREE.Texture or null.
@@ -70,17 +113,14 @@ export function useEffectTexture(texName: string): THREE.Texture | null {
 
       for (const path of candidates) {
         try {
-          const decoded: DecodedTexture = await invoke("decode_texture", { path });
+          const decoded = await decodeEffectTextureCached(path);
 
           if (cancelled) return;
-
-          const bytes = Uint8Array.from(atob(decoded.data), (c) => c.charCodeAt(0));
-          const effectBytes = emulateD3dA8R8G8B8(bytes);
 
           // Use DataTexture with V1's exact settings — decoded RGBA is already
           // in OpenGL row order, so flipY=false is correct.
           tex = new THREE.DataTexture(
-            effectBytes,
+            decoded.bytes.slice(),
             decoded.width,
             decoded.height,
             THREE.RGBAFormat,
