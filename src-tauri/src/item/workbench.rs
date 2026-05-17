@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::character::helper::{HelperData, HelperDummyInfo, HELPER_TYPE_DUMMY};
 use crate::character::model::CharacterGeometricModel;
+use crate::client_paths;
 use crate::math::LwMatrix44;
 
 fn now_iso() -> String {
@@ -787,7 +788,7 @@ pub fn generate_item_info_entry(
     state: &WorkbenchState,
     requested_id: Option<u32>,
 ) -> anyhow::Result<ItemInfoPreview> {
-    let item_info_path = project_dir.join("scripts/table/ItemInfo.txt");
+    let item_info_path = client_paths::table_file(project_dir, "ItemInfo.txt");
 
     let (lines, header) = if item_info_path.exists() {
         let content = std::fs::read(&item_info_path)?;
@@ -873,7 +874,7 @@ pub fn register_item(
     tsv_line: &str,
     assigned_id: u32,
 ) -> anyhow::Result<()> {
-    let item_info_path = project_dir.join("scripts/table/ItemInfo.txt");
+    let item_info_path = client_paths::table_file(project_dir, "ItemInfo.txt");
 
     if item_info_path.exists() {
         let content = std::fs::read(&item_info_path)?;

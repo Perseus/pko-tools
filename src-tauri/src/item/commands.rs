@@ -764,7 +764,7 @@ pub async fn decompile_item_refine_info(
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
     let project_dir = project.project_directory.as_ref();
 
-    let input_path = project_dir.join("scripts/table/ItemRefineInfo.bin");
+    let input_path = crate::client_paths::table_file(project_dir, "ItemRefineInfo.bin");
     let output_path = project_dir
         .join("pko-tools")
         .join("exports")
@@ -785,7 +785,7 @@ pub async fn decompile_item_refine_effect_info(
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
     let project_dir = project.project_directory.as_ref();
 
-    let input_path = project_dir.join("scripts/table/ItemRefineEffectInfo.bin");
+    let input_path = crate::client_paths::table_file(project_dir, "ItemRefineEffectInfo.bin");
     let output_path = project_dir
         .join("pko-tools")
         .join("exports")
@@ -806,7 +806,7 @@ pub async fn decompile_scene_effect_info(
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
     let project_dir = project.project_directory.as_ref();
 
-    let input_path = project_dir.join("scripts/table/sceneffectinfo.bin");
+    let input_path = crate::client_paths::table_file(project_dir, "sceneffectinfo.bin");
     let output_path = project_dir
         .join("pko-tools")
         .join("exports")
@@ -827,7 +827,7 @@ pub async fn decompile_stone_info(
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
     let project_dir = project.project_directory.as_ref();
 
-    let input_path = project_dir.join("scripts/table/StoneInfo.bin");
+    let input_path = crate::client_paths::table_file(project_dir, "StoneInfo.bin");
     let output_path = project_dir
         .join("pko-tools")
         .join("exports")

@@ -5,14 +5,15 @@ use anyhow::Result;
 use image::{DynamicImage, GenericImageView, Pixel};
 
 use super::terrain::{ParsedMap, UNDERWATER_TEXNO};
+use crate::client_paths;
 use crate::item::model::decode_pko_texture;
+use crate::text_encoding;
 
 // ============================================================================
 // TerrainInfo.bin parsing
 // ============================================================================
 
 const TERRAIN_ENTRY_SIZE: usize = 120;
-const TERRAIN_ENTRY_COUNT: usize = 49;
 
 /// Maximum atlas dimension in pixels. The per-tile resolution adapts to fit.
 /// 8192 keeps JPEG size reasonable (~2-8 MB) while maximizing texture detail.
@@ -31,7 +32,7 @@ pub struct TerrainTextureInfo {
 }
 
 /// Parse `scripts/table/TerrainInfo.bin` to extract terrain texture entries.
-/// Format: 4-byte header (struct size = 120), then 49 × 120-byte entries.
+/// Format: 4-byte header (struct size = 120), then N × 120-byte entries.
 /// Each entry: nIndex at offset 4 (4 bytes LE), szDataName at offset 8 (72 bytes, null-terminated).
 pub fn parse_terrain_info(data: &[u8]) -> Result<HashMap<u8, TerrainTextureInfo>> {
     if data.len() < 4 {
@@ -49,8 +50,9 @@ pub fn parse_terrain_info(data: &[u8]) -> Result<HashMap<u8, TerrainTextureInfo>
 
     let mut entries = HashMap::new();
     let entry_data = &data[4..];
+    let entry_count = entry_data.len() / TERRAIN_ENTRY_SIZE;
 
-    for i in 0..TERRAIN_ENTRY_COUNT {
+    for i in 0..entry_count {
         let offset = i * TERRAIN_ENTRY_SIZE;
         if offset + TERRAIN_ENTRY_SIZE > entry_data.len() {
             break;
@@ -62,9 +64,7 @@ pub fn parse_terrain_info(data: &[u8]) -> Result<HashMap<u8, TerrainTextureInfo>
         let n_index = u32::from_le_bytes([entry[4], entry[5], entry[6], entry[7]]) as u8;
 
         // szDataName at offset 8 (72 bytes, null-terminated)
-        let name_bytes = &entry[8..80];
-        let name_end = name_bytes.iter().position(|&b| b == 0).unwrap_or(72);
-        let name = String::from_utf8_lossy(&name_bytes[..name_end]).to_string();
+        let name = text_encoding::decode_gbk_cstr(&entry[8..80]);
 
         if name.is_empty() || n_index == 0 {
             continue;
@@ -150,9 +150,22 @@ const ALPHA_NO_2_UV: [[f32; 2]; 16] = [
 
 /// Try to load a PKO texture file, trying both original and normalized paths.
 fn load_pko_image(project_dir: &Path, rel_path: &str) -> Option<DynamicImage> {
-    let tex_data = std::fs::read(project_dir.join(rel_path))
-        .or_else(|_| std::fs::read(project_dir.join(rel_path.replace('\\', "/"))))
-        .ok()?;
+    let normalized = rel_path.replace('\\', "/");
+    let data_path = normalized
+        .strip_prefix("texture/")
+        .map(|path| client_paths::asset_file(project_dir, "texture", path));
+
+    let tex_data = data_path
+        .as_ref()
+        .map(std::fs::read)
+        .transpose()
+        .ok()
+        .flatten()
+        .or_else(|| std::fs::read(project_dir.join(rel_path)).ok())
+        .or_else(|| std::fs::read(project_dir.join(&normalized)).ok())
+        .or_else(|| {
+            std::fs::read(client_paths::asset_file(project_dir, "texture", rel_path)).ok()
+        })?;
     let decoded = decode_pko_texture(&tex_data);
     // Try auto-detect first, then fall back to format hint from extension.
     // TGA has no magic number so load_from_memory can't auto-detect it.
@@ -387,10 +400,7 @@ pub fn collect_referenced_tex_ids(parsed_map: &ParsedMap) -> HashSet<u8> {
 /// Attempt to load TerrainInfo.bin, load referenced textures, and bake an atlas.
 /// Returns None if TerrainInfo.bin is missing or textures can't be loaded.
 pub fn try_bake_atlas(project_dir: &Path, parsed_map: &ParsedMap) -> Option<image::RgbImage> {
-    let terrain_info_path = project_dir
-        .join("scripts")
-        .join("table")
-        .join("TerrainInfo.bin");
+    let terrain_info_path = client_paths::table_file(project_dir, "TerrainInfo.bin");
 
     let terrain_info_data = std::fs::read(&terrain_info_path).ok()?;
     let terrain_info = parse_terrain_info(&terrain_info_data).ok()?;
@@ -426,10 +436,7 @@ pub fn export_terrain_textures(
     parsed_map: &ParsedMap,
     output_dir: &Path,
 ) -> Result<HashMap<u8, String>> {
-    let terrain_info_path = project_dir
-        .join("scripts")
-        .join("table")
-        .join("TerrainInfo.bin");
+    let terrain_info_path = client_paths::table_file(project_dir, "TerrainInfo.bin");
 
     let terrain_info_data = std::fs::read(&terrain_info_path)
         .map_err(|e| anyhow::anyhow!("Failed to read TerrainInfo.bin: {}", e))?;
@@ -481,10 +488,7 @@ pub fn export_all_terrain_textures(
     project_dir: &Path,
     output_dir: &Path,
 ) -> Result<HashMap<u8, String>> {
-    let terrain_info_path = project_dir
-        .join("scripts")
-        .join("table")
-        .join("TerrainInfo.bin");
+    let terrain_info_path = client_paths::table_file(project_dir, "TerrainInfo.bin");
 
     let terrain_info_data = std::fs::read(&terrain_info_path)
         .map_err(|e| anyhow::anyhow!("Failed to read TerrainInfo.bin: {}", e))?;
@@ -756,6 +760,28 @@ mod tests {
             eprintln!("Terrain {}: {}", id, info.path);
             assert!(!info.path.is_empty());
         }
+    }
+
+    #[test]
+    fn parse_terrain_info_reads_all_records_from_file_length() {
+        let mut data = Vec::new();
+        data.extend_from_slice(&(TERRAIN_ENTRY_SIZE as u32).to_le_bytes());
+
+        for i in 1..=60u32 {
+            let mut entry = vec![0u8; TERRAIN_ENTRY_SIZE];
+            entry[4..8].copy_from_slice(&i.to_le_bytes());
+            let name = format!("texture/terrain/terrain_{:03}.tga", i);
+            entry[8..8 + name.len()].copy_from_slice(name.as_bytes());
+            data.extend_from_slice(&entry);
+        }
+
+        let entries = parse_terrain_info(&data).unwrap();
+
+        assert_eq!(entries.len(), 60);
+        assert_eq!(
+            entries.get(&60).map(|entry| entry.path.as_str()),
+            Some("texture/terrain/terrain_060.tga"),
+        );
     }
 
     #[test]

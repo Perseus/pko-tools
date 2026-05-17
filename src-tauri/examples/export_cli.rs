@@ -261,18 +261,9 @@ fn export_characters(
     char_id_filter: Option<u32>,
     profile: ExportProfile,
 ) {
-    let char_info_path = client_dir.join("scripts/table/CharacterInfo.txt");
-    if !char_info_path.exists() {
-        eprintln!(
-            "CharacterInfo.txt not found at {}",
-            char_info_path.display()
-        );
-        std::process::exit(1);
-    }
-
-    let characters = pko_tools_lib::character::info::parse_character_info(char_info_path)
+    let characters = pko_tools_lib::character::info::parse_character_table(client_dir)
         .unwrap_or_else(|e| {
-            eprintln!("Failed to parse CharacterInfo.txt: {:?}", e);
+            eprintln!("Failed to parse character table: {:?}", e);
             std::process::exit(1);
         });
 

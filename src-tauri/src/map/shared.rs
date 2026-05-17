@@ -9,6 +9,7 @@ use std::path::Path;
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
+use crate::client_paths;
 use crate::effect::model::EffFile;
 use crate::math::coord_transform::CoordTransform;
 
@@ -203,7 +204,7 @@ fn export_shared_assets_v2_inner(
 pub fn export_scene_textures(project_dir: &Path, output_dir: &Path) -> Result<u32> {
     use crate::item::model::decode_pko_texture;
 
-    let tex_dir = project_dir.join("texture/scene");
+    let tex_dir = client_paths::asset_file(project_dir, "texture", "scene");
     if !tex_dir.exists() {
         return Ok(0);
     }
@@ -586,7 +587,7 @@ fn load_effect_file(project_dir: &Path, eff_filename: &str) -> Option<EffFile> {
         .or_else(|| eff_filename.strip_suffix(".EFF"))
         .unwrap_or(eff_filename);
 
-    let eff_path = project_dir.join("effect").join(format!("{}.eff", base));
+    let eff_path = client_paths::asset_file(project_dir, "effect", format!("{}.eff", base));
     if eff_path.exists() {
         if let Ok(bytes) = std::fs::read(&eff_path) {
             return EffFile::from_bytes(&bytes).ok();
@@ -594,9 +595,11 @@ fn load_effect_file(project_dir: &Path, eff_filename: &str) -> Option<EffFile> {
     }
 
     // Try lowercase
-    let eff_path_lc = project_dir
-        .join("effect")
-        .join(format!("{}.eff", base.to_lowercase()));
+    let eff_path_lc = client_paths::asset_file(
+        project_dir,
+        "effect",
+        format!("{}.eff", base.to_lowercase()),
+    );
     if eff_path_lc.exists() {
         if let Ok(bytes) = std::fs::read(&eff_path_lc) {
             return EffFile::from_bytes(&bytes).ok();
@@ -660,15 +663,32 @@ fn copy_effect_textures(
         let mut source_path = None;
         for dir in &effect_tex_dirs {
             for ext in &exts {
-                let candidate = project_dir.join(dir).join(format!("{}.{}", stem, ext));
+                let candidate = if let Some(texture_rel) = dir.strip_prefix("texture/") {
+                    client_paths::asset_file(
+                        project_dir,
+                        "texture",
+                        Path::new(texture_rel).join(format!("{}.{}", stem, ext)),
+                    )
+                } else {
+                    client_paths::asset_file(project_dir, "texture", format!("{}.{}", stem, ext))
+                };
                 if candidate.exists() {
                     source_path = Some(candidate);
                     break;
                 }
-                let candidate_lc =
-                    project_dir
-                        .join(dir)
-                        .join(format!("{}.{}", stem.to_lowercase(), ext));
+                let candidate_lc = if let Some(texture_rel) = dir.strip_prefix("texture/") {
+                    client_paths::asset_file(
+                        project_dir,
+                        "texture",
+                        Path::new(texture_rel).join(format!("{}.{}", stem.to_lowercase(), ext)),
+                    )
+                } else {
+                    client_paths::asset_file(
+                        project_dir,
+                        "texture",
+                        format!("{}.{}", stem.to_lowercase(), ext),
+                    )
+                };
                 if candidate_lc.exists() {
                     source_path = Some(candidate_lc);
                     break;
@@ -723,7 +743,7 @@ fn copy_effect_textures(
 
 /// Copy water textures from BMP to PNG format — same logic as terrain.rs.
 fn copy_water_textures(project_dir: &Path, output_dir: &Path) -> Vec<String> {
-    let water_dir = project_dir.join("texture/terrain/water");
+    let water_dir = client_paths::asset_file(project_dir, "texture", "terrain/water");
     if !water_dir.exists() {
         return Vec::new();
     }

@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::Connection;
 use serde::Serialize;
 
+use crate::client_paths;
 use crate::db;
 
 #[derive(Serialize, Debug)]
@@ -234,7 +235,7 @@ impl Project {
 
     pub fn get_animation_files(&self) -> anyhow::Result<Vec<String>> {
         let mut files = Vec::new();
-        let path = self.project_directory.join("animation");
+        let path = client_paths::asset_dir(&self.project_directory, "animation");
         if path.exists() {
             if let Ok(entries) = std::fs::read_dir(path) {
                 for entry in entries {

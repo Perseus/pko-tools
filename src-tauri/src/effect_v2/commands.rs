@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use crate::client_paths;
 use crate::projects::project::Project;
 
 use super::magic_group_loader::load_magic_group;
@@ -19,12 +20,7 @@ pub async fn load_magic_single_table(project_id: String) -> Result<MagicSingleTa
         uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
 
-    let path = project
-        .project_directory
-        .as_ref()
-        .join("scripts")
-        .join("table")
-        .join("MagicSingleinfo.bin");
+    let path = client_paths::table_file(project.project_directory.as_ref(), "MagicSingleinfo.bin");
 
     let bytes = std::fs::read(&path).map_err(|e| {
         format!(
@@ -44,12 +40,7 @@ pub async fn load_magic_group_table(project_id: String) -> Result<MagicGroupTabl
         uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
 
-    let path = project
-        .project_directory
-        .as_ref()
-        .join("scripts")
-        .join("table")
-        .join("MagicGroupInfo.bin");
+    let path = client_paths::table_file(project.project_directory.as_ref(), "MagicGroupInfo.bin");
 
     let bytes = std::fs::read(&path).map_err(|e| {
         format!(

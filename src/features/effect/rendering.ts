@@ -460,9 +460,14 @@ export function resolveTextureCandidates(textureName: string, projectDirectory: 
     "texture/sceneffect",
   ];
 
-  return directories.flatMap((dir) =>
-    nameCandidates.map((name) => `${projectDirectory}/${dir}/${name}`)
+  const roots = [projectDirectory, `${projectDirectory}/Data`];
+  const candidates = roots.flatMap((root) =>
+    directories.flatMap((dir) =>
+      nameCandidates.map((name) => `${root}/${dir}/${name}`)
+    )
   );
+
+  return Array.from(new Set(candidates));
 }
 
 export function resolveFrameDurations(subEffect: SubEffect) {

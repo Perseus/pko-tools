@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use tauri::State;
 
+use crate::client_paths;
 use crate::projects::project::Project;
 use crate::AppState;
 
@@ -31,7 +32,7 @@ fn load_map_placements_cached(
         }
     }
 
-    let obj_path = project_dir.join("map").join(format!("{map_name}.obj"));
+    let obj_path = client_paths::asset_file(project_dir, "map", format!("{map_name}.obj"));
     if !obj_path.exists() {
         return Ok(Arc::new(Vec::new()));
     }

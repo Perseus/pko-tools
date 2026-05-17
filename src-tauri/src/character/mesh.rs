@@ -1,13 +1,17 @@
 use core::f32;
 use std::{
     collections::{BTreeMap, HashMap},
-    io::Seek,
+    io::{Cursor, Seek},
     path::Path,
 };
 
 use crate::{
+    client_paths,
     d3d::{D3DPrimitiveType, D3DVertexElement9},
+    item::model::decode_pko_texture,
+    map::scene_model::decode_dds_with_alpha,
     math::{self, coord_transform::CoordTransform, LwVector2, LwVector3},
+    text_encoding::decode_gbk_text,
 };
 use ::gltf::{
     json::{
@@ -24,7 +28,6 @@ use ::gltf::{
 };
 use base64::{prelude::BASE64_STANDARD, Engine};
 use binrw::BinWrite;
-use image::ImageReader;
 use serde::Serialize;
 use serde_json::json;
 
@@ -44,6 +47,14 @@ fn read_u32_le(r: &mut impl std::io::Read) -> std::io::Result<u32> {
     let mut buf = [0u8; 4];
     r.read_exact(&mut buf)?;
     Ok(u32::from_le_bytes(buf))
+}
+
+fn decode_texture_stem(bytes: &[u8]) -> String {
+    let end = bytes
+        .iter()
+        .position(|&byte| byte == b'\0' || byte == b'.')
+        .unwrap_or(bytes.len());
+    decode_gbk_text(&bytes[..end]).trim().to_string()
 }
 
 use super::{
@@ -797,99 +808,88 @@ impl CharacterMeshInfo {
     ) -> usize {
         let material_seq = &materials.as_ref().unwrap()[0];
         let texture_info = &material_seq.tex_seq[0];
-        let mut file_name = String::new();
-        for i in 0..texture_info.file_name.len() {
-            if texture_info.file_name[i] == b'\0' || texture_info.file_name[i] == b'.' {
-                break;
-            }
-
-            file_name += core::str::from_utf8(&[texture_info.file_name[i]]).unwrap();
-        }
+        let file_name = decode_texture_stem(&texture_info.file_name);
 
         let texture_dirs = ["texture/character", "texture"];
-        let mut image_file = None;
-        for dir in &texture_dirs {
-            let candidate = project_dir.join(dir).join(&file_name).with_extension("bmp");
-            if candidate.exists() {
-                image_file = Some(candidate);
-                break;
+        let texture_exts = ["bmp", "tga", "dds", "png", "jpg"];
+        let mut image_as_png = None;
+        'search: for dir in &texture_dirs {
+            for ext in &texture_exts {
+                let candidate = if let Some(texture_rel) = dir.strip_prefix("texture/") {
+                    client_paths::asset_file(project_dir, "texture", texture_rel)
+                } else {
+                    client_paths::asset_dir(project_dir, "texture")
+                }
+                .join(&file_name)
+                .with_extension(ext);
+                if !candidate.exists() {
+                    continue;
+                }
+
+                let Ok(raw_bytes) = std::fs::read(&candidate) else {
+                    continue;
+                };
+                let decoded = decode_pko_texture(&raw_bytes);
+                let Some(image) = decode_dds_with_alpha(&decoded) else {
+                    continue;
+                };
+                let mut png_data = Vec::new();
+                if image
+                    .write_to(&mut Cursor::new(&mut png_data), image::ImageFormat::Png)
+                    .is_ok()
+                {
+                    image_as_png = Some(png_data);
+                    break 'search;
+                }
             }
         }
-        let mut image_file = image_file.unwrap_or_else(|| {
-            // Fallback to character path for error message
-            project_dir
-                .join("texture/character/")
-                .join(&file_name)
-                .with_extension("bmp")
+        let base_color_texture = image_as_png.map(|image_as_png| {
+            let image_as_data_uri = format!(
+                "data:image/png;base64,{}",
+                BASE64_STANDARD.encode(&image_as_png)
+            );
+
+            let image = gltf::json::Image {
+                name: Some(file_name.clone()),
+                buffer_view: None,
+                extensions: None,
+                mime_type: Some(MimeType("image/png".to_string())),
+                extras: None,
+                uri: Some(image_as_data_uri),
+            };
+
+            let image_index = fields_to_aggregate.image.len();
+            fields_to_aggregate.image.push(image);
+
+            let sampler = gltf::json::texture::Sampler {
+                mag_filter: Some(Checked::Valid(MagFilter::Linear)),
+                min_filter: Some(Checked::Valid(texture::MinFilter::LinearMipmapLinear)),
+                wrap_s: Checked::Valid(texture::WrappingMode::Repeat),
+                wrap_t: Checked::Valid(texture::WrappingMode::Repeat),
+                ..Default::default()
+            };
+
+            let sampler_index = fields_to_aggregate.sampler.len();
+            fields_to_aggregate.sampler.push(sampler);
+
+            let texture = gltf::json::Texture {
+                name: Some(file_name.clone()),
+                sampler: Some(Index::new(sampler_index as u32)),
+                source: Index::new(image_index as u32),
+                extensions: None,
+                extras: None,
+            };
+
+            let texture_index = fields_to_aggregate.texture.len();
+            fields_to_aggregate.texture.push(texture);
+
+            texture::Info {
+                index: Index::new(texture_index as u32),
+                tex_coord: 0,
+                extensions: None,
+                extras: None,
+            }
         });
-        let original_image_reader = ImageReader::open(image_file.clone());
-        if original_image_reader.is_err() {
-            panic!(
-                "Error opening image file: {:?}, error: {:?}",
-                image_file.to_str(),
-                original_image_reader.err().unwrap()
-            );
-        }
-        let original_image = original_image_reader.unwrap().decode();
-        if original_image.is_err() {
-            panic!(
-                "Error decoding image file: {:?}, error: {:?}",
-                image_file.to_str(),
-                original_image.err().unwrap()
-            );
-        }
-        original_image
-            .unwrap()
-            .save_with_format(
-                Path::new("state/textures/")
-                    .join(&file_name)
-                    .with_extension("png"),
-                image::ImageFormat::Png,
-            )
-            .unwrap();
-
-        image_file = Path::new("state/textures/")
-            .join(&file_name)
-            .with_extension("png");
-        let image_as_png = std::fs::read(image_file).unwrap();
-        let image_as_data_uri = format!(
-            "data:image/png;base64,{}",
-            BASE64_STANDARD.encode(&image_as_png)
-        );
-
-        let image = gltf::json::Image {
-            name: Some("image".to_string()),
-            buffer_view: None,
-            extensions: None,
-            mime_type: Some(MimeType("image/png".to_string())),
-            extras: None,
-            uri: Some(image_as_data_uri),
-        };
-
-        let image_index = fields_to_aggregate.image.len();
-        fields_to_aggregate.image.push(image);
-
-        let sampler = gltf::json::texture::Sampler {
-            mag_filter: Some(Checked::Valid(MagFilter::Linear)),
-            min_filter: Some(Checked::Valid(texture::MinFilter::LinearMipmapLinear)),
-            wrap_s: Checked::Valid(texture::WrappingMode::Repeat),
-            wrap_t: Checked::Valid(texture::WrappingMode::Repeat),
-            ..Default::default()
-        };
-
-        let sampler_index = fields_to_aggregate.sampler.len();
-        fields_to_aggregate.sampler.push(sampler);
-
-        let texture = gltf::json::Texture {
-            name: Some("texture".to_string()),
-            sampler: Some(Index::new(sampler_index as u32)),
-            source: Index::new(image_index as u32),
-            extensions: None,
-            extras: None,
-        };
-
-        let texture_index = fields_to_aggregate.texture.len();
-        fields_to_aggregate.texture.push(texture);
 
         let emi = material_seq.material.emi.as_ref().unwrap();
 
@@ -907,12 +907,7 @@ impl CharacterMeshInfo {
             }),
             pbr_metallic_roughness: PbrMetallicRoughness {
                 base_color_factor: PbrBaseColorFactor(material_seq.material.dif.to_slice()),
-                base_color_texture: Some(texture::Info {
-                    index: Index::new(texture_index as u32),
-                    tex_coord: 0,
-                    extensions: None,
-                    extras: None,
-                }),
+                base_color_texture,
                 metallic_factor: StrengthFactor(0.0),
                 roughness_factor: StrengthFactor(0.0),
                 metallic_roughness_texture: None,
@@ -2179,5 +2174,17 @@ impl CharacterMeshInfo {
             + bone_idx_size
             + idx_size
             + sub_size) as u32
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_texture_stem;
+
+    #[test]
+    fn decodes_gbk_texture_stem_without_utf8_panic() {
+        // "测试" encoded as GBK, with an extension and null padding.
+        let bytes = [0xb2, 0xe2, 0xca, 0xd4, b'.', b't', b'g', b'a', 0];
+        assert_eq!(decode_texture_stem(&bytes), "测试");
     }
 }

@@ -266,13 +266,18 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
   useFrame((_state, delta) => {
     if (!currentActionRef.current) return;
 
-    if (hasActionPicker && selectedAction && playing) {
+    if (hasActionPicker && selectedAction) {
       // Clamp playback within the selected action's frame range
       const startTime = selectedAction.startFrame / fps;
       const endTime = selectedAction.endFrame / fps;
       const actionDuration = endTime - startTime;
-      if (actionDuration > 0 && currentActionRef.current.time > endTime) {
-        currentActionRef.current.time = startTime; // loop within range
+
+      if (playing) {
+        mixer.update(delta);
+        if (actionDuration > 0 && currentActionRef.current.time >= endTime) {
+          currentActionRef.current.time = startTime; // loop within range
+          mixer.setTime(startTime);
+        }
       }
     } else if (!hasActionPicker) {
       // Legacy keyframe-based playback
@@ -326,7 +331,7 @@ function CharacterModel({ gltfDataURI }: { gltfDataURI: string }) {
   </>;
 }
 
-/** Action picker panel rendered outside the Canvas as a fixed overlay */
+/** Action picker panel rendered outside the Canvas as a workbench overlay */
 function ActionPickerPanel() {
   const [picker, setPicker] = useAtom(actionPickerAtom);
 
@@ -366,9 +371,9 @@ function ActionPickerPanel() {
   return (
     <div
       style={{
-        position: 'fixed',
-        top: 8,
-        left: 8,
+        position: 'absolute',
+        bottom: 16,
+        left: 16,
         width: 260,
         background: '#1a1a2e',
         borderRadius: 8,

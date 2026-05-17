@@ -18,11 +18,83 @@ pub struct ActionRange {
 /// Full parsed action table: char_type_id → list of action ranges.
 pub type ActionTable = HashMap<u16, Vec<ActionRange>>;
 
+const ACTION_INFO_RECORD_SIZE: usize = 140;
+const ACTION_INFO_CHARACTER_ID_FIELD: usize = 28;
+const ACTION_INFO_ACTION_ID_FIELD: usize = 29;
+const ACTION_INFO_START_FRAME_FIELD: usize = 30;
+const ACTION_INFO_END_FRAME_FIELD: usize = 31;
+const ACTION_INFO_KEY_FRAME_FIELD: usize = 32;
+
 /// Load and parse a CharacterAction.tx file.
 pub fn load_action_table(path: impl AsRef<Path>) -> Result<ActionTable> {
     let data = std::fs::read(path.as_ref())
         .with_context(|| format!("Failed to read {}", path.as_ref().display()))?;
     parse_action_table(&data)
+}
+
+/// Load and parse Demon-style binary CharacterActionInfo.bin.
+///
+/// Rows are 140 bytes. The first 4 bytes are a table header, followed by fixed
+/// records where field 28 is the character row id, field 29 is pose/action id,
+/// and fields 30..32 hold the frame range and primary key frame.
+pub fn load_action_info_bin(path: impl AsRef<Path>) -> Result<ActionTable> {
+    let data = std::fs::read(path.as_ref())
+        .with_context(|| format!("Failed to read {}", path.as_ref().display()))?;
+    parse_action_info_bin(&data)
+}
+
+pub fn parse_action_info_bin(data: &[u8]) -> Result<ActionTable> {
+    if data.len() < 4 {
+        return Ok(ActionTable::new());
+    }
+
+    let payload = &data[4..];
+    let mut table: ActionTable = HashMap::new();
+
+    for record in payload.chunks_exact(ACTION_INFO_RECORD_SIZE) {
+        let Some(character_id) = read_u32_field(record, ACTION_INFO_CHARACTER_ID_FIELD) else {
+            continue;
+        };
+        let Some(action_id) = read_u32_field(record, ACTION_INFO_ACTION_ID_FIELD) else {
+            continue;
+        };
+        let Some(start_frame) = read_u32_field(record, ACTION_INFO_START_FRAME_FIELD) else {
+            continue;
+        };
+        let Some(end_frame) = read_u32_field(record, ACTION_INFO_END_FRAME_FIELD) else {
+            continue;
+        };
+
+        if character_id == 0 || character_id > u16::MAX as u32 || action_id > u16::MAX as u32 {
+            continue;
+        }
+
+        let key_frame = read_u32_field(record, ACTION_INFO_KEY_FRAME_FIELD).unwrap_or(0);
+        let key_frames = if key_frame != 0 {
+            vec![key_frame]
+        } else {
+            Vec::new()
+        };
+
+        table
+            .entry(character_id as u16)
+            .or_default()
+            .push(ActionRange {
+                action_id: action_id as u16,
+                start_frame,
+                end_frame,
+                key_frames,
+            });
+    }
+
+    Ok(table)
+}
+
+fn read_u32_field(record: &[u8], field_index: usize) -> Option<u32> {
+    let start = field_index.checked_mul(4)?;
+    let end = start.checked_add(4)?;
+    let bytes: [u8; 4] = record.get(start..end)?.try_into().ok()?;
+    Some(u32::from_le_bytes(bytes))
 }
 
 /// Parse CharacterAction.tx from raw bytes.
@@ -232,5 +304,31 @@ mod tests {
                 actions.len()
             );
         }
+    }
+
+    #[test]
+    fn parse_binary_action_info_groups_by_character_row_id() {
+        let mut data = vec![0u8; 4 + ACTION_INFO_RECORD_SIZE * 2];
+        data[0..4].copy_from_slice(&140u32.to_le_bytes());
+
+        let row = &mut data[4..4 + ACTION_INFO_RECORD_SIZE];
+        write_field(row, ACTION_INFO_CHARACTER_ID_FIELD, 26);
+        write_field(row, ACTION_INFO_ACTION_ID_FIELD, 5);
+        write_field(row, ACTION_INFO_START_FRAME_FIELD, 235);
+        write_field(row, ACTION_INFO_END_FRAME_FIELD, 265);
+        write_field(row, ACTION_INFO_KEY_FRAME_FIELD, 250);
+
+        let table = parse_action_info_bin(&data).expect("parse action info bin");
+        let actions = table.get(&26).expect("character 26 actions");
+        assert_eq!(actions.len(), 1);
+        assert_eq!(actions[0].action_id, 5);
+        assert_eq!(actions[0].start_frame, 235);
+        assert_eq!(actions[0].end_frame, 265);
+        assert_eq!(actions[0].key_frames, vec![250]);
+    }
+
+    fn write_field(record: &mut [u8], field_index: usize, value: u32) {
+        let start = field_index * 4;
+        record[start..start + 4].copy_from_slice(&value.to_le_bytes());
     }
 }
