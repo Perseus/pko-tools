@@ -5,7 +5,12 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
-use super::model::{ForgeGlowDraft, ForgeGlowExportResult, ForgeGlowVariant};
+use crate::client_paths;
+
+use super::model::{
+    ForgeGlowDraft, ForgeGlowExportResult, ForgeGlowParticleOverride, ForgeGlowVariant,
+    ForgeRecipeParticleRow,
+};
 use super::storage::sanitize_slug;
 
 fn now_stamp() -> String {
@@ -40,10 +45,111 @@ pub fn selected_variants<'a>(
     variants
 }
 
+#[derive(Debug, Clone)]
+struct ExportParticleRow {
+    lane_tier: u32,
+    enabled: bool,
+    base_effect_id: i32,
+    final_effect_id: u32,
+    dummy_id: i32,
+    scale: f32,
+    par_file: Option<String>,
+    custom: bool,
+}
+
+fn override_par_file(
+    source: Option<String>,
+    override_row: Option<&ForgeGlowParticleOverride>,
+) -> Option<String> {
+    match override_row.and_then(|value| value.par_file.clone()) {
+        Some(value) => value,
+        None => source,
+    }
+}
+
+fn effective_particle_rows_for_variant(
+    draft: &ForgeGlowDraft,
+    variant: &ForgeGlowVariant,
+) -> Vec<ExportParticleRow> {
+    let source_lane_tiers = draft
+        .source_recipe
+        .particle_rows
+        .iter()
+        .map(|row| row.lane_tier)
+        .collect::<BTreeSet<_>>();
+
+    let mut rows = draft
+        .source_recipe
+        .particle_rows
+        .iter()
+        .map(|row: &ForgeRecipeParticleRow| {
+            let override_row = variant
+                .overrides
+                .particle_rows
+                .iter()
+                .find(|candidate| candidate.lane_tier == row.lane_tier);
+
+            ExportParticleRow {
+                lane_tier: row.lane_tier,
+                enabled: override_row
+                    .and_then(|value| value.enabled)
+                    .unwrap_or(row.enabled),
+                base_effect_id: row.base_effect_id,
+                final_effect_id: row.final_effect_id,
+                dummy_id: override_row
+                    .and_then(|value| value.dummy_id)
+                    .unwrap_or(row.dummy_id),
+                scale: override_row
+                    .and_then(|value| value.scale)
+                    .unwrap_or(row.scale),
+                par_file: override_par_file(row.par_file.clone(), override_row),
+                custom: false,
+            }
+        })
+        .collect::<Vec<_>>();
+
+    rows.extend(
+        variant
+            .overrides
+            .particle_rows
+            .iter()
+            .filter(|row| !source_lane_tiers.contains(&row.lane_tier))
+            .map(|row| ExportParticleRow {
+                lane_tier: row.lane_tier,
+                enabled: row.enabled.unwrap_or(true),
+                base_effect_id: 0,
+                final_effect_id: 0,
+                dummy_id: row.dummy_id.unwrap_or(0),
+                scale: row.scale.unwrap_or(1.0),
+                par_file: row.par_file.clone().flatten(),
+                custom: true,
+            }),
+    );
+
+    rows.sort_by_key(|row| row.lane_tier);
+    rows
+}
+
 pub fn build_table_patch_intent(draft: &ForgeGlowDraft, variant_ids: &[String]) -> Value {
     let variants = selected_variants(draft, variant_ids)
         .into_iter()
         .map(|variant| {
+            let particle_rows = effective_particle_rows_for_variant(draft, variant)
+                .into_iter()
+                .map(|row| {
+                    json!({
+                        "laneTier": row.lane_tier,
+                        "enabled": row.enabled,
+                        "baseEffectId": row.base_effect_id,
+                        "finalEffectId": row.final_effect_id,
+                        "dummyId": row.dummy_id,
+                        "scale": row.scale,
+                        "parFile": row.par_file,
+                        "custom": row.custom
+                    })
+                })
+                .collect::<Vec<_>>();
+
             json!({
                 "variantId": variant.id,
                 "variantName": variant.name,
@@ -68,36 +174,7 @@ pub fn build_table_patch_intent(draft: &ForgeGlowDraft, variant_ids: &[String]) 
                         .overrides
                         .alpha
                         .unwrap_or(draft.source_recipe.alpha),
-                    "particleRows": draft
-                        .source_recipe
-                        .particle_rows
-                        .iter()
-                        .map(|row| {
-                            let override_row = variant
-                                .overrides
-                                .particle_rows
-                                .iter()
-                                .find(|candidate| candidate.lane_tier == row.lane_tier);
-
-                            json!({
-                                "laneTier": row.lane_tier,
-                                "enabled": override_row
-                                    .and_then(|value| value.enabled)
-                                    .unwrap_or(row.enabled),
-                                "baseEffectId": row.base_effect_id,
-                                "finalEffectId": row.final_effect_id,
-                                "dummyId": override_row
-                                    .and_then(|value| value.dummy_id)
-                                    .unwrap_or(row.dummy_id),
-                                "scale": override_row
-                                    .and_then(|value| value.scale)
-                                    .unwrap_or(row.scale),
-                                "parFile": override_row
-                                    .and_then(|value| value.par_file.clone())
-                                    .unwrap_or_else(|| row.par_file.clone())
-                            })
-                        })
-                        .collect::<Vec<_>>()
+                    "particleRows": particle_rows
                 }
             })
         })
@@ -113,7 +190,7 @@ pub fn build_table_patch_intent(draft: &ForgeGlowDraft, variant_ids: &[String]) 
 }
 
 fn resolve_effect_file(project_dir: &Path, par_file: &str) -> PathBuf {
-    project_dir.join("effect").join(par_file)
+    client_paths::asset_file(project_dir, "effect", par_file)
 }
 
 pub fn export_package(
@@ -142,21 +219,24 @@ pub fn export_package(
 
     let mut warnings = Vec::new();
     let mut copied = BTreeSet::new();
-    for row in &draft.source_recipe.particle_rows {
-        let Some(par_file) = &row.par_file else {
-            continue;
-        };
-        if !copied.insert(par_file.clone()) {
-            continue;
-        }
+    for variant in selected_variants(draft, variant_ids) {
+        for row in effective_particle_rows_for_variant(draft, variant) {
+            let Some(par_file) = row.par_file else {
+                continue;
+            };
+            if !copied.insert(par_file.clone()) {
+                continue;
+            }
 
-        let source = resolve_effect_file(project_dir, par_file);
-        let target = assets_dir.join(par_file);
-        if source.exists() {
-            fs::copy(&source, &target)
-                .with_context(|| format!("copy {} to {}", source.display(), target.display()))?;
-        } else {
-            warnings.push(format!("Effect asset not found: {}", source.display()));
+            let source = resolve_effect_file(project_dir, &par_file);
+            let target = assets_dir.join(&par_file);
+            if source.exists() {
+                fs::copy(&source, &target).with_context(|| {
+                    format!("copy {} to {}", source.display(), target.display())
+                })?;
+            } else {
+                warnings.push(format!("Effect asset not found: {}", source.display()));
+            }
         }
     }
 
@@ -206,13 +286,22 @@ mod tests {
             overrides: ForgeGlowRecipeOverrides {
                 alpha: Some(0.5),
                 light_id: None,
-                particle_rows: vec![ForgeGlowParticleOverride {
-                    lane_tier: 0,
-                    enabled: Some(false),
-                    dummy_id: Some(7),
-                    scale: Some(1.25),
-                    par_file: None,
-                }],
+                particle_rows: vec![
+                    ForgeGlowParticleOverride {
+                        lane_tier: 0,
+                        enabled: Some(false),
+                        dummy_id: Some(7),
+                        scale: Some(1.25),
+                        par_file: None,
+                    },
+                    ForgeGlowParticleOverride {
+                        lane_tier: 9,
+                        enabled: Some(true),
+                        dummy_id: Some(2),
+                        scale: Some(0.8),
+                        par_file: Some(Some("custom.eff".to_string())),
+                    },
+                ],
             },
         });
 
@@ -229,6 +318,14 @@ mod tests {
         assert_eq!(
             variants[1]["itemRefineEffectInfo"]["particleRows"][0]["dummyId"],
             7
+        );
+        assert_eq!(
+            variants[1]["itemRefineEffectInfo"]["particleRows"][1]["custom"],
+            true
+        );
+        assert_eq!(
+            variants[1]["itemRefineEffectInfo"]["particleRows"][1]["parFile"],
+            "custom.eff"
         );
     }
 }

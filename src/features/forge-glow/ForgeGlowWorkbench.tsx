@@ -3,7 +3,7 @@ import { GizmoHelper, GizmoViewport, Html, OrbitControls, useGLTF } from "@react
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import * as THREE from "three";
-import { MousePointer2, PackageOpen, Sparkles, Play, Plus, RotateCcw, Save, Square } from "lucide-react";
+import { MousePointer2, PackageOpen, Sparkles, Play, Plus, RotateCcw, Save, Square, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -42,6 +42,7 @@ import {
   parseForgeGlowScaleInput,
   selectForgeGlowLitEntry,
   stripForgeGlowEffectFileExtension,
+  removeForgeGlowParticleOverride,
   updateForgeGlowVariant,
   upsertForgeGlowParticleOverride,
 } from "./forgeGlowDraft";
@@ -143,9 +144,11 @@ function ForgeGlowScaleInput({
 
   return (
     <Input
+      name="forge-glow-row-scale"
       value={text}
       disabled={disabled}
       inputMode="decimal"
+      autoComplete="off"
       onFocus={() => setFocused(true)}
       onBlur={() => {
         setFocused(false);
@@ -187,9 +190,12 @@ function ForgeGlowEffectFileInput({
   return (
     <div className="relative">
       <Input
+        name="forge-glow-effect-file"
         value={text}
         disabled={disabled}
         placeholder="Select .par or .eff"
+        autoComplete="off"
+        spellCheck={false}
         onFocus={() => setOpen(true)}
         onBlur={() => {
           window.setTimeout(() => setOpen(false), 120);
@@ -559,7 +565,7 @@ export default function ForgeGlowWorkbench() {
   }, []);
 
   useEffect(() => {
-    setPlayback((value) => ({ ...value, time: 0, playing: false, loop: true }));
+    setPlayback((value) => ({ ...value, time: 0, loop: true }));
   }, [draft?.id, variantId, selectedLane, setPlayback]);
 
   useEffect(() => {
@@ -645,6 +651,28 @@ export default function ForgeGlowWorkbench() {
     updateVariant((current) =>
       upsertForgeGlowParticleOverride(current, selectedLane, { dummyId }),
     );
+  }
+
+  function addParticleRow() {
+    if (!draft || readonly || !variant) return;
+    const nextLaneTier =
+      effectiveRows.reduce((max, row) => Math.max(max, row.laneTier), -1) + 1;
+    const defaultDummy = dummyOptions[0]?.id ?? 0;
+    updateVariant((current) =>
+      upsertForgeGlowParticleOverride(current, nextLaneTier, {
+        enabled: true,
+        dummyId: defaultDummy,
+        scale: 1,
+        parFile: null,
+      }),
+    );
+    setSelectedLane(nextLaneTier);
+  }
+
+  function removeParticleRow(laneTier: number) {
+    if (!draft || readonly || !variant) return;
+    updateVariant((current) => removeForgeGlowParticleOverride(current, laneTier));
+    setSelectedLane((current) => (current === laneTier ? "all" : current));
   }
 
   function addVariant() {
@@ -779,9 +807,11 @@ export default function ForgeGlowWorkbench() {
               <div>
                 <div className="text-xs text-muted-foreground">Alpha</div>
                 <Input
+                  name="forge-glow-alpha"
                   value={String(opacityScale)}
                   disabled={readonly}
                   inputMode="decimal"
+                  autoComplete="off"
                   onChange={(event) =>
                     updateVariant((current) => ({
                       ...current,
@@ -796,9 +826,11 @@ export default function ForgeGlowWorkbench() {
               <div>
                 <div className="text-xs text-muted-foreground">Light</div>
                 <Input
+                  name="forge-glow-light-id"
                   value={String(variant?.overrides.lightId ?? draft.sourceRecipe.lightId ?? "")}
                   disabled={readonly}
                   inputMode="numeric"
+                  autoComplete="off"
                   onChange={(event) =>
                     updateVariant((current) => ({
                       ...current,
@@ -839,9 +871,11 @@ export default function ForgeGlowWorkbench() {
                 <div>
                   <div className="text-xs text-muted-foreground">Light ID</div>
                   <Input
+                    name="forge-glow-native-light-id"
                     value={String(variant?.overrides.lightId ?? draft.sourceRecipe.lightId ?? "")}
                     disabled={readonly}
                     inputMode="numeric"
+                    autoComplete="off"
                     onChange={(event) =>
                       updateVariant((current) => ({
                         ...current,
@@ -888,7 +922,25 @@ export default function ForgeGlowWorkbench() {
             </div>
 
             <div className="space-y-2">
-              <div className="text-sm font-semibold">Particle Rows</div>
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-sm font-semibold">Particle Rows</div>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8 gap-2"
+                  disabled={readonly}
+                  onClick={addParticleRow}
+                >
+                  <Plus className="h-3.5 w-3.5" />
+                  Row
+                </Button>
+              </div>
+              {effectiveRows.length === 0 && (
+                <div className="rounded-md border border-dashed border-border p-3 text-sm text-muted-foreground">
+                  This forge recipe has no particle/effect rows yet. Add a row to attach
+                  a .par or .eff file to a weapon dummy.
+                </div>
+              )}
               {effectiveRows.map((row) => (
                 <div
                   key={row.laneTier}
@@ -904,23 +956,37 @@ export default function ForgeGlowWorkbench() {
                     >
                       <div className="text-sm font-medium">Lane {row.laneTier}</div>
                       <div className="truncate text-xs text-muted-foreground">
-                        {row.parFile ?? "No particle file"} · effect {row.finalEffectId}
+                        {row.parFile ?? "No particle file"} ·{" "}
+                        {row.isCustom ? "custom row" : `effect ${row.finalEffectId}`}
                       </div>
                     </button>
-                    <Button
-                      size="sm"
-                      variant={row.enabled ? "secondary" : "outline"}
-                      disabled={readonly}
-                      onClick={() =>
-                        updateVariant((current) =>
-                          upsertForgeGlowParticleOverride(current, row.laneTier, {
-                            enabled: !row.enabled,
-                          }),
-                        )
-                      }
-                    >
-                      {row.enabled ? "On" : "Off"}
-                    </Button>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {row.isCustom && (
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-8 w-8"
+                          disabled={readonly}
+                          onClick={() => removeParticleRow(row.laneTier)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        variant={row.enabled ? "secondary" : "outline"}
+                        disabled={readonly}
+                        onClick={() =>
+                          updateVariant((current) =>
+                            upsertForgeGlowParticleOverride(current, row.laneTier, {
+                              enabled: !row.enabled,
+                            }),
+                          )
+                        }
+                      >
+                        {row.enabled ? "On" : "Off"}
+                      </Button>
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2">
