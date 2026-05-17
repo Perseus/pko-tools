@@ -19,7 +19,9 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    let dir = std::env::args().nth(1).map(PathBuf::from)
+    let dir = std::env::args()
+        .nth(1)
+        .map(PathBuf::from)
         .ok_or_else(|| anyhow::anyhow!("Usage: effect_feature_scan <effect-dir>"))?;
     if !dir.is_dir() {
         bail!("{} is not a directory", dir.display());
@@ -28,7 +30,10 @@ fn run() -> Result<()> {
     let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
         .with_context(|| format!("failed to read {}", dir.display()))?
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-        .filter(|path| path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("eff")))
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("eff"))
+        })
         .collect();
     paths.sort();
 
@@ -40,12 +45,14 @@ fn run() -> Result<()> {
     };
 
     for path in paths {
-        let bytes = std::fs::read(&path)
-            .with_context(|| format!("failed to read {}", path.display()))?;
+        let bytes =
+            std::fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
         let effect = match EffFile::from_bytes(&bytes) {
             Ok(effect) => effect,
             Err(error) => {
-                report.parse_failures.push(format!("{}: {error}", path.display()));
+                report
+                    .parse_failures
+                    .push(format!("{}: {error}", path.display()));
                 continue;
             }
         };
@@ -85,7 +92,13 @@ fn scan_effect(report: &mut ScanReport, root: &Path, path: &Path, effect: &EffFi
             record(report, "useParam", root, path, Some(index));
         }
         if sub.alpha {
-            record(report, "transparentBlackAlphaCandidate", root, path, Some(index));
+            record(
+                report,
+                "transparentBlackAlphaCandidate",
+                root,
+                path,
+                Some(index),
+            );
         }
     }
 }
@@ -101,8 +114,15 @@ fn record(
     if entries.len() >= 32 {
         return;
     }
-    let relative = path.strip_prefix(root).unwrap_or(path).display().to_string();
-    if entries.iter().any(|entry| entry.file == relative && entry.sub_effect_index == sub_effect_index) {
+    let relative = path
+        .strip_prefix(root)
+        .unwrap_or(path)
+        .display()
+        .to_string();
+    if entries
+        .iter()
+        .any(|entry| entry.file == relative && entry.sub_effect_index == sub_effect_index)
+    {
         return;
     }
     entries.push(FeatureHit {

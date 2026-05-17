@@ -79,10 +79,7 @@ fn main() -> Result<()> {
         )
     } else {
         let source = PathBuf::from(&args[1]);
-        (
-            collect_refs_from_source(&source)?,
-            PathBuf::from(&args[2]),
-        )
+        (collect_refs_from_source(&source)?, PathBuf::from(&args[2]))
     };
 
     let bundle = build_bundle(&client_dir, refs);
@@ -136,7 +133,10 @@ fn build_bundle(client_dir: &Path, refs: SourceRefs) -> ModelBundle {
                     },
                 );
             }
-            Err(error) => errors.push(ModelBundleError { name, error: error.to_string() }),
+            Err(error) => errors.push(ModelBundleError {
+                name,
+                error: error.to_string(),
+            }),
         }
     }
 
@@ -326,8 +326,14 @@ mod tests {
         add_particle_model_ref(&mut refs, "effect\\30Light.EFF");
         add_particle_model_ref(&mut refs, "weapon.lgo");
 
-        assert_eq!(refs.effect_names.into_iter().collect::<Vec<_>>(), vec!["30light"]);
-        assert_eq!(refs.model_names.into_iter().collect::<Vec<_>>(), vec!["weapon"]);
+        assert_eq!(
+            refs.effect_names.into_iter().collect::<Vec<_>>(),
+            vec!["30light"]
+        );
+        assert_eq!(
+            refs.model_names.into_iter().collect::<Vec<_>>(),
+            vec!["weapon"]
+        );
     }
 
     #[test]
