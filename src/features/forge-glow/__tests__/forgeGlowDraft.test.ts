@@ -2,11 +2,13 @@ import { describe, expect, it } from "vitest";
 import {
   buildForgeGlowPreview,
   buildForgeGlowLitRecipe,
+  addForgeGlowCustomParticleRow,
   filterForgeGlowEffectFileOptions,
   formatForgeGlowDummyOption,
   getEffectiveForgeGlowRows,
   getForgeGlowEffectFileKind,
   parseForgeGlowScaleInput,
+  removeForgeGlowParticleOverride,
   selectForgeGlowLitEntry,
   stripForgeGlowEffectFileExtension,
   upsertForgeGlowParticleOverride,
@@ -104,6 +106,39 @@ describe("forge glow draft helpers", () => {
       laneTier: 1,
       scale: 2,
     });
+  });
+
+  it("surfaces custom variant particle rows when the recipe has no source rows", () => {
+    const nextDraft = draft();
+    nextDraft.sourceRecipe.particleRows = [];
+    nextDraft.variants[0].overrides.particleRows = [];
+    nextDraft.variants[0] = addForgeGlowCustomParticleRow(nextDraft.variants[0], {
+      dummyId: 2,
+      scale: 0.8,
+      parFile: "custom.eff",
+    });
+
+    const rows = getEffectiveForgeGlowRows(nextDraft, "variant-a");
+
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      isCustom: true,
+      enabled: true,
+      dummyId: 2,
+      scale: 0.8,
+      parFile: "custom.eff",
+      finalEffectId: 0,
+    });
+  });
+
+  it("removes custom particle rows from variants", () => {
+    const variant = addForgeGlowCustomParticleRow(draft().variants[0], {
+      parFile: "custom.par",
+    });
+
+    const next = removeForgeGlowParticleOverride(variant, 1);
+
+    expect(next.overrides.particleRows.some((row) => row.laneTier === 1)).toBe(false);
   });
 
   it("builds an item-viewer forge preview from effective rows", () => {

@@ -96,4 +96,5 @@ export type ForgeGlowExportResult = {
 
 export type EffectiveForgeGlowRow = ForgeRecipeParticleRow & {
   sourceRow: ForgeRecipeParticleRow;
+  isCustom?: boolean;
 };

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { filterForgeGlowWeaponOptions, formatGemOption } from "../ForgeGlowNavigator";
+import {
+  filterForgeGlowWeaponOptions,
+  formatGemOption,
+  resolveForgeGlowGemOption,
+} from "../ForgeGlowNavigator";
 import type { Item } from "@/types/item";
 
 function item(
@@ -63,5 +67,48 @@ describe("formatGemOption", () => {
         hintFunc: "StoneHint",
       }),
     ).toBe("881 · Shining Gem of Rage · type 3");
+  });
+});
+
+describe("resolveForgeGlowGemOption", () => {
+  const gems = [
+    {
+      itemId: 881,
+      itemName: "Mysterious Topaz Fragment",
+      stoneInfoId: 7,
+      stoneType: 3,
+      equipPos: [1, 2, 3],
+      hintFunc: "StoneHint",
+    },
+    {
+      itemId: 882,
+      itemName: "Mysterious Ruby Fragment",
+      stoneInfoId: 8,
+      stoneType: 4,
+      equipPos: [1, 2, 3],
+      hintFunc: "StoneHint",
+    },
+  ];
+
+  it("resolves a selected gem from the stored item id", () => {
+    expect(resolveForgeGlowGemOption(gems, "", "881")?.itemName).toBe(
+      "Mysterious Topaz Fragment",
+    );
+  });
+
+  it("resolves exact gem names typed or restored by the browser", () => {
+    expect(
+      resolveForgeGlowGemOption(gems, "Mysterious Topaz Fragment", "")?.itemId,
+    ).toBe(881);
+  });
+
+  it("resolves the formatted dropdown label", () => {
+    expect(
+      resolveForgeGlowGemOption(
+        gems,
+        "881 · Mysterious Topaz Fragment · type 3",
+        "",
+      )?.itemId,
+    ).toBe(881);
   });
 });

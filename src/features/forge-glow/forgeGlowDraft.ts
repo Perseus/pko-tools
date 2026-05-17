@@ -165,18 +165,48 @@ function applyRowOverride(
   };
 }
 
+function customRowFromOverride(
+  override: ForgeGlowParticleOverride,
+): EffectiveForgeGlowRow {
+  const row: ForgeRecipeParticleRow = {
+    laneTier: override.laneTier,
+    baseEffectId: 0,
+    finalEffectId: 0,
+    dummyId: override.dummyId ?? 0,
+    scale: override.scale ?? 1,
+    parFile: override.parFile ?? null,
+    enabled: override.enabled ?? true,
+  };
+
+  return {
+    ...row,
+    sourceRow: row,
+    isCustom: true,
+  };
+}
+
 export function getEffectiveForgeGlowRows(
   draft: ForgeGlowDraft,
   variantId: string,
 ): EffectiveForgeGlowRow[] {
   const variant = getForgeGlowVariant(draft, variantId);
-  return draft.sourceRecipe.particleRows.map((row) =>
+  const sourceLaneTiers = new Set(
+    draft.sourceRecipe.particleRows.map((row) => row.laneTier),
+  );
+  const sourceRows = draft.sourceRecipe.particleRows.map((row) =>
     applyRowOverride(
       row,
       variant.overrides.particleRows.find(
         (override) => override.laneTier === row.laneTier,
       ),
     ),
+  );
+  const customRows = variant.overrides.particleRows
+    .filter((override) => !sourceLaneTiers.has(override.laneTier))
+    .map(customRowFromOverride);
+
+  return [...sourceRows, ...customRows].sort(
+    (left, right) => left.laneTier - right.laneTier,
   );
 }
 
@@ -231,6 +261,44 @@ export function upsertForgeGlowParticleOverride(
             row.laneTier === laneTier ? nextOverride : row,
           )
         : [...variant.overrides.particleRows, nextOverride],
+    },
+  };
+}
+
+export function addForgeGlowCustomParticleRow(
+  variant: ForgeGlowVariant,
+  defaults: Partial<ForgeGlowParticleOverride> = {},
+  reservedLaneTiers: number[] = [],
+): ForgeGlowVariant {
+  const usedLaneTiers = new Set(
+    [
+      ...variant.overrides.particleRows.map((row) => row.laneTier),
+      ...reservedLaneTiers,
+    ],
+  );
+  let laneTier = 0;
+  while (usedLaneTiers.has(laneTier)) laneTier += 1;
+
+  return upsertForgeGlowParticleOverride(variant, laneTier, {
+    enabled: true,
+    dummyId: defaults.dummyId ?? 0,
+    scale: defaults.scale ?? 1,
+    parFile: defaults.parFile ?? null,
+    ...defaults,
+  });
+}
+
+export function removeForgeGlowParticleOverride(
+  variant: ForgeGlowVariant,
+  laneTier: number,
+): ForgeGlowVariant {
+  return {
+    ...variant,
+    overrides: {
+      ...variant.overrides,
+      particleRows: variant.overrides.particleRows.filter(
+        (row) => row.laneTier !== laneTier,
+      ),
     },
   };
 }

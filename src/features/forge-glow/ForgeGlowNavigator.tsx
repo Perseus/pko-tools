@@ -90,6 +90,31 @@ function filterGemOptions(
     .slice(0, 12);
 }
 
+export function resolveForgeGlowGemOption(
+  options: ForgeGlowGemOption[],
+  query: string,
+  itemId: string,
+): ForgeGlowGemOption | null {
+  const selectedId = numberValue(itemId);
+  if (selectedId) {
+    return options.find((gem) => gem.itemId === selectedId) ?? null;
+  }
+
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return null;
+
+  const exact = options.find(
+    (gem) =>
+      String(gem.itemId) === normalized ||
+      gem.itemName.toLowerCase() === normalized ||
+      formatGemOption(gem).toLowerCase() === normalized,
+  );
+  if (exact) return exact;
+
+  const filtered = filterGemOptions(options, query);
+  return filtered.length === 1 ? filtered[0] : null;
+}
+
 export default function ForgeGlowNavigator() {
   const currentProject = useAtomValue(currentProjectAtom);
   const [drafts, setDrafts] = useAtom(forgeGlowDraftsAtom);
@@ -149,10 +174,13 @@ export default function ForgeGlowNavigator() {
     const inputs: ForgeRecipeInputs = {
       weaponItemId: itemId,
       charType,
-      gems: gems.map((gem) => ({
-        itemId: numberValue(gem.itemId),
-        level: numberValue(gem.level),
-      })),
+      gems: gems.map((gem) => {
+        const resolved = resolveForgeGlowGemOption(gemOptions, gem.query, gem.itemId);
+        return {
+          itemId: resolved?.itemId ?? 0,
+          level: numberValue(gem.level),
+        };
+      }),
     };
 
     setCreating(true);
@@ -217,7 +245,10 @@ export default function ForgeGlowNavigator() {
           <div className="flex gap-2">
             <Input
               id="forge-glow-search"
+              name="forge-glow-weapon-query"
               value={query}
+              autoComplete="off"
+              spellCheck={false}
               onFocus={() => setWeaponPickerOpen(true)}
               onChange={(event) => {
                 setQuery(event.target.value);
@@ -253,10 +284,12 @@ export default function ForgeGlowNavigator() {
             </div>
           )}
           <Input
+            name="forge-glow-selected-weapon-id"
             value={weaponItemId}
             readOnly
             placeholder="Selected weapon id"
             inputMode="numeric"
+            autoComplete="off"
           />
         </div>
 
@@ -285,13 +318,16 @@ export default function ForgeGlowNavigator() {
               <div key={index} className="grid grid-cols-[1fr_64px] gap-2">
                 <div className="min-w-0 space-y-1">
                   <Input
+                    name={`forge-glow-gem-query-${index}`}
                     value={gem.query}
+                    autoComplete="off"
+                    spellCheck={false}
                     onChange={(event) => {
                       const nextQuery = event.target.value;
-                      const exact = gemOptions.find(
-                        (option) =>
-                          String(option.itemId) === nextQuery.trim() ||
-                          formatGemOption(option) === nextQuery,
+                      const exact = resolveForgeGlowGemOption(
+                        gemOptions,
+                        nextQuery,
+                        "",
                       );
                       setGems((current) =>
                         current.map((entry, idx) =>
@@ -357,6 +393,7 @@ export default function ForgeGlowNavigator() {
                   )}
                 </div>
                 <Input
+                  name={`forge-glow-gem-level-${index}`}
                   value={gem.level}
                   onChange={(event) =>
                     setGems((current) =>
@@ -366,6 +403,7 @@ export default function ForgeGlowNavigator() {
                     )
                   }
                   inputMode="numeric"
+                  autoComplete="off"
                 />
               </div>
             );
