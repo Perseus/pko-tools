@@ -2,21 +2,31 @@ import { acquireGltfResource } from "@/lib/gltfResource";
 import { useEffect, useState } from "react";
 
 export function useGltfResource(gltfJson: string | null | undefined): string | null {
-  const [url, setUrl] = useState<string | null>(null);
+  const [resource, setResource] = useState<{
+    source: string;
+    url: string;
+  } | null>(null);
 
   useEffect(() => {
     if (!gltfJson) {
-      setUrl(null);
+      setResource(null);
       return;
     }
 
     const resource = acquireGltfResource(gltfJson);
-    setUrl(resource.url);
+    setResource({
+      source: gltfJson,
+      url: resource.url,
+    });
 
     return () => {
       resource.release();
     };
   }, [gltfJson]);
 
-  return url;
+  if (!gltfJson || resource?.source !== gltfJson) {
+    return null;
+  }
+
+  return resource.url;
 }

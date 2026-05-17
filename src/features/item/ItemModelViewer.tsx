@@ -283,6 +283,7 @@ export default function ItemModelViewer({
 
   return (
     <ItemModel
+      key={gltfDataURI}
       gltfDataURI={gltfDataURI}
       litInfo={litInfo}
       effectConfig={effectConfig}
