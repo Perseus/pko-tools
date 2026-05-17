@@ -19,7 +19,9 @@ fn main() {
 }
 
 fn run() -> Result<()> {
-    let dir = std::env::args().nth(1).map(PathBuf::from)
+    let dir = std::env::args()
+        .nth(1)
+        .map(PathBuf::from)
         .ok_or_else(|| anyhow::anyhow!("Usage: particle_feature_scan <effect-dir>"))?;
     if !dir.is_dir() {
         bail!("{} is not a directory", dir.display());
@@ -28,7 +30,10 @@ fn run() -> Result<()> {
     let mut paths: Vec<PathBuf> = std::fs::read_dir(&dir)
         .with_context(|| format!("failed to read {}", dir.display()))?
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
-        .filter(|path| path.extension().is_some_and(|ext| ext.eq_ignore_ascii_case("par")))
+        .filter(|path| {
+            path.extension()
+                .is_some_and(|ext| ext.eq_ignore_ascii_case("par"))
+        })
         .collect();
     paths.sort();
 
@@ -40,12 +45,14 @@ fn run() -> Result<()> {
     };
 
     for path in paths {
-        let bytes = std::fs::read(&path)
-            .with_context(|| format!("failed to read {}", path.display()))?;
+        let bytes =
+            std::fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
         let par = match ParFile::from_bytes(&bytes) {
             Ok(par) => par,
             Err(error) => {
-                report.parse_failures.push(format!("{}: {error}", path.display()));
+                report
+                    .parse_failures
+                    .push(format!("{}: {error}", path.display()));
                 continue;
             }
         };
@@ -71,7 +78,11 @@ fn record(
         return;
     }
     entries.push(FeatureHit {
-        file: path.strip_prefix(root).unwrap_or(path).display().to_string(),
+        file: path
+            .strip_prefix(root)
+            .unwrap_or(path)
+            .display()
+            .to_string(),
         system_index,
     });
 }
