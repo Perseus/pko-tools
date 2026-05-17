@@ -4,10 +4,16 @@
 //! (`PoseTable`, `PoseEntry`).
 
 use anyhow::{anyhow, Result};
-use kaitai::*;
 use std::path::Path;
 
-use crate::kaitai_gen::pko_poseinfo::*;
+use crate::text_encoding::decode_gbk_cstr;
+
+const POSEINFO_HEADER_SIZE: usize = 4;
+const POSEINFO_RECORD_SIZE: usize = 120;
+const POSEINFO_NAME_OFFSET: usize = 8;
+const POSEINFO_NAME_SIZE: usize = 64;
+const POSEINFO_WEAPON_VARIANTS_OFFSET: usize = 108;
+const POSEINFO_WEAPON_VARIANT_COUNT: usize = 7;
 
 /// Weapon wield mode names, indexed 0-6.
 pub const WEAPON_MODES: [&str; 7] = [
@@ -58,42 +64,54 @@ pub fn load_poseinfo(path: impl AsRef<Path>) -> Result<PoseTable> {
 }
 
 pub fn load_poseinfo_from_bytes(data: &[u8]) -> Result<PoseTable> {
-    let reader = BytesReader::from(data.to_vec());
-    let parsed = PkoPoseinfo::read_into::<_, PkoPoseinfo>(&reader, None, None)
-        .map_err(|e| anyhow!("Kaitai poseinfo parse error: {:?}", e))?;
+    if data.len() < POSEINFO_HEADER_SIZE {
+        return Ok(PoseTable {
+            entries: Vec::new(),
+        });
+    }
 
-    convert_poseinfo(&parsed)
-}
+    let payload = &data[POSEINFO_HEADER_SIZE..];
+    let mut entries = Vec::with_capacity(payload.len() / POSEINFO_RECORD_SIZE);
 
-fn convert_poseinfo(parsed: &PkoPoseinfo) -> Result<PoseTable> {
-    let entries_raw = parsed.entries();
-    let mut entries = Vec::with_capacity(entries_raw.len());
-
-    for entry in entries_raw.iter() {
-        let pose_id = *entry.pose_id() as u16;
-
-        // Extract null-terminated ASCII name from 64-byte field
-        let name_bytes = entry.name();
-        let end = name_bytes
-            .iter()
-            .position(|&b| b == 0)
-            .unwrap_or(name_bytes.len());
-        let name = String::from_utf8_lossy(&name_bytes[..end]).to_string();
-
-        let variants = entry.weapon_variants();
-        let mut weapon_variants = [0i16; 7];
-        for (i, &v) in variants.iter().enumerate().take(7) {
-            weapon_variants[i] = v;
+    for record in payload.chunks_exact(POSEINFO_RECORD_SIZE) {
+        let pose_id = read_u32(record, 4).unwrap_or(0);
+        if pose_id == 0 || pose_id > u16::MAX as u32 {
+            continue;
         }
 
+        let mut weapon_variants = [0i16; 7];
+        for (i, slot) in weapon_variants
+            .iter_mut()
+            .enumerate()
+            .take(POSEINFO_WEAPON_VARIANT_COUNT)
+        {
+            let offset = POSEINFO_WEAPON_VARIANTS_OFFSET + i * 2;
+            *slot = read_i16(record, offset).unwrap_or(0);
+        }
+
+        let name = record
+            .get(POSEINFO_NAME_OFFSET..POSEINFO_NAME_OFFSET + POSEINFO_NAME_SIZE)
+            .map(decode_gbk_cstr)
+            .unwrap_or_default();
+
         entries.push(PoseEntry {
-            pose_id,
+            pose_id: pose_id as u16,
             name,
             weapon_variants,
         });
     }
 
     Ok(PoseTable { entries })
+}
+
+fn read_u32(record: &[u8], offset: usize) -> Option<u32> {
+    let bytes: [u8; 4] = record.get(offset..offset + 4)?.try_into().ok()?;
+    Some(u32::from_le_bytes(bytes))
+}
+
+fn read_i16(record: &[u8], offset: usize) -> Option<i16> {
+    let bytes: [u8; 2] = record.get(offset..offset + 2)?.try_into().ok()?;
+    Some(i16::from_le_bytes(bytes))
 }
 
 /// Sanitize a pose name for use as a glTF animation name.
@@ -163,5 +181,32 @@ mod tests {
         assert_eq!(sanitize_action_name("Normal Wait"), "normal_wait");
         assert_eq!(sanitize_action_name("Death (All)"), "death_all");
         assert_eq!(sanitize_action_name("Attack 1"), "attack_1");
+    }
+
+    #[test]
+    fn parse_poseinfo_reads_all_records_and_decodes_gbk_names() {
+        let mut data = vec![0u8; POSEINFO_HEADER_SIZE + POSEINFO_RECORD_SIZE * 2];
+        data[0..4].copy_from_slice(&120u32.to_le_bytes());
+
+        let first = &mut data[POSEINFO_HEADER_SIZE..POSEINFO_HEADER_SIZE + POSEINFO_RECORD_SIZE];
+        first[0..4].copy_from_slice(&1u32.to_le_bytes());
+        first[4..8].copy_from_slice(&1u32.to_le_bytes());
+        first[POSEINFO_NAME_OFFSET..POSEINFO_NAME_OFFSET + 4]
+            .copy_from_slice(&[0xb4, 0xfd, 0xbb, 0xfa]);
+        first[POSEINFO_WEAPON_VARIANTS_OFFSET..POSEINFO_WEAPON_VARIANTS_OFFSET + 2]
+            .copy_from_slice(&1i16.to_le_bytes());
+
+        let second_start = POSEINFO_HEADER_SIZE + POSEINFO_RECORD_SIZE;
+        let second = &mut data[second_start..second_start + POSEINFO_RECORD_SIZE];
+        second[0..4].copy_from_slice(&2u32.to_le_bytes());
+        second[4..8].copy_from_slice(&2u32.to_le_bytes());
+        second[POSEINFO_NAME_OFFSET..POSEINFO_NAME_OFFSET + 6].copy_from_slice(b"Attack");
+        second[POSEINFO_WEAPON_VARIANTS_OFFSET..POSEINFO_WEAPON_VARIANTS_OFFSET + 2]
+            .copy_from_slice(&2i16.to_le_bytes());
+
+        let table = load_poseinfo_from_bytes(&data).expect("parse poseinfo");
+        assert_eq!(table.entries.len(), 2);
+        assert_eq!(table.entries[0].name, "待机");
+        assert_eq!(table.entries[1].name, "Attack");
     }
 }

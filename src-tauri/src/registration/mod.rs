@@ -2,28 +2,13 @@ pub mod commands;
 
 use std::path::Path;
 
-use crate::character::Character;
+use crate::{character::info::parse_character_table, client_paths};
 
 /// Check if a model ID (Framework Number) is already in use in CharacterInfo.txt.
 pub fn is_model_id_available(project_dir: &Path, model_id: u32) -> anyhow::Result<bool> {
-    let char_info_path = project_dir.join("scripts/table/CharacterInfo.txt");
-
-    if !char_info_path.exists() {
-        return Err(anyhow::anyhow!("CharacterInfo.txt not found"));
-    }
-
-    let mut reader = csv::ReaderBuilder::new()
-        .delimiter(b'\t')
-        .has_headers(false)
-        .comment(Some(b'/'))
-        .flexible(true)
-        .from_reader(std::fs::File::open(&char_info_path)?);
-
-    for result in reader.deserialize::<Character>() {
-        if let Ok(character) = result {
-            if character.model as u32 == model_id {
-                return Ok(false);
-            }
+    for character in parse_character_table(project_dir)? {
+        if character.model as u32 == model_id {
+            return Ok(false);
         }
     }
 
@@ -32,27 +17,12 @@ pub fn is_model_id_available(project_dir: &Path, model_id: u32) -> anyhow::Resul
 
 /// Find the next available model ID (Framework Number) by scanning CharacterInfo.txt.
 pub fn get_next_available_model_id(project_dir: &Path) -> anyhow::Result<u32> {
-    let char_info_path = project_dir.join("scripts/table/CharacterInfo.txt");
-
-    if !char_info_path.exists() {
-        return Err(anyhow::anyhow!("CharacterInfo.txt not found"));
-    }
-
-    let mut reader = csv::ReaderBuilder::new()
-        .delimiter(b'\t')
-        .has_headers(false)
-        .comment(Some(b'/'))
-        .flexible(true)
-        .from_reader(std::fs::File::open(&char_info_path)?);
-
     let mut max_model_id: u32 = 0;
 
-    for result in reader.deserialize::<Character>() {
-        if let Ok(character) = result {
-            let model = character.model as u32;
-            if model > max_model_id {
-                max_model_id = model;
-            }
+    for character in parse_character_table(project_dir)? {
+        let model = character.model as u32;
+        if model > max_model_id {
+            max_model_id = model;
         }
     }
 
@@ -61,22 +31,11 @@ pub fn get_next_available_model_id(project_dir: &Path) -> anyhow::Result<u32> {
 
 /// Find the next available character ID by scanning CharacterInfo.txt.
 fn get_next_character_id(project_dir: &Path) -> anyhow::Result<u32> {
-    let char_info_path = project_dir.join("scripts/table/CharacterInfo.txt");
-
-    let mut reader = csv::ReaderBuilder::new()
-        .delimiter(b'\t')
-        .has_headers(false)
-        .comment(Some(b'/'))
-        .flexible(true)
-        .from_reader(std::fs::File::open(&char_info_path)?);
-
     let mut max_id: u32 = 0;
 
-    for result in reader.deserialize::<Character>() {
-        if let Ok(character) = result {
-            if character.id > max_id {
-                max_id = character.id;
-            }
+    for character in parse_character_table(project_dir)? {
+        if character.id > max_id {
+            max_id = character.id;
         }
     }
 
@@ -89,7 +48,7 @@ fn get_next_character_id(project_dir: &Path) -> anyhow::Result<u32> {
 /// The entry uses default values for most fields - the user can
 /// customize via the game's data editor tools.
 pub fn register_character(project_dir: &Path, model_id: u32, name: &str) -> anyhow::Result<u32> {
-    let char_info_path = project_dir.join("scripts/table/CharacterInfo.txt");
+    let char_info_path = client_paths::table_file(project_dir, "CharacterInfo.txt");
 
     if !char_info_path.exists() {
         return Err(anyhow::anyhow!("CharacterInfo.txt not found"));

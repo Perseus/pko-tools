@@ -12,6 +12,7 @@ use image::RgbImage;
 use serde_json::value::RawValue;
 
 use super::{MapEntry, MapMetadata};
+use crate::client_paths;
 use crate::effect::model::EffFile;
 use crate::map::obj_loader;
 use crate::map::scene_model::LoadedSceneModels;
@@ -96,7 +97,7 @@ pub fn rgb565_to_float(color: i16) -> (f32, f32, f32) {
 
 /// Scan `project_dir/map/` for `.map` files and build a list of available maps.
 pub fn scan_maps(project_dir: &Path) -> Result<Vec<MapEntry>> {
-    let map_dir = project_dir.join("map");
+    let map_dir = client_paths::asset_dir(project_dir, "map");
     if !map_dir.exists() {
         return Ok(vec![]);
     }
@@ -2434,13 +2435,13 @@ pub fn export_terrain_gltf(
     map_name: &str,
     output_dir: &Path,
 ) -> Result<super::MapExportResult> {
-    let map_path = project_dir.join("map").join(format!("{}.map", map_name));
+    let map_path = client_paths::asset_file(project_dir, "map", format!("{}.map", map_name));
     let map_data = std::fs::read(&map_path)
         .with_context(|| format!("Failed to read map file: {}", map_path.display()))?;
     let parsed_map = super::map_loader::load_map(&map_data)?;
 
     // Try to load .obj file
-    let obj_path = project_dir.join("map").join(format!("{}.obj", map_name));
+    let obj_path = client_paths::asset_file(project_dir, "map", format!("{}.obj", map_name));
     let objects = if obj_path.exists() {
         let obj_data = std::fs::read(&obj_path)?;
         obj_loader::load_obj(&obj_data).ok()
@@ -2482,13 +2483,13 @@ pub fn export_terrain_gltf(
 
 /// Build glTF JSON for the in-app viewer (returns the JSON string directly).
 pub fn build_map_viewer_gltf(project_dir: &Path, map_name: &str) -> Result<String> {
-    let map_path = project_dir.join("map").join(format!("{}.map", map_name));
+    let map_path = client_paths::asset_file(project_dir, "map", format!("{}.map", map_name));
     let map_data = std::fs::read(&map_path)
         .with_context(|| format!("Failed to read map file: {}", map_path.display()))?;
     let parsed_map = super::map_loader::load_map(&map_data)?;
 
     // Try to load .obj file
-    let obj_path = project_dir.join("map").join(format!("{}.obj", map_name));
+    let obj_path = client_paths::asset_file(project_dir, "map", format!("{}.obj", map_name));
     let objects = if obj_path.exists() {
         let obj_data = std::fs::read(&obj_path)?;
         obj_loader::load_obj(&obj_data).ok()
@@ -2890,7 +2891,7 @@ fn load_effect_file(project_dir: &Path, eff_filename: &str) -> Option<EffFile> {
         .or_else(|| eff_filename.strip_suffix(".EFF"))
         .unwrap_or(eff_filename);
 
-    let eff_path = project_dir.join("effect").join(format!("{}.eff", base));
+    let eff_path = client_paths::asset_file(project_dir, "effect", format!("{}.eff", base));
     if eff_path.exists() {
         if let Ok(bytes) = std::fs::read(&eff_path) {
             return EffFile::from_bytes(&bytes).ok();
@@ -2898,7 +2899,7 @@ fn load_effect_file(project_dir: &Path, eff_filename: &str) -> Option<EffFile> {
     }
 
     // Try case-insensitive search in effect directory
-    let effect_dir = project_dir.join("effect");
+    let effect_dir = client_paths::asset_dir(project_dir, "effect");
     if effect_dir.exists() {
         let target = format!("{}.eff", base).to_lowercase();
         if let Ok(entries) = std::fs::read_dir(&effect_dir) {
@@ -2917,7 +2918,7 @@ fn load_effect_file(project_dir: &Path, eff_filename: &str) -> Option<EffFile> {
 
 /// Get metadata for a map without building the full glTF.
 pub fn get_metadata(project_dir: &Path, map_name: &str) -> Result<MapMetadata> {
-    let map_path = project_dir.join("map").join(format!("{}.map", map_name));
+    let map_path = client_paths::asset_file(project_dir, "map", format!("{}.map", map_name));
     let map_data = std::fs::read(&map_path)
         .with_context(|| format!("Failed to read map file: {}", map_path.display()))?;
     let parsed_map = super::map_loader::load_map(&map_data)?;
@@ -2932,7 +2933,7 @@ pub fn get_metadata(project_dir: &Path, map_name: &str) -> Result<MapMetadata> {
         non_empty * (parsed_map.header.n_section_width * parsed_map.header.n_section_height) as u32;
 
     // Count objects if .obj file exists
-    let obj_path = project_dir.join("map").join(format!("{}.obj", map_name));
+    let obj_path = client_paths::asset_file(project_dir, "map", format!("{}.obj", map_name));
     let object_count = if obj_path.exists() {
         let obj_data = std::fs::read(&obj_path)?;
         obj_loader::load_obj(&obj_data)

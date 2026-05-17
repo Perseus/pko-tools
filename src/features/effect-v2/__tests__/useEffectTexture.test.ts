@@ -30,6 +30,15 @@ describe("resolveEffectTextureCandidates", () => {
       "/project/texture/effect/spark.bmp",
     ]);
   });
+
+  it("adds Demon Data texture fallbacks after root-layout candidates", () => {
+    const candidates = resolveEffectTextureCandidates("spark", "/project");
+
+    expect(candidates).toContain("/project/Data/texture/effect/spark.tga");
+    expect(candidates.indexOf("/project/texture/effect/spark.tga")).toBeLessThan(
+      candidates.indexOf("/project/Data/texture/effect/spark.tga"),
+    );
+  });
 });
 
 describe("emulateD3dA8R8G8B8", () => {

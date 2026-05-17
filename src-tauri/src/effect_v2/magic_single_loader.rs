@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use kaitai::*;
 
 use crate::kaitai_gen::pko_magic_single::{PkoMagicSingle, PkoMagicSingle_EffParam};
+use crate::text_encoding;
 
 use super::model::{MagicSingleEntry, MagicSingleTable};
 
@@ -68,8 +69,7 @@ fn convert_record(rec: &PkoMagicSingle_EffParam) -> MagicSingleEntry {
 /// truncating at the first null byte.
 fn kaitai_fixed_str(s: &str) -> String {
     let bytes: Vec<u8> = s.chars().map(|c| c as u8).collect();
-    let end = bytes.iter().position(|b| *b == 0).unwrap_or(bytes.len());
-    String::from_utf8_lossy(&bytes[..end]).to_string()
+    text_encoding::decode_gbk_cstr(&bytes)
 }
 
 #[cfg(test)]
@@ -292,6 +292,11 @@ mod tests {
     }
 
     fn infer_effect_dir_from_table_dir(table_dir: &Path) -> PathBuf {
+        let sibling_effect = table_dir.with_file_name("effect");
+        if sibling_effect.exists() {
+            return sibling_effect;
+        }
+
         table_dir
             .parent()
             .and_then(Path::parent)

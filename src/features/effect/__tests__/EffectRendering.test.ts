@@ -243,6 +243,14 @@ describe("effect rendering helpers", () => {
     expect(candidates).toContain("/project/texture/spark.png");
     expect(candidates).toContain("/project/texture/skill/spark.dds");
     expect(candidates).toContain("/project/texture/lit/spark.tga");
+    expect(candidates).toContain("/project/Data/texture/effect/spark.tga");
+  });
+
+  it("keeps root-layout candidates before Demon Data-layout fallbacks", () => {
+    const candidates = resolveTextureCandidates("spark", "/project");
+    expect(candidates.indexOf("/project/texture/effect/spark.tga")).toBeLessThan(
+      candidates.indexOf("/project/Data/texture/effect/spark.tga"),
+    );
   });
 
   it("uses frame times when available", () => {

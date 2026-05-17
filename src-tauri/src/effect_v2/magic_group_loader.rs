@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 
 use super::model::{MagicGroupEntry, MagicGroupTable};
+use crate::text_encoding;
 
 /// Parse a MagicGroupInfo.bin file from raw bytes.
 ///
@@ -116,8 +117,7 @@ fn parse_group_record(data: &[u8]) -> Result<Option<MagicGroupEntry>> {
 
 /// Convert a fixed-width byte buffer to a String, truncating at the first null byte.
 fn fixed_str(buf: &[u8]) -> String {
-    let end = buf.iter().position(|b| *b == 0).unwrap_or(buf.len());
-    String::from_utf8_lossy(&buf[..end]).to_string()
+    text_encoding::decode_gbk_cstr(buf)
 }
 
 #[cfg(test)]

@@ -15,6 +15,7 @@ pub(crate) mod kaitai_gen;
 pub mod animation;
 mod broadcast;
 pub mod character;
+pub mod client_paths;
 mod d3d;
 mod db;
 pub mod decompiler;
@@ -29,6 +30,8 @@ mod preferences;
 mod projects;
 pub mod registration;
 pub mod retarget;
+pub mod string_set;
+pub mod text_encoding;
 pub mod texture_pipeline;
 pub mod validation;
 

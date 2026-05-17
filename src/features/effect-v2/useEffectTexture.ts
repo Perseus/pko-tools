@@ -41,9 +41,14 @@ export function resolveEffectTextureCandidates(
     ? [trimmed]
     : EFFECT_TEXTURE_EXTENSIONS.map((ext) => `${trimmed}.${ext}`);
 
-  return EFFECT_TEXTURE_DIRS.flatMap((dir) =>
-    names.map((name) => `${projectDirectory}/${dir}/${name}`)
+  const roots = [projectDirectory, `${projectDirectory}/Data`];
+  const candidates = roots.flatMap((root) =>
+    EFFECT_TEXTURE_DIRS.flatMap((dir) =>
+      names.map((name) => `${root}/${dir}/${name}`)
+    )
   );
+
+  return Array.from(new Set(candidates));
 }
 
 export function emulateD3dA8R8G8B8(rgba: Uint8Array): Uint8Array {

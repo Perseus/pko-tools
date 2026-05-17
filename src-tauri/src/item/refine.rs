@@ -3,6 +3,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::client_paths;
+use crate::text_encoding;
+
 // CRawDataInfo base class layout (108 bytes):
 //   bExist: BOOL (i32)           offset 0, 4 bytes
 //   nIndex: int                  offset 4, 4 bytes
@@ -126,7 +129,7 @@ pub fn parse_refine_effects(data: &[u8]) -> anyhow::Result<RefineEffectTable> {
 
 /// Load and parse ItemRefineEffectInfo.bin from a project directory
 pub fn load_refine_effects(project_dir: &Path) -> anyhow::Result<RefineEffectTable> {
-    let bin_path = project_dir.join("scripts/table/ItemRefineEffectInfo.bin");
+    let bin_path = client_paths::table_file(project_dir, "ItemRefineEffectInfo.bin");
     if !bin_path.exists() {
         return Ok(RefineEffectTable { entries: vec![] });
     }
@@ -217,7 +220,7 @@ pub fn parse_item_refine_info(data: &[u8]) -> anyhow::Result<ItemRefineInfoTable
 
 /// Load and parse ItemRefineInfo.bin from a project directory
 pub fn load_item_refine_info(project_dir: &Path) -> anyhow::Result<ItemRefineInfoTable> {
-    let bin_path = project_dir.join("scripts/table/ItemRefineInfo.bin");
+    let bin_path = client_paths::table_file(project_dir, "ItemRefineInfo.bin");
     if !bin_path.exists() {
         return Ok(ItemRefineInfoTable {
             entries: HashMap::new(),
@@ -253,9 +256,7 @@ pub struct StoneInfoTable {
 }
 
 fn read_cstr(data: &[u8], offset: usize, max_len: usize) -> String {
-    let slice = &data[offset..offset + max_len];
-    let end = slice.iter().position(|&b| b == 0).unwrap_or(max_len);
-    String::from_utf8_lossy(&slice[..end]).to_string()
+    text_encoding::read_gbk_cstr(data, offset, max_len).unwrap_or_default()
 }
 
 pub fn parse_stone_info(data: &[u8]) -> anyhow::Result<StoneInfoTable> {
@@ -313,7 +314,7 @@ pub fn parse_stone_info(data: &[u8]) -> anyhow::Result<StoneInfoTable> {
 }
 
 pub fn load_stone_info(project_dir: &Path) -> anyhow::Result<StoneInfoTable> {
-    let bin_path = project_dir.join("scripts/table/StoneInfo.bin");
+    let bin_path = client_paths::table_file(project_dir, "StoneInfo.bin");
     if !bin_path.exists() {
         return Ok(StoneInfoTable {
             by_item_id: HashMap::new(),

@@ -17,6 +17,7 @@ use gltf_json::{
     validation::{Checked, USize64},
 };
 
+use crate::client_paths;
 use crate::item::model::decode_pko_texture;
 use crate::math::coord_transform::CoordTransform;
 
@@ -30,13 +31,14 @@ use super::scene_obj_info::SceneObjModelInfo;
 /// Also tries case-insensitive fallback.
 pub fn find_lmo_path(project_dir: &Path, filename: &str) -> Option<std::path::PathBuf> {
     let candidates = [
-        project_dir.join("model").join("scene").join(filename),
-        project_dir.join("model").join(filename),
-        project_dir
-            .join("model")
-            .join("scene")
-            .join(filename.to_lowercase()),
-        project_dir.join("model").join(filename.to_lowercase()),
+        client_paths::asset_file(project_dir, "model", Path::new("scene").join(filename)),
+        client_paths::asset_file(project_dir, "model", filename),
+        client_paths::asset_file(
+            project_dir,
+            "model",
+            Path::new("scene").join(filename.to_lowercase()),
+        ),
+        client_paths::asset_file(project_dir, "model", filename.to_lowercase()),
     ];
     candidates.into_iter().find(|p| p.exists())
 }
@@ -303,15 +305,32 @@ pub fn find_texture_file(project_dir: &Path, tex_name: &str) -> Option<std::path
 
     for dir in &dirs {
         for ext in &exts {
-            let candidate = project_dir.join(dir).join(format!("{}.{}", stem, ext));
+            let candidate = if let Some(texture_rel) = dir.strip_prefix("texture/") {
+                client_paths::asset_file(
+                    project_dir,
+                    "texture",
+                    Path::new(texture_rel).join(format!("{}.{}", stem, ext)),
+                )
+            } else {
+                client_paths::asset_file(project_dir, "texture", format!("{}.{}", stem, ext))
+            };
             if candidate.exists() {
                 return Some(candidate);
             }
             // Try lowercase
-            let candidate_lc =
-                project_dir
-                    .join(dir)
-                    .join(format!("{}.{}", stem.to_lowercase(), ext));
+            let candidate_lc = if let Some(texture_rel) = dir.strip_prefix("texture/") {
+                client_paths::asset_file(
+                    project_dir,
+                    "texture",
+                    Path::new(texture_rel).join(format!("{}.{}", stem.to_lowercase(), ext)),
+                )
+            } else {
+                client_paths::asset_file(
+                    project_dir,
+                    "texture",
+                    format!("{}.{}", stem.to_lowercase(), ext),
+                )
+            };
             if candidate_lc.exists() {
                 return Some(candidate_lc);
             }

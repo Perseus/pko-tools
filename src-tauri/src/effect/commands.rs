@@ -10,6 +10,7 @@ use gltf::json::{
 use serde::Serialize;
 
 use crate::character::{model::CharacterGeometricModel, GLTFFieldsToAggregate};
+use crate::client_paths;
 use crate::item::model::decode_pko_texture;
 use crate::map::lmo_types::LmoBoneAnimData;
 use crate::map::scene_model::decode_dds_with_alpha;
@@ -115,7 +116,10 @@ pub struct DecodedTexture {
 /// plus the non-standard PKO TGA format (48-byte header + raw BGRA pixels).
 #[tauri::command]
 pub async fn decode_texture(path: String) -> Result<DecodedTexture, String> {
-    let resolved = resolve_case_insensitive(&path).unwrap_or_else(|| path.clone().into());
+    let requested = std::path::Path::new(&path);
+    let resolved = resolve_case_insensitive(requested)
+        .or_else(|| resolve_data_texture_fallback(requested))
+        .unwrap_or_else(|| requested.to_path_buf());
     let raw_bytes =
         std::fs::read(&resolved).map_err(|e| format!("Failed to read texture {}: {}", path, e))?;
     let bytes = decode_pko_texture(&raw_bytes);
@@ -473,14 +477,13 @@ fn guess_texture_dimensions(pixel_count: usize) -> Option<(usize, usize)> {
 /// PKO is a Windows game where paths are case-insensitive, but macOS/Linux may
 /// have case-sensitive filesystems. If the exact path doesn't exist, scan the
 /// parent directory for a case-insensitive match.
-fn resolve_case_insensitive(path: &str) -> Option<std::path::PathBuf> {
-    let p = std::path::Path::new(path);
-    if p.exists() {
-        return Some(p.to_path_buf());
+fn resolve_case_insensitive(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    if path.exists() {
+        return Some(path.to_path_buf());
     }
 
-    let parent = p.parent()?;
-    let file_name = p.file_name()?.to_str()?.to_lowercase();
+    let parent = path.parent()?;
+    let file_name = path.file_name()?.to_str()?.to_lowercase();
     let entries = std::fs::read_dir(parent).ok()?;
 
     for entry in entries.flatten() {
@@ -492,6 +495,36 @@ fn resolve_case_insensitive(path: &str) -> Option<std::path::PathBuf> {
     }
 
     None
+}
+
+fn resolve_data_texture_fallback(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let components: Vec<_> = path.components().collect();
+    let texture_index = components.iter().position(|component| {
+        component
+            .as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case("texture")
+    })?;
+
+    if texture_index > 0
+        && components[texture_index - 1]
+            .as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case("data")
+    {
+        return None;
+    }
+
+    let mut candidate = std::path::PathBuf::new();
+    for component in &components[..texture_index] {
+        candidate.push(component.as_os_str());
+    }
+    candidate.push("Data");
+    for component in &components[texture_index..] {
+        candidate.push(component.as_os_str());
+    }
+
+    resolve_case_insensitive(&candidate)
 }
 
 // TODO: Inverse remap (Y-up -> PKO Z-up) needed here once editing is supported.
@@ -549,18 +582,14 @@ pub async fn list_texture_files(project_id: String) -> Result<Vec<String>, Strin
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
     let project_dir = project.project_directory.as_ref();
 
-    let texture_dirs = [
-        "texture/effect",
-        "texture/skill",
-        "texture/lit",
-        "texture/sceneffect",
-    ];
+    let texture_dirs = ["effect", "skill", "lit", "sceneffect"];
 
     let extensions = ["tga", "dds", "bmp", "png"];
     let mut files = Vec::new();
+    let texture_root = client_paths::asset_dir(project_dir, "texture");
 
     for dir in &texture_dirs {
-        let full_path = project_dir.join(dir);
+        let full_path = texture_root.join(dir);
         if !full_path.exists() {
             continue;
         }
@@ -570,10 +599,12 @@ pub async fn list_texture_files(project_id: String) -> Result<Vec<String>, Strin
                 if path.is_file() {
                     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                         if extensions.contains(&ext.to_lowercase().as_str()) {
-                            if let Some(name) =
-                                path.strip_prefix(project_dir).ok().and_then(|p| p.to_str())
+                            if let Some(name) = path
+                                .strip_prefix(&texture_root)
+                                .ok()
+                                .and_then(|p| p.to_str())
                             {
-                                files.push(name.to_string());
+                                files.push(format!("texture/{}", name.replace('\\', "/")));
                             }
                         }
                     }
@@ -601,8 +632,8 @@ pub async fn load_path_file(
         format!("{}.csf", path_name)
     };
 
-    let path = project.project_directory.join("effect").join(&file_name);
-    let resolved = resolve_case_insensitive(path.to_str().unwrap_or("")).unwrap_or(path);
+    let path = client_paths::asset_file(&project.project_directory, "effect", &file_name);
+    let resolved = resolve_case_insensitive(&path).unwrap_or(path);
 
     let bytes = std::fs::read(&resolved)
         .map_err(|e| format!("Failed to read path file {}: {}", resolved.display(), e))?;
@@ -674,9 +705,7 @@ fn parse_csf_points(bytes: &[u8]) -> Result<Vec<[f32; 3]>, String> {
 
 fn particles_file_path(project_dir: &std::path::Path, effect_name: &str) -> std::path::PathBuf {
     let base = effect_name.strip_suffix(".eff").unwrap_or(effect_name);
-    project_dir
-        .join("effect")
-        .join(format!("{}.particles.json", base))
+    client_paths::asset_file(project_dir, "effect", format!("{}.particles.json", base))
 }
 
 fn par_file_path(project_dir: &std::path::Path, par_name: &str) -> std::path::PathBuf {
@@ -686,7 +715,7 @@ fn par_file_path(project_dir: &std::path::Path, par_name: &str) -> std::path::Pa
         format!("{}.par", par_name)
     };
 
-    project_dir.join("effect").join(file_name)
+    client_paths::asset_file(project_dir, "effect", file_name)
 }
 
 fn effect_file_path(project_dir: &std::path::Path, effect_name: &str) -> std::path::PathBuf {
@@ -696,7 +725,7 @@ fn effect_file_path(project_dir: &std::path::Path, effect_name: &str) -> std::pa
         format!("{}.eff", effect_name)
     };
 
-    project_dir.join("effect").join(file_name)
+    client_paths::asset_file(project_dir, "effect", file_name)
 }
 
 /// Resolve an effect model .lgo path with case-insensitive filename matching.
@@ -706,7 +735,7 @@ pub fn resolve_effect_model_path(
 ) -> Option<std::path::PathBuf> {
     let name = model_name.strip_suffix(".lgo").unwrap_or(model_name);
     let target = format!("{}.lgo", name).to_lowercase();
-    let dir = project_dir.join("model/effect");
+    let dir = client_paths::asset_file(project_dir, "model", "effect");
 
     if !dir.exists() {
         return None;
@@ -762,10 +791,9 @@ pub fn build_effect_model_gltf(project_dir: &Path, model_name: &str) -> Result<S
     };
 
     let mut nodes = Vec::new();
-    let skin = geom
-        .bone_animation
-        .as_ref()
-        .and_then(|bone_anim| append_effect_model_bone_animation(&mut fields, &mut nodes, bone_anim));
+    let skin = geom.bone_animation.as_ref().and_then(|bone_anim| {
+        append_effect_model_bone_animation(&mut fields, &mut nodes, bone_anim)
+    });
 
     let root_joint_nodes = if let Some(bone_anim) = geom.bone_animation.as_ref() {
         collect_root_joint_nodes(bone_anim, 0)
@@ -785,8 +813,7 @@ pub fn build_effect_model_gltf(project_dir: &Path, model_name: &str) -> Result<S
         ..Default::default()
     };
     let helper_nodes = geom.get_gltf_helper_nodes_for_mesh(0, None);
-    let scene_node_indices =
-        append_effect_model_scene_nodes(&mut nodes, mesh_node, helper_nodes);
+    let scene_node_indices = append_effect_model_scene_nodes(&mut nodes, mesh_node, helper_nodes);
 
     let scene = gltf::json::Scene {
         name: Some("Scene".to_string()),
@@ -878,7 +905,8 @@ fn append_effect_model_bone_animation(
         if bone.parent_id != u32::MAX {
             let parent = bone.parent_id as usize;
             if parent < bone_count {
-                children_by_bone[parent].push(gltf::json::Index::new(first_joint_node_idx + idx as u32));
+                children_by_bone[parent]
+                    .push(gltf::json::Index::new(first_joint_node_idx + idx as u32));
             }
         }
     }
@@ -1233,6 +1261,30 @@ mod tests {
         assert_eq!(decoded.width, 16);
         assert_eq!(decoded.height, 16);
         assert!(raw.chunks_exact(4).all(|px| px == [12, 34, 56, 78]));
+    }
+
+    #[test]
+    fn decode_texture_resolves_demon_data_texture_from_legacy_candidate_path() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let actual_dir = temp.path().join("Data").join("texture").join("effect");
+        std::fs::create_dir_all(&actual_dir).expect("create texture dir");
+        let actual_path = actual_dir.join("spark.png");
+        let requested_path = temp.path().join("texture").join("effect").join("spark.png");
+
+        let img = image::RgbaImage::from_pixel(8, 8, image::Rgba([90, 40, 20, 255]));
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .expect("encode png");
+        std::fs::write(&actual_path, png).expect("write png");
+
+        let decoded = tauri::async_runtime::block_on(decode_texture(
+            requested_path.to_string_lossy().to_string(),
+        ))
+        .expect("decode should resolve Data/texture fallback");
+
+        assert_eq!(decoded.width, 8);
+        assert_eq!(decoded.height, 8);
     }
 
     #[test]
