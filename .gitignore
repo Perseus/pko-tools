@@ -53,5 +53,6 @@ server-source
 __pycache__/
 *.pyc
 
+.tmp/
 
 unity-export
