@@ -15,13 +15,15 @@ Separately, extract the shared particle frame advancement / interpolation / deat
 - `ParticleVisual` local time provider wiring
 - `BlastSystem` wired to the hook as first consumer (init/move callbacks only)
 
+**Supersession note:** the original scaffold assumed frontend effect vectors were converted with a PKO XYZ to Three.js XZY swap. That assumption has since been corrected for the v2 effect runtime: `.eff`, `.par`, dummy, magic target, particle, and link-beam vectors stay as raw PKO z-up runtime vectors. Mesh/glTF import conversion remains a separate boundary.
+
 **Explicitly out of scope:**
 - Implementing core particle physics for any system type (fire, snow, round, etc.)
-- Changing any existing coordinate conversion logic (PKO XYZ → Three.js XZY via `pkoVec` stays exactly as-is)
+- Changing any existing coordinate conversion logic
 - Changing keyframe interpolation in RectPlane/Cylinder (only the time source changes, not the math)
 - Adding new rendering logic — existing sub-effect rendering stays identical
 
-**Golden rule:** if a file already has working core logic (coordinate swaps, interpolation, blend modes), only the time-reading mechanism changes. No new transforms, no new math, no new coordinate handling.
+**Golden rule:** if a file already has working core logic (coordinate handling, interpolation, blend modes), only the time-reading mechanism changes. No new transforms, no new math, no new coordinate handling.
 
 ## Problem
 
@@ -335,7 +337,7 @@ function useParticleLifecycle(options: {
 
 2. Wire `BlastSystem.tsx` as the first consumer of `useParticleLifecycle`. The `initBlastParticle` and `moveBlastParticle` callbacks contain the type-specific spawn/movement logic. This also fixes an existing hooks violation in the current `BlastSystem.tsx` (calling `useRef` inside a `for` loop).
 
-   **Note:** The blast init/move callbacks use PKO→Three.js coordinate swaps (Y↔Z) in the same way as the existing code. No new coordinate handling is introduced.
+   **Note:** This scaffold originally preserved the then-existing coordinate handling. Current v2 runtime particle vectors are raw PKO z-up values; blast init/move callbacks must not add a PKO-to-Three Y/Z swap.
 
 ### Phase 6: Convert remaining particle system stubs
 
