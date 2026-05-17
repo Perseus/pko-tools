@@ -1,8 +1,10 @@
 # Effect Pipeline Coordinate System Fix
 
+> **Superseded for v2 effect runtime:** this historical plan moved effect data toward a frontend Three.js Y-up conversion model. Current v2 rendering parity work uses raw PKO z-up runtime vectors for `.eff`, `.par`, dummy spans, magic target vectors, particle kinematics, and link beams. Do not use this plan as guidance for v2 runtime effect coordinates. Mesh/glTF import conversion remains a separate boundary.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Move PKO LH Z-up to glTF/Three.js RH Y-up coordinate conversion from ad-hoc frontend code into the backend Tauri commands, so both effect viewers receive correctly-oriented data.
+**Goal:** Move PKO LH Z-up to glTF/Three.js RH Y-up coordinate conversion from ad-hoc frontend code into the backend Tauri commands, so the current effect workbench receives correctly-oriented data.
 
 **Architecture:** The backend already has `remap_eff_for_export` and `remap_par_for_export` (in `src-tauri/src/effect/export.rs`) which apply `CoordTransform` to all position/angle/direction vectors. Currently these are only called from the CLI JSON export path. We wire them into the `load_effect` and `load_par_file` Tauri commands, then strip the frontend's incomplete ad-hoc coordinate handling (`pkoVec`, broken `d3dYawPitchRollQuaternion`).
 
@@ -230,7 +232,7 @@ git commit -m "fix(effect-v2): remove pkoVec helper, backend now delivers Y-up d
 
 ### Task 4: Fix RectPlane renderer — remove pkoVec, fix Euler order
 
-`RectPlane.tsx` uses `pkoVec` on positions, sizes, and angles. With backend-transformed data, all `pkoVec` calls are removed. Angle application also needs the correct `"YXZ"` Euler order (matching the old viewer's proven approach).
+`RectPlane.tsx` uses `pkoVec` on positions, sizes, and angles. With backend-transformed data, all `pkoVec` calls are removed. Angle application also needs the correct `"YXZ"` Euler order (matching the current frame-application helper's proven approach).
 
 **Files:**
 - Modify: `src/features/effect-v2/renderers/models/RectPlane.tsx`
@@ -651,7 +653,7 @@ Expected: No matches (all references removed).
 
 **What was NOT changed (intentional):**
 
-1. **Old effect viewer** (`src/features/effect/applySubEffectFrame.ts`): Already uses `"YXZ"` Euler order and applies data directly. With backend now delivering Y-up transformed data, positions, angles, and rotaLoopVec all slot in correctly without code changes.
+1. **Effect frame application helper** (`src/features/effect/applySubEffectFrame.ts`): Already uses `"YXZ"` Euler order and applies data directly. With backend now delivering Y-up transformed data, positions, angles, and rotaLoopVec all slot in correctly without code changes.
 
 2. **Map pipeline** (`src-tauri/src/map/terrain.rs`, `shared.rs`): These `load_effect_file` functions serve the map export pipeline which has its own coordinate handling. Not part of the Tauri command path.
 
