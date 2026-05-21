@@ -8,18 +8,25 @@ use std::path::{Path, PathBuf};
 ///
 /// Demon Online keeps the same engine resources under `Data`:
 /// `Data/animation`, `Data/effect`, `Data/map`, `Data/model`, `Data/Table`.
+///
+/// Some source checkouts wrap the runnable client in a nested `client`
+/// directory. In that case the user-visible project root may be the checkout
+/// root, while the actual game assets live under `client/map`,
+/// `client/texture`, and `client/scripts/table`.
 pub fn asset_dir(project_dir: &Path, name: &str) -> PathBuf {
-    let direct = project_dir.join(name);
-    if direct.is_dir() {
-        return direct;
+    for root in candidate_client_roots(project_dir) {
+        let direct = root.join(name);
+        if direct.is_dir() {
+            return direct;
+        }
+
+        let demon = root.join("Data").join(name);
+        if demon.is_dir() {
+            return demon;
+        }
     }
 
-    let demon = project_dir.join("Data").join(name);
-    if demon.is_dir() {
-        return demon;
-    }
-
-    direct
+    project_dir.join(name)
 }
 
 pub fn asset_file(project_dir: &Path, dir: &str, file_name: impl AsRef<Path>) -> PathBuf {
@@ -27,22 +34,24 @@ pub fn asset_file(project_dir: &Path, dir: &str, file_name: impl AsRef<Path>) ->
 }
 
 pub fn table_dir(project_dir: &Path) -> PathBuf {
-    let direct = project_dir.join("scripts").join("table");
-    if direct.is_dir() {
-        return direct;
+    for root in candidate_client_roots(project_dir) {
+        let direct = root.join("scripts").join("table");
+        if direct.is_dir() {
+            return direct;
+        }
+
+        let direct_table = root.join("Table");
+        if direct_table.is_dir() {
+            return direct_table;
+        }
+
+        let demon = root.join("Data").join("Table");
+        if demon.is_dir() {
+            return demon;
+        }
     }
 
-    let direct_table = project_dir.join("Table");
-    if direct_table.is_dir() {
-        return direct_table;
-    }
-
-    let demon = project_dir.join("Data").join("Table");
-    if demon.is_dir() {
-        return demon;
-    }
-
-    direct
+    project_dir.join("scripts").join("table")
 }
 
 pub fn table_file(project_dir: &Path, file_name: &str) -> PathBuf {
@@ -50,21 +59,30 @@ pub fn table_file(project_dir: &Path, file_name: &str) -> PathBuf {
 }
 
 pub fn script_txt_file(project_dir: &Path, file_name: &str) -> PathBuf {
-    let direct = project_dir.join("scripts").join("txt").join(file_name);
-    if direct.exists() {
-        return direct;
+    for root in candidate_client_roots(project_dir) {
+        let direct = root.join("scripts").join("txt").join(file_name);
+        if direct.exists() {
+            return direct;
+        }
+
+        let demon = root
+            .join("Data")
+            .join("scripts")
+            .join("txt")
+            .join(file_name);
+        if demon.exists() {
+            return demon;
+        }
     }
 
-    let demon = project_dir
-        .join("Data")
-        .join("scripts")
-        .join("txt")
-        .join(file_name);
-    if demon.exists() {
-        return demon;
-    }
+    project_dir.join("scripts").join("txt").join(file_name)
+}
 
-    direct
+fn candidate_client_roots(project_dir: &Path) -> Vec<PathBuf> {
+    let mut roots = vec![project_dir.to_path_buf()];
+    roots.push(project_dir.join("client"));
+    roots.push(project_dir.join("Client"));
+    roots
 }
 
 #[cfg(test)]
@@ -130,6 +148,34 @@ mod tests {
         assert_eq!(
             table_file(&root, "ItemFirstInfo.bin"),
             root.join("Table").join("ItemFirstInfo.bin")
+        );
+
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn resolves_nested_client_checkout_asset_and_table_paths() {
+        let root = temp_root("nested_client");
+        let client = root.join("client");
+        fs::create_dir_all(client.join("map")).unwrap();
+        fs::create_dir_all(client.join("texture")).unwrap();
+        fs::create_dir_all(client.join("scripts").join("table")).unwrap();
+        fs::create_dir_all(client.join("scripts").join("txt")).unwrap();
+        fs::write(
+            client.join("scripts").join("txt").join("CharacterInfo.txt"),
+            b"",
+        )
+        .unwrap();
+
+        assert_eq!(asset_dir(&root, "map"), client.join("map"));
+        assert_eq!(asset_dir(&root, "texture"), client.join("texture"));
+        assert_eq!(
+            table_file(&root, "TerrainInfo.bin"),
+            client.join("scripts").join("table").join("TerrainInfo.bin")
+        );
+        assert_eq!(
+            script_txt_file(&root, "CharacterInfo.txt"),
+            client.join("scripts").join("txt").join("CharacterInfo.txt")
         );
 
         let _ = fs::remove_dir_all(root);

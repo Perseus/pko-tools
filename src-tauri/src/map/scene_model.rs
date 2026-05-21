@@ -1,10 +1,8 @@
 //! LMO → glTF conversion for scene building models.
 //!
-//! Two entry points:
+//! Entry point:
 //! - `build_gltf_from_lmo` — standalone building viewer (single LMO → complete glTF)
-//! - `load_scene_models` — map integration (batch load unique models, return glTF components)
 
-use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
@@ -23,8 +21,6 @@ use crate::math::coord_transform::CoordTransform;
 
 use super::lmo_loader;
 use super::lmo_types::{self as lmo, LmoGeomObject, LmoModel, D3DCULL_NONE};
-use super::scene_obj::SceneObject;
-use super::scene_obj_info::SceneObjModelInfo;
 
 /// Search for an LMO file in the standard model directories.
 /// PKO clients store scene models in `model/scene/`, but some may be in `model/`.
@@ -2013,158 +2009,6 @@ fn merge_data_uri_buffers(
     Ok((merged, single_buffer, new_views))
 }
 
-// ============================================================================
-// Public API: batch load scene models for map integration
-// ============================================================================
-
-/// Loaded scene model data for map integration.
-pub struct LoadedSceneModels {
-    /// glTF meshes for each unique model.
-    pub meshes: Vec<gltf_json::Mesh>,
-    /// Materials used by the models.
-    pub materials: Vec<gltf_json::Material>,
-    /// Accessors for model data.
-    pub accessors: Vec<gltf_json::Accessor>,
-    /// Buffer views for model data.
-    pub buffer_views: Vec<gltf_json::buffer::View>,
-    /// Buffers for model data.
-    pub buffers: Vec<gltf_json::Buffer>,
-    /// Images for model textures.
-    pub images: Vec<gltf_json::Image>,
-    /// Texture samplers.
-    pub samplers: Vec<gltf_json::texture::Sampler>,
-    /// Textures referencing images and samplers.
-    pub textures: Vec<gltf_json::Texture>,
-    /// Maps obj_id → mesh index within this struct's meshes array.
-    pub model_mesh_map: HashMap<u32, usize>,
-}
-
-/// Load unique scene models referenced by map objects.
-///
-/// Only loads models for type-0 (building) objects. Skips failures gracefully.
-pub fn load_scene_models(
-    project_dir: &Path,
-    obj_info: &HashMap<u32, SceneObjModelInfo>,
-    objects: &[SceneObject],
-) -> Result<LoadedSceneModels> {
-    // Collect unique obj_ids for type-0 objects
-    let mut unique_ids: Vec<u32> = objects
-        .iter()
-        .filter(|o| o.obj_type == 0)
-        .map(|o| o.obj_id as u32)
-        .collect();
-    unique_ids.sort_unstable();
-    unique_ids.dedup();
-
-    let ct = CoordTransform::new();
-    let mut builder = GltfBuilder::new();
-    let mut model_mesh_map = HashMap::new();
-
-    for obj_id in unique_ids {
-        let info = match obj_info.get(&obj_id) {
-            Some(i) => i,
-            None => continue,
-        };
-
-        let lmo_path = match find_lmo_path(project_dir, &info.filename) {
-            Some(p) => p,
-            None => continue,
-        };
-
-        let model = match lmo_loader::load_lmo_no_animation(&lmo_path) {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-        add_model_to_builder(
-            &mut builder,
-            &mut model_mesh_map,
-            obj_id,
-            &model,
-            project_dir,
-            &ct,
-        );
-    }
-
-    Ok(LoadedSceneModels {
-        meshes: builder.meshes,
-        materials: builder.materials,
-        accessors: builder.accessors,
-        buffer_views: builder.buffer_views,
-        buffers: builder.buffers,
-        images: builder.images,
-        samplers: builder.samplers,
-        textures: builder.textures,
-        model_mesh_map,
-    })
-}
-
-fn add_model_to_builder(
-    builder: &mut GltfBuilder,
-    model_mesh_map: &mut HashMap<u32, usize>,
-    obj_id: u32,
-    model: &LmoModel,
-    project_dir: &Path,
-    ct: &CoordTransform,
-) {
-    // Merge all geometry objects into a single mesh with multiple primitives
-    let mut all_primitives = Vec::new();
-
-    for (gi, geom) in model.geom_objects.iter().enumerate() {
-        let prefix = format!("obj{}_{}", obj_id, gi);
-        let material_base_idx = builder.materials.len() as u32;
-
-        if geom.materials.is_empty() {
-            build_lmo_material(
-                builder,
-                &lmo::LmoMaterial {
-                    diffuse: [0.7, 0.7, 0.7, 1.0],
-                    ambient: [0.3, 0.3, 0.3, 1.0],
-                    emissive: [0.0, 0.0, 0.0, 0.0],
-                    opacity: 1.0,
-                    transp_type: 0,
-                    alpha_test_enabled: false,
-                    alpha_ref: 0,
-                    src_blend: None,
-                    dest_blend: None,
-                    cull_mode: None,
-                    tex_filename: None,
-                },
-                &format!("{}_mat", prefix),
-                project_dir,
-                TextureMode::Skip, // skip textures for map batch loading
-            );
-        } else {
-            for (mi, mat) in geom.materials.iter().enumerate() {
-                build_lmo_material(
-                    builder,
-                    mat,
-                    &format!("{}_mat{}", prefix, mi),
-                    project_dir,
-                    TextureMode::Skip, // skip textures for map batch loading
-                );
-            }
-        }
-
-        let prims = build_geom_primitives(builder, geom, &prefix, material_base_idx, false, ct);
-        all_primitives.extend(prims);
-    }
-
-    if all_primitives.is_empty() {
-        return;
-    }
-
-    let mesh_idx = builder.meshes.len();
-    builder.meshes.push(gltf_json::Mesh {
-        name: Some(format!("building_{}", obj_id)),
-        primitives: all_primitives,
-        weights: None,
-        extensions: None,
-        extras: None,
-    });
-
-    model_mesh_map.insert(obj_id, mesh_idx);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2530,65 +2374,6 @@ mod tests {
 
         let result = build_gltf_from_lmo(&lmo_path, &tmp_dir);
         assert!(result.is_err(), "empty model should error");
-
-        let _ = std::fs::remove_dir_all(&tmp_dir);
-    }
-
-    #[test]
-    fn load_scene_models_unknown_ids_skipped() {
-        let obj_info = HashMap::new(); // empty — no known models
-        let objects = vec![SceneObject {
-            raw_type_id: 0,
-            obj_type: 0,
-            obj_id: 999,
-            world_x: 0.0,
-            world_y: 0.0,
-            world_z: 0.0,
-            yaw_angle: 0,
-            scale: 100,
-        }];
-
-        let tmp_dir = std::env::temp_dir().join("pko_tools_test_scene");
-        let _ = std::fs::create_dir_all(&tmp_dir);
-
-        let result = load_scene_models(&tmp_dir, &obj_info, &objects).unwrap();
-        assert!(result.meshes.is_empty());
-        assert!(result.model_mesh_map.is_empty());
-
-        let _ = std::fs::remove_dir_all(&tmp_dir);
-    }
-
-    #[test]
-    fn load_scene_models_effects_ignored() {
-        let mut obj_info = HashMap::new();
-        obj_info.insert(
-            1,
-            SceneObjModelInfo {
-                id: 1,
-                filename: "test.lmo".to_string(),
-                ..Default::default()
-            },
-        );
-        // Object is type 1 (effect) — should be skipped
-        let objects = vec![SceneObject {
-            raw_type_id: 0,
-            obj_type: 1, // effect, not model
-            obj_id: 1,
-            world_x: 0.0,
-            world_y: 0.0,
-            world_z: 0.0,
-            yaw_angle: 0,
-            scale: 100,
-        }];
-
-        let tmp_dir = std::env::temp_dir().join("pko_tools_test_scene2");
-        let _ = std::fs::create_dir_all(&tmp_dir);
-
-        let result = load_scene_models(&tmp_dir, &obj_info, &objects).unwrap();
-        assert!(
-            result.model_mesh_map.is_empty(),
-            "effects should be skipped"
-        );
 
         let _ = std::fs::remove_dir_all(&tmp_dir);
     }

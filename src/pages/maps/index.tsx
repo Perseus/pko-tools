@@ -21,7 +21,10 @@ export default function MapsPage() {
   }
 
   return (
-    <main className="h-full w-full">
+    <main
+      data-testid="maps-page-shell"
+      className="h-full min-h-0 w-full min-w-0 overflow-hidden"
+    >
       <MapWorkbench />
     </main>
   );

@@ -3,7 +3,7 @@ use kaitai::*;
 
 use crate::kaitai_gen::pko_obj::PkoObj;
 
-use super::scene_obj::{ParsedObjFile, SceneObject};
+use super::scene_obj::{ParsedObjFile, RawSceneObjectRecord, SceneObject};
 
 const OBJ_FILE_VER600: i32 = 600;
 
@@ -29,11 +29,14 @@ pub fn load_obj(data: &[u8]) -> Result<ParsedObjFile> {
     let section_cnt_y = *parsed.section_cnt_y();
     let section_width = *parsed.section_width();
     let section_height = *parsed.section_height();
+    let section_obj_num = *parsed.section_obj_num();
     let section_cnt = (section_cnt_x * section_cnt_y) as usize;
 
     let section_index = parsed.section_index();
 
     let mut objects = Vec::new();
+    let mut raw_records = Vec::new();
+    let mut object_raw_indices = Vec::new();
 
     for section_no in 0..section_cnt {
         let entry = &section_index[section_no];
@@ -59,6 +62,13 @@ pub fn load_obj(data: &[u8]) -> Result<ParsedObjFile> {
                 break;
             }
             let rec = &data[rec_start..rec_start + 20];
+            let mut raw_bytes = [0u8; 20];
+            raw_bytes.copy_from_slice(rec);
+            let raw_record_index = raw_records.len();
+            raw_records.push(RawSceneObjectRecord {
+                section_no,
+                bytes: raw_bytes,
+            });
 
             let raw_type_id = i16::from_le_bytes([rec[0], rec[1]]);
             // rec[2..4] is padding
@@ -102,9 +112,10 @@ pub fn load_obj(data: &[u8]) -> Result<ParsedObjFile> {
                 world_x,
                 world_y,
                 world_z,
-                yaw_angle: sanitize_yaw_degrees(s_yaw_angle),
-                scale: sanitize_scale(s_scale),
+                yaw_angle: s_yaw_angle,
+                scale: s_scale,
             });
+            object_raw_indices.push(raw_record_index);
         }
     }
 
@@ -113,7 +124,11 @@ pub fn load_obj(data: &[u8]) -> Result<ParsedObjFile> {
         section_cnt_y,
         section_width,
         section_height,
+        section_obj_num,
         objects,
+        raw_records,
+        object_raw_indices,
+        dirty_object_indices: Default::default(),
     })
 }
 
@@ -137,24 +152,8 @@ fn decode_section_relative_cm(
     Some((abs_x_cm as f32 / 100.0, abs_y_cm as f32 / 100.0))
 }
 
-fn sanitize_yaw_degrees(raw_yaw: i16) -> i16 {
-    let mut yaw = raw_yaw as i32;
-    if yaw.abs() > 360 {
-        yaw %= 360;
-    }
-    yaw as i16
-}
-
 fn safe_abs_i16(v: i16) -> i32 {
     (v as i32).abs()
-}
-
-fn sanitize_scale(raw_scale: i16) -> i16 {
-    if safe_abs_i16(raw_scale) > 2000 {
-        0
-    } else {
-        raw_scale
-    }
 }
 
 #[cfg(test)]

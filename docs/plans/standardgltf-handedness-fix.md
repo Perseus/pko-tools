@@ -1,5 +1,7 @@
 # Fix StandardGltf Coordinate Transform: det=+1 → det=-1
 
+> Historical coordinate-transform plan: references to map terrain GLB/viewer verification are obsolete for current map work. Standard glTF remains relevant for character/building/effect assets, not whole-map terrain export.
+
 ## Goal
 
 Change the StandardGltf export profile from a pure rotation `(x,y,z) → (x, z, -y)` (det=+1, preserves handedness) to a reflection `(x,y,z) → (x, z, y)` (det=-1, flips handedness). This fixes character mirroring and inside-out faces in the Tauri Three.js viewer, and makes map tile coordinates positive (matching PKO's positive tileX/tileY).
@@ -94,6 +96,6 @@ Revert the incorrect "CCW winding" comment in `character/mesh.rs:500-503` to exp
 
 ## Open Questions
 
-1. **Map/terrain viewer:** Do the Tauri map viewer pages use StandardGltf? If so, terrain and buildings need visual verification after the change. The `shared.rs` and `commands.rs` files create StandardGltf instances for the preview viewer.
+1. **Map/terrain viewer:** Obsolete for current map work. Whole-map terrain GLB/glTF export and terrain preview paths have been removed; StandardGltf verification applies to character, building, item, and effect assets only.
 2. **Golden reference tests:** Are there snapshot tests in `tests/golden_reference_tests.rs` that compare GLB output byte-for-byte? If so, those snapshots need regeneration.
 3. **Bone scale conversion:** Character bone scale at `character.rs:525` passes raw scale without `ct.scale()`. This is a pre-existing bug (unrelated to this change) but should be noted.

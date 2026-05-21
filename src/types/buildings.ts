@@ -42,3 +42,26 @@ export type BuildingMetadata = {
   version: number;
   geom_objects: GeomObjectInfo[];
 };
+
+export type BuildingSceneInfo = {
+  building_id: number;
+  filename: string;
+  display_name: string;
+  scene_obj_type: number;
+  shade_flag: boolean;
+  enable_point_light: boolean;
+  enable_env_light: boolean;
+  attach_effect_id: number;
+  style: number;
+  flag: number;
+  size_flag: number;
+  anim_ctrl_id: number;
+  is_really_big: boolean;
+  point_color: [number, number, number];
+  env_color: [number, number, number];
+  point_range: number;
+  point_attenuation: number;
+  fade_obj_num: number;
+  fade_obj_seq: number[];
+  fade_coefficient: number;
+};

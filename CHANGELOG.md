@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Removed
+
+- **Map glTF terrain export/viewer:** Removed the whole-map glTF/GLB terrain export and on-demand terrain viewer path. Maps now stay on the native 2D workbench and native PKO client/server editing/export flow.
+
+---
+
 ## [0.1.9] - 2026-03-06
 
 ### Improvements
@@ -54,7 +62,7 @@
 
 ![CMDK palette](changelog-assets/cmdk-palette.png)
 
-- **Map export pipeline (v3):** Per-section terrain export for large maps, shared asset export system, GLB writer for terrain and buildings, terrain height grid PNG export, and alpha mask atlas splitting into 16 slices
+- **Legacy map export pipeline (v3):** Per-section terrain export for large maps, shared asset export system, GLB writer for terrain and buildings, terrain height grid PNG export, and alpha mask atlas splitting into 16 slices. Whole-map terrain GLB/glTF export was later removed; current map work uses the native 2D workbench and PKO client/server formats.
 
 - **Kaitai-only parsing:** Migrated all PKO binary format parsers (LGO, LMO, LAB, OBJ, MAP, EFF) to Kaitai Struct adapters with exhaustive parity tests; deleted all legacy native parsers
 - **`pko_inspect` CLI:** New binary that parses any supported PKO format and prints structured JSON for debugging
@@ -71,7 +79,7 @@
 - **Performance:** Code-split routes, tuned vendor chunking, per-workbench frame probes and dev performance overlay, instrumented Tauri invokes with timing metrics, capped DPR, preferred high-performance WebGL, and instanced mesh rendering for map object markers
 - **Effect performance:** Cached cylinder deformation geometry, reused gizmo temporaries, moved playback clock off Jotai frame updates, and disabled persistent draw buffers
 - **Blend/material state:** Per-material blend state via structured PKO suffix, `D3DRS_CULLMODE` extraction for double-sided materials, alpha test state parsing from V0000/V0001 render state blocks, and additive blend mode + vertex color export from LMO buildings
-- **Terrain export quality:** Clamped boundary vertices to eliminate cliff faces at section edges; removed incorrect 25x height exaggeration from glTF output
+- **Legacy terrain export quality:** Clamped boundary vertices to eliminate cliff faces at section edges; removed incorrect 25x height exaggeration from the old terrain exporter
 
 ### Bug Fixes
 

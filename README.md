@@ -56,11 +56,12 @@ This tool is designed for converting game client assets into standard formats (s
   - `PKO_LMO_PARSER=native` (default)
   - `PKO_LMO_PARSER=kaitai` (currently scaffold fallback to native parser)
 
-### Exporting to glTF
+### Exporting assets to glTF
 
-- Click the **"Export to glTF"** button.
-- The tool will generate a `.glTF` file that contains the character's mesh, animations, and texture data.
+- In the character or building tools, click the **"Export to glTF"** button.
+- The tool will generate a `.glTF` file that contains the asset mesh, animation, and texture data supported by that tool.
 - The exported file is saved to the `exports/gltf` folder located next to the tool’s installation directory.
+- Maps are edited and exported through their native PKO client/server formats rather than glTF.
 - **Editing in Blender:**  
   When exporting from Blender, ensure the following settings are applied:
   1. **Animation:** Turn **"Sampling animations"** **OFF**.

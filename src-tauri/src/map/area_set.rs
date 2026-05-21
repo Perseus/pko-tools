@@ -24,7 +24,7 @@ pub struct AreaDefinition {
     pub light_color: [u8; 3],
     /// Directional light direction vector [x, y, z]
     pub light_dir: [f32; 3],
-    /// Zone type: 0=wilderness (PK enabled), 1=city (safe zone)
+    /// Zone type from AreaSet chType: 0=wilderness/outside, 1=city
     pub zone_type: u8,
 }
 

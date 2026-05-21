@@ -1,172 +1,334 @@
-import { Canvas } from "@react-three/fiber";
 import { modLabel } from "@/lib/platform";
-import { OrbitControls, GizmoHelper, GizmoViewport } from "@react-three/drei";
-import { useAtomValue, useAtom } from "jotai";
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { mapGltfJsonAtom, mapLoadingAtom, mapMetadataAtom, mapViewConfigAtom, selectedMapAtom } from "@/store/map";
-import MapTerrainViewer from "./MapTerrainViewer";
+import { useAtomValue } from "jotai";
+import {
+  KeyboardEvent as ReactKeyboardEvent,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { selectedMapAtom } from "@/store/map";
 import MapPlacementBrowser from "./MapPlacementBrowser";
-import { Loader2 } from "lucide-react";
+import MapChunkedWorkbench from "./MapChunkedWorkbench";
+import { Maximize2, PanelRightOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { actionIds } from "@/features/actions/actionIds";
-import { ContextualActionMenu } from "@/features/actions/ContextualActionMenu";
-import { useRegisterActionRuntime } from "@/features/actions/ActionKernelProvider";
-import { PerfFrameProbe, PerfOverlay } from "@/features/perf";
-import { CanvasErrorBoundary } from "@/components/CanvasErrorBoundary";
-import { MapPlacementRecord } from "@/types/map";
-import { currentProjectAtom } from "@/store/project";
-import { loadMapTerrain } from "@/commands/map";
-import { toast } from "@/hooks/use-toast";
-import { LatestOnly } from "@/lib/latestOnly";
+import { MapPlacementRecord, MapSelectedTile } from "@/types/map";
+import type { MapPlacementOverlayFilter, MapTileBounds } from "./mapWorkbenchView";
 
-const MAP_CONTEXT_ACTIONS = [
-  actionIds.mapToggleObjectMarkers,
-  actionIds.mapToggleWireframe,
-  actionIds.mapExportGltf,
-];
+const PLACEMENT_PANEL_WIDTH_PX = 320;
+const PLACEMENT_PANEL_EDGE_GAP_PX = 12;
+const PLACEMENT_PANEL_SAFE_INSET_PX = PLACEMENT_PANEL_WIDTH_PX + PLACEMENT_PANEL_EDGE_GAP_PX;
+const PLACEMENT_RAIL_WIDTH_PX = 48;
+const PLACEMENT_RAIL_SAFE_INSET_PX = PLACEMENT_RAIL_WIDTH_PX + PLACEMENT_PANEL_EDGE_GAP_PX;
 
-function MapViewToolbar() {
-  const [viewConfig, setViewConfig] = useAtom(mapViewConfigAtom);
+type PlacementFocusRequest = {
+  placement: MapPlacementRecord;
+  nonce: number;
+};
 
-  const mapToggleObjectsActionRuntime = useMemo(
-    () => ({
-      run: () => {
-        setViewConfig((prev) => ({
-          ...prev,
-          showObjectMarkers: !prev.showObjectMarkers,
-        }));
-      },
-      isEnabled: () => true,
-    }),
-    [setViewConfig],
-  );
-  const mapToggleWireframeActionRuntime = useMemo(
-    () => ({
-      run: () => {
-        setViewConfig((prev) => ({
-          ...prev,
-          showWireframe: !prev.showWireframe,
-        }));
-      },
-      isEnabled: () => true,
-    }),
-    [setViewConfig],
-  );
+type MapScopedPlacement = {
+  mapName: string;
+  placement: MapPlacementRecord;
+};
 
-  useRegisterActionRuntime(actionIds.mapToggleObjectMarkers, mapToggleObjectsActionRuntime);
-  useRegisterActionRuntime(actionIds.mapToggleWireframe, mapToggleWireframeActionRuntime);
+type MapScopedFocusRequest = {
+  mapName: string;
+  request: PlacementFocusRequest;
+};
 
-  return (
-    <div className="absolute top-2 left-2 z-10 flex gap-1">
-      <Button
-        variant={viewConfig.showObjectMarkers ? "default" : "outline"}
-        size="sm"
-        className="h-7 text-xs"
-        onClick={() =>
-          setViewConfig((prev) => ({
-            ...prev,
-            showObjectMarkers: !prev.showObjectMarkers,
-          }))
-        }
-      >
-        Objects
-      </Button>
-      <Button
-        variant={viewConfig.showWireframe ? "default" : "outline"}
-        size="sm"
-        className="h-7 text-xs"
-        onClick={() =>
-          setViewConfig((prev) => ({
-            ...prev,
-            showWireframe: !prev.showWireframe,
-          }))
-        }
-      >
-        Wireframe
-      </Button>
-    </div>
-  );
-}
+type MapScopedTile = {
+  mapName: string;
+  tile: MapSelectedTile;
+};
 
-function MapMetadataPanel() {
-  const metadata = useAtomValue(mapMetadataAtom);
-  if (!metadata) return null;
+type MapScopedBounds = {
+  mapName: string;
+  bounds: MapTileBounds;
+};
 
-  return (
-    <div className="absolute bottom-8 left-2 z-10 bg-background/80 backdrop-blur-sm rounded-md border p-2 text-xs space-y-0.5">
-      <div className="font-medium">{metadata.name}</div>
-      <div className="text-muted-foreground">
-        Size: {metadata.width} x {metadata.height}
-      </div>
-      <div className="text-muted-foreground">
-        Sections: {metadata.non_empty_sections} / {metadata.total_sections}
-      </div>
-      <div className="text-muted-foreground">
-        Tiles: {metadata.total_tiles.toLocaleString()}
-      </div>
-      {metadata.object_count > 0 && (
-        <div className="text-muted-foreground">
-          Objects: {metadata.object_count}
-        </div>
-      )}
-    </div>
-  );
-}
+type MapScopedPlacementUiState = {
+  mapName: string;
+  panelOpen: boolean;
+  panelMounted: boolean;
+  toolsHidden: boolean;
+};
 
 export default function MapWorkbench() {
-  const currentProject = useAtomValue(currentProjectAtom);
   const selectedMap = useAtomValue(selectedMapAtom);
-  const [gltfJson, setMapGltfJson] = useAtom(mapGltfJsonAtom);
-  const metadata = useAtomValue(mapMetadataAtom);
-  const [loading, setMapLoading] = useAtom(mapLoadingAtom);
-  const viewConfig = useAtomValue(mapViewConfigAtom);
-  const [selectedPlacement, setSelectedPlacement] = useState<MapPlacementRecord | null>(null);
-  const [mode, setMode] = useState<"placements" | "terrain">("placements");
-  const terrainLoadGuard = useRef(new LatestOnly());
+  const [selectedPlacementState, setSelectedPlacementState] =
+    useState<MapScopedPlacement | null>(null);
+  const [selectedPlacementViewState, setSelectedPlacementViewState] =
+    useState<MapScopedPlacement | null>(null);
+  const [placementFocusRequestState, setPlacementFocusRequestState] =
+    useState<MapScopedFocusRequest | null>(null);
+  const [selectedTileState, setSelectedTileState] = useState<MapScopedTile | null>(null);
+  const [visibleBoundsState, setVisibleBoundsState] = useState<MapScopedBounds | null>(null);
+  const [placementFilterState, setPlacementFilterState] = useState<{
+    mapName: string;
+    filter: MapPlacementOverlayFilter;
+  } | null>(null);
+  const [placementUiState, setPlacementUiState] =
+    useState<MapScopedPlacementUiState | null>(null);
+  const placementFocusNonceRef = useRef(0);
+  const stageRef = useRef<HTMLDivElement | null>(null);
+  const openPlacementPanelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const collapsePlacementPanelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const showPlacementToolsButtonRef = useRef<HTMLButtonElement | null>(null);
+  const [stageWidth, setStageWidth] = useState<number | null>(null);
+  const selectedMapName = selectedMap?.name ?? null;
 
-  useEffect(() => {
-    setMode("placements");
-    setSelectedPlacement(null);
-  }, [selectedMap?.name]);
-
-  async function handleLoadTerrain() {
-    if (!currentProject || !selectedMap) {
+  useLayoutEffect(() => {
+    const element = stageRef.current;
+    if (!element) {
       return;
     }
 
-    const requestVersion = terrainLoadGuard.current.begin();
-    setMode("terrain");
-    setMapLoading(true);
-    try {
-      const nextGltf = await loadMapTerrain(currentProject.id, selectedMap.name);
-      if (!terrainLoadGuard.current.isLatest(requestVersion)) {
-        return;
-      }
-      setMapGltfJson(nextGltf);
-    } catch (error) {
-      if (terrainLoadGuard.current.isLatest(requestVersion)) {
-        toast({
-          title: "Failed to load terrain",
-          description: String(error),
-          variant: "destructive",
-        });
-      }
-    } finally {
-      if (terrainLoadGuard.current.isLatest(requestVersion)) {
-        setMapLoading(false);
-      }
+    const updateStageWidth = (width: number) => {
+      setStageWidth((current) => (
+        current === width ? current : width
+      ));
+    };
+
+    updateStageWidth(element.clientWidth);
+
+    if (typeof ResizeObserver === "undefined") {
+      const handleResize = () => updateStageWidth(element.clientWidth);
+      window.addEventListener("resize", handleResize);
+      return () => window.removeEventListener("resize", handleResize);
     }
+
+    const observer = new ResizeObserver((entries) => {
+      const nextWidth = entries[0]?.contentRect.width;
+      if (typeof nextWidth === "number" && Number.isFinite(nextWidth)) {
+        updateStageWidth(Math.max(0, nextWidth));
+      }
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  function openPlacementPanel() {
+    if (!selectedMapName) {
+      return;
+    }
+    setPlacementUiState({
+      mapName: selectedMapName,
+      panelOpen: true,
+      panelMounted: true,
+      toolsHidden: false,
+    });
+    window.requestAnimationFrame(() => collapsePlacementPanelButtonRef.current?.focus());
   }
 
-  // Compute initial camera position — edge of map looking across the terrain
-  const mapScale = 1; // 1 tile = 1 world unit (no scale factor)
-  const cameraPos: [number, number, number] = metadata
-    ? [
-        (metadata.width * mapScale) * 0.1,
-        (metadata.width * mapScale) * 0.15,
-        (metadata.height * mapScale) * 0.1,
-      ]
-    : [50, 40, 50];
+  function collapsePlacementPanel() {
+    setPlacementUiState((current) =>
+      selectedMapName
+        ? {
+            mapName: selectedMapName,
+            panelOpen: false,
+            panelMounted: current?.mapName === selectedMapName
+              ? current.panelMounted
+              : false,
+            toolsHidden: current?.mapName === selectedMapName
+              ? current.toolsHidden
+              : false,
+          }
+        : null
+    );
+    window.requestAnimationFrame(() => openPlacementPanelButtonRef.current?.focus());
+  }
+
+  function maximizeMapEditor() {
+    if (!selectedMapName) {
+      return;
+    }
+    setPlacementUiState({
+      mapName: selectedMapName,
+      panelOpen: false,
+      panelMounted: false,
+      toolsHidden: true,
+    });
+    window.requestAnimationFrame(() => showPlacementToolsButtonRef.current?.focus());
+  }
+
+  function showPlacementTools() {
+    if (!selectedMapName) {
+      return;
+    }
+    setPlacementUiState({
+      mapName: selectedMapName,
+      panelOpen: false,
+      panelMounted: false,
+      toolsHidden: false,
+    });
+    window.requestAnimationFrame(() => openPlacementPanelButtonRef.current?.focus());
+  }
+
+  function handleWorkbenchKeyDown(event: ReactKeyboardEvent<HTMLDivElement>) {
+    if (event.key !== "Escape" || !placementPanelOpen) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+    collapsePlacementPanel();
+  }
+
+  const scopedPlacement = useCallback((placement: MapPlacementRecord | null): MapScopedPlacement | null => {
+    return selectedMapName && placement
+      ? { mapName: selectedMapName, placement }
+      : null;
+  }, [selectedMapName]);
+
+  const handleSelectedPlacementViewChange = useCallback((placement: MapPlacementRecord | null) => {
+    setSelectedPlacementViewState(scopedPlacement(placement));
+  }, [scopedPlacement]);
+
+  const handleCanvasSelectPlacement = useCallback((placement: MapPlacementRecord | null) => {
+    const scoped = scopedPlacement(placement);
+    setSelectedPlacementState(scoped);
+    setSelectedPlacementViewState(scoped);
+  }, [scopedPlacement]);
+
+  const handleSelectedTileChange = useCallback((tile: MapSelectedTile | null) => {
+    setSelectedTileState(selectedMapName && tile
+      ? { mapName: selectedMapName, tile }
+      : null);
+  }, [selectedMapName]);
+
+  const handleViewportBoundsChange = useCallback((
+    bounds: MapTileBounds | null,
+    sourceMapName?: string | null,
+  ) => {
+    if (bounds && sourceMapName !== selectedMapName) {
+      return;
+    }
+    setVisibleBoundsState(selectedMapName && bounds
+      ? { mapName: selectedMapName, bounds }
+      : null);
+  }, [selectedMapName]);
+
+  function selectPlacementFromBrowser(placement: MapPlacementRecord | null) {
+    setSelectedPlacementState(scopedPlacement(placement));
+    setSelectedPlacementViewState(scopedPlacement(placement));
+    setPlacementFocusRequestState(selectedMapName && placement
+      ? {
+          mapName: selectedMapName,
+          request: {
+            placement,
+            nonce: ++placementFocusNonceRef.current,
+          },
+        }
+      : null);
+  }
+
+  const handlePlacementFilterChange = useCallback((filter: MapPlacementOverlayFilter) => {
+    if (!selectedMapName) {
+      setPlacementFilterState(null);
+      return;
+    }
+    setPlacementFilterState({ mapName: selectedMapName, filter });
+  }, [selectedMapName]);
+
+  useEffect(() => {
+    setSelectedPlacementState(null);
+    setSelectedPlacementViewState(null);
+    setPlacementFocusRequestState(null);
+    setSelectedTileState(null);
+    setVisibleBoundsState(null);
+    setPlacementFilterState(null);
+    setPlacementUiState(selectedMapName
+      ? {
+          mapName: selectedMapName,
+          panelOpen: false,
+          panelMounted: false,
+          toolsHidden: false,
+        }
+      : null);
+  }, [selectedMapName]);
+
+  const placementFilter =
+    placementFilterState && placementFilterState.mapName === selectedMapName
+      ? placementFilterState.filter
+      : null;
+  const selectedPlacement =
+    selectedPlacementState && selectedPlacementState.mapName === selectedMapName
+      ? selectedPlacementState.placement
+      : null;
+  const selectedPlacementView =
+    selectedPlacementViewState && selectedPlacementViewState.mapName === selectedMapName
+      ? selectedPlacementViewState.placement
+      : null;
+  const placementFocusRequest =
+    placementFocusRequestState && placementFocusRequestState.mapName === selectedMapName
+      ? placementFocusRequestState.request
+      : null;
+  const selectedTile =
+    selectedTileState && selectedTileState.mapName === selectedMapName
+      ? selectedTileState.tile
+      : null;
+  const visibleBounds =
+    visibleBoundsState && visibleBoundsState.mapName === selectedMapName
+      ? visibleBoundsState.bounds
+      : null;
+  const activePlacementUiState =
+    placementUiState && placementUiState.mapName === selectedMapName
+      ? placementUiState
+      : null;
+  const placementPanelOpen = activePlacementUiState?.panelOpen ?? false;
+  const placementPanelMounted = activePlacementUiState?.panelMounted ?? false;
+  const placementToolsHidden = activePlacementUiState?.toolsHidden ?? false;
+
+  const placementFilterActive = Boolean(
+    placementFilter?.valid
+    && (
+      placementFilter.query.trim() !== ""
+      || placementFilter.placementType !== "all"
+      || (
+        placementFilter.nearEnabled
+        && (
+          placementFilter.useVisibleBounds
+          || (
+            placementFilter.nearX != null
+            && placementFilter.nearY != null
+            && placementFilter.nearRadius != null
+          )
+        )
+      )
+    ),
+  );
+  const placementFilterFollowsView = Boolean(
+    placementFilterActive
+    && placementFilter?.nearEnabled
+    && placementFilter.useVisibleBounds,
+  );
+  const placementFilterBadge = placementFilterFollowsView ? "View" : "Filter";
+  const placementFilterTitle = placementFilterFollowsView
+    ? "Placement browser filter follows the visible map view"
+    : "Placement browser filter is active";
+  const openPlacementPanelLabel = placementFilterActive
+    ? `Open placements panel, ${placementFilterFollowsView ? "view filter active" : "filter active"}`
+    : "Open placements panel";
+  const placementPanelSafeInset = stageWidth && stageWidth > 0
+    ? Math.min(
+        PLACEMENT_PANEL_SAFE_INSET_PX,
+        Math.max(
+          PLACEMENT_RAIL_SAFE_INSET_PX,
+          stageWidth - PLACEMENT_PANEL_EDGE_GAP_PX,
+        ),
+      )
+    : PLACEMENT_PANEL_SAFE_INSET_PX;
+  const rightOverlayInset = placementToolsHidden
+    ? 0
+    : placementPanelOpen
+      ? placementPanelSafeInset
+      : PLACEMENT_RAIL_SAFE_INSET_PX;
+  const rightDockInset = placementToolsHidden
+    ? 0
+    : placementPanelOpen
+      ? placementPanelSafeInset
+      : PLACEMENT_RAIL_SAFE_INSET_PX;
 
   if (!selectedMap) {
     return (
@@ -180,171 +342,150 @@ export default function MapWorkbench() {
   }
 
   return (
-    <ContextualActionMenu
-      actionIds={MAP_CONTEXT_ACTIONS}
-      requireShiftKey
-      className="relative h-full w-full"
+    <div
+      data-testid="map-workbench-shell"
+      className="relative h-full min-h-0 w-full min-w-0 overflow-hidden"
     >
-      <div className="flex h-full w-full gap-3 p-3">
-        <div className="relative min-w-0 flex-1 overflow-hidden rounded-lg border bg-muted/20">
-          <div className="absolute left-3 top-3 z-10 flex items-center gap-2">
-            <Button
-              variant={mode === "placements" ? "default" : "outline"}
-              size="sm"
-              className="h-8 text-xs"
-              onClick={() => setMode("placements")}
-            >
-              Placements
-            </Button>
-            <Button
-              variant={mode === "terrain" ? "default" : "outline"}
-              size="sm"
-              className="h-8 text-xs"
-              onClick={() => {
-                if (gltfJson) {
-                  setMode("terrain");
-                  return;
-                }
-                void handleLoadTerrain();
-              }}
-            >
-              {loading && mode === "terrain" ? (
-                <>
-                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                  Loading Terrain
-                </>
-              ) : (
-                "3D Terrain"
-              )}
-            </Button>
-          </div>
-
-          {mode === "terrain" ? (
-            <>
-              <MapViewToolbar />
-              <MapMetadataPanel />
-              {loading && (
-                <div className="flex h-full items-center justify-center">
-                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                  <span className="ml-2 text-muted-foreground text-sm">
-                    Loading terrain...
-                  </span>
-                </div>
-              )}
-              {!loading && !gltfJson && (
-                <div className="flex h-full flex-col items-center justify-center gap-3 text-center text-sm text-muted-foreground">
-                  <div>Terrain is loaded on demand so huge maps stay usable.</div>
-                  <Button size="sm" onClick={() => void handleLoadTerrain()}>
-                    Load 3D Terrain
-                  </Button>
-                </div>
-              )}
-              {!loading && gltfJson && (
-                <>
-                  <CanvasErrorBoundary className="absolute inset-0 flex items-center justify-center">
-                    <Canvas
-                      camera={{
-                        position: cameraPos,
-                        fov: 45,
-                        near: 0.1,
-                        far: 50000,
-                      }}
-                      dpr={[1, 1.5]}
-                      gl={{ powerPreference: "high-performance" }}
-                      style={{ background: "linear-gradient(180deg, #b0c4de 0%, #dfe6ed 100%)" }}
-                    >
-                      <ambientLight intensity={0.6} />
-                      <directionalLight position={[500, 1000, 500]} intensity={0.8} />
-
-                      <Suspense fallback={null}>
-                        <MapTerrainViewer
-                          gltfJson={gltfJson}
-                          viewConfig={viewConfig}
-                          selectedPlacement={selectedPlacement}
-                        />
-                      </Suspense>
-
-                      <OrbitControls
-                        makeDefault
-                        maxDistance={15000}
-                        minDistance={1}
-                        target={
-                          metadata
-                            ? [
-                                (metadata.width * mapScale) / 2,
-                                0,
-                                (metadata.height * mapScale) / 2,
-                              ]
-                            : [0, 0, 0]
-                        }
-                      />
-
-                      <GizmoHelper alignment="bottom-right" margin={[60, 60]}>
-                        <GizmoViewport />
-                      </GizmoHelper>
-                      <PerfFrameProbe surface="maps" />
-                    </Canvas>
-                  </CanvasErrorBoundary>
-                  <PerfOverlay surface="maps" className="right-3 top-3" />
-                </>
-              )}
-            </>
-          ) : (
-            <div className="h-full overflow-y-auto px-8 py-14">
-              <div className="max-w-2xl">
-                <h2 className="text-xl font-semibold">{selectedMap.display_name}</h2>
-                <p className="mt-2 text-sm text-muted-foreground">
-                  This lightweight explorer opens map placement data without loading the heavy 3D terrain scene.
-                  Search, filter, and inspect `.obj` records on the right, then optionally load terrain only when you need spatial context.
-                </p>
-
-                <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-lg border bg-background p-4">
-                    <div className="text-xs uppercase tracking-wide text-muted-foreground">Selected placement</div>
-                    {selectedPlacement ? (
-                      <div className="mt-2 space-y-1 text-sm">
-                        <div className="font-medium">
-                          {selectedPlacement.display_name ?? selectedPlacement.asset_name ?? `${selectedPlacement.kind} ${selectedPlacement.obj_id}`}
-                        </div>
-                        <div className="font-mono text-xs text-muted-foreground">
-                          {selectedPlacement.asset_name ?? "unresolved"}
-                        </div>
-                        <div className="pt-2 font-mono text-xs text-muted-foreground">
-                          idx {selectedPlacement.index} | id {selectedPlacement.obj_id} | yaw {selectedPlacement.yaw_angle}
-                        </div>
-                        <div className="font-mono text-xs text-muted-foreground">
-                          x {selectedPlacement.world_x.toFixed(2)} | y {selectedPlacement.world_y.toFixed(2)} | z {selectedPlacement.world_z.toFixed(2)}
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="mt-2 text-sm text-muted-foreground">
-                        Pick a placement from the browser to inspect it here.
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="rounded-lg border bg-background p-4">
-                    <div className="text-xs uppercase tracking-wide text-muted-foreground">3D terrain</div>
-                    <div className="mt-2 text-sm text-muted-foreground">
-                      The original terrain renderer is still available, but it only loads on demand now.
-                    </div>
-                    <Button className="mt-4" size="sm" onClick={() => void handleLoadTerrain()}>
-                      {gltfJson ? "Open Terrain View" : "Load Terrain On Demand"}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-        </div>
-
-        <div className="h-full w-[24rem] shrink-0">
-          <MapPlacementBrowser
-            onSelectPlacement={setSelectedPlacement}
+      <div
+        ref={stageRef}
+        data-testid="map-workbench-stage"
+        className="relative h-full min-h-0 w-full min-w-0 overflow-hidden p-3"
+        onKeyDownCapture={handleWorkbenchKeyDown}
+      >
+        <div
+          data-testid="map-workbench-canvas-pane"
+          className="relative h-full min-h-0 w-full min-w-0 overflow-hidden rounded-lg border bg-muted/20"
+        >
+          <MapChunkedWorkbench
             selectedPlacement={selectedPlacement}
+            onSelectPlacement={handleCanvasSelectPlacement}
+            onSelectedTileChange={handleSelectedTileChange}
+            onSelectedPlacementViewChange={handleSelectedPlacementViewChange}
+            onViewportBoundsChange={handleViewportBoundsChange}
+            placementFocusRequest={placementFocusRequest}
+            placementFilter={placementFilter}
+            rightOverlayInset={rightOverlayInset}
+            rightDockInset={rightDockInset}
+            showSelectedPlacementPreview={!placementPanelOpen}
+            preferCollapsedInspector={placementPanelOpen}
           />
         </div>
+
+        <div
+          id="map-placement-browser-pane"
+          data-testid="map-placement-browser-pane"
+          aria-hidden={!placementPanelOpen}
+          hidden={!placementPanelOpen}
+          className={`absolute bottom-3 right-3 top-3 z-30 min-h-0 overflow-hidden transition-[width,opacity,transform] duration-150 ${
+            placementPanelOpen
+              ? "w-80 max-w-[calc(100%-1.5rem)] opacity-100 shadow-xl"
+              : "pointer-events-none w-0 translate-x-2 opacity-0"
+          }`}
+        >
+          {placementPanelMounted && (
+            <MapPlacementBrowser
+              onSelectPlacement={selectPlacementFromBrowser}
+              selectedPlacement={selectedPlacementView}
+              selectedTile={selectedTile}
+              visibleBounds={visibleBounds}
+              onPlacementFilterChange={handlePlacementFilterChange}
+              onCollapse={collapsePlacementPanel}
+              collapsed={!placementPanelOpen}
+              collapseButtonRef={collapsePlacementPanelButtonRef}
+            />
+          )}
+        </div>
+        {!placementPanelOpen && !placementToolsHidden && (
+          <div
+            data-testid="map-placement-browser-rail"
+            className="absolute bottom-3 right-3 top-3 z-20 flex min-h-0 w-12 flex-col items-center overflow-hidden rounded-lg border bg-background shadow-sm"
+          >
+            <Button
+              ref={openPlacementPanelButtonRef}
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="mt-2 h-11 w-10 flex-col gap-0.5 px-0 py-1 text-[10px] leading-none"
+              aria-label={openPlacementPanelLabel}
+              aria-controls="map-placement-browser-pane"
+              aria-expanded={placementPanelOpen}
+              title={openPlacementPanelLabel}
+              onClick={openPlacementPanel}
+            >
+              <PanelRightOpen className="h-4 w-4" />
+              <span
+                data-testid="map-placement-rail-open-label"
+                className="text-[10px] leading-none"
+              >
+                Panel
+              </span>
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="mt-1 h-11 w-10 flex-col gap-0.5 px-0 py-1 text-[10px] leading-none"
+              aria-label="Maximize map editor"
+              title="Maximize map editor"
+              onClick={maximizeMapEditor}
+            >
+              <Maximize2 className="h-4 w-4" />
+              <span
+                data-testid="map-placement-rail-focus-label"
+                className="text-[10px] leading-none"
+              >
+                Focus
+              </span>
+            </Button>
+            <div className="mt-3 rotate-180 [writing-mode:vertical-rl] text-xs font-medium text-muted-foreground">
+              Placements
+            </div>
+            {(placementFilterActive || selectedPlacement) && (
+              <div className="mb-3 mt-auto flex flex-col items-center gap-2">
+                {placementFilterActive && (
+                  <div
+                    data-testid="map-placement-filter-indicator"
+                    className="rounded border border-primary/30 bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                    title={placementFilterTitle}
+                  >
+                    {placementFilterBadge}
+                  </div>
+                )}
+                {selectedPlacement && (
+                  <div
+                    className="h-2 w-2 rounded-full bg-primary"
+                    title={selectedPlacement.display_name
+                      ?? selectedPlacement.asset_name
+                      ?? `${selectedPlacement.kind} ${selectedPlacement.obj_id}`}
+                  />
+                )}
+              </div>
+            )}
+          </div>
+        )}
+        {placementToolsHidden && (
+          <div
+            data-testid="map-placement-tools-restore"
+            className="absolute right-3 top-3 z-20"
+          >
+            <Button
+              ref={showPlacementToolsButtonRef}
+              type="button"
+              variant="secondary"
+              size="sm"
+              className="h-9 gap-1.5 px-2.5 shadow-sm"
+              aria-label="Placements, restore placement tools"
+              aria-controls="map-placement-browser-pane"
+              aria-expanded="false"
+              title="Restore placement tools"
+              onClick={showPlacementTools}
+            >
+              <PanelRightOpen className="h-4 w-4" />
+              <span>Placements</span>
+            </Button>
+          </div>
+        )}
       </div>
-    </ContextualActionMenu>
+    </div>
   );
 }

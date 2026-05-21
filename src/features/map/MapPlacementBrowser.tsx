@@ -14,20 +14,56 @@ import { selectedMapAtom } from "@/store/map";
 import {
   MapPlacementPage,
   MapPlacementRecord,
+  MapSelectedTile,
   MapPlacementSummary,
 } from "@/types/map";
 import { useAtomValue } from "jotai";
-import { Loader2, Search } from "lucide-react";
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { Loader2, LocateFixed, MousePointer2, PanelRightClose, Search, X } from "lucide-react";
+import { type Ref, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import type { MapPlacementOverlayFilter, MapTileBounds } from "./mapWorkbenchView";
+import MapPlacementBuildingPreview from "./MapPlacementBuildingPreview";
 
 const PAGE_SIZE = 200;
+const VISIBLE_BOUNDS_QUERY_DEBOUNCE_MS = 120;
+type PlacementScopeMode = "all" | "view" | "point";
+
+function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debouncedValue, setDebouncedValue] = useState(value);
+
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedValue(value), delayMs);
+    return () => window.clearTimeout(timeout);
+  }, [delayMs, value]);
+
+  return debouncedValue;
+}
+
+function placementDisplayName(placement: MapPlacementRecord): string {
+  return placement.display_name ?? placement.asset_name ?? `${placement.kind} ${placement.obj_id}`;
+}
+
+function placementRowActionLabel(placement: MapPlacementRecord): string {
+  return `Select placement ${placementDisplayName(placement)}, ${placement.kind} ${placement.obj_id} at x ${placement.world_x.toFixed(2)} y ${placement.world_y.toFixed(2)}`;
+}
 
 export default function MapPlacementBrowser({
   onSelectPlacement,
   selectedPlacement,
+  selectedTile,
+  visibleBounds,
+  onPlacementFilterChange,
+  onCollapse,
+  collapsed = false,
+  collapseButtonRef,
 }: {
   onSelectPlacement: (placement: MapPlacementRecord | null) => void;
   selectedPlacement: MapPlacementRecord | null;
+  selectedTile: MapSelectedTile | null;
+  visibleBounds?: MapTileBounds | null;
+  onPlacementFilterChange?: (filter: MapPlacementOverlayFilter) => void;
+  onCollapse?: () => void;
+  collapsed?: boolean;
+  collapseButtonRef?: Ref<HTMLButtonElement>;
 }) {
   const currentProject = useAtomValue(currentProjectAtom);
   const selectedMap = useAtomValue(selectedMapAtom);
@@ -40,7 +76,7 @@ export default function MapPlacementBrowser({
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [pageLoading, setPageLoading] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState<number | null>(null);
-  const [nearEnabled, setNearEnabled] = useState(false);
+  const [nearMode, setNearMode] = useState<PlacementScopeMode>("all");
   const [nearX, setNearX] = useState("");
   const [nearY, setNearY] = useState("");
   const [nearRadius, setNearRadius] = useState("50");
@@ -54,12 +90,15 @@ export default function MapPlacementBrowser({
     setPlacementType("all");
     setPage(0);
     setSelectedIndex(null);
-    setNearEnabled(false);
+    setNearMode("all");
     setNearX("");
     setNearY("");
     setNearRadius("50");
-    onSelectPlacement(null);
-  }, [selectedMap?.name, onSelectPlacement]);
+  }, [selectedMap?.name]);
+
+  useEffect(() => {
+    setSelectedIndex(selectedPlacement?.index ?? null);
+  }, [selectedPlacement?.index]);
 
   useEffect(() => {
     async function loadSummary() {
@@ -86,26 +125,122 @@ export default function MapPlacementBrowser({
     return () => summaryGuard.current.invalidate();
   }, [currentProject, selectedMap]);
 
-  useEffect(() => {
-    setPage(0);
-  }, [deferredQuery, nearEnabled, nearRadius, nearX, nearY, placementType, selectedMap?.name]);
-
   const parsedNearX = nearX.trim() === "" ? undefined : Number(nearX);
   const parsedNearY = nearY.trim() === "" ? undefined : Number(nearY);
   const parsedNearRadius = nearRadius.trim() === "" ? undefined : Number(nearRadius);
-  const nearArgsValid = !nearEnabled || (
-    Number.isFinite(parsedNearX) &&
-    Number.isFinite(parsedNearY) &&
-    Number.isFinite(parsedNearRadius)
+  const visibleQueryBounds = useMemo(
+    () => normalizeVisibleBounds(visibleBounds),
+    [visibleBounds?.minX, visibleBounds?.minY, visibleBounds?.maxX, visibleBounds?.maxY],
   );
+  const queryVisibleBounds = useDebouncedValue(
+    visibleQueryBounds,
+    VISIBLE_BOUNDS_QUERY_DEBOUNCE_MS,
+  );
+  const queryVisibleBoundsKey = queryVisibleBounds
+    ? `${queryVisibleBounds.minX}:${queryVisibleBounds.minY}:${queryVisibleBounds.maxX}:${queryVisibleBounds.maxY}`
+    : "";
+  const visibleBoundsKey = visibleQueryBounds
+    ? `${visibleQueryBounds.minX}:${visibleQueryBounds.minY}:${visibleQueryBounds.maxX}:${visibleQueryBounds.maxY}`
+    : "";
+  const visibleBoundsLabel = visibleQueryBounds
+    ? formatVisibleBoundsLabel(visibleQueryBounds)
+    : null;
+  const nearEnabled = nearMode !== "all";
+  const activeVisibleBoundsKey = nearEnabled ? queryVisibleBoundsKey : "";
+  const activeViewportMinX = nearEnabled ? queryVisibleBounds?.minX : undefined;
+  const activeViewportMinY = nearEnabled ? queryVisibleBounds?.minY : undefined;
+  const activeViewportMaxX = nearEnabled ? queryVisibleBounds?.maxX : undefined;
+  const activeViewportMaxY = nearEnabled ? queryVisibleBounds?.maxY : undefined;
+  const nearPointInputStarted = nearX.trim() !== "" || nearY.trim() !== "";
+  const manualNearArgsValid = Number.isFinite(parsedNearX)
+    && Number.isFinite(parsedNearY)
+    && Number.isFinite(parsedNearRadius);
+  const nearPointRefinementActive = nearEnabled && nearPointInputStarted && manualNearArgsValid;
+  const nearPointDraftInvalid = nearEnabled && nearPointInputStarted && !manualNearArgsValid;
+  const nearArgsValid = nearMode === "all"
+    || (
+      nearMode === "view"
+        ? Boolean(visibleQueryBounds) && !nearPointDraftInvalid
+        : manualNearArgsValid
+    );
+  const queryNearArgsValid = nearMode === "all"
+    || (
+      nearMode === "view"
+        ? queryVisibleBoundsKey !== "" && queryVisibleBoundsKey === visibleBoundsKey && !nearPointDraftInvalid
+        : manualNearArgsValid
+    );
+  const selectedTileLabel = selectedTile ? `${selectedTile.x}, ${selectedTile.y}` : null;
+  const nearSearchHasChanges = nearMode !== "all"
+    || nearX.trim() !== ""
+    || nearY.trim() !== ""
+    || nearRadius.trim() !== "50";
+  const useVisibleBounds = nearEnabled && Boolean(visibleQueryBounds);
 
   useEffect(() => {
+    onPlacementFilterChange?.({
+      query: deferredQuery.trim(),
+      placementType,
+      nearEnabled,
+      nearX: nearPointRefinementActive ? parsedNearX : undefined,
+      nearY: nearPointRefinementActive ? parsedNearY : undefined,
+      nearRadius: nearPointRefinementActive
+        ? parsedNearRadius
+        : undefined,
+      useVisibleBounds,
+      valid: nearArgsValid,
+    });
+  }, [
+    deferredQuery,
+    manualNearArgsValid,
+    nearArgsValid,
+    nearEnabled,
+    nearMode,
+    nearPointRefinementActive,
+    onPlacementFilterChange,
+    parsedNearRadius,
+    parsedNearX,
+    parsedNearY,
+    placementType,
+    useVisibleBounds,
+  ]);
+
+  useEffect(() => {
+    if (collapsed) {
+      return;
+    }
+    setPage(0);
+  }, [
+    collapsed,
+    deferredQuery,
+    nearMode,
+    nearRadius,
+    nearX,
+    nearY,
+    placementType,
+    selectedMap?.name,
+    activeVisibleBoundsKey,
+  ]);
+
+  function setNearSearchAnchor(x: number | string, y: number | string) {
+    setNearMode(visibleQueryBounds ? "view" : "point");
+    setNearX(String(x));
+    setNearY(String(y));
+  }
+
+  useEffect(() => {
+    if (collapsed) {
+      pageGuard.current.invalidate();
+      setPageLoading(false);
+      return;
+    }
+
     async function loadPage() {
       if (!currentProject || !selectedMap) {
         setPageData(null);
         return;
       }
-      if (!nearArgsValid) {
+      if (!queryNearArgsValid) {
+        setPageLoading(false);
         setPageData({
           total: 0,
           offset: 0,
@@ -118,27 +253,34 @@ export default function MapPlacementBrowser({
       const version = pageGuard.current.begin();
       setPageLoading(true);
       try {
-        const nextPage = await queryMapPlacements(
+        const commonArgs = [
           currentProject.id,
           selectedMap.name,
           deferredQuery.trim() || undefined,
           placementType,
-          nearEnabled ? parsedNearX : undefined,
-          nearEnabled ? parsedNearY : undefined,
-          nearEnabled ? parsedNearRadius : undefined,
+          nearPointRefinementActive ? parsedNearX : undefined,
+          nearPointRefinementActive ? parsedNearY : undefined,
+          nearPointRefinementActive ? parsedNearRadius : undefined,
           page * PAGE_SIZE,
           PAGE_SIZE,
-        );
+        ] as const;
+        const nextPage = activeViewportMinX != null
+          && activeViewportMinY != null
+          && activeViewportMaxX != null
+          && activeViewportMaxY != null
+          ? await queryMapPlacements(
+            ...commonArgs,
+            activeViewportMinX,
+            activeViewportMinY,
+            activeViewportMaxX,
+            activeViewportMaxY,
+          )
+          : await queryMapPlacements(...commonArgs);
         if (!pageGuard.current.isLatest(version)) {
           return;
         }
         setPageData(nextPage);
 
-        const stillSelected = nextPage.items.find((item) => item.index === selectedIndex);
-        if (!stillSelected) {
-          setSelectedIndex(null);
-          onSelectPlacement(null);
-        }
       } finally {
         if (pageGuard.current.isLatest(version)) {
           setPageLoading(false);
@@ -151,16 +293,20 @@ export default function MapPlacementBrowser({
   }, [
     currentProject,
     deferredQuery,
-    nearArgsValid,
-    nearEnabled,
-    onSelectPlacement,
+    nearMode,
+    nearPointRefinementActive,
     page,
     parsedNearRadius,
     parsedNearX,
     parsedNearY,
     placementType,
-    selectedIndex,
+    queryNearArgsValid,
     selectedMap,
+    activeViewportMinX,
+    activeViewportMinY,
+    activeViewportMaxX,
+    activeViewportMaxY,
+    collapsed,
   ]);
 
   const pageCount = useMemo(() => {
@@ -169,6 +315,11 @@ export default function MapPlacementBrowser({
     }
     return Math.max(1, Math.ceil(pageData.total / PAGE_SIZE));
   }, [pageData]);
+  const pageRangeLabel = pageData
+    ? pageData.total === 0
+      ? "0 of 0"
+      : `${pageData.offset + 1}-${Math.min(pageData.offset + pageData.items.length, pageData.total)} of ${pageData.total}`
+    : "No results";
 
   if (!selectedMap) {
     return null;
@@ -185,9 +336,28 @@ export default function MapPlacementBrowser({
                 Streamed from the Rust parser in small pages
               </div>
             </div>
-            {(summaryLoading || pageLoading) && (
-              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-            )}
+            <div className="flex items-center gap-1">
+              {(summaryLoading || pageLoading) && (
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              )}
+              {onCollapse && (
+                <Button
+                  ref={collapseButtonRef}
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 shrink-0 gap-1 px-2 text-xs"
+                  aria-label="Collapse placements panel"
+                  aria-controls="map-placement-browser-pane"
+                  aria-expanded={!collapsed}
+                  title="Collapse placements panel"
+                  onClick={onCollapse}
+                >
+                  <PanelRightClose className="h-3.5 w-3.5" />
+                  <span>Collapse</span>
+                </Button>
+              )}
+            </div>
           </div>
 
           <div className="mt-3 grid grid-cols-[1fr_7rem] gap-2">
@@ -215,81 +385,195 @@ export default function MapPlacementBrowser({
             </Select>
           </div>
 
-          <div className="mt-2 rounded border p-2">
-            <div className="flex items-center justify-between gap-2">
-              <label className="text-xs font-medium">Near search</label>
-              <Button
-                type="button"
-                size="sm"
-                variant={nearEnabled ? "default" : "outline"}
-                className="h-7 text-xs"
-                onClick={() => setNearEnabled((current) => !current)}
+          {selectedPlacement?.obj_type === 0 && (
+            <MapPlacementBuildingPreview placement={selectedPlacement} />
+          )}
+
+          <div
+            role="group"
+            aria-labelledby="placement-search-area-label"
+            className="mt-2 rounded border p-2"
+          >
+            <div className="space-y-2">
+              <div id="placement-search-area-label" className="text-xs font-medium">Placement search area</div>
+              <div
+                data-testid="placement-search-area-tabs"
+                className="grid w-full grid-cols-3 gap-1 rounded bg-muted/40 p-1"
               >
-                {nearEnabled ? "Enabled" : "Off"}
-              </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={nearMode === "all" ? "default" : "ghost"}
+                  className="h-7 px-2 text-xs"
+                  aria-label="Search whole map"
+                  aria-pressed={nearMode === "all"}
+                  onClick={() => setNearMode("all")}
+                >
+                  Whole map
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={nearMode === "view" ? "default" : "ghost"}
+                  className="h-7 px-2 text-xs"
+                  aria-label="Search visible map view"
+                  aria-pressed={nearMode === "view"}
+                  aria-disabled={!visibleQueryBounds}
+                  title={visibleQueryBounds
+                    ? "Follow the visible map view"
+                    : "Pan or zoom the map to establish a visible view"}
+                  onClick={() => {
+                    setNearMode("view");
+                    setNearX("");
+                    setNearY("");
+                  }}
+                >
+                  Visible view
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={nearMode === "point" ? "default" : "ghost"}
+                  className="h-7 px-2 text-xs"
+                  aria-label="Search point radius"
+                  aria-pressed={nearMode === "point"}
+                  onClick={() => setNearMode("point")}
+                >
+                  Point radius
+                </Button>
+              </div>
             </div>
 
-            <div className="mt-2 grid grid-cols-3 gap-2">
-              <Input
-                value={nearX}
-                onChange={(event) => setNearX(event.target.value)}
-                placeholder="x"
-                className="h-8 text-xs"
-                disabled={!nearEnabled}
-              />
-              <Input
-                value={nearY}
-                onChange={(event) => setNearY(event.target.value)}
-                placeholder="y"
-                className="h-8 text-xs"
-                disabled={!nearEnabled}
-              />
-              <Input
-                value={nearRadius}
-                onChange={(event) => setNearRadius(event.target.value)}
-                placeholder="radius"
-                className="h-8 text-xs"
-                disabled={!nearEnabled}
-              />
-            </div>
-
-            <div className="mt-2 flex gap-2">
+            <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
+              <span>
+                {nearMode === "all"
+                  ? "Whole map"
+                  : nearMode === "view"
+                    ? visibleBoundsLabel
+                      ? nearPointRefinementActive
+                        ? `Visible view ${visibleBoundsLabel} + point radius`
+                        : `Visible view ${visibleBoundsLabel}`
+                      : "Visible view"
+                    : visibleBoundsLabel
+                      ? "Point radius inside visible view"
+                      : "Point radius"}
+              </span>
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                className="h-7 text-xs"
-                disabled={!selectedPlacement}
+                className="h-7 shrink-0 text-xs"
+                aria-label="Clear near search"
+                disabled={!nearSearchHasChanges}
                 onClick={() => {
-                  if (!selectedPlacement) {
-                    return;
-                  }
-                  setNearEnabled(true);
-                  setNearX(selectedPlacement.world_x.toFixed(2));
-                  setNearY(selectedPlacement.world_y.toFixed(2));
-                }}
-              >
-                Use Selected
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-7 text-xs"
-                onClick={() => {
-                  setNearEnabled(false);
+                  setNearMode("all");
                   setNearX("");
                   setNearY("");
                   setNearRadius("50");
                 }}
               >
+                <X className="h-3.5 w-3.5" />
                 Clear
               </Button>
             </div>
 
-            {nearEnabled && !nearArgsValid && (
+            <div className="mt-2 grid grid-cols-3 gap-2">
+              <label className="space-y-1">
+                <span className="block text-[10px] font-medium uppercase text-muted-foreground">Point X</span>
+                <Input
+                  aria-label="Point X"
+                  value={nearX}
+                  onChange={(event) => setNearX(event.target.value)}
+                  placeholder="x"
+                  className="h-8 text-xs"
+                  disabled={nearMode === "all"}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="block text-[10px] font-medium uppercase text-muted-foreground">Point Y</span>
+                <Input
+                  aria-label="Point Y"
+                  value={nearY}
+                  onChange={(event) => setNearY(event.target.value)}
+                  placeholder="y"
+                  className="h-8 text-xs"
+                  disabled={nearMode === "all"}
+                />
+              </label>
+              <label className="space-y-1">
+                <span className="block text-[10px] font-medium uppercase text-muted-foreground">Point radius</span>
+                <Input
+                  aria-label="Point radius"
+                  value={nearRadius}
+                  onChange={(event) => setNearRadius(event.target.value)}
+                  placeholder="radius"
+                  className="h-8 text-xs"
+                  disabled={nearMode === "all"}
+                />
+              </label>
+            </div>
+
+            {selectedTileLabel && (
+              <div className="mt-2 truncate font-mono text-[11px] text-muted-foreground">
+                Tile {selectedTileLabel}
+              </div>
+            )}
+
+            {nearMode === "point" && visibleBoundsLabel && (
+              <div className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
+                Visible view {visibleBoundsLabel}
+              </div>
+            )}
+
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 justify-start px-2 text-xs"
+                disabled={!selectedPlacement}
+                aria-label="Use selected object"
+                onClick={() => {
+                  if (!selectedPlacement) {
+                    return;
+                  }
+                  setNearSearchAnchor(
+                    selectedPlacement.world_x.toFixed(2),
+                    selectedPlacement.world_y.toFixed(2),
+                  );
+                }}
+              >
+                <LocateFixed className="h-3.5 w-3.5" />
+                Selected object
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 justify-start px-2 text-xs"
+                disabled={!selectedTile}
+                aria-label={selectedTileLabel ? `Use selected tile ${selectedTileLabel}` : "Use selected tile"}
+                onClick={() => {
+                  if (!selectedTile) {
+                    return;
+                  }
+                  setNearSearchAnchor(selectedTile.x, selectedTile.y);
+                }}
+              >
+                <MousePointer2 className="h-3.5 w-3.5" />
+                Selected tile
+              </Button>
+            </div>
+
+            {nearMode === "view" && !visibleQueryBounds && (
               <div className="mt-2 text-[11px] text-destructive">
-                Enter numeric x, y, and radius values to run a near search.
+                Pan or zoom the map to establish a visible view.
+              </div>
+            )}
+
+            {nearMode !== "all" && (nearMode === "point" || nearPointDraftInvalid) && !nearArgsValid && (
+              <div className="mt-2 text-[11px] text-destructive">
+                Enter numeric x, y, and radius values to search around a point.
               </div>
             )}
           </div>
@@ -312,9 +596,7 @@ export default function MapPlacementBrowser({
 
         <div className="flex items-center justify-between border-b px-3 py-2 text-xs text-muted-foreground">
           <div>
-            {pageData
-              ? `${pageData.offset + 1}-${Math.min(pageData.offset + pageData.items.length, pageData.total)} of ${pageData.total}`
-              : "No results"}
+            {pageRangeLabel}
           </div>
           <div className="flex items-center gap-1">
             <Button
@@ -348,6 +630,7 @@ export default function MapPlacementBrowser({
           <div className="divide-y">
             {pageData?.items.map((placement) => {
               const isSelected = placement.index === selectedIndex;
+              const actionLabel = placementRowActionLabel(placement);
               return (
                 <button
                   key={placement.index}
@@ -359,11 +642,13 @@ export default function MapPlacementBrowser({
                     setSelectedIndex(placement.index);
                     onSelectPlacement(placement);
                   }}
+                  aria-label={actionLabel}
+                  title={actionLabel}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium">
-                        {placement.display_name ?? placement.asset_name ?? `${placement.kind} ${placement.obj_id}`}
+                        {placementDisplayName(placement)}
                       </div>
                       <div className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
                         {placement.asset_name ?? "unresolved"}
@@ -389,4 +674,24 @@ export default function MapPlacementBrowser({
       </div>
     </div>
   );
+}
+
+function normalizeVisibleBounds(bounds: MapTileBounds | null | undefined): MapTileBounds | null {
+  if (!bounds) {
+    return null;
+  }
+
+  const minX = Math.floor(Math.min(bounds.minX, bounds.maxX));
+  const minY = Math.floor(Math.min(bounds.minY, bounds.maxY));
+  const maxX = Math.ceil(Math.max(bounds.minX, bounds.maxX));
+  const maxY = Math.ceil(Math.max(bounds.minY, bounds.maxY));
+  if (![minX, minY, maxX, maxY].every(Number.isFinite) || minX >= maxX || minY >= maxY) {
+    return null;
+  }
+
+  return { minX, minY, maxX, maxY };
+}
+
+function formatVisibleBoundsLabel(bounds: MapTileBounds): string {
+  return `${bounds.minX}, ${bounds.minY} to ${bounds.maxX}, ${bounds.maxY}`;
 }
