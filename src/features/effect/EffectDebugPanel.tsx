@@ -67,8 +67,6 @@ function formatGeometry(geo: GeometryConfig): string {
   switch (geo.type) {
     case "cylinder":
       return `Cylinder: r=${geo.topRadius}/${geo.botRadius}, h=${geo.height}, ${geo.segments} seg`;
-    case "sphere":
-      return "Sphere";
     case "model":
       return `Model: ${geo.modelName}`;
     case "rect":

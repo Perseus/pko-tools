@@ -19,6 +19,7 @@ import { ActionKernelProvider, CommandPalette } from "./features/actions";
 const CharacterPage = lazy(() => import("./pages/characters"));
 const EffectsPage = lazy(() => import("./pages/effects-v2"));
 const ItemsPage = lazy(() => import("./pages/items"));
+const ForgeGlowsPage = lazy(() => import("./pages/forge-glows"));
 const MapsPage = lazy(() => import("./pages/maps"));
 const BuildingsPage = lazy(() => import("./pages/buildings"));
 const ProjectCreator = lazy(() => import("./pages/project-creator/ProjectCreator"));
@@ -49,20 +50,25 @@ function App() {
   return (
     <SidebarProvider>
       <ActionKernelProvider>
-        <div className="grid h-screen w-screen">
-          <main className="grid grid-cols-[auto,1fr,auto] h-full">
+        <div className="grid h-dvh w-dvw overflow-hidden">
+          <main className="grid h-full min-h-0 min-w-0 grid-cols-[auto,minmax(0,1fr),auto] overflow-hidden">
             <SideNav />
-            <Suspense fallback={<div className="h-full w-full bg-background" />}>
-              <Routes>
-                <Route path="/" element={<div />} />
-                <Route path="/project-creator" element={<ProjectCreator />} />
-                <Route path="/characters" element={<CharacterPage/>} />
-                <Route path="/effects" element={<EffectsPage />} />
-                <Route path="/items" element={<ItemsPage />} />
-                <Route path="/maps" element={<MapsPage />} />
-                <Route path="/buildings" element={<BuildingsPage />} />
-                <Route path="*" element={<div />} />
-              </Routes>
+            <Suspense
+              fallback={<div className="h-full min-h-0 w-full min-w-0 overflow-hidden bg-background" />}
+            >
+              <div className="h-full min-h-0 w-full min-w-0 overflow-hidden">
+                <Routes>
+                  <Route path="/" element={<div />} />
+                  <Route path="/project-creator" element={<ProjectCreator />} />
+                  <Route path="/characters" element={<CharacterPage/>} />
+                  <Route path="/effects" element={<EffectsPage />} />
+                  <Route path="/items" element={<ItemsPage />} />
+                  <Route path="/forge-glows" element={<ForgeGlowsPage />} />
+                  <Route path="/maps" element={<MapsPage />} />
+                  <Route path="/buildings" element={<BuildingsPage />} />
+                  <Route path="*" element={<div />} />
+                </Routes>
+              </div>
             </Suspense>
             <WorkspaceNavigator />
           </main>

@@ -7,7 +7,7 @@ use crate::{
     animation::character::LW_INVALID_INDEX,
     character::{helper::BoundingSphereInfo, texture},
     d3d::D3DRenderStateType,
-    map::lmo_types::{LmoAnimData, LmoBoneAnimData, LmoTexUvAnim, LmoTexImgAnim, LmoMtlOpacAnim},
+    map::lmo_types::{LmoAnimData, LmoBoneAnimData, LmoMtlOpacAnim, LmoTexImgAnim, LmoTexUvAnim},
     math::{self, coord_transform::CoordTransform, LwMatrix44, LwSphere, LwVector3},
 };
 use ::gltf::{buffer, image, Document};
@@ -216,19 +216,19 @@ impl CharacterGeometricModel {
         ct: Option<&CoordTransform>,
     ) -> anyhow::Result<gltf::mesh::Primitive> {
         let mesh_info = self.mesh_info.as_ref().unwrap();
-        let primitive = mesh_info.get_gltf_primitive(
-            project_dir,
-            fields_to_aggregate,
-            &self.material_seq,
-            ct,
-        );
+        let primitive =
+            mesh_info.get_gltf_primitive(project_dir, fields_to_aggregate, &self.material_seq, ct);
 
         Ok(primitive)
     }
 
     /// Get glTF helper nodes (dummy points, bounding spheres, etc.)
     /// The mesh_index parameter associates these helpers with a specific mesh for round-trip support
-    pub fn get_gltf_helper_nodes_for_mesh(&self, mesh_index: usize, ct: Option<&CoordTransform>) -> Vec<gltf::Node> {
+    pub fn get_gltf_helper_nodes_for_mesh(
+        &self,
+        mesh_index: usize,
+        ct: Option<&CoordTransform>,
+    ) -> Vec<gltf::Node> {
         if self.helper_data.is_none() {
             return vec![];
         }
@@ -719,4 +719,3 @@ impl CharacterGeometricModel {
         helper_data
     }
 }
-

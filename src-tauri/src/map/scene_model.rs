@@ -1,10 +1,8 @@
 //! LMO → glTF conversion for scene building models.
 //!
-//! Two entry points:
+//! Entry point:
 //! - `build_gltf_from_lmo` — standalone building viewer (single LMO → complete glTF)
-//! - `load_scene_models` — map integration (batch load unique models, return glTF components)
 
-use std::collections::HashMap;
 use std::path::Path;
 
 use anyhow::{anyhow, Result};
@@ -17,26 +15,26 @@ use gltf_json::{
     validation::{Checked, USize64},
 };
 
+use crate::client_paths;
 use crate::item::model::decode_pko_texture;
-use crate::math::coord_transform::{CoordTransform, ExportProfile};
+use crate::math::coord_transform::CoordTransform;
 
-use super::lmo_types::{self as lmo, D3DCULL_NONE, LmoGeomObject, LmoModel};
 use super::lmo_loader;
-use super::scene_obj::SceneObject;
-use super::scene_obj_info::SceneObjModelInfo;
+use super::lmo_types::{self as lmo, LmoGeomObject, LmoModel, D3DCULL_NONE};
 
 /// Search for an LMO file in the standard model directories.
 /// PKO clients store scene models in `model/scene/`, but some may be in `model/`.
 /// Also tries case-insensitive fallback.
 pub fn find_lmo_path(project_dir: &Path, filename: &str) -> Option<std::path::PathBuf> {
     let candidates = [
-        project_dir.join("model").join("scene").join(filename),
-        project_dir.join("model").join(filename),
-        project_dir
-            .join("model")
-            .join("scene")
-            .join(filename.to_lowercase()),
-        project_dir.join("model").join(filename.to_lowercase()),
+        client_paths::asset_file(project_dir, "model", Path::new("scene").join(filename)),
+        client_paths::asset_file(project_dir, "model", filename),
+        client_paths::asset_file(
+            project_dir,
+            "model",
+            Path::new("scene").join(filename.to_lowercase()),
+        ),
+        client_paths::asset_file(project_dir, "model", filename.to_lowercase()),
     ];
     candidates.into_iter().find(|p| p.exists())
 }
@@ -303,15 +301,32 @@ pub fn find_texture_file(project_dir: &Path, tex_name: &str) -> Option<std::path
 
     for dir in &dirs {
         for ext in &exts {
-            let candidate = project_dir.join(dir).join(format!("{}.{}", stem, ext));
+            let candidate = if let Some(texture_rel) = dir.strip_prefix("texture/") {
+                client_paths::asset_file(
+                    project_dir,
+                    "texture",
+                    Path::new(texture_rel).join(format!("{}.{}", stem, ext)),
+                )
+            } else {
+                client_paths::asset_file(project_dir, "texture", format!("{}.{}", stem, ext))
+            };
             if candidate.exists() {
                 return Some(candidate);
             }
             // Try lowercase
-            let candidate_lc =
-                project_dir
-                    .join(dir)
-                    .join(format!("{}.{}", stem.to_lowercase(), ext));
+            let candidate_lc = if let Some(texture_rel) = dir.strip_prefix("texture/") {
+                client_paths::asset_file(
+                    project_dir,
+                    "texture",
+                    Path::new(texture_rel).join(format!("{}.{}", stem.to_lowercase(), ext)),
+                )
+            } else {
+                client_paths::asset_file(
+                    project_dir,
+                    "texture",
+                    format!("{}.{}", stem.to_lowercase(), ext),
+                )
+            };
             if candidate_lc.exists() {
                 return Some(candidate_lc);
             }
@@ -373,6 +388,87 @@ pub(crate) fn decode_dds_with_alpha(data: &[u8]) -> Option<image::DynamicImage> 
                 return Some(image::DynamicImage::ImageRgba8(img_buf));
             }
             // DXT3/DXT5: fall through to image crate (handles alpha correctly)
+        } else {
+            // Uncompressed RGB/RGBA DDS (DDPF_RGB with optional DDPF_ALPHAPIXELS)
+            let is_rgb = pf_flags & 0x40 != 0; // DDPF_RGB
+            if is_rgb {
+                let height = u32::from_le_bytes([data[12], data[13], data[14], data[15]]) as usize;
+                let width = u32::from_le_bytes([data[16], data[17], data[18], data[19]]) as usize;
+                let bit_count =
+                    u32::from_le_bytes([data[88], data[89], data[90], data[91]]) as usize;
+
+                if width == 0 || height == 0 || bit_count == 0 {
+                    return None;
+                }
+
+                let has_alpha = pf_flags & 0x1 != 0; // DDPF_ALPHAPIXELS
+                let bytes_per_pixel = bit_count / 8;
+                let pixel_data = &data[128..];
+                let expected_size = width * height * bytes_per_pixel;
+
+                if pixel_data.len() < expected_size {
+                    return None;
+                }
+
+                let r_mask = u32::from_le_bytes([data[92], data[93], data[94], data[95]]);
+                let g_mask = u32::from_le_bytes([data[96], data[97], data[98], data[99]]);
+                let b_mask = u32::from_le_bytes([data[100], data[101], data[102], data[103]]);
+                let a_mask = if has_alpha {
+                    u32::from_le_bytes([data[104], data[105], data[106], data[107]])
+                } else {
+                    0
+                };
+
+                let r_shift = r_mask.trailing_zeros();
+                let g_shift = g_mask.trailing_zeros();
+                let b_shift = b_mask.trailing_zeros();
+                let a_shift = if a_mask != 0 {
+                    a_mask.trailing_zeros()
+                } else {
+                    0
+                };
+
+                let mut rgba_bytes = Vec::with_capacity(width * height * 4);
+                for y in 0..height {
+                    for x in 0..width {
+                        let offset = (y * width + x) * bytes_per_pixel;
+                        let pixel = match bytes_per_pixel {
+                            4 => u32::from_le_bytes([
+                                pixel_data[offset],
+                                pixel_data[offset + 1],
+                                pixel_data[offset + 2],
+                                pixel_data[offset + 3],
+                            ]),
+                            3 => u32::from_le_bytes([
+                                pixel_data[offset],
+                                pixel_data[offset + 1],
+                                pixel_data[offset + 2],
+                                0,
+                            ]),
+                            2 => u32::from_le_bytes([
+                                pixel_data[offset],
+                                pixel_data[offset + 1],
+                                0,
+                                0,
+                            ]),
+                            _ => return None,
+                        };
+
+                        let r = ((pixel & r_mask) >> r_shift) as u8;
+                        let g = ((pixel & g_mask) >> g_shift) as u8;
+                        let b = ((pixel & b_mask) >> b_shift) as u8;
+                        let a = if has_alpha && a_mask != 0 {
+                            ((pixel & a_mask) >> a_shift) as u8
+                        } else {
+                            255
+                        };
+                        rgba_bytes.extend_from_slice(&[r, g, b, a]);
+                    }
+                }
+
+                let img_buf = image::RgbaImage::from_raw(width as u32, height as u32, rgba_bytes)?;
+                return Some(image::DynamicImage::ImageRgba8(img_buf));
+            }
         }
     }
 
@@ -388,10 +484,7 @@ fn load_texture_as_data_uri(path: &Path) -> Option<String> {
     let img = match decode_dds_with_alpha(&decoded) {
         Some(img) => img,
         None => {
-            eprintln!(
-                "Warning: failed to decode texture {}",
-                path.display(),
-            );
+            eprintln!("Warning: failed to decode texture {}", path.display(),);
             return None;
         }
     };
@@ -418,13 +511,13 @@ const D3DBLEND_DESTALPHA: u32 = 7;
 /// Returns the expected D3D SrcBlend value for a given transp_type, or None for type 0.
 fn default_src_blend_for_transp_type(transp_type: u32) -> Option<u32> {
     match transp_type {
-        0 => None,                      // FILTER: no blend set
-        1 => Some(D3DBLEND_ONE),        // ADDITIVE: One/One
-        2 => Some(D3DBLEND_SRCCOLOR),   // ADDITIVE1: SrcColor/One
-        3 => Some(D3DBLEND_SRCCOLOR),   // ADDITIVE2: SrcColor/InvSrcColor
-        4 => Some(D3DBLEND_SRCALPHA),   // ADDITIVE3: SrcAlpha/DestAlpha
-        5 => Some(D3DBLEND_ZERO),       // SUBTRACTIVE: Zero/InvSrcColor
-        _ => Some(D3DBLEND_ONE),        // 6-8 fall through to ONE/ONE
+        0 => None,                    // FILTER: no blend set
+        1 => Some(D3DBLEND_ONE),      // ADDITIVE: One/One
+        2 => Some(D3DBLEND_SRCCOLOR), // ADDITIVE1: SrcColor/One
+        3 => Some(D3DBLEND_SRCCOLOR), // ADDITIVE2: SrcColor/InvSrcColor
+        4 => Some(D3DBLEND_SRCALPHA), // ADDITIVE3: SrcAlpha/DestAlpha
+        5 => Some(D3DBLEND_ZERO),     // SUBTRACTIVE: Zero/InvSrcColor
+        _ => Some(D3DBLEND_ONE),      // 6-8 fall through to ONE/ONE
     }
 }
 
@@ -500,7 +593,11 @@ fn build_lmo_material(
     };
 
     let alpha_cutoff = if mat.alpha_test_enabled {
-        let ref_value = if mat.alpha_ref == 0 { 129u8 } else { mat.alpha_ref };
+        let ref_value = if mat.alpha_ref == 0 {
+            129u8
+        } else {
+            mat.alpha_ref
+        };
         Some(gltf_json::material::AlphaCutoff(
             (ref_value as f32 / 255.0).clamp(0.0, 1.0),
         ))
@@ -545,7 +642,11 @@ fn build_lmo_material(
     let material_name = if needs_suffix {
         let alpha_ref = if mat.alpha_test_enabled {
             let raw = mat.alpha_ref as u32;
-            if raw == 0 { 129 } else { raw } // Engine default ALPHAREF=129
+            if raw == 0 {
+                129
+            } else {
+                raw
+            } // Engine default ALPHAREF=129
         } else {
             0
         };
@@ -993,14 +1094,15 @@ fn build_geom_primitives(
 
 /// Build glTF node extras JSON for texuv/teximg/mtlopac/transform animation data.
 /// Returns None if the geom object has no animations of any kind.
-fn build_anim_extras(geom: &LmoGeomObject, geom_index: usize, ct: &CoordTransform) -> gltf_json::extras::Extras {
+fn build_anim_extras(
+    geom: &LmoGeomObject,
+    geom_index: usize,
+    ct: &CoordTransform,
+) -> gltf_json::extras::Extras {
     let has_property_anims = !geom.texuv_anims.is_empty()
         || !geom.teximg_anims.is_empty()
         || !geom.mtlopac_anims.is_empty();
-    let has_transform_anim = geom
-        .animation
-        .as_ref()
-        .map_or(false, |a| a.frame_num > 0);
+    let has_transform_anim = geom.animation.as_ref().map_or(false, |a| a.frame_num > 0);
     if !has_property_anims && !has_transform_anim {
         return None;
     }
@@ -1116,7 +1218,11 @@ fn build_anim_extras(geom: &LmoGeomObject, geom_index: usize, ct: &CoordTransfor
 /// Build glTF node extras combining animation data + pko_primitive_id.
 /// The primitive ID maps this mesh node to the PKO LMO subset index, used by
 /// Unity to identify which mesh pieces should fade (overhead roof fade system).
-fn build_node_extras(geom: &LmoGeomObject, geom_index: usize, ct: &CoordTransform) -> gltf_json::extras::Extras {
+fn build_node_extras(
+    geom: &LmoGeomObject,
+    geom_index: usize,
+    ct: &CoordTransform,
+) -> gltf_json::extras::Extras {
     let anim_extras = build_anim_extras(geom, geom_index, ct);
 
     // Start with existing anim extras or empty map
@@ -1190,9 +1296,7 @@ fn build_animations(
         let translations: Vec<f32> = anim
             .translations
             .iter()
-            .flat_map(|t| {
-                ct.position(*t).into_iter()
-            })
+            .flat_map(|t| ct.position(*t).into_iter())
             .collect();
 
         let trans_acc_idx = builder.add_accessor_f32(
@@ -1208,9 +1312,7 @@ fn build_animations(
         let rotations: Vec<f32> = anim
             .rotations
             .iter()
-            .flat_map(|r| {
-                ct.quaternion(*r).into_iter()
-            })
+            .flat_map(|r| ct.quaternion(*r).into_iter())
             .collect();
 
         let rot_acc_idx = builder.add_accessor_f32(
@@ -1326,15 +1428,14 @@ fn build_bone_skin(
         joint_node_indices.push(node_idx);
 
         // Set initial transform from frame 0 keyframes (if available)
-        let (translation, rotation) = if bi < bone_anim.keyframes.len()
-            && !bone_anim.keyframes[bi].translations.is_empty()
-        {
-            let t = ct.position(bone_anim.keyframes[bi].translations[0]);
-            let r = ct.quaternion(bone_anim.keyframes[bi].rotations[0]);
-            (Some(t), Some(r))
-        } else {
-            (None, None)
-        };
+        let (translation, rotation) =
+            if bi < bone_anim.keyframes.len() && !bone_anim.keyframes[bi].translations.is_empty() {
+                let t = ct.position(bone_anim.keyframes[bi].translations[0]);
+                let r = ct.quaternion(bone_anim.keyframes[bi].rotations[0]);
+                (Some(t), Some(r))
+            } else {
+                (None, None)
+            };
 
         builder.nodes.push(gltf_json::Node {
             name: Some(format!("{}_{}", prefix, bone.name)),
@@ -1361,12 +1462,8 @@ fn build_bone_skin(
     for (bi, children) in children_map.iter().enumerate() {
         if !children.is_empty() {
             let node_idx = (first_joint_node_idx + bi as u32) as usize;
-            builder.nodes[node_idx].children = Some(
-                children
-                    .iter()
-                    .map(|&c| gltf_json::Index::new(c))
-                    .collect(),
-            );
+            builder.nodes[node_idx].children =
+                Some(children.iter().map(|&c| gltf_json::Index::new(c)).collect());
         }
     }
 
@@ -1692,9 +1789,10 @@ pub fn build_gltf_from_lmo(lmo_path: &Path, project_dir: &Path) -> Result<String
         return Err(anyhow!("LMO file has no geometry objects"));
     }
 
-    let ct = CoordTransform::new(ExportProfile::StandardGltf);
+    let ct = CoordTransform::new();
     let mut builder = GltfBuilder::new();
-    let geom_result = process_lmo_geometry(&mut builder, &model, project_dir, TextureMode::Embed, &ct)?;
+    let geom_result =
+        process_lmo_geometry(&mut builder, &model, project_dir, TextureMode::Embed, &ct)?;
 
     let root = gltf_json::Root {
         asset: gltf_json::Asset {
@@ -1745,7 +1843,11 @@ pub fn build_glb_from_lmo(
         return Err(anyhow!("LMO file has no geometry objects"));
     }
     let mut builder = GltfBuilder::new();
-    let texture_mode = if embed_textures { TextureMode::Embed } else { TextureMode::ExternalUri };
+    let texture_mode = if embed_textures {
+        TextureMode::Embed
+    } else {
+        TextureMode::ExternalUri
+    };
     let geom_result = process_lmo_geometry(&mut builder, &model, project_dir, texture_mode, &ct)?;
 
     // Convert data-URI buffers into a single GLB binary buffer, then append
@@ -1905,158 +2007,6 @@ fn merge_data_uri_buffers(
     };
 
     Ok((merged, single_buffer, new_views))
-}
-
-// ============================================================================
-// Public API: batch load scene models for map integration
-// ============================================================================
-
-/// Loaded scene model data for map integration.
-pub struct LoadedSceneModels {
-    /// glTF meshes for each unique model.
-    pub meshes: Vec<gltf_json::Mesh>,
-    /// Materials used by the models.
-    pub materials: Vec<gltf_json::Material>,
-    /// Accessors for model data.
-    pub accessors: Vec<gltf_json::Accessor>,
-    /// Buffer views for model data.
-    pub buffer_views: Vec<gltf_json::buffer::View>,
-    /// Buffers for model data.
-    pub buffers: Vec<gltf_json::Buffer>,
-    /// Images for model textures.
-    pub images: Vec<gltf_json::Image>,
-    /// Texture samplers.
-    pub samplers: Vec<gltf_json::texture::Sampler>,
-    /// Textures referencing images and samplers.
-    pub textures: Vec<gltf_json::Texture>,
-    /// Maps obj_id → mesh index within this struct's meshes array.
-    pub model_mesh_map: HashMap<u32, usize>,
-}
-
-/// Load unique scene models referenced by map objects.
-///
-/// Only loads models for type-0 (building) objects. Skips failures gracefully.
-pub fn load_scene_models(
-    project_dir: &Path,
-    obj_info: &HashMap<u32, SceneObjModelInfo>,
-    objects: &[SceneObject],
-) -> Result<LoadedSceneModels> {
-    // Collect unique obj_ids for type-0 objects
-    let mut unique_ids: Vec<u32> = objects
-        .iter()
-        .filter(|o| o.obj_type == 0)
-        .map(|o| o.obj_id as u32)
-        .collect();
-    unique_ids.sort_unstable();
-    unique_ids.dedup();
-
-    let ct = CoordTransform::new(ExportProfile::StandardGltf);
-    let mut builder = GltfBuilder::new();
-    let mut model_mesh_map = HashMap::new();
-
-    for obj_id in unique_ids {
-        let info = match obj_info.get(&obj_id) {
-            Some(i) => i,
-            None => continue,
-        };
-
-        let lmo_path = match find_lmo_path(project_dir, &info.filename) {
-            Some(p) => p,
-            None => continue,
-        };
-
-        let model = match lmo_loader::load_lmo_no_animation(&lmo_path) {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-        add_model_to_builder(
-            &mut builder,
-            &mut model_mesh_map,
-            obj_id,
-            &model,
-            project_dir,
-            &ct,
-        );
-    }
-
-    Ok(LoadedSceneModels {
-        meshes: builder.meshes,
-        materials: builder.materials,
-        accessors: builder.accessors,
-        buffer_views: builder.buffer_views,
-        buffers: builder.buffers,
-        images: builder.images,
-        samplers: builder.samplers,
-        textures: builder.textures,
-        model_mesh_map,
-    })
-}
-
-fn add_model_to_builder(
-    builder: &mut GltfBuilder,
-    model_mesh_map: &mut HashMap<u32, usize>,
-    obj_id: u32,
-    model: &LmoModel,
-    project_dir: &Path,
-    ct: &CoordTransform,
-) {
-    // Merge all geometry objects into a single mesh with multiple primitives
-    let mut all_primitives = Vec::new();
-
-    for (gi, geom) in model.geom_objects.iter().enumerate() {
-        let prefix = format!("obj{}_{}", obj_id, gi);
-        let material_base_idx = builder.materials.len() as u32;
-
-        if geom.materials.is_empty() {
-            build_lmo_material(
-                builder,
-                &lmo::LmoMaterial {
-                    diffuse: [0.7, 0.7, 0.7, 1.0],
-                    ambient: [0.3, 0.3, 0.3, 1.0],
-                    emissive: [0.0, 0.0, 0.0, 0.0],
-                    opacity: 1.0,
-                    transp_type: 0,
-                    alpha_test_enabled: false,
-                    alpha_ref: 0,
-                    src_blend: None,
-                    dest_blend: None,
-                    cull_mode: None,
-                    tex_filename: None,
-                },
-                &format!("{}_mat", prefix),
-                project_dir,
-                TextureMode::Skip, // skip textures for map batch loading
-            );
-        } else {
-            for (mi, mat) in geom.materials.iter().enumerate() {
-                build_lmo_material(
-                    builder,
-                    mat,
-                    &format!("{}_mat{}", prefix, mi),
-                    project_dir,
-                    TextureMode::Skip, // skip textures for map batch loading
-                );
-            }
-        }
-
-        let prims = build_geom_primitives(builder, geom, &prefix, material_base_idx, false, ct);
-        all_primitives.extend(prims);
-    }
-
-    if all_primitives.is_empty() {
-        return;
-    }
-
-    let mesh_idx = builder.meshes.len();
-    builder.meshes.push(gltf_json::Mesh {
-        name: Some(format!("building_{}", obj_id)),
-        primitives: all_primitives,
-        weights: None,
-        extensions: None,
-        extras: None,
-    });
-
-    model_mesh_map.insert(obj_id, mesh_idx);
 }
 
 #[cfg(test)]
@@ -2333,10 +2283,16 @@ mod tests {
         let geom = &model.geom_objects[0];
         let mat_base = builder.materials.len() as u32;
         for (mi, mat) in geom.materials.iter().enumerate() {
-            build_lmo_material(&mut builder, mat, &format!("mat{}", mi), &tmp, TextureMode::Skip);
+            build_lmo_material(
+                &mut builder,
+                mat,
+                &format!("mat{}", mi),
+                &tmp,
+                TextureMode::Skip,
+            );
         }
 
-        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let ct = CoordTransform::new();
         let prims = build_geom_primitives(&mut builder, geom, "test", mat_base, false, &ct);
         assert_eq!(prims.len(), 1, "should have 1 primitive for 1 subset");
 
@@ -2418,65 +2374,6 @@ mod tests {
 
         let result = build_gltf_from_lmo(&lmo_path, &tmp_dir);
         assert!(result.is_err(), "empty model should error");
-
-        let _ = std::fs::remove_dir_all(&tmp_dir);
-    }
-
-    #[test]
-    fn load_scene_models_unknown_ids_skipped() {
-        let obj_info = HashMap::new(); // empty — no known models
-        let objects = vec![SceneObject {
-            raw_type_id: 0,
-            obj_type: 0,
-            obj_id: 999,
-            world_x: 0.0,
-            world_y: 0.0,
-            world_z: 0.0,
-            yaw_angle: 0,
-            scale: 100,
-        }];
-
-        let tmp_dir = std::env::temp_dir().join("pko_tools_test_scene");
-        let _ = std::fs::create_dir_all(&tmp_dir);
-
-        let result = load_scene_models(&tmp_dir, &obj_info, &objects).unwrap();
-        assert!(result.meshes.is_empty());
-        assert!(result.model_mesh_map.is_empty());
-
-        let _ = std::fs::remove_dir_all(&tmp_dir);
-    }
-
-    #[test]
-    fn load_scene_models_effects_ignored() {
-        let mut obj_info = HashMap::new();
-        obj_info.insert(
-            1,
-            SceneObjModelInfo {
-                id: 1,
-                filename: "test.lmo".to_string(),
-                ..Default::default()
-            },
-        );
-        // Object is type 1 (effect) — should be skipped
-        let objects = vec![SceneObject {
-            raw_type_id: 0,
-            obj_type: 1, // effect, not model
-            obj_id: 1,
-            world_x: 0.0,
-            world_y: 0.0,
-            world_z: 0.0,
-            yaw_angle: 0,
-            scale: 100,
-        }];
-
-        let tmp_dir = std::env::temp_dir().join("pko_tools_test_scene2");
-        let _ = std::fs::create_dir_all(&tmp_dir);
-
-        let result = load_scene_models(&tmp_dir, &obj_info, &objects).unwrap();
-        assert!(
-            result.model_mesh_map.is_empty(),
-            "effects should be skipped"
-        );
 
         let _ = std::fs::remove_dir_all(&tmp_dir);
     }
@@ -2699,14 +2596,22 @@ mod tests {
             .map(|(i, g)| (i as u32, g))
             .collect();
 
-        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let ct = CoordTransform::new();
         let anims = build_animations(&mut builder, &animated_nodes, &ct);
 
         assert_eq!(anims.len(), 1, "should produce exactly one Animation");
         let anim = &anims[0];
         // Each animated node gets 2 channels (translation + rotation)
-        assert_eq!(anim.channels.len(), 2, "should have translation + rotation channels");
-        assert_eq!(anim.samplers.len(), 2, "should have translation + rotation samplers");
+        assert_eq!(
+            anim.channels.len(),
+            2,
+            "should have translation + rotation channels"
+        );
+        assert_eq!(
+            anim.samplers.len(),
+            2,
+            "should have translation + rotation samplers"
+        );
     }
 
     #[test]
@@ -2714,9 +2619,12 @@ mod tests {
         let mut builder = GltfBuilder::new();
         let animated_nodes: Vec<(u32, &LmoGeomObject)> = vec![];
 
-        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let ct = CoordTransform::new();
         let anims = build_animations(&mut builder, &animated_nodes, &ct);
-        assert!(anims.is_empty(), "static-only model should produce no animations");
+        assert!(
+            anims.is_empty(),
+            "static-only model should produce no animations"
+        );
     }
 
     #[test]
@@ -2724,23 +2632,35 @@ mod tests {
         let model = make_animated_test_model();
         let animated_geom = &model.geom_objects[1];
 
-        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let ct = CoordTransform::new();
         let extras = build_anim_extras(animated_geom, 5, &ct);
         assert!(extras.is_some(), "animated geom should produce extras");
 
         let json_str = extras.unwrap().to_string();
         let parsed: serde_json::Value = serde_json::from_str(&json_str).unwrap();
 
-        assert_eq!(parsed["geom_index"], 5, "geom_index should match the gi parameter");
-        assert!(parsed["transform_anim"].is_object(), "should have transform_anim");
+        assert_eq!(
+            parsed["geom_index"], 5,
+            "geom_index should match the gi parameter"
+        );
+        assert!(
+            parsed["transform_anim"].is_object(),
+            "should have transform_anim"
+        );
         assert_eq!(parsed["transform_anim"]["frame_num"], 3);
         assert_eq!(parsed["transform_anim"]["frame_rate"], 30.0);
         assert_eq!(
-            parsed["transform_anim"]["translations"].as_array().unwrap().len(),
+            parsed["transform_anim"]["translations"]
+                .as_array()
+                .unwrap()
+                .len(),
             3
         );
         assert_eq!(
-            parsed["transform_anim"]["rotations"].as_array().unwrap().len(),
+            parsed["transform_anim"]["rotations"]
+                .as_array()
+                .unwrap()
+                .len(),
             3
         );
     }
@@ -2750,9 +2670,12 @@ mod tests {
         let model = make_test_model();
         let static_geom = &model.geom_objects[0];
 
-        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let ct = CoordTransform::new();
         let extras = build_anim_extras(static_geom, 0, &ct);
-        assert!(extras.is_none(), "static geom with no anims should produce None");
+        assert!(
+            extras.is_none(),
+            "static geom with no anims should produce None"
+        );
     }
 
     #[test]
@@ -2761,9 +2684,12 @@ mod tests {
         let static_geom = &model.geom_objects[0];
 
         // Even a static geom with no anims should get pko_primitive_id
-        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let ct = CoordTransform::new();
         let extras = build_node_extras(static_geom, 7, &ct);
-        assert!(extras.is_some(), "node extras should always be Some (has pko_primitive_id)");
+        assert!(
+            extras.is_some(),
+            "node extras should always be Some (has pko_primitive_id)"
+        );
 
         let parsed: serde_json::Value = serde_json::from_str(&extras.unwrap().to_string()).unwrap();
         assert_eq!(parsed["pko_primitive_id"], 7);
@@ -2774,14 +2700,17 @@ mod tests {
         let model = make_animated_test_model();
         let animated_geom = &model.geom_objects[1];
 
-        let ct = CoordTransform::new(ExportProfile::StandardGltf);
+        let ct = CoordTransform::new();
         let extras = build_node_extras(animated_geom, 3, &ct);
         assert!(extras.is_some());
 
         let parsed: serde_json::Value = serde_json::from_str(&extras.unwrap().to_string()).unwrap();
         // Should have both pko_primitive_id AND animation data
         assert_eq!(parsed["pko_primitive_id"], 3);
-        assert!(parsed["transform_anim"].is_object(), "should still have transform_anim");
+        assert!(
+            parsed["transform_anim"].is_object(),
+            "should still have transform_anim"
+        );
         assert_eq!(parsed["geom_index"], 3);
     }
 
@@ -2928,18 +2857,27 @@ mod tests {
         assert_eq!(default_dst_blend_for_transp_type(1), Some(D3DBLEND_ONE));
 
         // Type 2 (ADDITIVE1): SrcColor/One
-        assert_eq!(default_src_blend_for_transp_type(2), Some(D3DBLEND_SRCCOLOR));
+        assert_eq!(
+            default_src_blend_for_transp_type(2),
+            Some(D3DBLEND_SRCCOLOR)
+        );
         assert_eq!(default_dst_blend_for_transp_type(2), Some(D3DBLEND_ONE));
 
         // Type 3 (ADDITIVE2): SrcColor/InvSrcColor
-        assert_eq!(default_src_blend_for_transp_type(3), Some(D3DBLEND_SRCCOLOR));
+        assert_eq!(
+            default_src_blend_for_transp_type(3),
+            Some(D3DBLEND_SRCCOLOR)
+        );
         assert_eq!(
             default_dst_blend_for_transp_type(3),
             Some(D3DBLEND_INVSRCCOLOR)
         );
 
         // Type 4 (ADDITIVE3): SrcAlpha/DestAlpha
-        assert_eq!(default_src_blend_for_transp_type(4), Some(D3DBLEND_SRCALPHA));
+        assert_eq!(
+            default_src_blend_for_transp_type(4),
+            Some(D3DBLEND_SRCALPHA)
+        );
         assert_eq!(
             default_dst_blend_for_transp_type(4),
             Some(D3DBLEND_DESTALPHA)
@@ -2991,11 +2929,7 @@ mod tests {
             let gltf_mat = &builder.materials[0];
             // Name should contain T1, not T6/T7/T8
             assert!(
-                gltf_mat
-                    .name
-                    .as_ref()
-                    .unwrap()
-                    .contains("__PKO_T1_A0_O255"),
+                gltf_mat.name.as_ref().unwrap().contains("__PKO_T1_A0_O255"),
                 "type {} should canonicalize to T1 in name, got: {}",
                 transp_type,
                 gltf_mat.name.as_ref().unwrap()
@@ -3058,10 +2992,7 @@ mod tests {
             "additive + alpha test should produce Mask alpha mode"
         );
 
-        let cutoff = gltf_mat
-            .alpha_cutoff
-            .expect("alpha cutoff should be set")
-            .0;
+        let cutoff = gltf_mat.alpha_cutoff.expect("alpha cutoff should be set").0;
         assert!((cutoff - (129.0 / 255.0)).abs() < 1e-6);
 
         let name = gltf_mat.name.as_ref().unwrap();
@@ -3299,7 +3230,8 @@ mod tests {
         let json_len = u32::from_le_bytes(glb[12..16].try_into().unwrap()) as usize;
         let json_data = &glb[20..20 + json_len];
         let bin_offset = 20 + json_len;
-        let bin_len = u32::from_le_bytes(glb[bin_offset..bin_offset + 4].try_into().unwrap()) as usize;
+        let bin_len =
+            u32::from_le_bytes(glb[bin_offset..bin_offset + 4].try_into().unwrap()) as usize;
         let bin_data = glb[bin_offset + 8..bin_offset + 8 + bin_len].to_vec();
         let parsed: serde_json::Value = serde_json::from_slice(json_data).unwrap();
         (parsed, bin_data)
@@ -3469,7 +3401,8 @@ mod tests {
         let model = make_multi_geom_model(4, false);
         let lmo_path = write_temp_lmo(&model, &tmp_dir, "no_colors.lmo");
 
-        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir, true, &CoordTransform::new(ExportProfile::StandardGltf)).unwrap();
+        let (json_str, bin) =
+            build_glb_from_lmo(&lmo_path, &tmp_dir, true, &CoordTransform::new()).unwrap();
         let glb = build_glb_bytes(&json_str, &bin);
         let (json, bin_data) = parse_glb(&glb);
 
@@ -3491,7 +3424,8 @@ mod tests {
         let model = make_multi_geom_model(4, true);
         let lmo_path = write_temp_lmo(&model, &tmp_dir, "with_colors.lmo");
 
-        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir, true, &CoordTransform::new(ExportProfile::StandardGltf)).unwrap();
+        let (json_str, bin) =
+            build_glb_from_lmo(&lmo_path, &tmp_dir, true, &CoordTransform::new()).unwrap();
         let glb = build_glb_bytes(&json_str, &bin);
         let (json, bin_data) = parse_glb(&glb);
 
@@ -3519,7 +3453,8 @@ mod tests {
 
         let lmo_path = write_temp_lmo(&model, &tmp_dir, "mixed_colors.lmo");
 
-        let (json_str, bin) = build_glb_from_lmo(&lmo_path, &tmp_dir, true, &CoordTransform::new(ExportProfile::StandardGltf)).unwrap();
+        let (json_str, bin) =
+            build_glb_from_lmo(&lmo_path, &tmp_dir, true, &CoordTransform::new()).unwrap();
         let glb = build_glb_bytes(&json_str, &bin);
         let (json, bin_data) = parse_glb(&glb);
 
@@ -3539,9 +3474,8 @@ mod tests {
     /// contains vertex float data instead of triangle indices.
     #[test]
     fn real_glb_buildings_have_valid_indices() {
-        let buildings_dir = std::path::Path::new(
-            "../../client-unity/pko-client/Assets/Maps/Shared/buildings",
-        );
+        let buildings_dir =
+            std::path::Path::new("../../client-unity/pko-client/Assets/Maps/Shared/buildings");
         if !buildings_dir.exists() {
             return; // skip if building files not available
         }
@@ -3601,7 +3535,8 @@ mod tests {
         };
 
         let project_dir = lmo_path.parent().unwrap().parent().unwrap();
-        let (json_str, bin) = build_glb_from_lmo(lmo_path, project_dir, true, &CoordTransform::new(ExportProfile::StandardGltf)).unwrap();
+        let (json_str, bin) =
+            build_glb_from_lmo(lmo_path, project_dir, true, &CoordTransform::new()).unwrap();
         let glb = build_glb_bytes(&json_str, &bin);
         let (json, bin_data) = parse_glb(&glb);
 
@@ -3666,7 +3601,7 @@ mod tests {
         file.extend_from_slice(&(block_data.len() as u32).to_le_bytes()); // dwPitchOrLinearSize
         file.extend_from_slice(&0u32.to_le_bytes()); // dwDepth
         file.extend_from_slice(&1u32.to_le_bytes()); // dwMipMapCount
-        // dwReserved1[11]
+                                                     // dwReserved1[11]
         for _ in 0..11 {
             file.extend_from_slice(&0u32.to_le_bytes());
         }
@@ -3701,9 +3636,11 @@ mod tests {
         // Since color0 (0) < color1 (0xFFFF), this is punch-through mode.
         // Index bits: all 0b11 = index 3 = transparent for all 16 pixels.
         let mut block = [0u8; 8];
-        block[0] = 0x00; block[1] = 0x00; // color0 = 0 (black)
-        block[2] = 0xFF; block[3] = 0xFF; // color1 = 0xFFFF (white)
-        // All pixels = index 3 (0b11 repeated 16 times = 0xFFFFFFFF)
+        block[0] = 0x00;
+        block[1] = 0x00; // color0 = 0 (black)
+        block[2] = 0xFF;
+        block[3] = 0xFF; // color1 = 0xFFFF (white)
+                         // All pixels = index 3 (0b11 repeated 16 times = 0xFFFFFFFF)
         block[4] = 0xFF;
         block[5] = 0xFF;
         block[6] = 0xFF;
@@ -3734,9 +3671,11 @@ mod tests {
         // color1 = 0x001F (bright blue, RGB565)
         // Since color0 (0xF800) > color1 (0x001F), this is 4-color opaque mode.
         let mut block = [0u8; 8];
-        block[0] = 0x00; block[1] = 0xF8; // color0 = 0xF800 (red)
-        block[2] = 0x1F; block[3] = 0x00; // color1 = 0x001F (blue)
-        // All pixels = index 0 → color0 (red)
+        block[0] = 0x00;
+        block[1] = 0xF8; // color0 = 0xF800 (red)
+        block[2] = 0x1F;
+        block[3] = 0x00; // color1 = 0x001F (blue)
+                         // All pixels = index 0 → color0 (red)
         block[4] = 0x00;
         block[5] = 0x00;
         block[6] = 0x00;
@@ -3756,7 +3695,14 @@ mod tests {
 
         // First pixel should be red-ish (R high, G low, B low)
         let p = rgba.get_pixel(0, 0).0;
-        assert!(p[0] > 200, "red channel should be high, got R={} G={} B={} A={}", p[0], p[1], p[2], p[3]);
+        assert!(
+            p[0] > 200,
+            "red channel should be high, got R={} G={} B={} A={}",
+            p[0],
+            p[1],
+            p[2],
+            p[3]
+        );
         assert!(p[1] < 10, "green channel should be low, got {}", p[1]);
         assert!(p[2] < 10, "blue channel should be low, got {}", p[2]);
     }
@@ -3820,14 +3766,22 @@ mod tests {
         for y in 0..2 {
             for x in 0..4 {
                 let a = rgba.get_pixel(x, y).0[3];
-                assert_eq!(a, 255, "pixel ({},{}) should be opaque, got alpha={}", x, y, a);
+                assert_eq!(
+                    a, 255,
+                    "pixel ({},{}) should be opaque, got alpha={}",
+                    x, y, a
+                );
             }
         }
         // Bottom half: transparent
         for y in 2..4 {
             for x in 0..4 {
                 let a = rgba.get_pixel(x, y).0[3];
-                assert_eq!(a, 0, "pixel ({},{}) should be transparent, got alpha={}", x, y, a);
+                assert_eq!(
+                    a, 0,
+                    "pixel ({},{}) should be transparent, got alpha={}",
+                    x, y, a
+                );
             }
         }
     }
@@ -3843,10 +3797,15 @@ mod tests {
             block[i] = 0x88; // two nibbles per byte, each 0x8
         }
         // Color section: color0 > color1 (opaque mode), all index 0 = white
-        block[8] = 0xFF; block[9] = 0xFF; // color0 = white
-        block[10] = 0x00; block[11] = 0x00; // color1 = black
-        // All indices 0
-        block[12] = 0x00; block[13] = 0x00; block[14] = 0x00; block[15] = 0x00;
+        block[8] = 0xFF;
+        block[9] = 0xFF; // color0 = white
+        block[10] = 0x00;
+        block[11] = 0x00; // color1 = black
+                          // All indices 0
+        block[12] = 0x00;
+        block[13] = 0x00;
+        block[14] = 0x00;
+        block[15] = 0x00;
 
         let dds = build_dds(4, 4, FOURCC_DXT3, &block);
         // DXT3 falls through to image crate — should decode with alpha preserved
@@ -3872,14 +3831,19 @@ mod tests {
         // Build a 4x4 DXT5 DDS — alpha0=255, alpha1=0, all indices=0 → all alpha=255
         let mut block = [0u8; 16];
         block[0] = 255; // alpha0
-        block[1] = 0;   // alpha1
-        // Alpha indices: all 0 (3 bits each, 16 pixels = 48 bits = 6 bytes, all zero)
-        // block[2..8] already zeroed
-        // Color: white, all indices 0
-        block[8] = 0xFF; block[9] = 0xFF; // color0 = white
-        block[10] = 0x00; block[11] = 0x00; // color1 = black
-        // Color indices: all 0
-        block[12] = 0x00; block[13] = 0x00; block[14] = 0x00; block[15] = 0x00;
+        block[1] = 0; // alpha1
+                      // Alpha indices: all 0 (3 bits each, 16 pixels = 48 bits = 6 bytes, all zero)
+                      // block[2..8] already zeroed
+                      // Color: white, all indices 0
+        block[8] = 0xFF;
+        block[9] = 0xFF; // color0 = white
+        block[10] = 0x00;
+        block[11] = 0x00; // color1 = black
+                          // Color indices: all 0
+        block[12] = 0x00;
+        block[13] = 0x00;
+        block[14] = 0x00;
+        block[15] = 0x00;
 
         let dds = build_dds(4, 4, FOURCC_DXT5, &block);
         let img = decode_dds_with_alpha(&dds).expect("DXT5 should decode via image crate");
@@ -3907,7 +3871,7 @@ mod tests {
             ambient: [0.3, 0.3, 0.3, 1.0],
             emissive: [0.0, 0.0, 0.0, 0.0],
             opacity: 1.0,
-            transp_type: 0,          // FILTER (non-effect)
+            transp_type: 0,            // FILTER (non-effect)
             alpha_test_enabled: false, // NOT alpha tested
             alpha_ref: 0,
             src_blend: None,
@@ -3980,11 +3944,19 @@ mod tests {
 
         // Top-left quadrant (0-3, 0-3): red, opaque
         let p = rgba.get_pixel(0, 0).0;
-        assert!(p[0] > 200 && p[3] == 255, "top-left should be opaque red: {:?}", p);
+        assert!(
+            p[0] > 200 && p[3] == 255,
+            "top-left should be opaque red: {:?}",
+            p
+        );
 
         // Top-right quadrant (4-7, 0-3): blue, opaque
         let p = rgba.get_pixel(4, 0).0;
-        assert!(p[2] > 200 && p[3] == 255, "top-right should be opaque blue: {:?}", p);
+        assert!(
+            p[2] > 200 && p[3] == 255,
+            "top-right should be opaque blue: {:?}",
+            p
+        );
 
         // Bottom-left quadrant (0-3, 4-7): fully transparent
         let p = rgba.get_pixel(0, 4).0;
@@ -3992,23 +3964,29 @@ mod tests {
 
         // Bottom-right quadrant (4-7, 4-7): green, opaque
         let p = rgba.get_pixel(4, 4).0;
-        assert!(p[1] > 200 && p[3] == 255, "bottom-right should be opaque green: {:?}", p);
+        assert!(
+            p[1] > 200 && p[3] == 255,
+            "bottom-right should be opaque green: {:?}",
+            p
+        );
 
         // Count: exactly 16 transparent pixels (one 4x4 block)
         let transparent_count = rgba.pixels().filter(|p| p.0[3] == 0).count();
-        assert_eq!(transparent_count, 16, "exactly one block should be transparent");
+        assert_eq!(
+            transparent_count, 16,
+            "exactly one block should be transparent"
+        );
     }
 
     #[test]
     fn build_glb_with_bone_animation() {
-        let lmo_path =
-            std::path::Path::new("../top-client/model/scene/nml-bd199.lmo");
+        let lmo_path = std::path::Path::new("../top-client/model/scene/nml-bd199.lmo");
         if !lmo_path.exists() {
             eprintln!("Skipping bone animation test: nml-bd199.lmo not found");
             return;
         }
         let project_dir = std::path::Path::new("../top-client");
-        let (json, bin) = build_glb_from_lmo(lmo_path, project_dir, true, &CoordTransform::new(ExportProfile::StandardGltf))
+        let (json, bin) = build_glb_from_lmo(lmo_path, project_dir, true, &CoordTransform::new())
             .expect("GLB export should succeed for nml-bd199");
 
         let root: serde_json::Value = serde_json::from_str(&json).unwrap();
@@ -4024,7 +4002,9 @@ mod tests {
         }
 
         // Should have 1 merged bone animation with all channels
-        let animations = root["animations"].as_array().expect("should have animations");
+        let animations = root["animations"]
+            .as_array()
+            .expect("should have animations");
         assert_eq!(animations.len(), 1, "all bone animations merged into one");
 
         // Single animation should have 40 channels (5 butterflies × 4 bones × 2 properties)
@@ -4036,6 +4016,9 @@ mod tests {
         );
 
         // Binary buffer should be non-trivial
-        assert!(bin.len() > 10000, "binary buffer should have substantial data");
+        assert!(
+            bin.len() > 10000,
+            "binary buffer should have substantial data"
+        );
     }
 }

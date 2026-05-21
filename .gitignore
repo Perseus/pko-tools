@@ -46,9 +46,13 @@ server-source
 # OpenCode plans (session-specific)
 .opencode/plan/
 
+# Superpowers visual brainstorming sessions (session-specific)
+.superpowers/
+
 # Python cache
 __pycache__/
 *.pyc
 
+.tmp/
 
 unity-export

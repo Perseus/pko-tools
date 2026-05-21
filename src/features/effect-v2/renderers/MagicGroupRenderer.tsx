@@ -1,72 +1,36 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useAtomValue } from "jotai";
+import { useFrame } from "@react-three/fiber";
+import * as THREE from "three";
 import { MagicGroupEntry, MagicSingleEntry } from "@/types/effect-v2";
 import { magicSingleTableAtom } from "@/store/effect-v2";
 import { useTimeSource } from "../TimeContext";
-import { TriggeredClock } from "../TimeContext";
 import { MagicEffectRenderer } from "./MagicEffectRenderer";
 import { useLoadEffect } from "../useLoadEffect";
+import {
+  computeFanPhaseTarget,
+  computeSequenceDelay,
+  expandMagicGroupPhases,
+} from "./magicGroupKinematics";
 
-/**
- * Phase scheduler interface — abstracts the sequencing strategy so it can
- * be swapped later (e.g., overlapping, weighted random) without touching
- * the renderer.
- */
-interface PhaseScheduler {
-  /** Total number of phases in the sequence. */
-  phaseCount: number;
-  /** Advance to the next phase. Returns the new phase index, or -1 if complete. */
-  advance(currentPhase: number): number;
-  /** Get the MagicSingleEntry for a given phase index. */
-  getEntry(phaseIndex: number): MagicSingleEntry | null;
-}
-
-/**
- * Build a sequential phase scheduler from a MagicGroupEntry.
- * Expands typeIds + counts into a flat sequence:
- *   typeIds=[10,11], counts=[2,1] → phases=[10, 10, 11]
- */
-function buildSequentialScheduler(
-  group: MagicGroupEntry,
-  magicTable: Map<number, MagicSingleEntry>,
-): PhaseScheduler {
-  const phases: number[] = [];
-  for (let i = 0; i < group.typeIds.length; i++) {
-    if (group.typeIds[i] < 0) continue;
-    for (let j = 0; j < group.counts[i]; j++) {
-      phases.push(group.typeIds[i]);
-    }
-  }
-
-  return {
-    phaseCount: phases.length,
-    advance(currentPhase: number): number {
-      const next = currentPhase + 1;
-      return next < phases.length ? next : -1;
-    },
-    getEntry(phaseIndex: number): MagicSingleEntry | null {
-      if (phaseIndex < 0 || phaseIndex >= phases.length) return null;
-      return magicTable.get(phases[phaseIndex]) ?? null;
-    },
-  };
-}
+/** Group render modes matching C++ GroupList[] indices. */
+const GROUP_MODE_FAN = 0;
+const GROUP_MODE_SEQUENCE = 1;
 
 interface MagicGroupRendererProps {
   group: MagicGroupEntry;
 }
 
 /**
- * Renders a MagicGroup by playing its MagicSingle phases sequentially.
- * Each phase is wrapped in a TriggeredClock so it starts at t=0.
- * Phase transitions happen on MagicEffectRenderer completion.
+ * Renders a MagicGroup by dispatching on renderIdx:
+ *   0 = Fan mode:  all effects fired simultaneously, rotated in a horizontal fan
+ *   1 = Sequence:  all effects fired simultaneously, staggered by 0.2s each
+ *
+ * Matches C++ GroupList[] = { Part_fan, Part_sequence } in EffectObj.cpp.
  */
 export function MagicGroupRenderer({ group }: MagicGroupRendererProps) {
   const table = useAtomValue(magicSingleTableAtom);
-  const timeSource = useTimeSource();
-  const [currentPhase, setCurrentPhase] = useState(0);
-  const [phaseKey, setPhaseKey] = useState(0); // force remount on phase change
 
-  // Build lookup map from MagicSingle table
   const magicMap = useMemo(() => {
     const map = new Map<number, MagicSingleEntry>();
     for (const entry of table?.entries ?? []) {
@@ -75,73 +39,174 @@ export function MagicGroupRenderer({ group }: MagicGroupRendererProps) {
     return map;
   }, [table]);
 
-  // Build the scheduler
-  const scheduler = useMemo(
-    () => buildSequentialScheduler(group, magicMap),
+  const phases = useMemo(
+    () => expandMagicGroupPhases(group, magicMap),
     [group, magicMap],
   );
 
-  // Reset to phase 0 when group changes
-  useEffect(() => {
-    setCurrentPhase(0);
-    setPhaseKey((k) => k + 1);
-  }, [group]);
+  const renderMode = group.render_idx;
 
-  // Reset when playback time resets to 0
-  const prevTime = useRef(timeSource.getTime());
-  if (timeSource.getTime() < prevTime.current) {
-    // Can't setState during render, schedule it
-    queueMicrotask(() => {
-      setCurrentPhase(0);
-      setPhaseKey((k) => k + 1);
-    });
+  if (phases.length === 0) return null;
+
+  switch (renderMode) {
+    case GROUP_MODE_FAN:
+      return <FanGroupRenderer phases={phases} />;
+    case GROUP_MODE_SEQUENCE:
+      return <SequenceGroupRenderer phases={phases} />;
+    default:
+      return null;
   }
-  prevTime.current = timeSource.getTime();
+}
 
-  const handlePhaseComplete = useCallback(() => {
-    setCurrentPhase((prev) => {
-      const next = scheduler.advance(prev);
-      if (next === -1) {
-        // All phases complete — loop handled by playback controls
-        return prev;
-      }
-      setPhaseKey((k) => k + 1);
-      return next;
-    });
-  }, [scheduler]);
+// ── Fan Mode ────────────────────────────────────────────────────────────────
 
-  const currentEntry = scheduler.getEntry(currentPhase);
-  if (!currentEntry || scheduler.phaseCount === 0) return null;
+interface FanGroupRendererProps {
+  phases: MagicSingleEntry[];
+}
+
+/**
+ * Fan mode: fires all effects simultaneously, each rotated by an angular
+ * offset around PKO vertical Z. Matches C++ Part_fan() which flattens target
+ * Z to the origin height and uses D3DXMatrixRotationZ.
+ */
+function FanGroupRenderer({ phases }: FanGroupRendererProps) {
+  const count = phases.length;
+  const origin = useMemo(() => new THREE.Vector3(0, 0, 0), []);
+  const target = useMemo(() => new THREE.Vector3(0, 8, 0), []);
 
   return (
-    <PhaseRenderer
-      key={`phase-${phaseKey}`}
-      entry={currentEntry}
-      onComplete={handlePhaseComplete}
+    <group>
+      {phases.map((entry, i) => {
+        const phaseTarget = computeFanPhaseTarget(origin, target, i, count);
+        return (
+          <FanPhase key={i} entry={entry} origin={origin} target={phaseTarget} />
+        );
+      })}
+    </group>
+  );
+}
+
+function FanPhase({
+  entry,
+  origin,
+  target,
+}: {
+  entry: MagicSingleEntry;
+  origin: THREE.Vector3;
+  target: THREE.Vector3;
+}) {
+  const effFiles = useLoadEffect(entry.models);
+  return (
+    <MagicEffectRenderer
+      effFiles={effFiles}
+      magicEntry={entry}
+      origin={origin}
+      target={target}
+      showTarget={false}
+      animateTarget={false}
     />
   );
 }
 
+// ── Sequence Mode ───────────────────────────────────────────────────────────
+
+interface SequenceGroupRendererProps {
+  phases: MagicSingleEntry[];
+}
+
 /**
- * Renders a single phase: loads .eff files, wraps in TriggeredClock,
- * delegates to MagicEffectRenderer.
+ * Sequence mode: fires all effects from the same position, each delayed by
+ * index * 0.2s. Matches C++ Part_sequence() which calls
+ * SetDailTime((float)n * 0.2f) on each effect.
  */
-function PhaseRenderer({
-  entry,
-  onComplete,
-}: {
-  entry: MagicSingleEntry;
-  onComplete: () => void;
-}) {
-  const effFiles = useLoadEffect(entry.models);
+function SequenceGroupRenderer({ phases }: SequenceGroupRendererProps) {
+  const origin = useMemo(() => new THREE.Vector3(0, 0, 0), []);
+  const target = useMemo(() => new THREE.Vector3(0, 8, 1), []);
+  const targetVisual = useMemo(() => new THREE.Vector3(0, 8, 0), []);
 
   return (
-    <TriggeredClock loop={false}>
-      <MagicEffectRenderer
-        effFiles={effFiles}
-        magicEntry={entry}
-        onComplete={onComplete}
-      />
-    </TriggeredClock>
+    <group>
+      {phases.map((entry, i) => (
+        <DelayedEffect key={i} delay={computeSequenceDelay(i)}>
+          <SequencePhase
+            entry={entry}
+            origin={origin}
+            target={target}
+            targetVisual={targetVisual}
+            showTarget={i === 0}
+          />
+        </DelayedEffect>
+      ))}
+    </group>
+  );
+}
+
+function SequencePhase({
+  entry,
+  origin,
+  target,
+  targetVisual,
+  showTarget,
+}: {
+  entry: MagicSingleEntry;
+  origin: THREE.Vector3;
+  target: THREE.Vector3;
+  targetVisual: THREE.Vector3;
+  showTarget: boolean;
+}) {
+  const effFiles = useLoadEffect(entry.models);
+  return (
+    <MagicEffectRenderer
+      effFiles={effFiles}
+      magicEntry={entry}
+      origin={origin}
+      target={target}
+      targetVisual={targetVisual}
+      showTarget={showTarget}
+      animateTarget={false}
+    />
+  );
+}
+
+// ── Delay wrapper ───────────────────────────────────────────────────────────
+
+interface DelayedEffectProps {
+  delay: number;
+  children: React.ReactNode;
+}
+
+/**
+ * Renders children only after `delay` seconds have elapsed on the time source.
+ * Uses visibility toggle so the Three.js scene graph stays stable (no mount churn).
+ */
+function DelayedEffect({ delay, children }: DelayedEffectProps) {
+  const groupRef = useRef<THREE.Group>(null);
+  const timeSource = useTimeSource();
+  const [visible, setVisible] = useState(delay <= 0);
+
+  useFrame(() => {
+    const t = timeSource.getTime();
+    const shouldBeVisible = t >= delay;
+    if (shouldBeVisible !== visible) {
+      setVisible(shouldBeVisible);
+    }
+    if (groupRef.current) {
+      groupRef.current.visible = shouldBeVisible;
+    }
+  });
+
+  // Reset visibility when time resets
+  const prevTime = useRef(timeSource.getTime());
+  if (timeSource.getTime() < prevTime.current) {
+    if (delay > 0) {
+      queueMicrotask(() => setVisible(false));
+    }
+  }
+  prevTime.current = timeSource.getTime();
+
+  return (
+    <group ref={groupRef} visible={visible}>
+      {children}
+    </group>
   );
 }

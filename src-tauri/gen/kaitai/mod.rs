@@ -7,4 +7,5 @@ pub mod pko_map;
 pub mod pko_obj;
 pub mod pko_par;
 pub mod pko_poseinfo;
+pub mod pko_shadeinfo;
 pub mod terrain_info;

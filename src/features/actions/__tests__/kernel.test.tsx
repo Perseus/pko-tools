@@ -83,6 +83,15 @@ function RecencyProbe() {
   );
 }
 
+function ActionTitlesProbe() {
+  const { getActionsForCurrentContext } = useActionKernel();
+  const titles = getActionsForCurrentContext()
+    .map((action) => action.title)
+    .join(",");
+
+  return <div aria-label="action-titles">{titles}</div>;
+}
+
 function renderKernel(onEffectSave: () => void, onGizmoTranslate: () => void) {
   return render(
     <MemoryRouter initialEntries={["/effects"]}>
@@ -176,5 +185,21 @@ describe("ActionKernelProvider keyboard behavior", () => {
       );
     });
     expect(onGizmoTranslate).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not advertise map-to-glTF export on the maps surface", () => {
+    render(
+      <MemoryRouter initialEntries={["/maps"]}>
+        <SidebarProvider>
+          <ActionKernelProvider>
+            <ActionTitlesProbe />
+          </ActionKernelProvider>
+        </SidebarProvider>
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByLabelText("action-titles")).not.toHaveTextContent(
+      "Export Map to glTF",
+    );
   });
 });

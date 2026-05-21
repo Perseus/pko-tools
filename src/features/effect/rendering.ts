@@ -73,11 +73,12 @@ export function resolveFrameData(
 }
 
 export type GeometryConfig = {
-  type: "plane" | "rect" | "rectPlane" | "rectZ" | "triangle" | "trianglePlane" | "triangleZ" | "cylinder" | "sphere" | "model";
+  type: "plane" | "rect" | "rectPlane" | "rectZ" | "triangle" | "trianglePlane" | "triangleZ" | "cylinder" | "model";
   topRadius?: number;
   botRadius?: number;
   height?: number;
   segments?: number;
+  bottomUvV?: number;
   modelName?: string;
 };
 
@@ -85,7 +86,6 @@ const BUILTIN_NAMES = new Set([
   "",
   "Cylinder",
   "Cone",
-  "Sphere",
   "Rect",
   "RectZ",
   "RectPlane",
@@ -95,7 +95,7 @@ const BUILTIN_NAMES = new Set([
 
 /**
  * Determine geometry from the sub-effect's modelName field.
- * In PKO, geometry shape is defined by modelName (Cylinder, Cone, Sphere, Rect, etc.),
+ * In PKO, geometry shape is defined by modelName (Cylinder, Cone, Rect, etc.),
  * NOT by effectType (which controls texture/UV animation mode).
  * When useParam > 0, per-frame cylinder params override sub-effect level params.
  */
@@ -103,27 +103,27 @@ export function resolveGeometry(subEffect: SubEffect, frameIndex?: number): Geom
   const modelName = subEffect.modelName.trim();
 
   if (modelName === "Cylinder" || modelName === "Cone") {
+    const bottomUvV = modelName === "Cone" ? 1.5 : 1;
+    const defaultTopRadius = modelName === "Cone" ? 0 : 0.5;
     if (subEffect.useParam > 0 && subEffect.perFrameCylinder.length > 0 && frameIndex !== undefined) {
       const params = subEffect.perFrameCylinder[frameIndex] ?? subEffect.perFrameCylinder[0];
       return {
         type: "cylinder",
-        topRadius: params.topRadius || 0.5,
-        botRadius: params.botRadius || 0.5,
-        height: params.height || 1.0,
-        segments: Math.max(params.segments || 16, 3),
+        topRadius: params.topRadius ?? defaultTopRadius,
+        botRadius: params.botRadius ?? 0.5,
+        height: params.height ?? 1.0,
+        segments: Math.max(params.segments ?? 16, 3),
+        bottomUvV,
       };
     }
     return {
       type: "cylinder",
-      topRadius: subEffect.topRadius || 0.5,
-      botRadius: subEffect.botRadius || 0.5,
-      height: subEffect.height || 1.0,
-      segments: Math.max(subEffect.segments || 16, 3),
+      topRadius: subEffect.topRadius ?? defaultTopRadius,
+      botRadius: subEffect.botRadius ?? 0.5,
+      height: subEffect.height ?? 1.0,
+      segments: Math.max(subEffect.segments ?? 16, 3),
+      bottomUvV,
     };
-  }
-
-  if (modelName === "Sphere") {
-    return { type: "sphere" };
   }
 
   // Non-built-in name → external .lgo model file
@@ -327,13 +327,47 @@ export function createCylinderGeometry(
   botRadius = 0.5,
   height = 1.0,
   segments = 16,
+  bottomUvV = 1,
 ): THREE.BufferGeometry {
-  const geo = new THREE.CylinderGeometry(topRadius, botRadius, height, Math.max(segments, 3), 1, true);
-  // THREE.CylinderGeometry extends along Y, centered at origin.
-  // Rotate to Z-axis: rotateX(-π/2) maps Y→Z
-  // Then translate +Z by h/2 so base is at Z=0, top at Z=h
-  geo.rotateX(-Math.PI / 2);
-  geo.translate(0, 0, height / 2);
+  const seg = Math.max(segments, 3);
+  const positions: number[] = [];
+  const normals: number[] = [];
+  const uvs: number[] = [];
+  const indices: number[] = [];
+
+  const normalizeZero = (value: number) => Math.abs(value) < 1e-12 ? 0 : value;
+
+  for (let i = 0; i <= seg; i++) {
+    const angle = (2 * Math.PI * i) / seg;
+    const sin = normalizeZero(Math.sin(angle));
+    const cos = normalizeZero(Math.cos(angle));
+    const u = 1 - i / seg;
+
+    positions.push(
+      normalizeZero(topRadius * sin),
+      normalizeZero(topRadius * cos),
+      height,
+      normalizeZero(botRadius * sin),
+      normalizeZero(botRadius * cos),
+      0,
+    );
+    normals.push(sin, cos, 0, sin, cos, 0);
+    uvs.push(u, 0, u, bottomUvV);
+  }
+
+  for (let i = 0; i < seg; i++) {
+    const top0 = i * 2;
+    const bot0 = top0 + 1;
+    const top1 = top0 + 2;
+    const bot1 = top0 + 3;
+    indices.push(top0, bot0, top1, top1, bot0, bot1);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute("normal", new THREE.Float32BufferAttribute(normals, 3));
+  geo.setAttribute("uv", new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
   return geo;
 }
 
@@ -358,13 +392,25 @@ function d3dBlendToThree(d3dBlend: number): THREE.BlendingSrcFactor {
   }
 }
 
+function d3dBlendToThreeForEffectBackbuffer(d3dBlend: number): THREE.BlendingSrcFactor {
+  // PKO renders effects into the game backbuffer, not a transparent WebGL canvas.
+  // In that target, DESTALPHA behaves as opaque destination alpha for authored
+  // effects such as lryf/shadowf02; using WebGL destination alpha exposes black
+  // texture rectangles that the D3D client does not show.
+  switch (d3dBlend) {
+    case 7: return THREE.OneFactor;
+    case 8: return THREE.ZeroFactor;
+    default: return d3dBlendToThree(d3dBlend);
+  }
+}
+
 export function resolveBlendFactors(srcBlend: number, destBlend: number): {
   blendSrc: THREE.BlendingSrcFactor;
   blendDst: THREE.BlendingDstFactor;
 } {
   return {
-    blendSrc: d3dBlendToThree(srcBlend),
-    blendDst: d3dBlendToThree(destBlend) as THREE.BlendingDstFactor,
+    blendSrc: d3dBlendToThreeForEffectBackbuffer(srcBlend),
+    blendDst: d3dBlendToThreeForEffectBackbuffer(destBlend) as THREE.BlendingDstFactor,
   };
 }
 
@@ -414,9 +460,14 @@ export function resolveTextureCandidates(textureName: string, projectDirectory: 
     "texture/sceneffect",
   ];
 
-  return directories.flatMap((dir) =>
-    nameCandidates.map((name) => `${projectDirectory}/${dir}/${name}`)
+  const roots = [projectDirectory, `${projectDirectory}/Data`];
+  const candidates = roots.flatMap((root) =>
+    directories.flatMap((dir) =>
+      nameCandidates.map((name) => `${root}/${dir}/${name}`)
+    )
   );
+
+  return Array.from(new Set(candidates));
 }
 
 export function resolveFrameDurations(subEffect: SubEffect) {

@@ -7,11 +7,11 @@
 #![allow(unused_comparisons)]
 
 extern crate kaitai;
-use kaitai::*;
-use std::convert::{TryFrom, TryInto};
-use std::cell::{Ref, Cell, RefCell};
-use std::rc::{Rc, Weak};
 use super::pko_lmo::PkoLmo_GeometryChunk;
+use kaitai::*;
+use std::cell::{Cell, Ref, RefCell};
+use std::convert::{TryFrom, TryInto};
+use std::rc::{Rc, Weak};
 
 /**
  * Direct lwGeomObjInfo container used by .lgo resources.
@@ -51,14 +51,26 @@ impl KStruct for PkoLgo {
         *self_rc.geometry_raw.borrow_mut() = _io.read_bytes_full()?.into();
         let geometry_raw = self_rc.geometry_raw.borrow();
         let _t_geometry_raw_io = BytesReader::from(geometry_raw.clone());
-        let f = |t : &mut PkoLmo_GeometryChunk| Ok(t.set_params((*self_rc.version()).try_into().map_err(|_| KError::CastError)?, (0).try_into().map_err(|_| KError::CastError)?));
-        let t = Self::read_into_with_init::<BytesReader, PkoLmo_GeometryChunk>(&_t_geometry_raw_io, None, None, &f)?.into();
+        let f = |t: &mut PkoLmo_GeometryChunk| {
+            Ok(t.set_params(
+                (*self_rc.version())
+                    .try_into()
+                    .map_err(|_| KError::CastError)?,
+                (0).try_into().map_err(|_| KError::CastError)?,
+            ))
+        };
+        let t = Self::read_into_with_init::<BytesReader, PkoLmo_GeometryChunk>(
+            &_t_geometry_raw_io,
+            None,
+            None,
+            &f,
+        )?
+        .into();
         *self_rc.geometry.borrow_mut() = t;
         Ok(())
     }
 }
-impl PkoLgo {
-}
+impl PkoLgo {}
 impl PkoLgo {
     pub fn version(&self) -> Ref<'_, u32> {
         self.version.borrow()

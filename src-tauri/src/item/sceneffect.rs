@@ -3,6 +3,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::client_paths;
+use crate::text_encoding;
+
 /// A single entry from sceneffectinfo.txt
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SceneEffectInfo {
@@ -96,9 +99,7 @@ fn read_f32(data: &[u8], offset: usize) -> f32 {
 }
 
 fn read_cstr(data: &[u8], offset: usize, max_len: usize) -> String {
-    let slice = &data[offset..offset + max_len];
-    let end = slice.iter().position(|&b| b == 0).unwrap_or(max_len);
-    String::from_utf8_lossy(&slice[..end]).to_string()
+    text_encoding::read_gbk_cstr(data, offset, max_len).unwrap_or_default()
 }
 
 /// Parse sceneffectinfo.bin — CRawDataSet binary format.
@@ -192,13 +193,13 @@ pub fn parse_scene_effect_info_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, S
 /// Load and parse sceneffectinfo from a project directory.
 /// Tries .bin (binary CRawDataSet) first, falls back to .txt (tab-separated text).
 pub fn load_scene_effect_info(project_dir: &Path) -> anyhow::Result<HashMap<u32, SceneEffectInfo>> {
-    let bin_path = project_dir.join("scripts/table/sceneffectinfo.bin");
+    let bin_path = client_paths::table_file(project_dir, "sceneffectinfo.bin");
     if bin_path.exists() {
         let data = std::fs::read(&bin_path)?;
         return parse_scene_effect_info_bin(&data);
     }
 
-    let txt_path = project_dir.join("scripts/table/sceneffectinfo.txt");
+    let txt_path = client_paths::table_file(project_dir, "sceneffectinfo.txt");
     if txt_path.exists() {
         let text = std::fs::read_to_string(&txt_path)?;
         return Ok(parse_scene_effect_info(&text));

@@ -123,11 +123,11 @@ export default function SubEffectProperties() {
           />
         </div>
         <div className="space-y-1">
-          <FieldLabel help="Use 'Cylinder', 'Cone', or 'Sphere' for built-in primitives (shows mesh params below). Or enter a .lgo model filename.">Model Name</FieldLabel>
+          <FieldLabel help="Use 'Cylinder' or 'Cone' for built-in deformable primitives. Other names are loaded as effect model resources.">Model Name</FieldLabel>
           <Input
             aria-label="subeffect-model"
             value={subEffect.modelName}
-            placeholder="Cylinder, Cone, Sphere, or filename"
+            placeholder="Cylinder, Cone, or model name"
             onChange={(event) => updateSubEffect({ modelName: event.target.value })}
           />
         </div>

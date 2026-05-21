@@ -3,6 +3,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::client_paths;
+use crate::text_encoding;
+
 /// A scene object model entry from sceneobjinfo.bin.
 ///
 /// Parses all CSceneObjInfo fields (extends CRawDataInfo, 108-byte base).
@@ -119,9 +122,21 @@ fn read_bool(data: &[u8], offset: usize) -> bool {
 }
 
 fn read_cstr(data: &[u8], offset: usize, max_len: usize) -> String {
-    let slice = &data[offset..offset + max_len];
-    let end = slice.iter().position(|&b| b == 0).unwrap_or(max_len);
-    String::from_utf8_lossy(&slice[..end]).to_string()
+    text_encoding::read_gbk_cstr(data, offset, max_len).unwrap_or_default()
+}
+
+fn read_raw_data_id_and_shift(data: &[u8]) -> (u32, usize) {
+    let legacy_id = read_u32(data, RAW_DATA_INFO_NID_OFFSET);
+    if legacy_id != 0 {
+        return (legacy_id, 0);
+    }
+
+    let demon_id = read_u32(data, RAW_DATA_INFO_NID_OFFSET + 4);
+    if demon_id != 0 {
+        return (demon_id, 8);
+    }
+
+    (legacy_id, 0)
 }
 
 /// Parse sceneobjinfo.bin — CRawDataSet binary format.
@@ -137,9 +152,6 @@ pub fn parse_scene_obj_info_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, Scen
     if entry_size == 0 {
         return Ok(HashMap::new());
     }
-
-    let has_derived_fields = entry_size >= MIN_DERIVED_SIZE;
-    let has_fade_fields = entry_size >= MIN_FADE_SIZE;
 
     let data = &data[4..];
     let entry_count = data.len() / entry_size;
@@ -157,7 +169,10 @@ pub fn parse_scene_obj_info_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, Scen
             continue;
         }
 
-        let id = read_u32(chunk, RAW_DATA_INFO_NID_OFFSET);
+        let (id, layout_shift) = read_raw_data_id_and_shift(chunk);
+        let has_derived_fields = entry_size >= MIN_DERIVED_SIZE + layout_shift;
+        let has_fade_fields = entry_size >= MIN_FADE_SIZE + layout_shift;
+        let field = |offset: usize| offset + layout_shift;
         let filename = read_cstr(chunk, RAW_DATA_INFO_SZDATA_OFFSET, RAW_DATA_INFO_SZDATA_LEN)
             .trim()
             .to_string();
@@ -185,29 +200,29 @@ pub fn parse_scene_obj_info_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, Scen
             point_attenuation,
         ) = if has_derived_fields {
             let display_name =
-                read_cstr(chunk, SCENE_OBJ_SZNAME_OFFSET, SCENE_OBJ_SZNAME_LEN);
-            let obj_type = read_i32(chunk, SCENE_OBJ_NTYPE_OFFSET);
-            let shade_flag = read_bool(chunk, SCENE_OBJ_BSHADE_FLAG_OFFSET);
-            let enable_point_light = read_bool(chunk, SCENE_OBJ_BENABLE_POINT_LIGHT_OFFSET);
-            let enable_env_light = read_bool(chunk, SCENE_OBJ_BENABLE_ENV_LIGHT_OFFSET);
-            let attach_effect_id = read_i32(chunk, SCENE_OBJ_NATTACH_EFFECT_ID_OFFSET);
-            let style = read_i32(chunk, SCENE_OBJ_NSTYLE_OFFSET);
-            let flag = read_i32(chunk, SCENE_OBJ_NFLAG_OFFSET);
-            let size_flag = read_i32(chunk, SCENE_OBJ_NSIZE_FLAG_OFFSET);
-            let anim_ctrl_id = read_i32(chunk, SCENE_OBJ_NANIM_CTRL_ID_OFFSET);
-            let is_really_big = read_bool(chunk, SCENE_OBJ_BIS_REALLY_BIG_OFFSET);
+                read_cstr(chunk, field(SCENE_OBJ_SZNAME_OFFSET), SCENE_OBJ_SZNAME_LEN);
+            let obj_type = read_i32(chunk, field(SCENE_OBJ_NTYPE_OFFSET));
+            let shade_flag = read_bool(chunk, field(SCENE_OBJ_BSHADE_FLAG_OFFSET));
+            let enable_point_light = read_bool(chunk, field(SCENE_OBJ_BENABLE_POINT_LIGHT_OFFSET));
+            let enable_env_light = read_bool(chunk, field(SCENE_OBJ_BENABLE_ENV_LIGHT_OFFSET));
+            let attach_effect_id = read_i32(chunk, field(SCENE_OBJ_NATTACH_EFFECT_ID_OFFSET));
+            let style = read_i32(chunk, field(SCENE_OBJ_NSTYLE_OFFSET));
+            let flag = read_i32(chunk, field(SCENE_OBJ_NFLAG_OFFSET));
+            let size_flag = read_i32(chunk, field(SCENE_OBJ_NSIZE_FLAG_OFFSET));
+            let anim_ctrl_id = read_i32(chunk, field(SCENE_OBJ_NANIM_CTRL_ID_OFFSET));
+            let is_really_big = read_bool(chunk, field(SCENE_OBJ_BIS_REALLY_BIG_OFFSET));
             let point_color = [
-                chunk[SCENE_OBJ_POINT_COLOR_OFFSET],
-                chunk[SCENE_OBJ_POINT_COLOR_OFFSET + 1],
-                chunk[SCENE_OBJ_POINT_COLOR_OFFSET + 2],
+                chunk[field(SCENE_OBJ_POINT_COLOR_OFFSET)],
+                chunk[field(SCENE_OBJ_POINT_COLOR_OFFSET) + 1],
+                chunk[field(SCENE_OBJ_POINT_COLOR_OFFSET) + 2],
             ];
             let env_color = [
-                chunk[SCENE_OBJ_ENV_COLOR_OFFSET],
-                chunk[SCENE_OBJ_ENV_COLOR_OFFSET + 1],
-                chunk[SCENE_OBJ_ENV_COLOR_OFFSET + 2],
+                chunk[field(SCENE_OBJ_ENV_COLOR_OFFSET)],
+                chunk[field(SCENE_OBJ_ENV_COLOR_OFFSET) + 1],
+                chunk[field(SCENE_OBJ_ENV_COLOR_OFFSET) + 2],
             ];
-            let point_range = read_i32(chunk, SCENE_OBJ_NRANGE_OFFSET);
-            let point_attenuation = read_f32(chunk, SCENE_OBJ_ATTENUATION1_OFFSET);
+            let point_range = read_i32(chunk, field(SCENE_OBJ_NRANGE_OFFSET));
+            let point_attenuation = read_f32(chunk, field(SCENE_OBJ_ATTENUATION1_OFFSET));
             (
                 display_name,
                 obj_type,
@@ -248,12 +263,12 @@ pub fn parse_scene_obj_info_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, Scen
 
         // Parse fade fields if the entry is large enough (offsets 204-275)
         let (fade_obj_num, fade_obj_seq, fade_coefficient) = if has_fade_fields {
-            let num = read_i32(chunk, SCENE_OBJ_NFADE_OBJ_NUM_OFFSET);
+            let num = read_i32(chunk, field(SCENE_OBJ_NFADE_OBJ_NUM_OFFSET));
             let count = (num.max(0) as usize).min(16);
             let seq: Vec<i32> = (0..count)
-                .map(|j| read_i32(chunk, SCENE_OBJ_NFADE_OBJ_SEQ_OFFSET + j * 4))
+                .map(|j| read_i32(chunk, field(SCENE_OBJ_NFADE_OBJ_SEQ_OFFSET) + j * 4))
                 .collect();
-            let coeff = read_f32(chunk, SCENE_OBJ_FFADE_COEFFICIENT_OFFSET);
+            let coeff = read_f32(chunk, field(SCENE_OBJ_FFADE_COEFFICIENT_OFFSET));
             (num, seq, coeff)
         } else {
             (0, Vec::new(), 0.0)
@@ -291,7 +306,12 @@ pub fn parse_scene_obj_info_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, Scen
 
 /// Load and parse sceneobjinfo.bin from a project directory.
 pub fn load_scene_obj_info(project_dir: &Path) -> anyhow::Result<HashMap<u32, SceneObjModelInfo>> {
-    let bin_path = project_dir.join("scripts/table/sceneobjinfo.bin");
+    let bin_path = client_paths::table_file(project_dir, "sceneobjinfo.bin");
+    if bin_path.exists() {
+        let data = std::fs::read(&bin_path)?;
+        return parse_scene_obj_info_bin(&data);
+    }
+    let bin_path = client_paths::table_file(project_dir, "SceneObjInfo.bin");
     if bin_path.exists() {
         let data = std::fs::read(&bin_path)?;
         return parse_scene_obj_info_bin(&data);
@@ -311,6 +331,62 @@ mod tests {
 
         let map = parse_scene_obj_info_bin(&0u32.to_le_bytes()).unwrap();
         assert!(map.is_empty());
+    }
+
+    #[test]
+    fn parses_demon_shifted_raw_data_sceneobj_layout() {
+        let entry_size = 288usize;
+        let mut data = Vec::new();
+        data.extend_from_slice(&(entry_size as u32).to_le_bytes());
+        let mut entry = vec![0u8; entry_size];
+        entry[0..4].copy_from_slice(&1i32.to_le_bytes());
+        entry[4..8].copy_from_slice(&42u32.to_le_bytes());
+        entry[8..21].copy_from_slice(b"house_001.lmo");
+        entry[104..108].copy_from_slice(&42u32.to_le_bytes());
+        entry[112..116].copy_from_slice(&42u32.to_le_bytes());
+        entry[116..125].copy_from_slice(b"House001\0");
+        entry[132..136].copy_from_slice(&3i32.to_le_bytes());
+        entry[136..139].copy_from_slice(&[1, 2, 3]);
+        entry[139..142].copy_from_slice(&[4, 5, 6]);
+        entry[148..152].copy_from_slice(&900i32.to_le_bytes());
+        entry[152..156].copy_from_slice(&0.5f32.to_le_bytes());
+        entry[156..160].copy_from_slice(&77i32.to_le_bytes());
+        entry[160..164].copy_from_slice(&2i32.to_le_bytes());
+        entry[164..168].copy_from_slice(&88i32.to_le_bytes());
+        entry[168..172].copy_from_slice(&1i32.to_le_bytes());
+        entry[172..176].copy_from_slice(&1i32.to_le_bytes());
+        entry[176..180].copy_from_slice(&9i32.to_le_bytes());
+        entry[180..184].copy_from_slice(&10i32.to_le_bytes());
+        entry[204..208].copy_from_slice(&1i32.to_le_bytes());
+        entry[208..212].copy_from_slice(&1i32.to_le_bytes());
+        entry[212..216].copy_from_slice(&2i32.to_le_bytes());
+        entry[216..220].copy_from_slice(&11i32.to_le_bytes());
+        entry[220..224].copy_from_slice(&12i32.to_le_bytes());
+        entry[280..284].copy_from_slice(&0.25f32.to_le_bytes());
+        data.extend_from_slice(&entry);
+
+        let map = parse_scene_obj_info_bin(&data).unwrap();
+        let info = map.get(&42).unwrap();
+
+        assert_eq!(info.filename, "house_001.lmo");
+        assert_eq!(info.display_name, "House001");
+        assert_eq!(info.obj_type, 3);
+        assert_eq!(info.point_color, [1, 2, 3]);
+        assert_eq!(info.env_color, [4, 5, 6]);
+        assert_eq!(info.point_range, 900);
+        assert_eq!(info.point_attenuation, 0.5);
+        assert_eq!(info.anim_ctrl_id, 77);
+        assert_eq!(info.style, 2);
+        assert_eq!(info.attach_effect_id, 88);
+        assert!(info.enable_point_light);
+        assert!(info.enable_env_light);
+        assert_eq!(info.flag, 9);
+        assert_eq!(info.size_flag, 10);
+        assert!(info.shade_flag);
+        assert!(info.is_really_big);
+        assert_eq!(info.fade_obj_num, 2);
+        assert_eq!(info.fade_obj_seq, vec![11, 12]);
+        assert_eq!(info.fade_coefficient, 0.25);
     }
 
     #[test]
@@ -361,12 +437,8 @@ mod tests {
         assert!(shaded > 100, "expected many shaded entries, got {}", shaded);
 
         // Should have various object types
-        let types: std::collections::HashSet<i32> =
-            map.values().map(|v| v.obj_type).collect();
-        assert!(
-            types.contains(&0),
-            "should have type 0 (normal buildings)"
-        );
+        let types: std::collections::HashSet<i32> = map.values().map(|v| v.obj_type).collect();
+        assert!(types.contains(&0), "should have type 0 (normal buildings)");
         eprintln!(
             "Object types present: {:?}, shaded: {}/{}",
             types,
@@ -386,10 +458,7 @@ mod tests {
         let map = parse_scene_obj_info_bin(&data).unwrap();
 
         // Count entries with fade data
-        let fade_entries: Vec<_> = map
-            .values()
-            .filter(|v| v.fade_obj_num > 0)
-            .collect();
+        let fade_entries: Vec<_> = map.values().filter(|v| v.fade_obj_num > 0).collect();
 
         eprintln!(
             "Buildings with fade data: {}/{} total entries",
@@ -413,7 +482,11 @@ mod tests {
             );
             eprintln!(
                 "  id={}, file={}, fade_num={}, seq={:?}, coeff={}",
-                entry.id, entry.filename, entry.fade_obj_num, entry.fade_obj_seq, entry.fade_coefficient
+                entry.id,
+                entry.filename,
+                entry.fade_obj_num,
+                entry.fade_obj_seq,
+                entry.fade_coefficient
             );
         }
     }

@@ -7,6 +7,6 @@ PKO_KAITAI_BUILD = "0"
 linker = "/usr/bin/clang"
 rustflags = ["-C", "link-arg=--ld-path=/usr/bin/mold"]
 
-# Use LLD linker on Windows for faster linking
+# Use rust-lld on Windows for much faster linking (bundled with rustup)
 [target.x86_64-pc-windows-msvc]
-linker = "lld-link"
+linker = "rust-lld"

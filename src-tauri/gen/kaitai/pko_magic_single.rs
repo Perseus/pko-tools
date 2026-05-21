@@ -8,8 +8,8 @@
 
 extern crate kaitai;
 use kaitai::*;
+use std::cell::{Cell, Ref, RefCell};
 use std::convert::{TryFrom, TryInto};
-use std::cell::{Ref, Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 /**
@@ -17,7 +17,7 @@ use std::rc::{Rc, Weak};
  * CRawDataSet::_WriteRawDataInfo_Bin().  Each record is a flat
  * EFF_Param struct (inheriting CRawDataInfo) of exactly `record_size`
  * bytes.
- * 
+ *
  * File layout:
  *   4 bytes  — record_size (u4le, always 600 for EFF_Param)
  *   N × record_size bytes — one EFF_Param per active record
@@ -56,10 +56,18 @@ impl KStruct for PkoMagicSingle {
         {
             let mut _i = 0;
             while !_io.is_eof() {
-                self_rc.records_raw.borrow_mut().push(_io.read_bytes(*self_rc.record_size() as usize)?.into());
+                self_rc
+                    .records_raw
+                    .borrow_mut()
+                    .push(_io.read_bytes(*self_rc.record_size() as usize)?.into());
                 let records_raw = self_rc.records_raw.borrow();
                 let io_records_raw = BytesReader::from(records_raw.last().unwrap().clone());
-                let t = Self::read_into::<BytesReader, PkoMagicSingle_EffParam>(&io_records_raw, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+                let t = Self::read_into::<BytesReader, PkoMagicSingle_EffParam>(
+                    &io_records_raw,
+                    Some(self_rc._root.clone()),
+                    Some(self_rc._self.clone()),
+                )?
+                .into();
                 self_rc.records.borrow_mut().push(t);
                 _i += 1;
             }
@@ -67,8 +75,7 @@ impl KStruct for PkoMagicSingle {
         Ok(())
     }
 }
-impl PkoMagicSingle {
-}
+impl PkoMagicSingle {}
 
 /**
  * Size in bytes of each record (sizeof(EFF_Param) = 600).
@@ -149,7 +156,8 @@ impl KStruct for PkoMagicSingle_EffParam {
         let _r = _rrc.as_ref().unwrap();
         *self_rc.b_exist.borrow_mut() = _io.read_u4le()?.into();
         *self_rc.n_index.borrow_mut() = _io.read_s4le()?.into();
-        *self_rc.sz_data_name.borrow_mut() = bytes_to_str(&_io.read_bytes(72 as usize)?.into(), "ASCII")?;
+        *self_rc.sz_data_name.borrow_mut() =
+            bytes_to_str(&_io.read_bytes(72 as usize)?.into(), "ASCII")?;
         *self_rc.dw_last_use_tick.borrow_mut() = _io.read_u4le()?.into();
         *self_rc.b_enable.borrow_mut() = _io.read_u4le()?.into();
         *self_rc.p_data.borrow_mut() = _io.read_u4le()?.into();
@@ -157,19 +165,26 @@ impl KStruct for PkoMagicSingle_EffParam {
         *self_rc.dw_data_size.borrow_mut() = _io.read_u4le()?.into();
         *self_rc.n_id.borrow_mut() = _io.read_s4le()?.into();
         *self_rc.dw_load_cnt.borrow_mut() = _io.read_u4le()?.into();
-        *self_rc.sz_name.borrow_mut() = bytes_to_str(&_io.read_bytes(32 as usize)?.into(), "ASCII")?;
+        *self_rc.sz_name.borrow_mut() =
+            bytes_to_str(&_io.read_bytes(32 as usize)?.into(), "ASCII")?;
         *self_rc.n_model_num.borrow_mut() = _io.read_s4le()?.into();
         *self_rc.str_model.borrow_mut() = Vec::new();
         let l_str_model = 8;
         for _i in 0..l_str_model {
-            self_rc.str_model.borrow_mut().push(bytes_to_str(&_io.read_bytes(24 as usize)?.into(), "ASCII")?);
+            self_rc
+                .str_model
+                .borrow_mut()
+                .push(bytes_to_str(&_io.read_bytes(24 as usize)?.into(), "ASCII")?);
         }
         *self_rc.n_vel.borrow_mut() = _io.read_s4le()?.into();
         *self_rc.n_par_num.borrow_mut() = _io.read_s4le()?.into();
         *self_rc.str_part.borrow_mut() = Vec::new();
         let l_str_part = 8;
         for _i in 0..l_str_part {
-            self_rc.str_part.borrow_mut().push(bytes_to_str(&_io.read_bytes(24 as usize)?.into(), "ASCII")?);
+            self_rc
+                .str_part
+                .borrow_mut()
+                .push(bytes_to_str(&_io.read_bytes(24 as usize)?.into(), "ASCII")?);
         }
         *self_rc.n_dummy.borrow_mut() = Vec::new();
         let l_n_dummy = 8;
@@ -178,12 +193,12 @@ impl KStruct for PkoMagicSingle_EffParam {
         }
         *self_rc.n_render_idx.borrow_mut() = _io.read_s4le()?.into();
         *self_rc.n_light_id.borrow_mut() = _io.read_s4le()?.into();
-        *self_rc.str_result.borrow_mut() = bytes_to_str(&_io.read_bytes(24 as usize)?.into(), "ASCII")?;
+        *self_rc.str_result.borrow_mut() =
+            bytes_to_str(&_io.read_bytes(24 as usize)?.into(), "ASCII")?;
         Ok(())
     }
 }
-impl PkoMagicSingle_EffParam {
-}
+impl PkoMagicSingle_EffParam {}
 
 /**
  * Whether this record is active (1 = yes, 0 = no).

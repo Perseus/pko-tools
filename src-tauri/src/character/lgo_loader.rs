@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 
 use crate::kaitai_gen::pko_lmo::*;
 use kaitai::*;
@@ -23,7 +23,10 @@ use super::texture::{
     MaterialTextureInfoTransparencyType, RenderStateAtom, TextureInfo, TextureType,
 };
 use crate::animation::character::LW_INVALID_INDEX;
-use crate::d3d::{D3DBlend, D3DCmpFunc, D3DFormat, D3DPool, D3DPrimitiveType, D3DRenderStateType, D3DVertexElement9};
+use crate::d3d::{
+    D3DBlend, D3DCmpFunc, D3DFormat, D3DPool, D3DPrimitiveType, D3DRenderStateType,
+    D3DVertexElement9,
+};
 use crate::math::{LwBox, LwMatrix44, LwPlane, LwSphere, LwVector2, LwVector3};
 
 use cgmath::{Matrix4, Vector2, Vector3, Vector4};
@@ -38,8 +41,13 @@ fn enum_from_u32<T: TryFrom<u32>>(v: u32, default: T) -> T {
 // ============================================================================
 
 pub fn load_lgo(path: impl AsRef<Path>) -> Result<CharacterGeometricModel> {
-    let data = std::fs::read(path.as_ref())
-        .map_err(|e| anyhow::anyhow!("Failed to read LGO file '{}': {}", path.as_ref().display(), e))?;
+    let data = std::fs::read(path.as_ref()).map_err(|e| {
+        anyhow::anyhow!(
+            "Failed to read LGO file '{}': {}",
+            path.as_ref().display(),
+            e
+        )
+    })?;
     load_lgo_from_bytes(&data)
 }
 
@@ -109,7 +117,8 @@ fn convert_geometry_to_char_model(
             lp
         } else if header.mtl_size > 0 {
             let mtl = chunk.material().clone();
-            let has_lp = *mtl.has_legacy_prefix()
+            let has_lp = *mtl
+                .has_legacy_prefix()
                 .map_err(|e| anyhow::anyhow!("has_legacy_prefix: {:?}", e))?;
             if has_lp {
                 let lp = *mtl.legacy_prefix();
@@ -150,7 +159,11 @@ fn convert_geometry_to_char_model(
     let mesh_info = if header.mesh_size > 0 {
         let mesh_section = chunk.mesh().clone();
         let mesh_raw = chunk.mesh_raw().clone();
-        Some(convert_mesh_section(&mesh_section, &mesh_raw, effective_version)?)
+        Some(convert_mesh_section(
+            &mesh_section,
+            &mesh_raw,
+            effective_version,
+        )?)
     } else {
         None
     };
@@ -198,27 +211,36 @@ fn convert_header(
 ) -> Result<CharGeoModelInfoHeader> {
     let kaitai_header = chunk.header().clone();
 
-    let id = *kaitai_header.id()
+    let id = *kaitai_header
+        .id()
         .map_err(|e| anyhow::anyhow!("header.id: {:?}", e))?;
-    let parent_id = *kaitai_header.parent_id()
+    let parent_id = *kaitai_header
+        .parent_id()
         .map_err(|e| anyhow::anyhow!("header.parent_id: {:?}", e))?;
-    let _type = *kaitai_header.geom_type()
+    let _type = *kaitai_header
+        .geom_type()
         .map_err(|e| anyhow::anyhow!("header.geom_type: {:?}", e))?;
-    let mat_local_rc = kaitai_header.mat_local()
+    let mat_local_rc = kaitai_header
+        .mat_local()
         .map_err(|e| anyhow::anyhow!("header.mat_local: {:?}", e))?
         .clone();
     let mat_local = extract_lw_matrix44(&mat_local_rc);
 
-    let mtl_size = *kaitai_header.mtl_size()
+    let mtl_size = *kaitai_header
+        .mtl_size()
         .map_err(|e| anyhow::anyhow!("header.mtl_size: {:?}", e))?;
-    let mesh_size = *kaitai_header.mesh_size()
+    let mesh_size = *kaitai_header
+        .mesh_size()
         .map_err(|e| anyhow::anyhow!("header.mesh_size: {:?}", e))?;
-    let helper_size = *kaitai_header.helper_size()
+    let helper_size = *kaitai_header
+        .helper_size()
         .map_err(|e| anyhow::anyhow!("header.helper_size: {:?}", e))?;
-    let anim_size = *kaitai_header.anim_size()
+    let anim_size = *kaitai_header
+        .anim_size()
         .map_err(|e| anyhow::anyhow!("header.anim_size: {:?}", e))?;
 
-    let header_kind = *kaitai_header.header_kind()
+    let header_kind = *kaitai_header
+        .header_kind()
         .map_err(|e| anyhow::anyhow!("header.header_kind: {:?}", e))?;
 
     let (rcci, state_ctrl) = if header_kind == 1 {
@@ -287,7 +309,8 @@ fn convert_material_section(
     section: &OptRc<PkoLmo_MaterialSection>,
     _file_version: u32,
 ) -> Result<Vec<CharMaterialTextureInfo>> {
-    let format_hint = *section.format_hint()
+    let format_hint = *section
+        .format_hint()
         .map_err(|e| anyhow::anyhow!("format_hint: {:?}", e))?;
     let mtl_format = match format_hint {
         0 => MtlFormat::V0000,
@@ -396,8 +419,7 @@ fn post_process_material(
         total_mtl_rs_num += 1;
 
         if rsa.state == D3DRenderStateType::DestBlend as u32
-            && (rsa.value0 == D3DBlend::One as u32
-                || rsa.value0 == D3DBlend::InvSrcColor as u32)
+            && (rsa.value0 == D3DBlend::One as u32 || rsa.value0 == D3DBlend::InvSrcColor as u32)
         {
             transp_flag = true;
         }
@@ -433,24 +455,56 @@ fn post_process_material(
 
 fn extract_char_material(mtl: &OptRc<PkoLmo_Material>) -> CharMaterial {
     let dif = mtl.dif().clone();
-    let dif_r = *dif.r(); let dif_g = *dif.g(); let dif_b = *dif.b(); let dif_a = *dif.a();
+    let dif_r = *dif.r();
+    let dif_g = *dif.g();
+    let dif_b = *dif.b();
+    let dif_a = *dif.a();
 
     let amb = mtl.amb().clone();
-    let amb_r = *amb.r(); let amb_g = *amb.g(); let amb_b = *amb.b(); let amb_a = *amb.a();
+    let amb_r = *amb.r();
+    let amb_g = *amb.g();
+    let amb_b = *amb.b();
+    let amb_a = *amb.a();
 
     let spe = mtl.spe().clone();
-    let spe_r = *spe.r(); let spe_g = *spe.g(); let spe_b = *spe.b(); let spe_a = *spe.a();
+    let spe_r = *spe.r();
+    let spe_g = *spe.g();
+    let spe_b = *spe.b();
+    let spe_a = *spe.a();
 
     let emi = mtl.emi().clone();
-    let emi_r = *emi.r(); let emi_g = *emi.g(); let emi_b = *emi.b(); let emi_a = *emi.a();
+    let emi_r = *emi.r();
+    let emi_g = *emi.g();
+    let emi_b = *emi.b();
+    let emi_a = *emi.a();
 
     let power = *mtl.power();
 
     CharMaterial {
-        dif: ColorValue4F { r: dif_r, g: dif_g, b: dif_b, a: dif_a },
-        amb: ColorValue4F { r: amb_r, g: amb_g, b: amb_b, a: amb_a },
-        spe: Some(ColorValue4F { r: spe_r, g: spe_g, b: spe_b, a: spe_a }),
-        emi: Some(ColorValue4F { r: emi_r, g: emi_g, b: emi_b, a: emi_a }),
+        dif: ColorValue4F {
+            r: dif_r,
+            g: dif_g,
+            b: dif_b,
+            a: dif_a,
+        },
+        amb: ColorValue4F {
+            r: amb_r,
+            g: amb_g,
+            b: amb_b,
+            a: amb_a,
+        },
+        spe: Some(ColorValue4F {
+            r: spe_r,
+            g: spe_g,
+            b: spe_b,
+            a: spe_a,
+        }),
+        emi: Some(ColorValue4F {
+            r: emi_r,
+            g: emi_g,
+            b: emi_b,
+            a: emi_a,
+        }),
         power,
     }
 }
@@ -509,7 +563,12 @@ fn extract_cstr_from_bytes(raw: &[u8]) -> [u8; 64] {
 }
 
 fn extract_tex_info_0000(stages: &[OptRc<PkoLmo_TexInfo0000>]) -> [TextureInfo; 4] {
-    let mut tex_seq = [TextureInfo::new(), TextureInfo::new(), TextureInfo::new(), TextureInfo::new()];
+    let mut tex_seq = [
+        TextureInfo::new(),
+        TextureInfo::new(),
+        TextureInfo::new(),
+        TextureInfo::new(),
+    ];
 
     for (i, stage_rc) in stages.iter().enumerate().take(4) {
         let stage_val = *stage_rc.stage();
@@ -526,7 +585,10 @@ fn extract_tex_info_0000(stages: &[OptRc<PkoLmo_TexInfo0000>]) -> [TextureInfo; 
         tex_seq[i].colorkey_type = enum_from_u32(*stage_rc.colorkey_type(), ColorKeyType::None);
         let ck = stage_rc.colorkey().clone();
         tex_seq[i].colorkey = LwColorValue4b {
-            b: *ck.b(), g: *ck.g(), r: *ck.r(), a: *ck.a(),
+            b: *ck.b(),
+            g: *ck.g(),
+            r: *ck.r(),
+            a: *ck.a(),
         };
         tex_seq[i].byte_alignment_flag = 0;
         tex_seq[i].file_name = extract_cstr_from_bytes(&stage_rc.file_name());
@@ -554,7 +616,12 @@ fn extract_tex_info_0000(stages: &[OptRc<PkoLmo_TexInfo0000>]) -> [TextureInfo; 
 }
 
 fn extract_tex_info_0001(stages: &[OptRc<PkoLmo_TexInfo0001>]) -> [TextureInfo; 4] {
-    let mut tex_seq = [TextureInfo::new(), TextureInfo::new(), TextureInfo::new(), TextureInfo::new()];
+    let mut tex_seq = [
+        TextureInfo::new(),
+        TextureInfo::new(),
+        TextureInfo::new(),
+        TextureInfo::new(),
+    ];
 
     for (i, stage_rc) in stages.iter().enumerate().take(4) {
         let stage_val = *stage_rc.stage();
@@ -571,7 +638,10 @@ fn extract_tex_info_0001(stages: &[OptRc<PkoLmo_TexInfo0001>]) -> [TextureInfo; 
         tex_seq[i].colorkey_type = enum_from_u32(*stage_rc.colorkey_type(), ColorKeyType::None);
         let ck = stage_rc.colorkey().clone();
         tex_seq[i].colorkey = LwColorValue4b {
-            b: *ck.b(), g: *ck.g(), r: *ck.r(), a: *ck.a(),
+            b: *ck.b(),
+            g: *ck.g(),
+            r: *ck.r(),
+            a: *ck.a(),
         };
         tex_seq[i].byte_alignment_flag = 0;
         tex_seq[i].file_name = extract_cstr_from_bytes(&stage_rc.file_name());
@@ -593,7 +663,12 @@ fn extract_tex_info_0001(stages: &[OptRc<PkoLmo_TexInfo0001>]) -> [TextureInfo; 
 }
 
 fn extract_tex_info_current(stages: &[OptRc<PkoLmo_TexInfoCurrent>]) -> [TextureInfo; 4] {
-    let mut tex_seq = [TextureInfo::new(), TextureInfo::new(), TextureInfo::new(), TextureInfo::new()];
+    let mut tex_seq = [
+        TextureInfo::new(),
+        TextureInfo::new(),
+        TextureInfo::new(),
+        TextureInfo::new(),
+    ];
 
     for (i, stage_rc) in stages.iter().enumerate().take(4) {
         tex_seq[i].stage = *stage_rc.stage();
@@ -608,7 +683,10 @@ fn extract_tex_info_current(stages: &[OptRc<PkoLmo_TexInfoCurrent>]) -> [Texture
         tex_seq[i].colorkey_type = enum_from_u32(*stage_rc.colorkey_type(), ColorKeyType::None);
         let ck = stage_rc.colorkey().clone();
         tex_seq[i].colorkey = LwColorValue4b {
-            b: *ck.b(), g: *ck.g(), r: *ck.r(), a: *ck.a(),
+            b: *ck.b(),
+            g: *ck.g(),
+            r: *ck.r(),
+            a: *ck.a(),
         };
         tex_seq[i].file_name = extract_cstr_from_bytes(&stage_rc.file_name());
         tex_seq[i].data = *stage_rc.data_ptr();
@@ -644,17 +722,21 @@ fn convert_mesh_section(
         version = old_version;
     }
 
-    let header_kind = *section.header_kind()
+    let header_kind = *section
+        .header_kind()
         .map_err(|e| anyhow::anyhow!("header_kind: {:?}", e))?;
-    let fvf = *section.fvf()
-        .map_err(|e| anyhow::anyhow!("fvf: {:?}", e))?;
-    let vertex_num = *section.vertex_num()
+    let fvf = *section.fvf().map_err(|e| anyhow::anyhow!("fvf: {:?}", e))?;
+    let vertex_num = *section
+        .vertex_num()
         .map_err(|e| anyhow::anyhow!("vertex_num: {:?}", e))? as usize;
-    let index_num = *section.index_num()
+    let index_num = *section
+        .index_num()
         .map_err(|e| anyhow::anyhow!("index_num: {:?}", e))? as usize;
-    let _subset_num = *section.subset_num()
+    let _subset_num = *section
+        .subset_num()
         .map_err(|e| anyhow::anyhow!("subset_num: {:?}", e))? as usize;
-    let bone_index_num = *section.bone_index_num()
+    let bone_index_num = *section
+        .bone_index_num()
         .map_err(|e| anyhow::anyhow!("bone_index_num: {:?}", e))? as usize;
 
     // Build header
@@ -668,7 +750,8 @@ fn convert_mesh_section(
     }
 
     // Normals
-    let has_normals = *section.has_normals()
+    let has_normals = *section
+        .has_normals()
         .map_err(|e| anyhow::anyhow!("has_normals: {:?}", e))?;
     let mut normal_seq = Vec::new();
     if has_normals {
@@ -692,7 +775,8 @@ fn convert_mesh_section(
     }
 
     // Vertex colors
-    let has_diffuse = *section.has_diffuse()
+    let has_diffuse = *section
+        .has_diffuse()
         .map_err(|e| anyhow::anyhow!("has_diffuse: {:?}", e))?;
     let mut vercol_seq = Vec::new();
     if has_diffuse {
@@ -704,7 +788,8 @@ fn convert_mesh_section(
     }
 
     // Blend data
-    let has_blend = *section.has_blend_data()
+    let has_blend = *section
+        .has_blend_data()
         .map_err(|e| anyhow::anyhow!("has_blend_data: {:?}", e))?;
     let mut blend_seq = Vec::new();
     if has_blend {
@@ -765,8 +850,10 @@ fn convert_mesh_section(
                     let off = idx_start + i * 4;
                     if off + 4 <= raw_len {
                         let val = u32::from_le_bytes([
-                            mesh_raw[off], mesh_raw[off + 1],
-                            mesh_raw[off + 2], mesh_raw[off + 3],
+                            mesh_raw[off],
+                            mesh_raw[off + 1],
+                            mesh_raw[off + 2],
+                            mesh_raw[off + 3],
                         ]);
                         fixed_indices.push(val);
                     }
@@ -819,13 +906,17 @@ fn convert_mesh_header(
     fvf: u32,
     _version: u32,
 ) -> Result<CharacterInfoMeshHeader> {
-    let vertex_num = *section.vertex_num()
+    let vertex_num = *section
+        .vertex_num()
         .map_err(|e| anyhow::anyhow!("vertex_num: {:?}", e))?;
-    let index_num = *section.index_num()
+    let index_num = *section
+        .index_num()
         .map_err(|e| anyhow::anyhow!("index_num: {:?}", e))?;
-    let subset_num = *section.subset_num()
+    let subset_num = *section
+        .subset_num()
         .map_err(|e| anyhow::anyhow!("subset_num: {:?}", e))?;
-    let bone_index_num = *section.bone_index_num()
+    let bone_index_num = *section
+        .bone_index_num()
         .map_err(|e| anyhow::anyhow!("bone_index_num: {:?}", e))?;
 
     match header_kind {
@@ -909,8 +1000,18 @@ fn parse_v0000_mesh_render_state(raw: &[u8]) -> [RenderStateAtom; 8] {
 
     for (j, rs) in rs_set.iter_mut().enumerate().take(LW_MESH_RS_NUM) {
         let offset = j * 8;
-        let state = u32::from_le_bytes([raw[offset], raw[offset + 1], raw[offset + 2], raw[offset + 3]]);
-        let value = u32::from_le_bytes([raw[offset + 4], raw[offset + 5], raw[offset + 6], raw[offset + 7]]);
+        let state = u32::from_le_bytes([
+            raw[offset],
+            raw[offset + 1],
+            raw[offset + 2],
+            raw[offset + 3],
+        ]);
+        let value = u32::from_le_bytes([
+            raw[offset + 4],
+            raw[offset + 5],
+            raw[offset + 6],
+            raw[offset + 7],
+        ]);
 
         if state == LW_INVALID_INDEX {
             break;
@@ -932,12 +1033,15 @@ fn parse_v0000_mesh_render_state(raw: &[u8]) -> [RenderStateAtom; 8] {
 }
 
 fn extract_subsets(subset_seq: &[OptRc<PkoLmo_SubsetInfo>]) -> Vec<CharacterMeshSubsetInfo> {
-    subset_seq.iter().map(|s| CharacterMeshSubsetInfo {
-        primitive_num: *s.primitive_num(),
-        start_index: *s.start_index(),
-        vertex_num: *s.vertex_num(),
-        min_index: *s.min_index(),
-    }).collect()
+    subset_seq
+        .iter()
+        .map(|s| CharacterMeshSubsetInfo {
+            primitive_num: *s.primitive_num(),
+            start_index: *s.start_index(),
+            vertex_num: *s.vertex_num(),
+            min_index: *s.min_index(),
+        })
+        .collect()
 }
 
 // ============================================================================
@@ -957,7 +1061,8 @@ fn convert_helper_section(
     } else {
         *section.helper_type()
     };
-    let effective_version = *section.effective_version()
+    let effective_version = *section
+        .effective_version()
         .map_err(|e| anyhow::anyhow!("effective_version: {:?}", e))?;
 
     let mut dummy_num = 0u32;
@@ -1075,7 +1180,14 @@ fn convert_helper_box(entry: &OptRc<PkoLmo_HelperBoxInfo>) -> Result<HelperBoxIn
     let len = name_raw.len().min(32);
     name[..len].copy_from_slice(&name_raw[..len]);
 
-    Ok(HelperBoxInfo { id, _type, state, _box: bbox, mat, name })
+    Ok(HelperBoxInfo {
+        id,
+        _type,
+        state,
+        _box: bbox,
+        mat,
+        name,
+    })
 }
 
 fn convert_helper_mesh(entry: &OptRc<PkoLmo_HelperMeshInfo>) -> Result<HelperMeshInfo> {
@@ -1095,7 +1207,9 @@ fn convert_helper_mesh(entry: &OptRc<PkoLmo_HelperMeshInfo>) -> Result<HelperMes
     let vertex_seq_k = entry.vertex_seq().clone();
     let mut vertex_seq = Vec::with_capacity(vertex_num_val as usize);
     for v in &vertex_seq_k {
-        let x = *v.x(); let y = *v.y(); let z = *v.z();
+        let x = *v.x();
+        let y = *v.y();
+        let z = *v.z();
         vertex_seq.push(LwVector3(Vector3::new(x, y, z)));
     }
 
@@ -1105,21 +1219,35 @@ fn convert_helper_mesh(entry: &OptRc<PkoLmo_HelperMeshInfo>) -> Result<HelperMes
         let vertex_raw = f.vertex().clone();
         let adj_raw = f.adj_face().clone();
         let plane_k = f.plane().clone();
-        let pa = *plane_k.a(); let pb = *plane_k.b();
-        let pc = *plane_k.c(); let pd = *plane_k.d();
+        let pa = *plane_k.a();
+        let pb = *plane_k.b();
+        let pc = *plane_k.c();
+        let pd = *plane_k.d();
         let center_k = f.center().clone();
-        let cx = *center_k.x(); let cy = *center_k.y(); let cz = *center_k.z();
+        let cx = *center_k.x();
+        let cy = *center_k.y();
+        let cz = *center_k.z();
 
         face_seq.push(HelperMeshFaceInfo {
             vertex: [vertex_raw[0], vertex_raw[1], vertex_raw[2]],
             adj_face: [adj_raw[0], adj_raw[1], adj_raw[2]],
-            plane: LwPlane { a: pa, b: pb, c: pc, d: pd },
+            plane: LwPlane {
+                a: pa,
+                b: pb,
+                c: pc,
+                d: pd,
+            },
             center: LwVector3(Vector3::new(cx, cy, cz)),
         });
     }
 
     Ok(HelperMeshInfo {
-        id, _type, sub_type, name, state, mat,
+        id,
+        _type,
+        sub_type,
+        name,
+        state,
+        mat,
         _box: bbox,
         vertex_num: vertex_num_val,
         face_num: face_num_val,
@@ -1132,7 +1260,11 @@ fn convert_bounding_box(entry: &OptRc<PkoLmo_BoundingBoxInfo>) -> Result<Boundin
     let id = *entry.id();
     let mat = extract_lw_matrix44(&entry.mat().clone());
     let bbox = extract_lw_box(&entry.bbox().clone());
-    Ok(BoundingBoxInfo { id, _box: bbox, mat })
+    Ok(BoundingBoxInfo {
+        id,
+        _box: bbox,
+        mat,
+    })
 }
 
 fn convert_bounding_sphere(entry: &OptRc<PkoLmo_BoundingSphereInfo>) -> Result<BoundingSphereInfo> {
@@ -1140,7 +1272,9 @@ fn convert_bounding_sphere(entry: &OptRc<PkoLmo_BoundingSphereInfo>) -> Result<B
     let mat = extract_lw_matrix44(&entry.mat().clone());
     let sphere_k = entry.sphere().clone();
     let center_k = sphere_k.center().clone();
-    let cx = *center_k.x(); let cy = *center_k.y(); let cz = *center_k.z();
+    let cx = *center_k.x();
+    let cy = *center_k.y();
+    let cz = *center_k.z();
     let r = *sphere_k.radius();
     let sphere = LwSphere {
         c: LwVector3(Vector3::new(cx, cy, cz)),
@@ -1157,18 +1291,34 @@ fn extract_lw_matrix44(mat: &OptRc<PkoLmo_Matrix44>) -> LwMatrix44 {
     // Native binrw reads [f32; 16] row-major and passes directly to Matrix4::new
     // which stores column-major: column0=(m11,m12,m13,m14), column1=(m21,...), etc.
     LwMatrix44(Matrix4::new(
-        *mat.m11(), *mat.m12(), *mat.m13(), *mat.m14(),
-        *mat.m21(), *mat.m22(), *mat.m23(), *mat.m24(),
-        *mat.m31(), *mat.m32(), *mat.m33(), *mat.m34(),
-        *mat.m41(), *mat.m42(), *mat.m43(), *mat.m44(),
+        *mat.m11(),
+        *mat.m12(),
+        *mat.m13(),
+        *mat.m14(),
+        *mat.m21(),
+        *mat.m22(),
+        *mat.m23(),
+        *mat.m24(),
+        *mat.m31(),
+        *mat.m32(),
+        *mat.m33(),
+        *mat.m34(),
+        *mat.m41(),
+        *mat.m42(),
+        *mat.m43(),
+        *mat.m44(),
     ))
 }
 
 fn extract_lw_box(aabb: &OptRc<PkoLmo_Aabb>) -> LwBox {
     let center_k = aabb.center().clone();
-    let cx = *center_k.x(); let cy = *center_k.y(); let cz = *center_k.z();
+    let cx = *center_k.x();
+    let cy = *center_k.y();
+    let cz = *center_k.z();
     let radius_k = aabb.radius().clone();
-    let rx = *radius_k.x(); let ry = *radius_k.y(); let rz = *radius_k.z();
+    let rx = *radius_k.x();
+    let ry = *radius_k.y();
+    let rz = *radius_k.z();
     LwBox {
         c: LwVector3(Vector3::new(cx, cy, cz)),
         r: LwVector3(Vector3::new(rx, ry, rz)),
@@ -1201,7 +1351,10 @@ mod tests {
         }
 
         let model = load_lgo(&path).expect("Failed to parse LGO via Kaitai");
-        assert!(model.version > 0 || model.version == 0, "version should be readable");
+        assert!(
+            model.version > 0 || model.version == 0,
+            "version should be readable"
+        );
         if let Some(ref mesh) = model.mesh_info {
             assert!(mesh.header.vertex_num > 0, "should have vertices");
         }

@@ -8,19 +8,19 @@
 
 extern crate kaitai;
 use kaitai::*;
+use std::cell::{Cell, Ref, RefCell};
 use std::convert::{TryFrom, TryInto};
-use std::cell::{Ref, Cell, RefCell};
 use std::rc::{Rc, Weak};
 
 /**
  * Binary scene-object placement format loaded by CSceneObjFile::Load()
  * in the PKO client engine.
- * 
+ *
  * Layout:
  *   - 44-byte header (title[16], version, file_size, section dims, section_obj_num)
  *   - Section index: section_cnt_x * section_cnt_y × (offset:s4, count:s4)
  *   - Per section at offset: count × 20-byte MSVC-aligned SSceneObjInfo records
- * 
+ *
  * The 20-byte record size comes from MSVC default struct alignment (no #pragma pack):
  *   sTypeID(s2) + 2 pad + nX(s4) + nY(s4) + sHeightOff(s2) + sYawAngle(s2) + sScale(s2) + 2 pad
  */
@@ -67,16 +67,21 @@ impl KStruct for PkoObj {
         *self_rc.section_height.borrow_mut() = _io.read_s4le()?.into();
         *self_rc.section_obj_num.borrow_mut() = _io.read_s4le()?.into();
         *self_rc.section_index.borrow_mut() = Vec::new();
-        let l_section_index = ((*self_rc.section_cnt_x() as i32) * (*self_rc.section_cnt_y() as i32));
+        let l_section_index =
+            ((*self_rc.section_cnt_x() as i32) * (*self_rc.section_cnt_y() as i32));
         for _i in 0..l_section_index {
-            let t = Self::read_into::<_, PkoObj_SectionIndexEntry>(&*_io, Some(self_rc._root.clone()), Some(self_rc._self.clone()))?.into();
+            let t = Self::read_into::<_, PkoObj_SectionIndexEntry>(
+                &*_io,
+                Some(self_rc._root.clone()),
+                Some(self_rc._self.clone()),
+            )?
+            .into();
             self_rc.section_index.borrow_mut().push(t);
         }
         Ok(())
     }
 }
-impl PkoObj {
-}
+impl PkoObj {}
 impl PkoObj {
     pub fn title(&self) -> Ref<'_, Vec<u8>> {
         self.title.borrow()
@@ -176,8 +181,7 @@ impl KStruct for PkoObj_SceneObjInfo {
         Ok(())
     }
 }
-impl PkoObj_SceneObjInfo {
-}
+impl PkoObj_SceneObjInfo {}
 impl PkoObj_SceneObjInfo {
     pub fn type_id(&self) -> Ref<'_, i16> {
         self.type_id.borrow()
@@ -255,8 +259,7 @@ impl KStruct for PkoObj_SectionIndexEntry {
         Ok(())
     }
 }
-impl PkoObj_SectionIndexEntry {
-}
+impl PkoObj_SectionIndexEntry {}
 impl PkoObj_SectionIndexEntry {
     pub fn offset(&self) -> Ref<'_, i32> {
         self.offset.borrow()

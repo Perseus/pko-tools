@@ -3,6 +3,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::client_paths;
+use crate::text_encoding;
+
 /// A single map info entry from mapinfo.bin.
 /// CMapInfo extends CRawDataInfo (108 bytes base).
 /// Derived fields at offset 108:
@@ -37,7 +40,8 @@ const RAW_DATA_INFO_BEXIST_OFFSET: usize = 0;
 const RAW_DATA_INFO_DATANAME_OFFSET: usize = 8;
 const RAW_DATA_INFO_NID_OFFSET: usize = 100;
 
-// CMapInfo derived fields start after CRawDataInfo base (108 bytes)
+// CMapInfo derived fields start after CRawDataInfo base (108 bytes).
+// Demon's 64-bit dumps keep nID at 104 and start derived fields 8 bytes later.
 const MAP_DERIVED_OFFSET: usize = 108;
 
 fn read_u32(data: &[u8], offset: usize) -> Option<u32> {
@@ -61,10 +65,7 @@ fn read_f32(data: &[u8], offset: usize) -> Option<f32> {
 /// Read a null-terminated string from a fixed-size buffer.
 /// Returns None if the buffer is too small.
 fn read_fixed_string(data: &[u8], offset: usize, max_len: usize) -> Option<String> {
-    let end = offset + max_len;
-    let slice = data.get(offset..end)?;
-    let nul_pos = slice.iter().position(|&b| b == 0).unwrap_or(max_len);
-    Some(String::from_utf8_lossy(&slice[..nul_pos]).to_string())
+    text_encoding::read_gbk_cstr(data, offset, max_len)
 }
 
 /// Parse mapinfo.bin — CRawDataSet binary format.
@@ -107,7 +108,7 @@ pub fn parse_mapinfo_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, MapInfo>> {
             continue;
         }
 
-        let map_id = match read_u32(chunk, RAW_DATA_INFO_NID_OFFSET) {
+        let (map_id, layout_shift) = match read_raw_data_id_and_shift(chunk) {
             Some(v) => v,
             None => continue,
         };
@@ -117,7 +118,7 @@ pub fn parse_mapinfo_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, MapInfo>> {
         };
 
         // Derived fields
-        let d = MAP_DERIVED_OFFSET;
+        let d = MAP_DERIVED_OFFSET + layout_shift;
         let display_name = match read_fixed_string(chunk, d, 16) {
             Some(v) => v,
             None => continue,
@@ -165,16 +166,30 @@ pub fn parse_mapinfo_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, MapInfo>> {
     Ok(map)
 }
 
+fn read_raw_data_id_and_shift(data: &[u8]) -> Option<(u32, usize)> {
+    let legacy_id = read_u32(data, RAW_DATA_INFO_NID_OFFSET)?;
+    if legacy_id != 0 {
+        return Some((legacy_id, 0));
+    }
+
+    let demon_id = read_u32(data, RAW_DATA_INFO_NID_OFFSET + 4)?;
+    if demon_id != 0 {
+        return Some((demon_id, 8));
+    }
+
+    Some((legacy_id, 0))
+}
+
 /// Load and parse mapinfo.bin from a project directory.
 pub fn load_mapinfo(project_dir: &Path) -> anyhow::Result<HashMap<u32, MapInfo>> {
-    let bin_path = project_dir.join("scripts/table/mapinfo.bin");
+    let bin_path = client_paths::table_file(project_dir, "mapinfo.bin");
     if bin_path.exists() {
         let data = std::fs::read(&bin_path)?;
         return parse_mapinfo_bin(&data);
     }
 
     // Try MapInfo.bin (mixed case)
-    let bin_path2 = project_dir.join("scripts/table/MapInfo.bin");
+    let bin_path2 = client_paths::table_file(project_dir, "MapInfo.bin");
     if bin_path2.exists() {
         let data = std::fs::read(&bin_path2)?;
         return parse_mapinfo_bin(&data);
@@ -273,6 +288,39 @@ mod tests {
 
         let not_found = find_map_info(&infos, "garner");
         assert!(not_found.is_none());
+    }
+
+    #[test]
+    fn parses_demon_shifted_raw_data_mapinfo_layout() {
+        let entry_size = 160usize;
+        let mut data = Vec::new();
+        data.extend_from_slice(&(entry_size as u32).to_le_bytes());
+        let mut entry = vec![0u8; entry_size];
+        entry[0..4].copy_from_slice(&1i32.to_le_bytes());
+        entry[4..8].copy_from_slice(&7u32.to_le_bytes());
+        entry[8..15].copy_from_slice(b"Map_XYZ");
+        entry[104..108].copy_from_slice(&7u32.to_le_bytes());
+        entry[112..116].copy_from_slice(&7u32.to_le_bytes());
+        entry[116..124].copy_from_slice(b"TestMap\0");
+        entry[132..136].copy_from_slice(&123i32.to_le_bytes());
+        entry[136..140].copy_from_slice(&456i32.to_le_bytes());
+        entry[140..144].copy_from_slice(&1.0f32.to_le_bytes());
+        entry[144..148].copy_from_slice(&2.0f32.to_le_bytes());
+        entry[148..152].copy_from_slice(&3.0f32.to_le_bytes());
+        entry[152..155].copy_from_slice(&[10, 20, 30]);
+        entry[155] = 1;
+        data.extend_from_slice(&entry);
+
+        let map = parse_mapinfo_bin(&data).unwrap();
+        let info = map.get(&7).unwrap();
+
+        assert_eq!(info.data_name, "Map_XYZ");
+        assert_eq!(info.display_name, "TestMap");
+        assert_eq!(info.init_x, 123);
+        assert_eq!(info.init_y, 456);
+        assert_eq!(info.light_dir, [1.0, 2.0, 3.0]);
+        assert_eq!(info.light_color, [10, 20, 30]);
+        assert!(info.show_switch);
     }
 
     #[test]

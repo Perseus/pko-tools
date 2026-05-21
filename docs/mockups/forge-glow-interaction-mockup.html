@@ -1,0 +1,840 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Forge Glow Bench Interaction Mockup</title>
+  <style>
+    :root {
+      --bg: #f6f6f4;
+      --panel: #ffffff;
+      --ink: #23211f;
+      --muted: #746f69;
+      --line: #ddd8d1;
+      --dark: #171923;
+      --accent: #13b8a6;
+      --accent-2: #f04f3e;
+      --gold: #e9b949;
+      --green: #28b45c;
+      --blue: #2f80ed;
+      --shadow: 0 14px 40px rgba(34, 30, 24, 0.12);
+      font-family:
+        Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background: var(--bg);
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    .app {
+      display: grid;
+      grid-template-rows: 68px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      padding: 0 24px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    .title h1 {
+      margin: 0;
+      font-size: 20px;
+      line-height: 1.2;
+      letter-spacing: 0;
+    }
+
+    .title p {
+      margin: 5px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .top-actions {
+      display: flex;
+      gap: 10px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      height: 38px;
+      min-width: 38px;
+      padding: 0 14px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--ink);
+      cursor: pointer;
+    }
+
+    .btn.primary {
+      border-color: #1f1b17;
+      background: #1f1b17;
+      color: white;
+    }
+
+    .btn.icon {
+      padding: 0;
+      width: 38px;
+    }
+
+    .content {
+      display: grid;
+      grid-template-columns: minmax(520px, 1fr) 460px;
+      min-height: 0;
+    }
+
+    .viewport {
+      position: relative;
+      overflow: hidden;
+      background:
+        linear-gradient(rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+        radial-gradient(circle at 48% 54%, rgba(19, 184, 166, 0.16), transparent 28%),
+        var(--dark);
+      background-size: 42px 42px, 42px 42px, auto, auto;
+      border-right: 1px solid var(--line);
+    }
+
+    .viewport-toolbar {
+      position: absolute;
+      top: 16px;
+      left: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      z-index: 5;
+      padding: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      background: rgba(18, 20, 29, 0.76);
+      backdrop-filter: blur(8px);
+    }
+
+    .tool {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 32px;
+      border: 0;
+      border-radius: 5px;
+      color: #d8f4ef;
+      background: rgba(255, 255, 255, 0.07);
+      cursor: pointer;
+    }
+
+    .tool.active {
+      color: #051f1a;
+      background: #4ee0cd;
+    }
+
+    .view-label {
+      color: #b8c0c8;
+      font-size: 12px;
+      padding: 0 8px;
+    }
+
+    .weapon-stage {
+      position: absolute;
+      inset: 82px 40px 44px 40px;
+      min-height: 520px;
+    }
+
+    .weapon {
+      position: absolute;
+      left: 48%;
+      top: 49%;
+      width: min(58vw, 720px);
+      max-width: 82%;
+      height: 118px;
+      transform: translate(-50%, -50%) rotate(-22deg);
+      transform-origin: center;
+    }
+
+    .blade {
+      position: absolute;
+      left: 26%;
+      top: 45px;
+      width: 62%;
+      height: 22px;
+      border-radius: 100% 9px 9px 100%;
+      background:
+        linear-gradient(180deg, #fafafa, #bac3c6 48%, #7c878c 52%, #f4f5f2);
+      box-shadow:
+        0 0 0 1px rgba(255, 255, 255, 0.24) inset,
+        0 0 42px rgba(118, 252, 236, 0.24);
+    }
+
+    .tip {
+      position: absolute;
+      right: 0;
+      top: 34px;
+      width: 80px;
+      height: 44px;
+      clip-path: polygon(0 23%, 100% 50%, 0 77%);
+      background: linear-gradient(180deg, #f7faf8, #8d9aa0 52%, #f7faf8);
+    }
+
+    .guard {
+      position: absolute;
+      left: 19%;
+      top: 28px;
+      width: 90px;
+      height: 54px;
+      border-radius: 4px;
+      background:
+        linear-gradient(90deg, transparent 0 28%, #806735 28% 72%, transparent 72%),
+        linear-gradient(180deg, #ffe38c, #9d6d25);
+      box-shadow: 0 0 20px rgba(233, 185, 73, 0.5);
+    }
+
+    .handle {
+      position: absolute;
+      left: 5%;
+      top: 48px;
+      width: 18%;
+      height: 18px;
+      border-radius: 12px;
+      background: linear-gradient(90deg, #2b211c, #7d4b2f, #2b211c);
+    }
+
+    .pommel {
+      position: absolute;
+      left: 0;
+      top: 39px;
+      width: 48px;
+      height: 36px;
+      border-radius: 50%;
+      background: radial-gradient(circle, #fff1ad, #946721 72%);
+    }
+
+    .glow-ring {
+      position: absolute;
+      left: 53%;
+      top: 50%;
+      width: 260px;
+      height: 260px;
+      transform: translate(-50%, -50%);
+      border-radius: 50%;
+      background:
+        radial-gradient(circle, rgba(21, 255, 220, 0.22), transparent 44%),
+        conic-gradient(
+          from 15deg,
+          rgba(21, 255, 220, 0.9),
+          rgba(255, 255, 255, 0.1),
+          rgba(21, 255, 220, 0.65),
+          rgba(255, 255, 255, 0.08),
+          rgba(21, 255, 220, 0.9)
+        );
+      filter: blur(0.2px);
+      opacity: 0.82;
+      mix-blend-mode: screen;
+      box-shadow:
+        0 0 34px rgba(21, 255, 220, 0.35),
+        0 0 110px rgba(21, 255, 220, 0.2);
+      pointer-events: none;
+    }
+
+    .dummy-point {
+      position: absolute;
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border: 2px solid rgba(255, 255, 255, 0.78);
+      border-radius: 999px;
+      background: rgba(15, 18, 24, 0.78);
+      color: white;
+      font-size: 12px;
+      font-weight: 700;
+      box-shadow:
+        0 0 0 4px rgba(19, 184, 166, 0.18),
+        0 10px 24px rgba(0, 0, 0, 0.3);
+      cursor: pointer;
+      z-index: 4;
+      transform: translate(-50%, -50%);
+    }
+
+    .dummy-point.active {
+      border-color: #4ee0cd;
+      background: #032b27;
+      color: #9af8ed;
+      box-shadow:
+        0 0 0 8px rgba(19, 184, 166, 0.2),
+        0 0 28px rgba(78, 224, 205, 0.72);
+    }
+
+    .dummy-point.used {
+      border-color: #ffd166;
+    }
+
+    .dummy-popover {
+      position: absolute;
+      left: 16px;
+      bottom: 78px;
+      width: 310px;
+      padding: 14px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      background: rgba(18, 20, 29, 0.84);
+      color: white;
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    .dummy-popover h2 {
+      margin: 0 0 6px;
+      font-size: 14px;
+    }
+
+    .dummy-popover p {
+      margin: 0;
+      color: #bac4cb;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .side {
+      min-height: 0;
+      overflow: auto;
+      padding: 18px;
+      background: var(--bg);
+    }
+
+    .panel {
+      margin-bottom: 16px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      box-shadow: 0 1px 0 rgba(255, 255, 255, 0.8) inset;
+    }
+
+    .panel h2 {
+      margin: 0;
+      font-size: 15px;
+      line-height: 1.2;
+    }
+
+    .panel-sub {
+      margin: 5px 0 14px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .field {
+      margin-top: 12px;
+    }
+
+    .field label {
+      display: block;
+      margin-bottom: 6px;
+      color: #4b4741;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .control-row {
+      display: grid;
+      grid-template-columns: 1fr 90px;
+      gap: 8px;
+    }
+
+    .input,
+    .select {
+      width: 100%;
+      height: 38px;
+      padding: 0 10px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fbfbfa;
+      color: var(--ink);
+    }
+
+    .color-input {
+      width: 100%;
+      height: 38px;
+      padding: 4px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fbfbfa;
+    }
+
+    .swatches {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .swatch {
+      height: 30px;
+      border: 1px solid rgba(0, 0, 0, 0.12);
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .recipe {
+      display: grid;
+      gap: 8px;
+      padding: 12px;
+      border: 1px solid #d9ece8;
+      border-radius: 8px;
+      background: #f3fbf9;
+    }
+
+    .recipe-step {
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 10px;
+      align-items: start;
+    }
+
+    .step-num {
+      display: grid;
+      place-items: center;
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      background: #d8f6f1;
+      color: #08796d;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .recipe-step strong {
+      display: block;
+      margin-bottom: 2px;
+      font-size: 13px;
+    }
+
+    .recipe-step span {
+      color: #55736e;
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .lane-card {
+      display: grid;
+      gap: 12px;
+      margin-top: 12px;
+      padding: 12px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfbfa;
+    }
+
+    .lane-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .lane-title {
+      min-width: 0;
+    }
+
+    .lane-title strong {
+      display: block;
+      font-size: 14px;
+    }
+
+    .lane-title span {
+      display: block;
+      overflow: hidden;
+      color: var(--muted);
+      font-size: 12px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 44px;
+      height: 26px;
+      padding: 0 10px;
+      border-radius: 999px;
+      background: #e8f1ef;
+      color: #116f65;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .dummy-select-row {
+      display: grid;
+      grid-template-columns: 1fr 112px;
+      gap: 8px;
+    }
+
+    .mini-map {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .mini-dummy {
+      min-height: 30px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: white;
+      color: #4d4842;
+      font-size: 12px;
+      cursor: pointer;
+    }
+
+    .mini-dummy.active {
+      border-color: var(--accent);
+      background: #e1f8f4;
+      color: #08695f;
+      font-weight: 800;
+    }
+
+    .note {
+      padding: 10px 12px;
+      border-left: 3px solid var(--gold);
+      background: #fff9e6;
+      color: #665124;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .footer {
+      color: var(--muted);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    @media (max-width: 1080px) {
+      .content {
+        grid-template-columns: 1fr;
+      }
+
+      .viewport {
+        min-height: 620px;
+        border-right: 0;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .side {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 16px;
+      }
+    }
+
+    @media (max-width: 760px) {
+      .topbar {
+        align-items: flex-start;
+        height: auto;
+        padding: 14px;
+      }
+
+      .top-actions {
+        display: none;
+      }
+
+      .viewport {
+        min-height: 520px;
+      }
+
+      .weapon-stage {
+        inset: 70px 10px 30px;
+      }
+
+      .dummy-popover {
+        width: calc(100% - 32px);
+      }
+
+      .side {
+        display: block;
+        padding: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header class="topbar">
+      <div class="title">
+        <h1>Forge glow 5008</h1>
+        <p>Sword of Azure Thunder - interactive glow and dummy placement workbench</p>
+      </div>
+      <div class="top-actions">
+        <button class="btn">Save draft</button>
+        <button class="btn primary">Export</button>
+      </div>
+    </header>
+
+    <section class="content">
+      <div class="viewport" aria-label="Weapon preview with dummy points">
+        <div class="viewport-toolbar">
+          <button class="tool active" title="Pick dummy">+</button>
+          <button class="tool" title="Orbit">O</button>
+          <button class="tool" title="Glow isolate">G</button>
+          <span class="view-label">Dummy pick mode: click a point on the weapon</span>
+        </div>
+
+        <div class="weapon-stage">
+          <div class="glow-ring" id="glowRing"></div>
+          <div class="weapon" aria-hidden="true">
+            <div class="pommel"></div>
+            <div class="handle"></div>
+            <div class="guard"></div>
+            <div class="blade"></div>
+            <div class="tip"></div>
+          </div>
+
+          <button class="dummy-point" data-dummy="0" style="left: 30%; top: 52%;">D0</button>
+          <button class="dummy-point used" data-dummy="1" style="left: 40%; top: 47%;">D1</button>
+          <button class="dummy-point active used" data-dummy="2" style="left: 51%; top: 43%;">D2</button>
+          <button class="dummy-point" data-dummy="3" style="left: 63%; top: 38%;">D3</button>
+          <button class="dummy-point" data-dummy="4" style="left: 73%; top: 35%;">D4</button>
+          <button class="dummy-point" data-dummy="5" style="left: 23%; top: 58%;">D5</button>
+        </div>
+
+        <aside class="dummy-popover">
+          <h2 id="selectedDummyTitle">Selected dummy D2 - blade center</h2>
+          <p id="selectedDummyText">
+            Lane 0 is attached here. The row selector and viewport point stay in sync, so users do not need to remember dummy ids.
+          </p>
+        </aside>
+      </div>
+
+      <aside class="side">
+        <section class="panel">
+          <h2>Glow color assistant</h2>
+          <p class="panel-sub">
+            The bench should translate a desired color into the native pieces PKO actually uses:
+            lit texture, opacity, blend mode, and optional generated texture.
+          </p>
+
+          <div class="field">
+            <label for="targetColor">Target color</label>
+            <div class="control-row">
+              <input id="targetHex" class="input" value="#15ffdc" />
+              <input id="targetColor" class="color-input" type="color" value="#15ffdc" />
+            </div>
+            <div class="swatches" aria-label="Color presets">
+              <button class="swatch" data-color="#15ffdc" style="background: #15ffdc;"></button>
+              <button class="swatch" data-color="#57ff6c" style="background: #57ff6c;"></button>
+              <button class="swatch" data-color="#4f8cff" style="background: #4f8cff;"></button>
+              <button class="swatch" data-color="#ff4fd8" style="background: #ff4fd8;"></button>
+              <button class="swatch" data-color="#ffb000" style="background: #ffb000;"></button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label for="nativeTexture">Native texture source</label>
+            <select id="nativeTexture" class="select">
+              <option>auto: closest existing lit texture</option>
+              <option>green.tga</option>
+              <option>blue.tga</option>
+              <option>red.tga</option>
+              <option>generate new forge_5008_cyan.tga</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="blendMode">Blend mode</label>
+            <select id="blendMode" class="select">
+              <option>Additive - bright weapon glow</option>
+              <option>Alpha filter - softer aura</option>
+              <option>SrcColor + One - high energy</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label for="opacity">Glow opacity</label>
+            <input id="opacity" class="input" value="0.78" />
+          </div>
+
+          <div class="field recipe">
+            <div class="recipe-step">
+              <span class="step-num">1</span>
+              <div>
+                <strong>Pick the target color visually</strong>
+                <span id="recipeColor">Target #15ffdc is cyan-green.</span>
+              </div>
+            </div>
+            <div class="recipe-step">
+              <span class="step-num">2</span>
+              <div>
+                <strong>Choose the closest native texture</strong>
+                <span>Show whether an existing lit texture is close enough, or recommend generating a new small TGA.</span>
+              </div>
+            </div>
+            <div class="recipe-step">
+              <span class="step-num">3</span>
+              <div>
+                <strong>Explain the final recipe</strong>
+                <span>Export writes the selected lit item id, texture filename, alpha, animation type, and blend mode.</span>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Particle row anchors</h2>
+          <p class="panel-sub">
+            Dummies are discovered from the selected weapon model and exposed as named anchors.
+            Users can pick from the viewport or from the autofilled selector.
+          </p>
+
+          <div class="lane-card">
+            <div class="lane-head">
+              <div class="lane-title">
+                <strong>Lane 0</strong>
+                <span>jj03.par - effect 3042</span>
+              </div>
+              <span class="pill">On</span>
+            </div>
+
+            <div class="field">
+              <label for="dummySelect">Anchor dummy</label>
+              <div class="dummy-select-row">
+                <select id="dummySelect" class="select">
+                  <option value="0">D0 - pommel</option>
+                  <option value="1">D1 - guard</option>
+                  <option value="2" selected>D2 - blade center</option>
+                  <option value="3">D3 - blade forward</option>
+                  <option value="4">D4 - tip</option>
+                  <option value="5">D5 - grip bottom</option>
+                </select>
+                <button class="btn" id="pickInView">Pick in view</button>
+              </div>
+              <div class="mini-map" id="dummyMiniMap">
+                <button class="mini-dummy" data-dummy="0">D0</button>
+                <button class="mini-dummy" data-dummy="1">D1</button>
+                <button class="mini-dummy active" data-dummy="2">D2</button>
+                <button class="mini-dummy" data-dummy="3">D3</button>
+                <button class="mini-dummy" data-dummy="4">D4</button>
+                <button class="mini-dummy" data-dummy="5">D5</button>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="effectFile">Effect file</label>
+              <select id="effectFile" class="select">
+                <option>jj03.par</option>
+                <option>hl_greenfy3.eff</option>
+                <option>forge_cyan_burst.par</option>
+              </select>
+            </div>
+
+            <div class="field">
+              <label for="scale">Scale</label>
+              <input id="scale" class="input" value="0.60" />
+            </div>
+          </div>
+
+          <div class="note">
+            The important behavior is that the selected lane owns the pick target.
+            Clicking a viewport dummy writes that dummy id into the lane override immediately.
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Why this is clearer</h2>
+          <p class="panel-sub">
+            This avoids magic numbers. The user sees each possible attachment point,
+            selects it spatially, and still has exact ids for export/debugging.
+          </p>
+          <p class="footer">
+            Mockup only. It represents the proposed UX, not a realtime renderer.
+            The production bench should use Drei Html labels or screen-space overlays
+            backed by the real dummy matrices extracted from the loaded LGO.
+          </p>
+        </section>
+      </aside>
+    </section>
+  </main>
+
+  <script>
+    const dummyNames = {
+      0: "pommel",
+      1: "guard",
+      2: "blade center",
+      3: "blade forward",
+      4: "tip",
+      5: "grip bottom"
+    };
+
+    const points = Array.from(document.querySelectorAll(".dummy-point"));
+    const miniButtons = Array.from(document.querySelectorAll(".mini-dummy"));
+    const dummySelect = document.getElementById("dummySelect");
+    const selectedTitle = document.getElementById("selectedDummyTitle");
+    const selectedText = document.getElementById("selectedDummyText");
+
+    function selectDummy(id) {
+      const textId = String(id);
+      points.forEach((point) => {
+        point.classList.toggle("active", point.dataset.dummy === textId);
+      });
+      miniButtons.forEach((button) => {
+        button.classList.toggle("active", button.dataset.dummy === textId);
+      });
+      dummySelect.value = textId;
+      selectedTitle.textContent = `Selected dummy D${id} - ${dummyNames[id]}`;
+      selectedText.textContent =
+        `Lane 0 is attached to D${id}. This writes dummyId=${id} to the row override and keeps export deterministic.`;
+    }
+
+    points.forEach((point) => {
+      point.addEventListener("click", () => selectDummy(point.dataset.dummy));
+    });
+    miniButtons.forEach((button) => {
+      button.addEventListener("click", () => selectDummy(button.dataset.dummy));
+    });
+    dummySelect.addEventListener("change", () => selectDummy(dummySelect.value));
+
+    const targetColor = document.getElementById("targetColor");
+    const targetHex = document.getElementById("targetHex");
+    const glowRing = document.getElementById("glowRing");
+    const recipeColor = document.getElementById("recipeColor");
+
+    function setGlowColor(value) {
+      const color = value.startsWith("#") ? value : `#${value}`;
+      targetColor.value = color;
+      targetHex.value = color;
+      glowRing.style.background =
+        `radial-gradient(circle, ${color}38, transparent 44%),` +
+        `conic-gradient(from 15deg, ${color}e6, rgba(255,255,255,0.1), ${color}a8, rgba(255,255,255,0.08), ${color}e6)`;
+      glowRing.style.boxShadow = `0 0 34px ${color}59, 0 0 110px ${color}33`;
+      recipeColor.textContent = `Target ${color.toUpperCase()} will be matched by texture hue plus opacity/blend.`;
+    }
+
+    targetColor.addEventListener("input", () => setGlowColor(targetColor.value));
+    targetHex.addEventListener("change", () => setGlowColor(targetHex.value));
+    document.querySelectorAll(".swatch").forEach((button) => {
+      button.addEventListener("click", () => setGlowColor(button.dataset.color));
+    });
+  </script>
+</body>
+</html>

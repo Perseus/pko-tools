@@ -1,8 +1,8 @@
 import { Canvas } from "@react-three/fiber";
 import { GizmoHelper, GizmoViewport, OrbitControls } from "@react-three/drei";
 import { useAtom, useAtomValue, useSetAtom } from "jotai";
-import { useEffect, useMemo, useState } from "react";
-import { effectV2SelectionAtom, effectV2PlaybackAtom, magicSingleTableAtom, effectV2HiddenSubEffectsAtom } from "@/store/effect-v2";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { effectV2SelectionAtom, effectV2PlaybackAtom, magicSingleTableAtom, effectV2HiddenSubEffectsAtom, effectV2HiddenParticleSystemsAtom, effectV2HiddenParticleSubEffectsAtom } from "@/store/effect-v2";
 import { MagicEffectRenderer } from "./renderers/MagicEffectRenderer";
 import { MagicGroupRenderer } from "./renderers/MagicGroupRenderer";
 import { EffectRenderer } from "./renderers/EffectRenderer";
@@ -10,11 +10,24 @@ import { ParticleEffectRenderer } from "./renderers/ParticleEffectRenderer";
 import { PlaybackClock } from "./PlaybackClock";
 import { GlobalTimeProvider } from "./TimeContext";
 import { useLoadEffect } from "./useLoadEffect";
+import { PKO_Z_UP_GRID_ROTATION, PkoZUpCamera } from "./zUpScene";
 import { Button } from "@/components/ui/button";
-import { Play, Square, RotateCcw, Repeat } from "lucide-react";
+import { Download, Play, Square, RotateCcw, Repeat } from "lucide-react";
 import { EffectV2Selection, MagicSingleEntry, MagicGroupEntry, ParFile } from "@/types/effect-v2";
-import { loadParFile } from "@/commands/effect";
+import { EffectFile } from "@/types/effect";
+import { loadParFile, loadEffect } from "@/commands/effect";
 import { currentProjectAtom } from "@/store/project";
+import {
+  sampleEffectTraceSession,
+  serializeEffectTraceArtifact,
+  toEffectTraceArtifact,
+} from "./effectTrace";
+import {
+  estimateStandaloneParticlePreviewDuration,
+  getNestedParticleEffectNames,
+} from "./standaloneParticlePreview";
+
+const EFFECT_TRACE_SAMPLE_TIMES = [0, 0.1, 0.2, 0.5, 1, 1.5, 2, 3];
 
 function PlaybackBar() {
   const [playback, setPlayback] = useAtom(effectV2PlaybackAtom);
@@ -160,16 +173,16 @@ function MagicGroupInfoPanel({ entry }: { entry: MagicGroupEntry }) {
         </div>
         <div>
           <div className="text-xs text-muted-foreground">Render Idx</div>
-          <div>{entry.renderIdx}</div>
+          <div>{entry.render_idx}</div>
         </div>
         <div>
           <div className="text-xs text-muted-foreground">Total Count</div>
-          <div>{entry.totalCount}</div>
+          <div>{entry.total_count}</div>
         </div>
       </div>
       <div>
         <div className="text-xs text-muted-foreground">Phases (click to view)</div>
-        {entry.typeIds.map((typeId, i) => {
+        {entry.type_ids.map((typeId, i) => {
           if (typeId < 0) return null;
           const magicEntry = table?.entries.find((e) => e.id === typeId);
           const name = magicEntry?.name ?? `#${typeId}`;
@@ -191,6 +204,7 @@ function MagicGroupInfoPanel({ entry }: { entry: MagicGroupEntry }) {
 function EffectFileInfoPanel({ fileName }: { fileName: string }) {
   const effFiles = useLoadEffect([fileName]);
   const eff = effFiles[0] ?? null;
+  const playback = useAtomValue(effectV2PlaybackAtom);
   const [hiddenIndices, setHiddenIndices] = useAtom(effectV2HiddenSubEffectsAtom);
 
   const toggleSubEffect = (index: number) => {
@@ -210,6 +224,23 @@ function EffectFileInfoPanel({ fileName }: { fileName: string }) {
     setHiddenIndices(new Set());
   }, [fileName, setHiddenIndices]);
 
+  const downloadTrace = () => {
+    if (!eff) return;
+    const session = sampleEffectTraceSession(eff, EFFECT_TRACE_SAMPLE_TIMES, playback.loop);
+    const artifact = toEffectTraceArtifact(session, {
+      source: "pko-tools",
+      effectName: fileName,
+      generatedAt: new Date().toISOString(),
+    });
+    const blob = new Blob([serializeEffectTraceArtifact(artifact)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `effect-trace-${fileName.replace(/[^a-z0-9_.-]+/gi, "_")}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   return (
     <div className="flex flex-col gap-3 text-sm">
       <div>
@@ -218,6 +249,16 @@ function EffectFileInfoPanel({ fileName }: { fileName: string }) {
       </div>
       {eff && (
         <>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 justify-start gap-2"
+            onClick={downloadTrace}
+            title="Export deterministic effect trace JSON for parity comparison"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Trace JSON
+          </Button>
           <div className="grid grid-cols-2 gap-2">
             <div>
               <div className="text-xs text-muted-foreground">Sub-effects</div>
@@ -265,9 +306,19 @@ function EffectFileInfoPanel({ fileName }: { fileName: string }) {
   );
 }
 
+const PARTICLE_TYPE_NAMES: Record<number, string> = {
+  1: "Snow", 2: "Fire", 3: "Blast", 4: "Ripple", 5: "Model",
+  6: "Strip", 7: "Wind", 8: "Arrow", 9: "Round", 10: "Blast2",
+  11: "Blast3", 12: "Shrink", 13: "Shade", 14: "Range", 15: "Range2",
+  16: "Dummy", 17: "LineSingle", 18: "LineRound",
+};
+
 function ParticleFileInfoPanel({ fileName }: { fileName: string }) {
   const [parData, setParData] = useState<ParFile | null>(null);
+  const [effFileMap, setEffFileMap] = useState<Map<string, EffectFile>>(new Map());
   const currentProject = useAtomValue(currentProjectAtom);
+  const [hiddenSystems, setHiddenSystems] = useAtom(effectV2HiddenParticleSystemsAtom);
+  const [hiddenSubEffectsMap, setHiddenSubEffectsMap] = useAtom(effectV2HiddenParticleSubEffectsAtom);
 
   useEffect(() => {
     if (!currentProject) return;
@@ -276,6 +327,53 @@ function ParticleFileInfoPanel({ fileName }: { fileName: string }) {
       .then((data) => setParData(data as ParFile))
       .catch(() => setParData(null));
   }, [fileName, currentProject]);
+
+  // Reset visibility when the particle file changes
+  useEffect(() => {
+    setHiddenSystems(new Set());
+    setHiddenSubEffectsMap(new Map());
+  }, [fileName, setHiddenSystems, setHiddenSubEffectsMap]);
+
+  // Load .eff files referenced by MODEL/STRIP systems
+  useEffect(() => {
+    if (!currentProject || !parData) { setEffFileMap(new Map()); return; }
+    const names = [...new Set(
+      parData.systems.map(s => s.modelName).filter(n => n.endsWith('.eff'))
+    )];
+    if (names.length === 0) { setEffFileMap(new Map()); return; }
+    let cancelled = false;
+    async function fetchEffs() {
+      const map = new Map<string, EffectFile>();
+      for (const name of names) {
+        try {
+          const data = await loadEffect(currentProject!.id, name) as EffectFile;
+          if (cancelled) return;
+          map.set(name, data);
+        } catch { /* skip missing */ }
+      }
+      if (!cancelled) setEffFileMap(map);
+    }
+    fetchEffs();
+    return () => { cancelled = true; };
+  }, [parData, currentProject]);
+
+  const toggleSystem = (i: number) => {
+    setHiddenSystems(prev => {
+      const next = new Set(prev);
+      if (next.has(i)) next.delete(i); else next.add(i);
+      return next;
+    });
+  };
+
+  const toggleSubEffect = (sysIdx: number, subIdx: number) => {
+    setHiddenSubEffectsMap(prev => {
+      const next = new Map(prev);
+      const s = new Set(next.get(sysIdx) ?? []);
+      if (s.has(subIdx)) s.delete(subIdx); else s.add(subIdx);
+      next.set(sysIdx, s);
+      return next;
+    });
+  };
 
   return (
     <div className="flex flex-col gap-3 text-sm">
@@ -309,12 +407,45 @@ function ParticleFileInfoPanel({ fileName }: { fileName: string }) {
           </div>
           {parData.systems.length > 0 && (
             <div>
-              <div className="text-xs text-muted-foreground">Particle Types</div>
-              {parData.systems.map((sys, i) => (
-                <div key={i} className="font-mono text-xs bg-muted px-2 py-1 rounded mt-1">
-                  {sys.name || `Type ${sys.type}`} ({sys.particleCount} particles)
-                </div>
-              ))}
+              <div className="text-xs text-muted-foreground mb-1">Particle Systems (click to toggle)</div>
+              {parData.systems.map((sys, i) => {
+                const hidden = hiddenSystems.has(i);
+                const typeName = PARTICLE_TYPE_NAMES[sys.type] ?? `Type${sys.type}`;
+                const hasEff = sys.modelName.endsWith('.eff');
+                const effFile = hasEff ? effFileMap.get(sys.modelName) : undefined;
+                const sysSubHidden = hiddenSubEffectsMap.get(i) ?? new Set<number>();
+                return (
+                  <div key={i}>
+                    <button
+                      className="w-full flex items-center gap-2 font-mono text-xs bg-muted hover:bg-accent px-2 py-1 rounded mt-1 cursor-pointer transition-colors"
+                      onClick={() => toggleSystem(i)}
+                    >
+                      <span className={hidden ? "opacity-30" : ""}>{hidden ? "○" : "●"}</span>
+                      <span className={hidden ? "line-through opacity-50" : ""}>
+                        {sys.name || `System ${i}`}
+                      </span>
+                      <span className="text-muted-foreground ml-auto shrink-0">
+                        {typeName}{hasEff ? `: ${sys.modelName}` : ""} · {sys.particleCount}px
+                      </span>
+                    </button>
+                    {hasEff && !hidden && effFile && effFile.subEffects.map((sub, j) => {
+                      const subHidden = sysSubHidden.has(j);
+                      return (
+                        <button
+                          key={j}
+                          className="w-full flex items-center gap-2 font-mono text-xs bg-muted/50 hover:bg-accent pl-6 pr-2 py-1 rounded mt-0.5 cursor-pointer transition-colors"
+                          onClick={() => toggleSubEffect(i, j)}
+                        >
+                          <span className={subHidden ? "opacity-30" : ""}>{subHidden ? "○" : "●"}</span>
+                          <span className={subHidden ? "line-through opacity-50" : ""}>
+                            {sub.modelName || "(default)"}{sub.texName ? ` [${sub.texName}]` : ""}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                );
+              })}
             </div>
           )}
         </>
@@ -330,10 +461,69 @@ function StandaloneEffectView({ fileName }: { fileName: string }) {
   return <EffectRenderer effect={effFiles[0]} />;
 }
 
-/** Standalone .par viewer — renders particle system at origin, looping. */
+/** Standalone .par viewer — renders particle system at origin under shared playback controls. */
 function StandaloneParticleView({ fileName }: { fileName: string }) {
+  const playback = useAtomValue(effectV2PlaybackAtom);
+  const setPlayback = useSetAtom(effectV2PlaybackAtom);
+  const currentProject = useAtomValue(currentProjectAtom);
+  const [previewPar, setPreviewPar] = useState<ParFile | null>(null);
+  const [previewReplayKey, setPreviewReplayKey] = useState(0);
+  const previewCompleteHandledRef = useRef(false);
   const baseName = fileName.replace(/\.par$/i, "");
-  return <ParticleEffectRenderer particleEffectName={baseName} loop />;
+  const nestedEffectNames = useMemo(() => getNestedParticleEffectNames(previewPar), [previewPar]);
+  const nestedEffects = useLoadEffect(nestedEffectNames);
+  const previewDuration = useMemo(
+    () => estimateStandaloneParticlePreviewDuration(previewPar, nestedEffects),
+    [previewPar, nestedEffects],
+  );
+
+  useEffect(() => {
+    if (!currentProject?.id) {
+      setPreviewPar(null);
+      return;
+    }
+
+    let cancelled = false;
+    loadParFile(currentProject.id, fileName)
+      .then((par) => {
+        if (!cancelled) setPreviewPar(par as ParFile);
+      })
+      .catch(() => {
+        if (!cancelled) setPreviewPar(null);
+      });
+
+    return () => { cancelled = true; };
+  }, [currentProject?.id, fileName]);
+
+  useEffect(() => {
+    previewCompleteHandledRef.current = false;
+  }, [baseName, previewReplayKey]);
+
+  const replayPreview = useCallback(() => {
+    if (previewCompleteHandledRef.current) return;
+    if (!playback.loop || !playback.playing || playback.time <= 0) return;
+    previewCompleteHandledRef.current = true;
+    setPlayback((current) => ({ ...current, time: 0 }));
+    setPreviewReplayKey((current) => current + 1);
+  }, [playback.loop, playback.playing, playback.time, setPlayback]);
+
+  const handlePreviewComplete = useCallback(() => {
+    replayPreview();
+  }, [replayPreview]);
+
+  useEffect(() => {
+    if (previewDuration > 0 && playback.time >= previewDuration) {
+      replayPreview();
+    }
+  }, [playback.time, previewDuration, replayPreview]);
+
+  return (
+    <ParticleEffectRenderer
+      key={`${baseName}:${previewReplayKey}`}
+      particleEffectName={baseName}
+      onComplete={handlePreviewComplete}
+    />
+  );
 }
 
 /** Renders the appropriate 3D content based on the current selection. */
@@ -398,12 +588,16 @@ export default function EffectV2Workbench() {
             <color attach="background" args={["#1e1e2e"]} />
             <ambientLight intensity={1} />
             <directionalLight position={[5, 5, 5]} />
+            <PkoZUpCamera />
             <PlaybackClock />
             <GlobalTimeProvider>
               <SceneContent selection={selection} />
             </GlobalTimeProvider>
             <OrbitControls makeDefault />
-            <gridHelper args={[40, 40, "#2f3239", "#1b1d22"]} />
+            <gridHelper
+              args={[40, 40, "#2f3239", "#1b1d22"]}
+              rotation={PKO_Z_UP_GRID_ROTATION}
+            />
             <GizmoHelper alignment="top-right" margin={[80, 80]}>
               <GizmoViewport axisColors={["#f73b3b", "#3bf751", "#3b8ef7"]} labelColor="white" />
             </GizmoHelper>

@@ -1,4 +1,7 @@
 import { ParSystem } from "@/types/effect-v2";
+import type { DummyLineSpan } from "./dummyLineKinematics";
+import type { MutableRefObject } from "react";
+import type * as THREE from "three";
 
 /**
  * Common props for all particle system renderers.
@@ -11,8 +14,20 @@ export interface ParticleSystemProps {
   index: number;
   /** Whether the particle system should loop. */
   loop?: boolean;
+  /** Runtime dummy1/dummy2 span used by C++ dummy-line particle systems. */
+  dummyLineSpan?: DummyLineSpan | null;
+  /** Runtime CMPPartCtrl::MoveTo emitter position, in Three coordinates. */
+  emitterPositionRef?: MutableRefObject<THREE.Vector3 | null>;
+  /** Runtime CMPPartCtrl::setDir direction, used by source modelDir particle systems. */
+  sourceDirectionRef?: MutableRefObject<THREE.Vector3 | null>;
   /** Called once when this system's animation is complete (non-looping only). */
   onComplete?: () => void;
+  /** Source CMPResManger::SendResMessage-style follow-on particle trigger. */
+  onHitEffect?: (
+    particleEffectName: string,
+    position: THREE.Vector3,
+    sourceDirection?: THREE.Vector3,
+  ) => void;
 }
 
 /**

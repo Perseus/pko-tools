@@ -1,13 +1,17 @@
 use core::f32;
 use std::{
     collections::{BTreeMap, HashMap},
-    io::Seek,
+    io::{Cursor, Seek},
     path::Path,
 };
 
 use crate::{
+    client_paths,
     d3d::{D3DPrimitiveType, D3DVertexElement9},
+    item::model::decode_pko_texture,
+    map::scene_model::decode_dds_with_alpha,
     math::{self, coord_transform::CoordTransform, LwVector2, LwVector3},
+    text_encoding::decode_gbk_text,
 };
 use ::gltf::{
     json::{
@@ -24,7 +28,6 @@ use ::gltf::{
 };
 use base64::{prelude::BASE64_STANDARD, Engine};
 use binrw::BinWrite;
-use image::ImageReader;
 use serde::Serialize;
 use serde_json::json;
 
@@ -46,11 +49,17 @@ fn read_u32_le(r: &mut impl std::io::Read) -> std::io::Result<u32> {
     Ok(u32::from_le_bytes(buf))
 }
 
+fn decode_texture_stem(bytes: &[u8]) -> String {
+    let end = bytes
+        .iter()
+        .position(|&byte| byte == b'\0' || byte == b'.')
+        .unwrap_or(bytes.len());
+    decode_gbk_text(&bytes[..end]).trim().to_string()
+}
+
 use super::{
     model::LW_MAX_TEXTURESTAGE_NUM,
-    texture::{
-        CharMaterialTextureInfo, MaterialTextureInfoTransparencyType, RenderStateAtom,
-    },
+    texture::{CharMaterialTextureInfo, MaterialTextureInfoTransparencyType, RenderStateAtom},
     GLTFFieldsToAggregate,
 };
 
@@ -497,8 +506,8 @@ impl CharacterMeshInfo {
         let buffer_view_index = fields_to_aggregate.buffer_view.len();
         let accessor_index = fields_to_aggregate.accessor.len();
 
-        // Winding reversal handled by ct.reverse_indices() which is profile-aware:
-        // StandardGltf (det=-1) flips winding automatically, UnityGltfast needs manual reversal.
+        // Winding reversal: the Y↔Z swap (det=-1) flips winding,
+        // so reverse_indices() restores correct CCW front faces.
         let mut indices: Vec<u32> = self.index_seq.clone();
         if let Some(ct) = ct {
             ct.reverse_indices(&mut indices);
@@ -799,99 +808,88 @@ impl CharacterMeshInfo {
     ) -> usize {
         let material_seq = &materials.as_ref().unwrap()[0];
         let texture_info = &material_seq.tex_seq[0];
-        let mut file_name = String::new();
-        for i in 0..texture_info.file_name.len() {
-            if texture_info.file_name[i] == b'\0' || texture_info.file_name[i] == b'.' {
-                break;
-            }
-
-            file_name += core::str::from_utf8(&[texture_info.file_name[i]]).unwrap();
-        }
+        let file_name = decode_texture_stem(&texture_info.file_name);
 
         let texture_dirs = ["texture/character", "texture"];
-        let mut image_file = None;
-        for dir in &texture_dirs {
-            let candidate = project_dir.join(dir).join(&file_name).with_extension("bmp");
-            if candidate.exists() {
-                image_file = Some(candidate);
-                break;
+        let texture_exts = ["bmp", "tga", "dds", "png", "jpg"];
+        let mut image_as_png = None;
+        'search: for dir in &texture_dirs {
+            for ext in &texture_exts {
+                let candidate = if let Some(texture_rel) = dir.strip_prefix("texture/") {
+                    client_paths::asset_file(project_dir, "texture", texture_rel)
+                } else {
+                    client_paths::asset_dir(project_dir, "texture")
+                }
+                .join(&file_name)
+                .with_extension(ext);
+                if !candidate.exists() {
+                    continue;
+                }
+
+                let Ok(raw_bytes) = std::fs::read(&candidate) else {
+                    continue;
+                };
+                let decoded = decode_pko_texture(&raw_bytes);
+                let Some(image) = decode_dds_with_alpha(&decoded) else {
+                    continue;
+                };
+                let mut png_data = Vec::new();
+                if image
+                    .write_to(&mut Cursor::new(&mut png_data), image::ImageFormat::Png)
+                    .is_ok()
+                {
+                    image_as_png = Some(png_data);
+                    break 'search;
+                }
             }
         }
-        let mut image_file = image_file.unwrap_or_else(|| {
-            // Fallback to character path for error message
-            project_dir
-                .join("texture/character/")
-                .join(&file_name)
-                .with_extension("bmp")
+        let base_color_texture = image_as_png.map(|image_as_png| {
+            let image_as_data_uri = format!(
+                "data:image/png;base64,{}",
+                BASE64_STANDARD.encode(&image_as_png)
+            );
+
+            let image = gltf::json::Image {
+                name: Some(file_name.clone()),
+                buffer_view: None,
+                extensions: None,
+                mime_type: Some(MimeType("image/png".to_string())),
+                extras: None,
+                uri: Some(image_as_data_uri),
+            };
+
+            let image_index = fields_to_aggregate.image.len();
+            fields_to_aggregate.image.push(image);
+
+            let sampler = gltf::json::texture::Sampler {
+                mag_filter: Some(Checked::Valid(MagFilter::Linear)),
+                min_filter: Some(Checked::Valid(texture::MinFilter::LinearMipmapLinear)),
+                wrap_s: Checked::Valid(texture::WrappingMode::Repeat),
+                wrap_t: Checked::Valid(texture::WrappingMode::Repeat),
+                ..Default::default()
+            };
+
+            let sampler_index = fields_to_aggregate.sampler.len();
+            fields_to_aggregate.sampler.push(sampler);
+
+            let texture = gltf::json::Texture {
+                name: Some(file_name.clone()),
+                sampler: Some(Index::new(sampler_index as u32)),
+                source: Index::new(image_index as u32),
+                extensions: None,
+                extras: None,
+            };
+
+            let texture_index = fields_to_aggregate.texture.len();
+            fields_to_aggregate.texture.push(texture);
+
+            texture::Info {
+                index: Index::new(texture_index as u32),
+                tex_coord: 0,
+                extensions: None,
+                extras: None,
+            }
         });
-        let original_image_reader = ImageReader::open(image_file.clone());
-        if original_image_reader.is_err() {
-            panic!(
-                "Error opening image file: {:?}, error: {:?}",
-                image_file.to_str(),
-                original_image_reader.err().unwrap()
-            );
-        }
-        let original_image = original_image_reader.unwrap().decode();
-        if original_image.is_err() {
-            panic!(
-                "Error decoding image file: {:?}, error: {:?}",
-                image_file.to_str(),
-                original_image.err().unwrap()
-            );
-        }
-        original_image
-            .unwrap()
-            .save_with_format(
-                Path::new("state/textures/")
-                    .join(&file_name)
-                    .with_extension("png"),
-                image::ImageFormat::Png,
-            )
-            .unwrap();
-
-        image_file = Path::new("state/textures/")
-            .join(&file_name)
-            .with_extension("png");
-        let image_as_png = std::fs::read(image_file).unwrap();
-        let image_as_data_uri = format!(
-            "data:image/png;base64,{}",
-            BASE64_STANDARD.encode(&image_as_png)
-        );
-
-        let image = gltf::json::Image {
-            name: Some("image".to_string()),
-            buffer_view: None,
-            extensions: None,
-            mime_type: Some(MimeType("image/png".to_string())),
-            extras: None,
-            uri: Some(image_as_data_uri),
-        };
-
-        let image_index = fields_to_aggregate.image.len();
-        fields_to_aggregate.image.push(image);
-
-        let sampler = gltf::json::texture::Sampler {
-            mag_filter: Some(Checked::Valid(MagFilter::Linear)),
-            min_filter: Some(Checked::Valid(texture::MinFilter::LinearMipmapLinear)),
-            wrap_s: Checked::Valid(texture::WrappingMode::Repeat),
-            wrap_t: Checked::Valid(texture::WrappingMode::Repeat),
-            ..Default::default()
-        };
-
-        let sampler_index = fields_to_aggregate.sampler.len();
-        fields_to_aggregate.sampler.push(sampler);
-
-        let texture = gltf::json::Texture {
-            name: Some("texture".to_string()),
-            sampler: Some(Index::new(sampler_index as u32)),
-            source: Index::new(image_index as u32),
-            extensions: None,
-            extras: None,
-        };
-
-        let texture_index = fields_to_aggregate.texture.len();
-        fields_to_aggregate.texture.push(texture);
 
         let emi = material_seq.material.emi.as_ref().unwrap();
 
@@ -909,12 +907,7 @@ impl CharacterMeshInfo {
             }),
             pbr_metallic_roughness: PbrMetallicRoughness {
                 base_color_factor: PbrBaseColorFactor(material_seq.material.dif.to_slice()),
-                base_color_texture: Some(texture::Info {
-                    index: Index::new(texture_index as u32),
-                    tex_coord: 0,
-                    extensions: None,
-                    extras: None,
-                }),
+                base_color_texture,
                 metallic_factor: StrengthFactor(0.0),
                 roughness_factor: StrengthFactor(0.0),
                 metallic_roughness_texture: None,
@@ -940,8 +933,7 @@ impl CharacterMeshInfo {
     ) -> gltf::json::mesh::Primitive {
         let vertex_position_accessor_index =
             self.get_vertex_position_accessor(fields_to_aggregate, ct);
-        let vertex_normal_accessor_index =
-            self.get_vertex_normal_accessor(fields_to_aggregate, ct);
+        let vertex_normal_accessor_index = self.get_vertex_normal_accessor(fields_to_aggregate, ct);
         let vertex_indices_accessor_index = self.get_vertex_index_accessor(fields_to_aggregate, ct);
 
         let material_index =
@@ -1194,9 +1186,7 @@ impl CharacterMeshInfo {
                             let mut texcoords: Vec<LwVector2> = vec![];
 
                             for _ in 0..accessor.count() {
-                                texcoords.push(
-                                    LwVector2::read_from(&mut reader).unwrap(),
-                                );
+                                texcoords.push(LwVector2::read_from(&mut reader).unwrap());
                             }
 
                             // only supporting one texcoord vec for now
@@ -1485,8 +1475,7 @@ impl CharacterMeshInfo {
 
                     let mut reader = std::io::Cursor::new(data_as_slice);
                     for _ in 0..accessor.count() {
-                        let vertex =
-                            LwVector3::read_from(&mut reader)?;
+                        let vertex = LwVector3::read_from(&mut reader)?;
                         mesh.vertex_seq.push(vertex);
                     }
                 }
@@ -1500,8 +1489,7 @@ impl CharacterMeshInfo {
 
                     let mut reader = std::io::Cursor::new(data_as_slice);
                     for _ in 0..accessor.count() {
-                        let vertex_normal =
-                            LwVector3::read_from(&mut reader)?;
+                        let vertex_normal = LwVector3::read_from(&mut reader)?;
                         mesh.normal_seq.push(vertex_normal);
                     }
                 }
@@ -1571,9 +1559,7 @@ impl CharacterMeshInfo {
                     let mut texcoords: Vec<LwVector2> = vec![];
 
                     for _ in 0..accessor.count() {
-                        texcoords.push(
-                            LwVector2::read_from(&mut reader).unwrap(),
-                        );
+                        texcoords.push(LwVector2::read_from(&mut reader).unwrap());
                     }
                     mesh.texcoord_seq[0] = texcoords;
                 }
@@ -1836,8 +1822,7 @@ impl CharacterMeshInfo {
 
                     let mut reader = std::io::Cursor::new(data_as_slice);
                     for _ in 0..accessor.count() {
-                        let vertex =
-                            LwVector3::read_from(&mut reader)?;
+                        let vertex = LwVector3::read_from(&mut reader)?;
                         mesh.vertex_seq.push(vertex);
                     }
                 }
@@ -1851,8 +1836,7 @@ impl CharacterMeshInfo {
 
                     let mut reader = std::io::Cursor::new(data_as_slice);
                     for _ in 0..accessor.count() {
-                        let vertex_normal =
-                            LwVector3::read_from(&mut reader)?;
+                        let vertex_normal = LwVector3::read_from(&mut reader)?;
                         mesh.normal_seq.push(vertex_normal);
                     }
                 }
@@ -1922,9 +1906,7 @@ impl CharacterMeshInfo {
                     let mut texcoords: Vec<LwVector2> = vec![];
 
                     for _ in 0..accessor.count() {
-                        texcoords.push(
-                            LwVector2::read_from(&mut reader).unwrap(),
-                        );
+                        texcoords.push(LwVector2::read_from(&mut reader).unwrap());
                     }
                     mesh.texcoord_seq[0] = texcoords;
                 }
@@ -2137,6 +2119,19 @@ impl CharacterMeshInfo {
             );
         }
 
+        if !self.blend_seq.is_empty() && !self.bone_index_seq.is_empty() {
+            let (joint_indices_accessor_index, weights_accessor_index) =
+                self.get_joint_and_weight_accessors(fields_to_aggregate);
+            attributes.insert(
+                Checked::Valid(Semantic::Joints(0)),
+                Index::new(joint_indices_accessor_index as u32),
+            );
+            attributes.insert(
+                Checked::Valid(Semantic::Weights(0)),
+                Index::new(weights_accessor_index as u32),
+            );
+        }
+
         let mode = match &self.header.pt_type {
             D3DPrimitiveType::TriangleList => gltf::mesh::Mode::Triangles,
             D3DPrimitiveType::TriangleStrip => gltf::mesh::Mode::TriangleStrip,
@@ -2179,5 +2174,17 @@ impl CharacterMeshInfo {
             + bone_idx_size
             + idx_size
             + sub_size) as u32
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::decode_texture_stem;
+
+    #[test]
+    fn decodes_gbk_texture_stem_without_utf8_panic() {
+        // "测试" encoded as GBK, with an extension and null padding.
+        let bytes = [0xb2, 0xe2, 0xca, 0xd4, b'.', b't', b'g', b'a', 0];
+        assert_eq!(decode_texture_stem(&bytes), "测试");
     }
 }

@@ -4,6 +4,8 @@ use std::path::Path;
 use encoding_rs::GBK;
 use serde::{Deserialize, Serialize};
 
+use crate::client_paths;
+
 /// A single area definition from AreaSet.bin.
 /// Each entry is keyed by btIsland (0-255) from the map tile data.
 /// Used for per-area lighting, music, minimap color, and zone type.
@@ -22,7 +24,7 @@ pub struct AreaDefinition {
     pub light_color: [u8; 3],
     /// Directional light direction vector [x, y, z]
     pub light_dir: [f32; 3],
-    /// Zone type: 0=wilderness (PK enabled), 1=city (safe zone)
+    /// Zone type from AreaSet chType: 0=wilderness/outside, 1=city
     pub zone_type: u8,
 }
 
@@ -123,8 +125,7 @@ pub fn parse_area_set_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, AreaDefini
             if chunk.len() < name_end {
                 String::new()
             } else {
-                let name_bytes =
-                    &chunk[RAW_DATA_INFO_DATANAME_OFFSET..name_end];
+                let name_bytes = &chunk[RAW_DATA_INFO_DATANAME_OFFSET..name_end];
                 let null_pos = name_bytes
                     .iter()
                     .position(|&b| b == 0)
@@ -185,14 +186,14 @@ pub fn parse_area_set_bin(data: &[u8]) -> anyhow::Result<HashMap<u32, AreaDefini
 
 /// Load and parse AreaSet.bin from a project directory.
 pub fn load_area_set(project_dir: &Path) -> anyhow::Result<HashMap<u32, AreaDefinition>> {
-    let bin_path = project_dir.join("scripts/table/AreaSet.bin");
+    let bin_path = client_paths::table_file(project_dir, "AreaSet.bin");
     if bin_path.exists() {
         let data = std::fs::read(&bin_path)?;
         return parse_area_set_bin(&data);
     }
 
     // Try lowercase variant
-    let bin_path_lower = project_dir.join("scripts/table/areaset.bin");
+    let bin_path_lower = client_paths::table_file(project_dir, "areaset.bin");
     if bin_path_lower.exists() {
         let data = std::fs::read(&bin_path_lower)?;
         return parse_area_set_bin(&data);
@@ -370,7 +371,7 @@ mod tests {
         entry[d + 4..d + 8].copy_from_slice(&0i32.to_le_bytes()); // nMusic
         entry[d + 8..d + 12].copy_from_slice(&0u32.to_le_bytes()); // dwEnvColor
         entry[d + 12..d + 16].copy_from_slice(&0u32.to_le_bytes()); // dwLightColor
-        // lightDir: 3 floats at d+16..d+28 (already zero)
+                                                                    // lightDir: 3 floats at d+16..d+28 (already zero)
         entry[d + 28] = zone_type;
 
         // Prefix with entry_size
@@ -381,13 +382,7 @@ mod tests {
 
     #[test]
     fn parse_ascii_name() {
-        let data = build_test_entry(
-            140,
-            1,
-            42,
-            b"Outskirt of Argent City\0",
-            1,
-        );
+        let data = build_test_entry(140, 1, 42, b"Outskirt of Argent City\0", 1);
         let map = parse_area_set_bin(&data).unwrap();
         let area = map.get(&42).expect("area 42 should exist");
         assert_eq!(area.name, "Outskirt of Argent City");

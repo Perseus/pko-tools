@@ -15,11 +15,13 @@ pub(crate) mod kaitai_gen;
 pub mod animation;
 mod broadcast;
 pub mod character;
+pub mod client_paths;
 mod d3d;
 mod db;
 pub mod decompiler;
 pub mod effect;
 pub mod effect_v2;
+pub mod forge_glow;
 pub mod item;
 pub mod map;
 pub mod math;
@@ -28,11 +30,13 @@ mod preferences;
 mod projects;
 pub mod registration;
 pub mod retarget;
+pub mod string_set;
+pub mod text_encoding;
 pub mod texture_pipeline;
 pub mod validation;
 
 use std::collections::HashMap;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::Manager;
 
 pub struct AppState {
@@ -40,6 +44,27 @@ pub struct AppState {
     preferences: preferences::Preferences,
     /// Cache of glTF JSON strings keyed by (project_id, character_id).
     pub character_gltf_cache: Mutex<HashMap<(uuid::Uuid, u32), String>>,
+    /// Cache of parsed/enriched map placement records keyed by (project_id, map_name).
+    pub map_placement_cache:
+        Mutex<HashMap<map::workbench::MapPlacementCacheKey, Arc<Vec<map::MapPlacementRecord>>>>,
+    /// Cache of parsed map terrain keyed by source file identity.
+    pub map_workbench_cache:
+        Mutex<HashMap<map::workbench::ParsedMapCacheKey, Arc<map::terrain::ParsedMap>>>,
+    /// Cache of parsed AreaSet metadata keyed by source file identity.
+    pub map_area_set_cache: Mutex<
+        HashMap<map::workbench::AreaSetCacheKey, Arc<HashMap<u32, map::area_set::AreaDefinition>>>,
+    >,
+    /// Cache of spatial placement indices keyed by (project_id, map_name).
+    pub map_placement_spatial_cache: Mutex<
+        HashMap<map::workbench::MapPlacementCacheKey, Arc<map::workbench::PlacementSpatialIndex>>,
+    >,
+    /// Cache of terrain texture samplers keyed by map and TerrainInfo source identity.
+    pub map_texture_sampler_cache: Mutex<
+        HashMap<
+            map::texture::TerrainTextureSamplerCacheKey,
+            Option<Arc<map::texture::TerrainTextureSampler>>,
+        >,
+    >,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -61,13 +86,19 @@ pub fn run() {
         builder = builder.plugin(tauri_plugin_mcp_bridge::init());
     }
 
-    builder.setup(|app| {
+    builder
+        .setup(|app| {
             let _ = projects::commands::init_directories();
             let preferences = preferences::Preferences::new();
             let mut state = AppState {
                 current_project: None,
                 preferences,
                 character_gltf_cache: Mutex::new(HashMap::new()),
+                map_placement_cache: Mutex::new(HashMap::new()),
+                map_workbench_cache: Mutex::new(HashMap::new()),
+                map_area_set_cache: Mutex::new(HashMap::new()),
+                map_placement_spatial_cache: Mutex::new(HashMap::new()),
+                map_texture_sampler_cache: Mutex::new(HashMap::new()),
             };
 
             if let Some(current_project_id) = &state.preferences.get_current_project() {
@@ -122,6 +153,15 @@ pub fn run() {
             item::commands::import_item_from_gltf,
             item::commands::load_model_preview,
             item::commands::get_forge_effect_preview,
+            item::commands::trace_forge_combination,
+            forge_glow::commands::resolve_forge_glow_recipe,
+            forge_glow::commands::list_forge_glow_gems,
+            forge_glow::commands::create_forge_glow_draft,
+            forge_glow::commands::list_forge_glow_drafts,
+            forge_glow::commands::load_forge_glow_draft,
+            forge_glow::commands::save_forge_glow_draft,
+            forge_glow::commands::delete_forge_glow_draft,
+            forge_glow::commands::export_forge_glow_package,
             item::commands::get_item_category_availability,
             item::commands::decompile_item_refine_info,
             item::commands::decompile_item_refine_effect_info,
@@ -151,12 +191,26 @@ pub fn run() {
             retarget::commands::apply_bone_mapping,
             retarget::commands::validate_bone_mapping,
             map::commands::get_map_list,
-            map::commands::load_map_terrain,
-            map::commands::get_map_metadata,
-            map::commands::export_map_to_gltf,
-            map::commands::export_shared_assets,
+            map::commands::get_scene_effect_list,
+            map::commands::get_terrain_texture_catalog,
+            map::commands::get_terrain_texture_preview,
+            map::commands::get_map_placement_summary,
+            map::commands::query_map_placements,
+            map::commands::get_map_workbench_manifest,
+            map::commands::get_map_overview,
+            map::commands::get_map_chunk,
+            map::commands::inspect_map_tile,
+            map::commands::get_map_tile_texture_preview,
+            map::commands::query_map_placements_in_bounds,
+            map::commands::query_map_rbo_records_in_bounds,
+            map::commands::export_map_edits,
+            map::commands::apply_map_edit_client_package,
+            map::commands::restore_map_edit_client_backup,
+            map::commands::export_map_tile_edits,
+            map::commands::export_map_placement_edits,
             map::commands::get_building_list,
             map::commands::load_building_model,
+            map::commands::get_building_scene_info,
             map::commands::export_building_to_gltf,
             map::commands::get_building_metadata,
         ])

@@ -1,4 +1,4 @@
-# Effect V2 — Rendering Notes & Unity Migration Guide
+# Effect Workbench — Rendering Notes & Unity Migration Guide
 
 ## UV Coordinate Conventions
 
@@ -16,7 +16,7 @@
 - PKO textures are `.tga` files in `texture/effect/`
 - The Rust backend `decode_texture` command handles standard TGA, BMP, PNG, DDS, plus two non-standard PKO TGA variants (ARGB with footer, BGRA with header)
 - Decoded output is always RGBA 8-bit per channel
-- **D3DFMT_A4R4G4B4**: PKO's 16-bit format (4 bits/channel). The decode pipeline already expands this to 8-bit RGBA — no special handling needed in the renderer
+- Effect resource calls pass `D3DFMT_A4R4G4B4`, but `lwTex::LoadVideoMemory` overrides the upload format to `D3DFMT_A8R8G8B8`; preserve decoded 8-bit alpha in the renderer.
 - **For Unity**: Use the same decode pipeline or let Unity's TGA/DDS importers handle it. Alpha channel preservation is critical for effects.
 
 ## Blend Modes
@@ -42,22 +42,32 @@ PKO uses D3D blend factors directly. The mapping:
 
 ## Coordinate System
 
-- **PKO engine**: Z-up, right-handed
-- **Three.js / glTF**: Y-up, right-handed
-- **Unity**: Y-up, left-handed (glTFast negates X)
+- **PKO effect runtime**: Z-up. `D3DXVECTOR3` effect, magic, particle, dummy, and link-beam positions are evaluated as raw X/Y/Z values; Z is vertical.
+- **Effect v2 scene**: also Z-up for effect runtime data. Do not Y/Z swap raw `.eff`, `.par`, dummy, magic target, or link-beam vectors.
+- **Imported glTF/model assets**: may have their own mesh-space conversion before they enter the effect scene. Keep mesh conversion separate from runtime effect vectors.
 
 ### Rules
-- Swap Y↔Z on all **vector data** (positions, directions, angles, acceleration): `(x, y, z) → (x, z, y)`
-- Do NOT rotate the geometry/mesh itself — that conflicts with billboarding
-- Billboard quad geometry stays in its native XY plane; the billboard quaternion copy handles camera-facing
-- **For Unity**: glTFast handles the coordinate conversion for meshes. For raw effect data (positions, directions), apply the same Y↔Z swap, then negate X for Unity's left-handed system: `(x, y, z) → (-x, z, y)`
+- Keep raw effect vector data as `(x, y, z)`.
+- Do NOT rotate ground-plane range rings or shade decals into X/Z. In z-up runtime space, their default XY plane is already the ground plane.
+- Billboard quad geometry stays in its native XY plane; the billboard quaternion copy handles camera-facing.
+- For target-facing magic/effects, match `CMagicCtrl::RotatingXZ`: the C++ D3D row-vector matrix is `RotationX(pitch) * RotationZ(yaw)`, which must be applied in Three as `RotationZ(yaw) * RotationX(pitch)` so local `+Y` points at the target.
+- `CMagicCtrl` does not continuously re-aim every flight mode. It applies `RotatingXZ` during `Emission`; only `Part_trace` calls `ResetDir` when a moving target changes enough. Do not replace this with per-frame `lookAt`/target-facing for arc, fly, fshade, dist, or drop paths.
+- Character glTF loaded through `load_character` is already converted to glTF Y-up by the backend. When it is rendered inside the v2 z-up effect scene, rotate it by `+90deg` around X so the model's local up axis maps to PKO/effect `+Z`.
+- **For Unity**: treat runtime vectors as PKO z-up inputs and perform any engine-specific conversion at the Unity scene boundary, separate from glTF mesh import conversion.
 
 ## Billboard Behaviour
 
 - Billboard copies the camera quaternion onto the group wrapping the mesh
 - Flight path position changes must happen on a **parent** group, not the same group as the billboard — otherwise `lookAt` from flight paths overwrites the billboard rotation
 - The hierarchy is: `FlightPathGroup (position) → BillboardGroup (quaternion) → Mesh`
+- A zero-axis `rotaLoop` still rebuilds the base transform every frame. It must not retain a stale Three.js quaternion from a previous render.
 - **For Unity**: Use `transform.LookAt(Camera.main.transform)` or a billboard shader. Same parent/child separation applies.
+
+## Particle Texture State
+
+- `CMPPartSys` defaults to `eff.fx` technique 3, so particle model and shade textures clamp U/V in the DX8 shader.
+- `CMPStrip` and `CMPLink` render with technique 0; in the DX8 shader this also clamps U/V.
+- Keep texture-address state separate from blend factors. Reverting particle textures to Three.js repeat wrapping can reintroduce dark boxed edges around soft alpha sprites.
 
 ## Flight Paths (MagicList)
 
@@ -72,7 +82,7 @@ Render index maps to flight algorithm. Array matches `EffectObj.cpp`:
 | 4 | arc | Arc trajectory |
 | 5 | dirlight | Directional light movement |
 | 6 | dist | Fixed distance from origin |
-| 7 | dist2 | Variant distance calculation |
+| 7 | dist2 | `Part_dist2` exists in source but is not present in this client's `MagicList[]`; v2 does not dispatch it |
 
 ### Trace implementation details
 - `velocity` is `nVel` from MagicSingleinfo, cast to float — units per second where 1 unit = 1 tile
@@ -80,16 +90,18 @@ Render index maps to flight algorithm. Array matches `EffectObj.cpp`:
 - Delta time is in **seconds** (matching PKO's `GetTickCount() / 1000`)
 - Target-motion compensation: when the target moves between frames, the projectile is nudged proportionally — `correction = (targetMovedSq / totalDistSq) * stepDist` applied along the target's movement direction. This creates smooth curving toward moving targets without sharp turns.
 - Done condition: distance to aim point < 1.5 units (must check against the same point used for direction, not the target's feet)
-- Aim point is offset +1Y above target position (chest height, not feet)
+- Aim point is offset +1Z above target position (chest height, not feet)
+- `MagicSingleinfo.bin` in `E:/gamedev/mp-client-source/Client/client/scripts/table` contains render indices 0-6 for this client.
 
 ### Quirks
 - If done-check uses a different point than the movement direction (e.g., checking distance to feet but aiming at chest), the projectile can orbit/get stuck inside the target
+- Do not route render index 7 unless targeting a different client source whose `MagicList[]` actually includes `Part_dist2`.
 - The 1.5 clamp means at very low framerates, the projectile still can't teleport — it moves max 1.5 units per frame regardless
 - **For Unity**: Use `Time.deltaTime` (already in seconds). Same 1.5 clamp. Same target-compensation formula.
 
 ## Playback System
 
-- Shared atom `effectV2PlaybackAtom`: `{ playing, loop, time, fps }`
+- Shared playback atom `effectV2PlaybackAtom`: `{ playing, loop, time, fps }`
 - `PlaybackClock` component inside Canvas advances time each frame
 - FPS selector: 0 = uncapped (real delta), or fixed 15/30/60 fps stepping
 - Fixed FPS uses accumulator pattern — only steps in `1/fps` increments

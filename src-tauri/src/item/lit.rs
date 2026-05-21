@@ -2,6 +2,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::client_paths;
+use crate::text_encoding;
+
 /// C++ constants from lwHeader.h
 const LW_MAX_NAME: usize = 64;
 const LW_MAX_FILE: usize = 128;
@@ -39,9 +42,7 @@ fn read_fixed_string(data: &[u8], offset: usize, size: usize) -> anyhow::Result<
         ));
     }
     let buf = &data[offset..offset + size];
-    // Find first null byte and trim
-    let end = buf.iter().position(|&b| b == 0).unwrap_or(size);
-    Ok(String::from_utf8_lossy(&buf[..end]).to_string())
+    Ok(text_encoding::decode_gbk_cstr(buf))
 }
 
 /// Parse the binary item.lit file.
@@ -165,7 +166,7 @@ pub fn parse_item_lit(data: &[u8]) -> anyhow::Result<Vec<ItemLitInfo>> {
 
 /// Load and parse item.lit from a project directory
 pub fn load_item_lit(project_dir: &Path) -> anyhow::Result<Vec<ItemLitInfo>> {
-    let lit_path = project_dir.join("scripts/txt/item.lit");
+    let lit_path = client_paths::script_txt_file(project_dir, "item.lit");
     if !lit_path.exists() {
         return Ok(vec![]);
     }

@@ -2,15 +2,25 @@ use std::path::Path;
 use std::str::FromStr;
 
 use base64::Engine;
+use gltf::json::{
+    accessor::{ComponentType, GenericComponentType},
+    animation::{Channel, Sampler, Target},
+    validation::{Checked, USize64},
+};
 use serde::Serialize;
 
 use crate::character::{model::CharacterGeometricModel, GLTFFieldsToAggregate};
+use crate::client_paths;
+use crate::item::model::decode_pko_texture;
+use crate::map::lmo_types::LmoBoneAnimData;
+use crate::map::scene_model::decode_dds_with_alpha;
 use crate::projects::project::Project;
 
 use super::{model::EffFile, model::ParFile, scan_effects_directory, scan_par_files};
 // Effect data is in D3D Y-up LH space. Transforms match Three.js "YXZ" Euler
 // directly (confirmed via matrix comparison with game client debug dumps).
 // No coordinate conversion needed for standalone viewing.
+const EFFECT_MODEL_ANIMATION_FPS: f32 = 30.0;
 
 #[tauri::command]
 pub async fn list_effects(project_id: String) -> Result<Vec<String>, String> {
@@ -67,22 +77,14 @@ pub async fn save_effect(
 }
 
 #[tauri::command]
-pub async fn load_par_file(
-    project_id: String,
-    par_name: String,
-) -> Result<ParFile, String> {
+pub async fn load_par_file(project_id: String, par_name: String) -> Result<ParFile, String> {
     let project_id =
         uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
     let par_path = par_file_path(project.project_directory.as_ref(), &par_name);
 
-    let bytes = std::fs::read(&par_path).map_err(|e| {
-        format!(
-            "Failed to read par file {}: {}",
-            par_path.display(),
-            e
-        )
-    })?;
+    let bytes = std::fs::read(&par_path)
+        .map_err(|e| format!("Failed to read par file {}: {}", par_path.display(), e))?;
     ParFile::from_bytes(&bytes).map_err(|e| e.to_string())
 }
 
@@ -114,9 +116,17 @@ pub struct DecodedTexture {
 /// plus the non-standard PKO TGA format (48-byte header + raw BGRA pixels).
 #[tauri::command]
 pub async fn decode_texture(path: String) -> Result<DecodedTexture, String> {
-    let resolved = resolve_case_insensitive(&path).unwrap_or_else(|| path.clone().into());
-    let bytes =
+    let requested = std::path::Path::new(&path);
+    let resolved = resolve_case_insensitive(requested)
+        .or_else(|| resolve_data_texture_fallback(requested))
+        .unwrap_or_else(|| requested.to_path_buf());
+    let raw_bytes =
         std::fs::read(&resolved).map_err(|e| format!("Failed to read texture {}: {}", path, e))?;
+    let bytes = decode_pko_texture(&raw_bytes);
+
+    if let Some(img) = decode_dds_with_alpha(&bytes) {
+        return Ok(decoded_texture_from_image(img));
+    }
 
     // Try standard image decoding first (handles valid TGA, BMP, PNG, etc.)
     let ext = path.rsplit('.').next().unwrap_or("").to_lowercase();
@@ -130,26 +140,12 @@ pub async fn decode_texture(path: String) -> Result<DecodedTexture, String> {
 
     if let Some(fmt) = format {
         if let Ok(img) = image::load_from_memory_with_format(&bytes, fmt) {
-            let rgba = img.to_rgba8();
-            let (w, h) = rgba.dimensions();
-            let data = base64::engine::general_purpose::STANDARD.encode(rgba.as_raw());
-            return Ok(DecodedTexture {
-                width: w,
-                height: h,
-                data,
-            });
+            return Ok(decoded_texture_from_image(img));
         }
     }
     // Also try auto-detection
     if let Ok(img) = image::load_from_memory(&bytes) {
-        let rgba = img.to_rgba8();
-        let (w, h) = rgba.dimensions();
-        let data = base64::engine::general_purpose::STANDARD.encode(rgba.as_raw());
-        return Ok(DecodedTexture {
-            width: w,
-            height: h,
-            data,
-        });
+        return Ok(decoded_texture_from_image(img));
     }
 
     // Fallback: paletted (color-mapped) TGA.
@@ -187,6 +183,17 @@ pub async fn decode_texture(path: String) -> Result<DecodedTexture, String> {
     }
 
     Err(format!("Unable to decode texture: {}", path))
+}
+
+fn decoded_texture_from_image(img: image::DynamicImage) -> DecodedTexture {
+    let rgba = img.to_rgba8();
+    let (w, h) = rgba.dimensions();
+    let data = base64::engine::general_purpose::STANDARD.encode(rgba.as_raw());
+    DecodedTexture {
+        width: w,
+        height: h,
+        data,
+    }
 }
 
 /// Try decoding raw PKO pixel data at both 4bpp (BGRA) and 3bpp (BGR).
@@ -411,7 +418,8 @@ fn try_decode_paletted_tga(bytes: &[u8]) -> Option<DecodedTexture> {
         for y in 0..height {
             let src_row = y * row_bytes;
             let dst_row = (height - 1 - y) * row_bytes;
-            flipped[dst_row..dst_row + row_bytes].copy_from_slice(&rgba[src_row..src_row + row_bytes]);
+            flipped[dst_row..dst_row + row_bytes]
+                .copy_from_slice(&rgba[src_row..src_row + row_bytes]);
         }
         rgba = flipped;
     }
@@ -469,14 +477,13 @@ fn guess_texture_dimensions(pixel_count: usize) -> Option<(usize, usize)> {
 /// PKO is a Windows game where paths are case-insensitive, but macOS/Linux may
 /// have case-sensitive filesystems. If the exact path doesn't exist, scan the
 /// parent directory for a case-insensitive match.
-fn resolve_case_insensitive(path: &str) -> Option<std::path::PathBuf> {
-    let p = std::path::Path::new(path);
-    if p.exists() {
-        return Some(p.to_path_buf());
+fn resolve_case_insensitive(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    if path.exists() {
+        return Some(path.to_path_buf());
     }
 
-    let parent = p.parent()?;
-    let file_name = p.file_name()?.to_str()?.to_lowercase();
+    let parent = path.parent()?;
+    let file_name = path.file_name()?.to_str()?.to_lowercase();
     let entries = std::fs::read_dir(parent).ok()?;
 
     for entry in entries.flatten() {
@@ -488,6 +495,36 @@ fn resolve_case_insensitive(path: &str) -> Option<std::path::PathBuf> {
     }
 
     None
+}
+
+fn resolve_data_texture_fallback(path: &std::path::Path) -> Option<std::path::PathBuf> {
+    let components: Vec<_> = path.components().collect();
+    let texture_index = components.iter().position(|component| {
+        component
+            .as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case("texture")
+    })?;
+
+    if texture_index > 0
+        && components[texture_index - 1]
+            .as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case("data")
+    {
+        return None;
+    }
+
+    let mut candidate = std::path::PathBuf::new();
+    for component in &components[..texture_index] {
+        candidate.push(component.as_os_str());
+    }
+    candidate.push("Data");
+    for component in &components[texture_index..] {
+        candidate.push(component.as_os_str());
+    }
+
+    resolve_case_insensitive(&candidate)
 }
 
 // TODO: Inverse remap (Y-up -> PKO Z-up) needed here once editing is supported.
@@ -545,18 +582,14 @@ pub async fn list_texture_files(project_id: String) -> Result<Vec<String>, Strin
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
     let project_dir = project.project_directory.as_ref();
 
-    let texture_dirs = [
-        "texture/effect",
-        "texture/skill",
-        "texture/lit",
-        "texture/sceneffect",
-    ];
+    let texture_dirs = ["effect", "skill", "lit", "sceneffect"];
 
     let extensions = ["tga", "dds", "bmp", "png"];
     let mut files = Vec::new();
+    let texture_root = client_paths::asset_dir(project_dir, "texture");
 
     for dir in &texture_dirs {
-        let full_path = project_dir.join(dir);
+        let full_path = texture_root.join(dir);
         if !full_path.exists() {
             continue;
         }
@@ -566,10 +599,12 @@ pub async fn list_texture_files(project_id: String) -> Result<Vec<String>, Strin
                 if path.is_file() {
                     if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
                         if extensions.contains(&ext.to_lowercase().as_str()) {
-                            if let Some(name) =
-                                path.strip_prefix(project_dir).ok().and_then(|p| p.to_str())
+                            if let Some(name) = path
+                                .strip_prefix(&texture_root)
+                                .ok()
+                                .and_then(|p| p.to_str())
                             {
-                                files.push(name.to_string());
+                                files.push(format!("texture/{}", name.replace('\\', "/")));
                             }
                         }
                     }
@@ -597,8 +632,8 @@ pub async fn load_path_file(
         format!("{}.csf", path_name)
     };
 
-    let path = project.project_directory.join("effect").join(&file_name);
-    let resolved = resolve_case_insensitive(path.to_str().unwrap_or("")).unwrap_or(path);
+    let path = client_paths::asset_file(&project.project_directory, "effect", &file_name);
+    let resolved = resolve_case_insensitive(&path).unwrap_or(path);
 
     let bytes = std::fs::read(&resolved)
         .map_err(|e| format!("Failed to read path file {}: {}", resolved.display(), e))?;
@@ -606,24 +641,24 @@ pub async fn load_path_file(
     parse_csf_points(&bytes).map_err(|e| format!("Failed to parse CSF file: {}", e))
 }
 
-/// Parse a .csf path file: "csf" header (3 bytes) + version (i32) + count (i32) + Vec3[count]
+/// Parse a .csf path file: "csf\0" header (4 bytes) + version (i32) + count (i32) + Vec3[count].
+/// C++ remaps each D3DXVECTOR3 from client coordinates as x, -z, y after reading.
 fn parse_csf_points(bytes: &[u8]) -> Result<Vec<[f32; 3]>, String> {
-    if bytes.len() < 11 {
+    if bytes.len() < 12 {
         return Err("File too small for CSF header".to_string());
     }
 
-    // Check "csf" header
-    if &bytes[0..3] != b"csf" {
+    if &bytes[0..4] != b"csf\0" {
         return Err("Invalid CSF header".to_string());
     }
 
     let _version = i32::from_le_bytes(
-        bytes[3..7]
+        bytes[4..8]
             .try_into()
             .map_err(|_| "Failed to read version")?,
     );
     let count = i32::from_le_bytes(
-        bytes[7..11]
+        bytes[8..12]
             .try_into()
             .map_err(|_| "Failed to read count")?,
     );
@@ -633,7 +668,7 @@ fn parse_csf_points(bytes: &[u8]) -> Result<Vec<[f32; 3]>, String> {
     }
     let count = count as usize;
 
-    let expected_size = 11 + count * 12; // 3 floats × 4 bytes each
+    let expected_size = 12 + count * 12; // 3 floats x 4 bytes each
     if bytes.len() < expected_size {
         return Err(format!(
             "File too small: expected {} bytes for {} points, got {}",
@@ -644,7 +679,7 @@ fn parse_csf_points(bytes: &[u8]) -> Result<Vec<[f32; 3]>, String> {
     }
 
     let mut points = Vec::with_capacity(count);
-    let mut offset = 11;
+    let mut offset = 12;
     for _ in 0..count {
         let x = f32::from_le_bytes(
             bytes[offset..offset + 4]
@@ -661,7 +696,7 @@ fn parse_csf_points(bytes: &[u8]) -> Result<Vec<[f32; 3]>, String> {
                 .try_into()
                 .map_err(|_| "Failed to read float")?,
         );
-        points.push([x, y, z]);
+        points.push([x, -z, y]);
         offset += 12;
     }
 
@@ -670,9 +705,7 @@ fn parse_csf_points(bytes: &[u8]) -> Result<Vec<[f32; 3]>, String> {
 
 fn particles_file_path(project_dir: &std::path::Path, effect_name: &str) -> std::path::PathBuf {
     let base = effect_name.strip_suffix(".eff").unwrap_or(effect_name);
-    project_dir
-        .join("effect")
-        .join(format!("{}.particles.json", base))
+    client_paths::asset_file(project_dir, "effect", format!("{}.particles.json", base))
 }
 
 fn par_file_path(project_dir: &std::path::Path, par_name: &str) -> std::path::PathBuf {
@@ -682,7 +715,7 @@ fn par_file_path(project_dir: &std::path::Path, par_name: &str) -> std::path::Pa
         format!("{}.par", par_name)
     };
 
-    project_dir.join("effect").join(file_name)
+    client_paths::asset_file(project_dir, "effect", file_name)
 }
 
 fn effect_file_path(project_dir: &std::path::Path, effect_name: &str) -> std::path::PathBuf {
@@ -692,14 +725,17 @@ fn effect_file_path(project_dir: &std::path::Path, effect_name: &str) -> std::pa
         format!("{}.eff", effect_name)
     };
 
-    project_dir.join("effect").join(file_name)
+    client_paths::asset_file(project_dir, "effect", file_name)
 }
 
 /// Resolve an effect model .lgo path with case-insensitive filename matching.
-fn resolve_effect_model_path(project_dir: &Path, model_name: &str) -> Option<std::path::PathBuf> {
+pub fn resolve_effect_model_path(
+    project_dir: &Path,
+    model_name: &str,
+) -> Option<std::path::PathBuf> {
     let name = model_name.strip_suffix(".lgo").unwrap_or(model_name);
     let target = format!("{}.lgo", name).to_lowercase();
-    let dir = project_dir.join("model/effect");
+    let dir = client_paths::asset_file(project_dir, "model", "effect");
 
     if !dir.exists() {
         return None;
@@ -719,7 +755,7 @@ fn resolve_effect_model_path(project_dir: &Path, model_name: &str) -> Option<std
 /// Load an effect .lgo model and return a minimal glTF JSON string containing
 /// only geometry (POSITION, NORMAL, TEXCOORD_0, indices). No materials, skins,
 /// or animations — the effect system provides its own textures and blending.
-fn build_effect_model_gltf(project_dir: &Path, model_name: &str) -> Result<String, String> {
+pub fn build_effect_model_gltf(project_dir: &Path, model_name: &str) -> Result<String, String> {
     let lgo_path = resolve_effect_model_path(project_dir, model_name)
         .ok_or_else(|| format!("Effect model not found: {}", model_name))?;
 
@@ -754,15 +790,34 @@ fn build_effect_model_gltf(project_dir: &Path, model_name: &str) -> Result<Strin
         weights: None,
     };
 
-    let node = gltf::json::Node {
+    let mut nodes = Vec::new();
+    let skin = geom.bone_animation.as_ref().and_then(|bone_anim| {
+        append_effect_model_bone_animation(&mut fields, &mut nodes, bone_anim)
+    });
+
+    let root_joint_nodes = if let Some(bone_anim) = geom.bone_animation.as_ref() {
+        collect_root_joint_nodes(bone_anim, 0)
+    } else {
+        Vec::new()
+    };
+
+    let mesh_node = gltf::json::Node {
         mesh: Some(gltf::json::Index::new(0)),
         name: Some(model_name.to_string()),
+        skin,
+        children: if root_joint_nodes.is_empty() {
+            None
+        } else {
+            Some(root_joint_nodes)
+        },
         ..Default::default()
     };
+    let helper_nodes = geom.get_gltf_helper_nodes_for_mesh(0, None);
+    let scene_node_indices = append_effect_model_scene_nodes(&mut nodes, mesh_node, helper_nodes);
 
     let scene = gltf::json::Scene {
         name: Some("Scene".to_string()),
-        nodes: vec![gltf::json::Index::new(0)],
+        nodes: scene_node_indices,
         extensions: None,
         extras: None,
     };
@@ -777,13 +832,281 @@ fn build_effect_model_gltf(project_dir: &Path, model_name: &str) -> Result<Strin
         buffer_views: fields.buffer_view,
         accessors: fields.accessor,
         meshes: vec![mesh],
-        nodes: vec![node],
+        nodes,
         scenes: vec![scene],
         scene: Some(gltf::json::Index::new(0)),
+        animations: fields.animation,
+        skins: fields.skin,
         ..Default::default()
     };
 
     serde_json::to_string(&root).map_err(|e| format!("Failed to serialize glTF: {}", e))
+}
+
+fn append_effect_model_scene_nodes(
+    nodes: &mut Vec<gltf::json::Node>,
+    mesh_node: gltf::json::Node,
+    helper_nodes: Vec<gltf::json::Node>,
+) -> Vec<gltf::json::Index<gltf::json::Node>> {
+    let first_scene_node = nodes.len() as u32;
+    nodes.push(mesh_node);
+    nodes.extend(helper_nodes);
+    (first_scene_node..nodes.len() as u32)
+        .map(gltf::json::Index::new)
+        .collect()
+}
+
+fn collect_root_joint_nodes(
+    bone_anim: &LmoBoneAnimData,
+    first_joint_node_idx: u32,
+) -> Vec<gltf::json::Index<gltf::json::Node>> {
+    bone_anim
+        .bones
+        .iter()
+        .enumerate()
+        .filter(|(_, bone)| bone.parent_id == u32::MAX)
+        .map(|(idx, _)| gltf::json::Index::new(first_joint_node_idx + idx as u32))
+        .collect()
+}
+
+fn append_effect_model_bone_animation(
+    fields: &mut GLTFFieldsToAggregate,
+    nodes: &mut Vec<gltf::json::Node>,
+    bone_anim: &LmoBoneAnimData,
+) -> Option<gltf::json::Index<gltf::json::Skin>> {
+    if bone_anim.bones.is_empty() || bone_anim.inv_bind_matrices.is_empty() {
+        return None;
+    }
+
+    let bone_count = bone_anim.bones.len();
+    let first_joint_node_idx = nodes.len() as u32;
+    let mut joint_node_indices = Vec::with_capacity(bone_count);
+
+    for (idx, bone) in bone_anim.bones.iter().enumerate() {
+        let (translation, rotation) = bone_anim
+            .keyframes
+            .get(idx)
+            .and_then(|kf| kf.translations.first().zip(kf.rotations.first()))
+            .map(|(t, r)| (*t, *r))
+            .unwrap_or(([0.0, 0.0, 0.0], [0.0, 0.0, 0.0, 1.0]));
+
+        let node_idx = nodes.len() as u32;
+        joint_node_indices.push(node_idx);
+        nodes.push(gltf::json::Node {
+            name: Some(format!("effect_model_bone_{}", bone.name)),
+            translation: Some(translation.into()),
+            rotation: Some(gltf::json::scene::UnitQuaternion(rotation)),
+            ..Default::default()
+        });
+    }
+
+    let mut children_by_bone = vec![Vec::<gltf::json::Index<gltf::json::Node>>::new(); bone_count];
+    for (idx, bone) in bone_anim.bones.iter().enumerate() {
+        if bone.parent_id != u32::MAX {
+            let parent = bone.parent_id as usize;
+            if parent < bone_count {
+                children_by_bone[parent]
+                    .push(gltf::json::Index::new(first_joint_node_idx + idx as u32));
+            }
+        }
+    }
+    for (idx, children) in children_by_bone.into_iter().enumerate() {
+        if !children.is_empty() {
+            nodes[(first_joint_node_idx + idx as u32) as usize].children = Some(children);
+        }
+    }
+
+    let mut ibm_data = Vec::with_capacity(bone_count * 16);
+    for matrix in bone_anim.inv_bind_matrices.iter().take(bone_count) {
+        for col in 0..4 {
+            for row in 0..4 {
+                ibm_data.push(matrix[col][row]);
+            }
+        }
+    }
+    let inverse_bind_matrices = add_effect_model_f32_accessor(
+        fields,
+        &ibm_data,
+        "effect_model_inverse_bind_matrices",
+        gltf::json::accessor::Type::Mat4,
+        16,
+    );
+
+    let skin_index = fields.skin.len() as u32;
+    fields.skin.push(gltf::json::Skin {
+        inverse_bind_matrices: Some(gltf::json::Index::new(inverse_bind_matrices)),
+        joints: joint_node_indices
+            .iter()
+            .map(|idx| gltf::json::Index::new(*idx))
+            .collect(),
+        skeleton: Some(gltf::json::Index::new(first_joint_node_idx)),
+        name: Some("effect_model_skin".to_string()),
+        extensions: None,
+        extras: None,
+    });
+
+    append_effect_model_animation(fields, bone_anim, &joint_node_indices);
+
+    Some(gltf::json::Index::new(skin_index))
+}
+
+fn append_effect_model_animation(
+    fields: &mut GLTFFieldsToAggregate,
+    bone_anim: &LmoBoneAnimData,
+    joint_node_indices: &[u32],
+) {
+    let frame_count = bone_anim.frame_num as usize;
+    if frame_count <= 1 {
+        return;
+    }
+
+    let times: Vec<f32> = (0..frame_count)
+        .map(|frame| frame as f32 / EFFECT_MODEL_ANIMATION_FPS)
+        .collect();
+    let time_accessor = add_effect_model_f32_accessor(
+        fields,
+        &times,
+        "effect_model_bone_time",
+        gltf::json::accessor::Type::Scalar,
+        1,
+    );
+
+    let mut samplers = Vec::new();
+    let mut channels = Vec::new();
+
+    for (bone_idx, keyframes) in bone_anim.keyframes.iter().enumerate() {
+        if bone_idx >= joint_node_indices.len() {
+            break;
+        }
+
+        if keyframes.translations.len() == frame_count {
+            let translations: Vec<f32> = keyframes
+                .translations
+                .iter()
+                .flat_map(|t| t.iter().copied())
+                .collect();
+            let output = add_effect_model_f32_accessor(
+                fields,
+                &translations,
+                &format!("effect_model_bone_{}_translation", bone_idx),
+                gltf::json::accessor::Type::Vec3,
+                3,
+            );
+            let sampler = samplers.len() as u32;
+            samplers.push(Sampler {
+                input: gltf::json::Index::new(time_accessor),
+                output: gltf::json::Index::new(output),
+                interpolation: Checked::Valid(gltf::json::animation::Interpolation::Linear),
+                extensions: None,
+                extras: None,
+            });
+            channels.push(Channel {
+                sampler: gltf::json::Index::new(sampler),
+                target: Target {
+                    node: gltf::json::Index::new(joint_node_indices[bone_idx]),
+                    path: Checked::Valid(gltf::json::animation::Property::Translation),
+                    extensions: None,
+                    extras: None,
+                },
+                extensions: None,
+                extras: None,
+            });
+        }
+
+        if keyframes.rotations.len() == frame_count {
+            let rotations: Vec<f32> = keyframes
+                .rotations
+                .iter()
+                .flat_map(|r| r.iter().copied())
+                .collect();
+            let output = add_effect_model_f32_accessor(
+                fields,
+                &rotations,
+                &format!("effect_model_bone_{}_rotation", bone_idx),
+                gltf::json::accessor::Type::Vec4,
+                4,
+            );
+            let sampler = samplers.len() as u32;
+            samplers.push(Sampler {
+                input: gltf::json::Index::new(time_accessor),
+                output: gltf::json::Index::new(output),
+                interpolation: Checked::Valid(gltf::json::animation::Interpolation::Linear),
+                extensions: None,
+                extras: None,
+            });
+            channels.push(Channel {
+                sampler: gltf::json::Index::new(sampler),
+                target: Target {
+                    node: gltf::json::Index::new(joint_node_indices[bone_idx]),
+                    path: Checked::Valid(gltf::json::animation::Property::Rotation),
+                    extensions: None,
+                    extras: None,
+                },
+                extensions: None,
+                extras: None,
+            });
+        }
+    }
+
+    if !channels.is_empty() {
+        fields.animation.push(gltf::json::Animation {
+            name: Some("EffectModelBoneAnimation".to_string()),
+            samplers,
+            channels,
+            extensions: None,
+            extras: None,
+        });
+    }
+}
+
+fn add_effect_model_f32_accessor(
+    fields: &mut GLTFFieldsToAggregate,
+    data: &[f32],
+    name: &str,
+    accessor_type: gltf::json::accessor::Type,
+    components_per_element: usize,
+) -> u32 {
+    let bytes: Vec<u8> = data.iter().flat_map(|value| value.to_le_bytes()).collect();
+    let buffer_index = fields.buffer.len() as u32;
+    let buffer_view_index = fields.buffer_view.len() as u32;
+    let accessor_index = fields.accessor.len() as u32;
+
+    fields.buffer.push(gltf::json::Buffer {
+        byte_length: USize64(bytes.len() as u64),
+        extensions: None,
+        extras: None,
+        name: Some(format!("{}_buffer", name)),
+        uri: Some(format!(
+            "data:application/octet-stream;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(&bytes)
+        )),
+    });
+    fields.buffer_view.push(gltf::json::buffer::View {
+        buffer: gltf::json::Index::new(buffer_index),
+        byte_length: USize64(bytes.len() as u64),
+        byte_offset: Some(USize64(0)),
+        byte_stride: None,
+        target: Some(Checked::Valid(gltf::json::buffer::Target::ArrayBuffer)),
+        extensions: None,
+        extras: None,
+        name: Some(format!("{}_view", name)),
+    });
+    fields.accessor.push(gltf::json::Accessor {
+        buffer_view: Some(gltf::json::Index::new(buffer_view_index)),
+        byte_offset: Some(USize64(0)),
+        component_type: Checked::Valid(GenericComponentType(ComponentType::F32)),
+        count: USize64((data.len() / components_per_element) as u64),
+        extensions: None,
+        extras: None,
+        max: None,
+        min: None,
+        name: Some(format!("{}_accessor", name)),
+        normalized: false,
+        sparse: None,
+        type_: Checked::Valid(accessor_type),
+    });
+
+    accessor_index
 }
 
 #[tauri::command]
@@ -798,6 +1121,8 @@ pub async fn load_effect_model(project_id: String, model_name: String) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::item::model::encode_pko_texture;
+    use base64::Engine;
 
     /// Verify build_effect_model_gltf produces valid glTF with 1 mesh, 1 scene,
     /// 0 skins, 0 animations, and 0 materials.
@@ -823,10 +1148,70 @@ mod tests {
     }
 
     #[test]
-    fn test_decode_paletted_tga() {
-        let path = std::path::Path::new(
-            "../top-client/texture/effect/jb05.TGA",
+    fn effect_model_gltf_preserves_gunwing_bone_animation() {
+        let project_dir = Path::new("E:/gamedev/mp-client-source/Client/client");
+        if !project_dir.join("model/effect/gunwing.lgo").exists() {
+            eprintln!(
+                "Skipping effect_model_gltf_preserves_gunwing_bone_animation: source client not found"
+            );
+            return;
+        }
+
+        let json_str = build_effect_model_gltf(project_dir, "gunwing.lgo")
+            .expect("gunwing effect model should build");
+        let root: gltf::json::Root = serde_json::from_str(&json_str).unwrap();
+
+        assert_eq!(root.skins.len(), 1, "gunwing.lgo should keep its skin");
+        assert!(
+            !root.animations.is_empty(),
+            "gunwing.lgo should keep its embedded bone animation"
         );
+
+        let attrs = &root.meshes[0].primitives[0].attributes;
+        assert!(
+            attrs.contains_key(&gltf::json::validation::Checked::Valid(
+                gltf::json::mesh::Semantic::Joints(0),
+            )),
+            "skinned effect model primitive should include JOINTS_0"
+        );
+        assert!(
+            attrs.contains_key(&gltf::json::validation::Checked::Valid(
+                gltf::json::mesh::Semantic::Weights(0),
+            )),
+            "skinned effect model primitive should include WEIGHTS_0"
+        );
+    }
+
+    #[test]
+    fn effect_model_scene_keeps_helper_nodes_addressable() {
+        let mesh_node = gltf::json::Node {
+            mesh: Some(gltf::json::Index::new(0)),
+            name: Some("weapon".to_string()),
+            ..Default::default()
+        };
+        let helper_node = gltf::json::Node {
+            name: Some("Dummy1".to_string()),
+            ..Default::default()
+        };
+
+        let mut nodes = Vec::new();
+        let scene_nodes = append_effect_model_scene_nodes(&mut nodes, mesh_node, vec![helper_node]);
+
+        assert_eq!(nodes.len(), 2);
+        assert_eq!(nodes[0].name.as_deref(), Some("weapon"));
+        assert_eq!(nodes[1].name.as_deref(), Some("Dummy1"));
+        assert_eq!(
+            scene_nodes
+                .iter()
+                .map(|idx| idx.value())
+                .collect::<Vec<_>>(),
+            vec![0, 1]
+        );
+    }
+
+    #[test]
+    fn test_decode_paletted_tga() {
+        let path = std::path::Path::new("../top-client/texture/effect/jb05.TGA");
         if !path.exists() {
             eprintln!("Skipping: jb05.TGA not found at {}", path.display());
             return;
@@ -846,6 +1231,141 @@ mod tests {
             .unwrap();
         assert_eq!(raw.len(), 128 * 128 * 4);
 
-        eprintln!("Decoded paletted TGA: {}x{}, {} bytes RGBA", decoded.width, decoded.height, raw.len());
+        eprintln!(
+            "Decoded paletted TGA: {}x{}, {} bytes RGBA",
+            decoded.width,
+            decoded.height,
+            raw.len()
+        );
+    }
+
+    #[test]
+    fn decode_texture_unwraps_pko_encoded_standard_images() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let path = temp.path().join("encoded.png");
+        let img = image::RgbaImage::from_pixel(16, 16, image::Rgba([12, 34, 56, 78]));
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .expect("encode png");
+        assert!(png.len() >= 88, "fixture must exercise PKO byte swapping");
+        std::fs::write(&path, encode_pko_texture(&png)).expect("write encoded texture");
+
+        let decoded =
+            tauri::async_runtime::block_on(decode_texture(path.to_string_lossy().to_string()))
+                .expect("decode pko encoded texture");
+        let raw = base64::engine::general_purpose::STANDARD
+            .decode(decoded.data)
+            .expect("base64 rgba");
+
+        assert_eq!(decoded.width, 16);
+        assert_eq!(decoded.height, 16);
+        assert!(raw.chunks_exact(4).all(|px| px == [12, 34, 56, 78]));
+    }
+
+    #[test]
+    fn decode_texture_resolves_demon_data_texture_from_legacy_candidate_path() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let actual_dir = temp.path().join("Data").join("texture").join("effect");
+        std::fs::create_dir_all(&actual_dir).expect("create texture dir");
+        let actual_path = actual_dir.join("spark.png");
+        let requested_path = temp.path().join("texture").join("effect").join("spark.png");
+
+        let img = image::RgbaImage::from_pixel(8, 8, image::Rgba([90, 40, 20, 255]));
+        let mut png = Vec::new();
+        image::DynamicImage::ImageRgba8(img)
+            .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)
+            .expect("encode png");
+        std::fs::write(&actual_path, png).expect("write png");
+
+        let decoded = tauri::async_runtime::block_on(decode_texture(
+            requested_path.to_string_lossy().to_string(),
+        ))
+        .expect("decode should resolve Data/texture fallback");
+
+        assert_eq!(decoded.width, 8);
+        assert_eq!(decoded.height, 8);
+    }
+
+    #[test]
+    fn decode_texture_preserves_dxt1_punch_through_alpha() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let path = temp.path().join("mask.dds");
+        let mut block = [0u8; 8];
+        block[0] = 0x00;
+        block[1] = 0x00;
+        block[2] = 0xff;
+        block[3] = 0xff;
+        block[4] = 0xff;
+        block[5] = 0xff;
+        block[6] = 0xff;
+        block[7] = 0xff;
+        let dds = build_dxt1_dds(4, 4, &block);
+        assert!(
+            decode_dds_with_alpha(&dds).is_some(),
+            "fixture should decode directly"
+        );
+        std::fs::write(&path, dds).expect("write dds");
+
+        let decoded =
+            tauri::async_runtime::block_on(decode_texture(path.to_string_lossy().to_string()))
+                .expect("decode dxt1 texture");
+        let raw = base64::engine::general_purpose::STANDARD
+            .decode(decoded.data)
+            .expect("base64 rgba");
+        let alpha_values: Vec<u8> = raw.chunks_exact(4).map(|px| px[3]).collect();
+
+        assert_eq!(decoded.width, 4);
+        assert_eq!(decoded.height, 4);
+        assert_eq!(
+            alpha_values.iter().filter(|&&alpha| alpha == 0).count(),
+            16,
+            "DXT1 punch-through block should decode as fully transparent",
+        );
+    }
+
+    fn build_dxt1_dds(width: u32, height: u32, dxt1_blocks: &[u8]) -> Vec<u8> {
+        const FOURCC_DXT1: u32 = u32::from_le_bytes(*b"DXT1");
+        let mut dds = Vec::new();
+        dds.extend_from_slice(b"DDS ");
+        dds.extend_from_slice(&124u32.to_le_bytes());
+        dds.extend_from_slice(&0x81007u32.to_le_bytes());
+        dds.extend_from_slice(&height.to_le_bytes());
+        dds.extend_from_slice(&width.to_le_bytes());
+        dds.extend_from_slice(&(dxt1_blocks.len() as u32).to_le_bytes());
+        dds.extend_from_slice(&0u32.to_le_bytes());
+        dds.extend_from_slice(&1u32.to_le_bytes());
+        for _ in 0..11 {
+            dds.extend_from_slice(&0u32.to_le_bytes());
+        }
+        dds.extend_from_slice(&32u32.to_le_bytes());
+        dds.extend_from_slice(&0x4u32.to_le_bytes());
+        dds.extend_from_slice(&FOURCC_DXT1.to_le_bytes());
+        dds.extend_from_slice(&0u32.to_le_bytes());
+        for _ in 0..4 {
+            dds.extend_from_slice(&0u32.to_le_bytes());
+        }
+        dds.extend_from_slice(&0x1000u32.to_le_bytes());
+        dds.extend_from_slice(&0u32.to_le_bytes());
+        dds.extend_from_slice(&0u32.to_le_bytes());
+        dds.extend_from_slice(&0u32.to_le_bytes());
+        dds.extend_from_slice(&0u32.to_le_bytes());
+        dds.extend_from_slice(dxt1_blocks);
+        dds
+    }
+
+    #[test]
+    fn parse_csf_points_matches_cpp_header_and_coordinate_remap() {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(b"csf\0");
+        bytes.extend_from_slice(&1_i32.to_le_bytes());
+        bytes.extend_from_slice(&1_i32.to_le_bytes());
+        bytes.extend_from_slice(&2.0_f32.to_le_bytes());
+        bytes.extend_from_slice(&3.0_f32.to_le_bytes());
+        bytes.extend_from_slice(&4.0_f32.to_le_bytes());
+
+        let points = parse_csf_points(&bytes).expect("valid csf path");
+
+        assert_eq!(points, vec![[2.0, -4.0, 3.0]]);
     }
 }

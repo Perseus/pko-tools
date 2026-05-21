@@ -1,5 +1,5 @@
 import { invokeTimed as invoke } from "@/commands/invokeTimed";
-import { BuildingEntry, BuildingMetadata } from "@/types/buildings";
+import { BuildingEntry, BuildingMetadata, BuildingSceneInfo } from "@/types/buildings";
 
 export const getBuildingList = async (
   projectId: string
@@ -12,6 +12,13 @@ export const loadBuildingModel = async (
   buildingId: number
 ): Promise<string> => {
   return invoke("load_building_model", { projectId, buildingId });
+};
+
+export const getBuildingSceneInfo = async (
+  projectId: string,
+  buildingId: number
+): Promise<BuildingSceneInfo | null> => {
+  return invoke("get_building_scene_info", { projectId, buildingId });
 };
 
 export const exportBuildingToGltf = async (

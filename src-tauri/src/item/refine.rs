@@ -3,6 +3,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::client_paths;
+use crate::text_encoding;
+
 // CRawDataInfo base class layout (108 bytes):
 //   bExist: BOOL (i32)           offset 0, 4 bytes
 //   nIndex: int                  offset 4, 4 bytes
@@ -126,7 +129,7 @@ pub fn parse_refine_effects(data: &[u8]) -> anyhow::Result<RefineEffectTable> {
 
 /// Load and parse ItemRefineEffectInfo.bin from a project directory
 pub fn load_refine_effects(project_dir: &Path) -> anyhow::Result<RefineEffectTable> {
-    let bin_path = project_dir.join("scripts/table/ItemRefineEffectInfo.bin");
+    let bin_path = client_paths::table_file(project_dir, "ItemRefineEffectInfo.bin");
     if !bin_path.exists() {
         return Ok(RefineEffectTable { entries: vec![] });
     }
@@ -217,7 +220,7 @@ pub fn parse_item_refine_info(data: &[u8]) -> anyhow::Result<ItemRefineInfoTable
 
 /// Load and parse ItemRefineInfo.bin from a project directory
 pub fn load_item_refine_info(project_dir: &Path) -> anyhow::Result<ItemRefineInfoTable> {
-    let bin_path = project_dir.join("scripts/table/ItemRefineInfo.bin");
+    let bin_path = client_paths::table_file(project_dir, "ItemRefineInfo.bin");
     if !bin_path.exists() {
         return Ok(ItemRefineInfoTable {
             entries: HashMap::new(),
@@ -226,6 +229,100 @@ pub fn load_item_refine_info(project_dir: &Path) -> anyhow::Result<ItemRefineInf
 
     let data = std::fs::read(&bin_path)?;
     parse_item_refine_info(&data)
+}
+
+// ============================================================================
+// StoneInfo.bin
+// ============================================================================
+
+/// CStoneInfo (extends CRawDataInfo, 192 bytes total in legacy PKO data)
+/// Derived fields at offset 108:
+///   nItemID: int (4 bytes)
+///   nEquipPos: int[3] (12 bytes)
+///   nType: int (4 bytes)
+///   szHintFunc: char[64] (64 bytes)
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct StoneInfoEntry {
+    pub id: i32,
+    pub item_id: i32,
+    pub equip_pos: Vec<i32>,
+    pub stone_type: i32,
+    pub hint_func: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct StoneInfoTable {
+    pub by_item_id: HashMap<i32, StoneInfoEntry>,
+}
+
+fn read_cstr(data: &[u8], offset: usize, max_len: usize) -> String {
+    text_encoding::read_gbk_cstr(data, offset, max_len).unwrap_or_default()
+}
+
+pub fn parse_stone_info(data: &[u8]) -> anyhow::Result<StoneInfoTable> {
+    if data.len() < 4 {
+        return Ok(StoneInfoTable {
+            by_item_id: HashMap::new(),
+        });
+    }
+
+    let entry_size = read_u32(data, 0) as usize;
+    if entry_size == 0 {
+        return Ok(StoneInfoTable {
+            by_item_id: HashMap::new(),
+        });
+    }
+
+    let data = &data[4..];
+    let entry_count = data.len() / entry_size;
+    let mut by_item_id = HashMap::new();
+
+    for i in 0..entry_count {
+        let offset = i * entry_size;
+        if offset + entry_size > data.len() {
+            break;
+        }
+
+        let chunk = &data[offset..offset + entry_size];
+        let b_exist = read_i32(chunk, RAW_DATA_INFO_BEXIST_OFFSET);
+        if b_exist == 0 {
+            continue;
+        }
+
+        let id = read_i32(chunk, RAW_DATA_INFO_NID_OFFSET);
+        let d = RAW_DATA_INFO_SIZE;
+        let item_id = read_i32(chunk, d);
+        let equip_pos = (0..3)
+            .map(|j| read_i32(chunk, d + 4 + j * 4))
+            .collect::<Vec<_>>();
+        let stone_type = read_i32(chunk, d + 16);
+        let hint_func = read_cstr(chunk, d + 20, 64);
+
+        by_item_id.insert(
+            item_id,
+            StoneInfoEntry {
+                id,
+                item_id,
+                equip_pos,
+                stone_type,
+                hint_func,
+            },
+        );
+    }
+
+    Ok(StoneInfoTable { by_item_id })
+}
+
+pub fn load_stone_info(project_dir: &Path) -> anyhow::Result<StoneInfoTable> {
+    let bin_path = client_paths::table_file(project_dir, "StoneInfo.bin");
+    if !bin_path.exists() {
+        return Ok(StoneInfoTable {
+            by_item_id: HashMap::new(),
+        });
+    }
+
+    let data = std::fs::read(&bin_path)?;
+    parse_stone_info(&data)
 }
 
 // ============================================================================

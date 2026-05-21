@@ -2,7 +2,7 @@
 
 ## Goal
 
-Extend the effect-v2 viewer to support four content types through a single dropdown selector in the navigator sidebar, keeping the existing canvas, playback controls, and renderer architecture intact.
+Extend the current effect workbench to support four content types through a single dropdown selector in the navigator sidebar, keeping the existing canvas, playback controls, and renderer architecture intact.
 
 | Content Type | Icon | Data Source | Canvas Rendering |
 |---|---|---|---|

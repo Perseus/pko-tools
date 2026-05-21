@@ -68,6 +68,46 @@ export type ForgeEffectPreview = {
   alpha: number;
 };
 
+export type ForgeTraceGemInput = {
+  item_id: number;
+  level: number;
+};
+
+export type ForgeTraceGemResolved = {
+  slot: number;
+  item_id: number;
+  item_name: string;
+  level: number;
+  stone_info_id: number;
+  stone_type: number;
+};
+
+export type ForgeTraceParticle = {
+  lane_tier: number;
+  base_effect_id: number;
+  final_effect_id: number;
+  dummy_id: number;
+  scale: number;
+  par_file: string | null;
+};
+
+export type ForgeTraceResult = {
+  weapon_item_id: number;
+  weapon_name: string;
+  char_type: number;
+  gems: ForgeTraceGemResolved[];
+  total_level: number;
+  effect_level: number;
+  alpha: number;
+  stone_types_input: number[];
+  category: number;
+  item_refine_values: number[];
+  refine_effect_id: number | null;
+  light_id: number | null;
+  lit_entry: ItemLitEntry | null;
+  particles: ForgeTraceParticle[];
+};
+
 export const ITEM_TYPE_NAMES: Record<number, string> = {
   1: "Sword (1H)",
   2: "Sword (2H)",

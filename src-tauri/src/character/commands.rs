@@ -8,7 +8,7 @@ use std::{
 use gltf::import;
 use tauri::{AppHandle, Emitter};
 
-use crate::{broadcast::get_broadcaster, AppState};
+use crate::{broadcast::get_broadcaster, client_paths, AppState};
 
 use super::{
     get_character_gltf_json, get_character_gltf_json_with_options, get_character_metadata,
@@ -238,22 +238,31 @@ pub async fn get_character_actions(
 ) -> Result<Vec<CharacterAction>, String> {
     let project_id =
         uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
-    let project = crate::projects::project::Project::get_project(project_id)
-        .map_err(|e| e.to_string())?;
+    let project =
+        crate::projects::project::Project::get_project(project_id).map_err(|e| e.to_string())?;
     let project_dir = project.project_directory.as_ref();
+    let character = super::info::get_character(project_id, char_type_id as u32).ok();
 
-    let action_table_path = project_dir.join("scripts/txt/CharacterAction.tx");
-    let poseinfo_path = project_dir.join("scripts/table/characterposeinfo.bin");
+    let action_table_path = client_paths::script_txt_file(project_dir, "CharacterAction.tx");
+    let action_info_path = client_paths::table_file(project_dir, "CharacterActionInfo.bin");
+    let poseinfo_path = client_paths::table_file(project_dir, "characterposeinfo.bin");
 
-    let action_table = crate::animation::action_table::load_action_table(&action_table_path)
-        .map_err(|e| e.to_string())?;
-    let pose_table = crate::animation::pose_info::load_poseinfo(&poseinfo_path)
-        .map_err(|e| e.to_string())?;
+    let (action_table, lookup_id) = if action_table_path.exists() {
+        (
+            crate::animation::action_table::load_action_table(&action_table_path),
+            character.map(|c| c.action_id).unwrap_or(char_type_id),
+        )
+    } else {
+        (
+            crate::animation::action_table::load_action_info_bin(&action_info_path),
+            char_type_id,
+        )
+    };
+    let action_table = action_table.map_err(|e| e.to_string())?;
+    let pose_table =
+        crate::animation::pose_info::load_poseinfo(&poseinfo_path).map_err(|e| e.to_string())?;
 
-    let actions = action_table
-        .get(&char_type_id)
-        .cloned()
-        .unwrap_or_default();
+    let actions = action_table.get(&lookup_id).cloned().unwrap_or_default();
 
     let result: Vec<CharacterAction> = actions
         .into_iter()

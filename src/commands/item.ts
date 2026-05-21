@@ -1,4 +1,4 @@
-import { Item, ItemImportResult, ItemLitInfo, ItemMetadata, RefineEffectTable, ForgeEffectPreview, ItemCategoryAvailability, DecompileResult, WorkbenchState, WorkbenchSummary, WorkbenchDummy, ItemInfoPreview } from "@/types/item";
+import { Item, ItemImportResult, ItemLitInfo, ItemMetadata, RefineEffectTable, ForgeEffectPreview, ItemCategoryAvailability, DecompileResult, WorkbenchState, WorkbenchSummary, WorkbenchDummy, ItemInfoPreview, ForgeTraceGemInput, ForgeTraceResult } from "@/types/item";
 import { invokeTimed as invoke } from "@/commands/invokeTimed";
 
 export const getItemList = async (
@@ -62,6 +62,20 @@ export const getForgeEffectPreview = async (
     refineLevel,
     charType,
     effectCategory,
+  });
+};
+
+export const traceForgeCombination = async (
+  projectId: string,
+  weaponItemId: number,
+  charType: number,
+  gems: ForgeTraceGemInput[]
+): Promise<ForgeTraceResult> => {
+  return invoke("trace_forge_combination", {
+    projectId,
+    weaponItemId,
+    charType,
+    gems,
   });
 };
 

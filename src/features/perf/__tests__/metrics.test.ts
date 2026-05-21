@@ -29,14 +29,14 @@ describe("perf metrics", () => {
     recordInvoke("load_character", 90, true);
     recordInvoke("load_character", 110, true);
     recordInvoke("load_character", 180, false);
-    recordInvoke("load_map_terrain", 240, true);
+    recordInvoke("get_map_chunk", 240, true);
 
     const snapshot = getPerfMetricsSnapshot();
 
     expect(snapshot.invokes.totalCount).toBe(4);
     expect(snapshot.invokes.errorCount).toBe(1);
     expect(snapshot.invokes.topCommands.length).toBeGreaterThan(0);
-    expect(snapshot.invokes.topCommands[0].command).toBe("load_map_terrain");
+    expect(snapshot.invokes.topCommands[0].command).toBe("get_map_chunk");
 
     const characterEntry = snapshot.invokes.topCommands.find(
       (entry) => entry.command === "load_character",

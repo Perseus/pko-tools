@@ -31,3 +31,12 @@ export const effectV2PlaybackAtom = atom<EffectV2Playback>({
 
 /** Set of sub-effect indices currently hidden in the effect viewer. */
 export const effectV2HiddenSubEffectsAtom = atom<Set<number>>(new Set<number>());
+
+/** Set of particle system indices currently hidden in the particle viewer. */
+export const effectV2HiddenParticleSystemsAtom = atom<Set<number>>(new Set<number>());
+
+/**
+ * Per-system sub-effect visibility for particle systems that embed .eff files.
+ * Key = particle system index, value = set of hidden sub-effect indices within that system's .eff.
+ */
+export const effectV2HiddenParticleSubEffectsAtom = atom<Map<number, Set<number>>>(new Map());

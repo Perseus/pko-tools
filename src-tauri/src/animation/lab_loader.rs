@@ -332,7 +332,10 @@ mod tests {
 
         eprintln!(
             "LAB regression: {} pass, {} skip, {} fail out of {} files",
-            pass, skip, fail, lab_files.len()
+            pass,
+            skip,
+            fail,
+            lab_files.len()
         );
         assert_eq!(fail, 0, "{} files failed regression check", fail);
     }

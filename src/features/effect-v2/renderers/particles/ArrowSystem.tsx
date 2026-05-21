@@ -1,34 +1,27 @@
+import { useMemo, useRef } from "react";
 import { ParticleSystemProps } from "./types";
 import { ParticleVisual } from "./ParticleVisual";
-import { useParticleLifecycle, Particle } from "./useParticleLifecycle";
-import { ParSystem } from "@/types/effect-v2";
-
-/**
- * Per-particle spawn for arrow.
- * Matches C++ _CreateArrow:
- * - vel = 0 on all axes. Static at offset position.
- * - Only frame-based animation (size/color/angle interpolation via lifecycle).
- */
-function initArrowParticle(_p: Particle, _i: number, _system: ParSystem) {
-  // No velocity, no acceleration — arrow is static, only animated via keyframes
-}
-
-/**
- * Per-frame position update for arrow particles.
- * No-op — arrow is static, only frame-based animation.
- */
-function moveArrowParticle(_p: Particle, _i: number, _dt: number) {
-  // No movement
-}
+import { useParticleLifecycle } from "./useParticleLifecycle";
+import { initArrowParticle, moveArrowParticle } from "./arrowKinematics";
 
 /** Type 8 — Arrow/projectile particles. */
-export function ArrowSystem({ system, onComplete, loop }: ParticleSystemProps) {
+export function ArrowSystem({ system, onComplete, loop, emitterPositionRef }: ParticleSystemProps) {
+  const sharedEffectElapsedRef = useRef(0);
+  const singleParticleSystem = useMemo(
+    () => ({ ...system, particleCount: 1 }),
+    [system],
+  );
+
   const particlesRef = useParticleLifecycle({
-    system,
+    system: singleParticleSystem,
     loop,
     onComplete,
+    emitterPositionRef,
+    sharedEffectElapsedRef,
+    frameEndBehavior: "reset",
     initParticle: initArrowParticle,
-    moveParticle: moveArrowParticle,
+    moveParticle: (p, i, dt, s, pathOffset) =>
+      moveArrowParticle(p, i, dt, s, emitterPositionRef?.current, pathOffset),
   });
 
   const alive = particlesRef.current.filter((p) => p.alive);
@@ -37,7 +30,7 @@ export function ArrowSystem({ system, onComplete, loop }: ParticleSystemProps) {
     <group>
       {alive.map((p) => (
         <group key={p.index} position={p.pos} scale={p.size}>
-          <ParticleVisual system={system} particle={p} loop={loop} />
+          <ParticleVisual system={system} particle={p} loop={loop} sharedEffectElapsedRef={sharedEffectElapsedRef} />
         </group>
       ))}
     </group>

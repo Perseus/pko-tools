@@ -2,9 +2,11 @@ import { FlightContext } from "../FlightPathController";
 import * as THREE from "three";
 
 /**
- * RenderIdx 7 — Distance2
- * Same movement as dist but with linear alpha fade (not implemented in viewer).
- * C++ Part_dist2: alpha fade would need renderer-level support.
+ * Unrouted Part_dist2 helper.
+ *
+ * The original source contains this function, but this client's EffectObj.cpp
+ * MagicList[] array does not include it. Keep it out of FlightPathController
+ * dispatch unless a different client source exposes render index 7.
  */
 export function flightDist2(ctx: FlightContext, group: THREE.Group): void {
   if (!ctx.state.initialized) {

@@ -48,6 +48,9 @@ export function buildEffectMaterialProps(
   const techAlphaTest = techniqueState?.alphaTestEnable
     ? (techniqueState.alphaFunc === 6 /* D3DCMP_NOTEQUAL */ ? 1 / 255 : 0)
     : 0;
+  const techAlphaBlend = techniqueState
+    ? techniqueState.alphaBlendEnable !== false
+    : useAlpha;
   const techSide = techniqueState
     ? (techniqueState.cullMode === 3 /* D3DCULL_CCW */ ? THREE.BackSide
        : techniqueState.cullMode === 2 /* D3DCULL_CW */ ? THREE.FrontSide
@@ -57,9 +60,11 @@ export function buildEffectMaterialProps(
   return {
     toneMapped: false,
     fog: false,
-    transparent: useAlpha || techAlphaTest > 0,
+    transparent: techAlphaBlend ? (useAlpha || techAlphaTest > 0) : techAlphaTest > 0,
     opacity: useAlpha ? 1 : 1,
-    blending: useAlpha ? THREE.CustomBlending : THREE.NormalBlending,
+    blending: techAlphaBlend
+      ? (useAlpha ? THREE.CustomBlending : THREE.NormalBlending)
+      : THREE.NoBlending,
     blendSrc: blendFactors.blendSrc,
     blendDst: blendFactors.blendDst,
     depthTest: techDepthTest,

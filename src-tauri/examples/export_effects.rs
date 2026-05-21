@@ -20,7 +20,9 @@ fn main() {
     if args.len() < 3 {
         eprintln!("Usage: export_effects <client_dir> <output_dir>");
         eprintln!();
-        eprintln!("  <client_dir>  Path to PKO client directory (contains effect/, texture/, scripts/)");
+        eprintln!(
+            "  <client_dir>  Path to PKO client directory (contains effect/, texture/, scripts/)"
+        );
         eprintln!("  <output_dir>  Output directory for exported data");
         std::process::exit(1);
     }
@@ -29,13 +31,19 @@ fn main() {
     let output_dir = PathBuf::from(&args[2]);
 
     if !client_dir.exists() {
-        eprintln!("Error: client directory does not exist: {}", client_dir.display());
+        eprintln!(
+            "Error: client directory does not exist: {}",
+            client_dir.display()
+        );
         std::process::exit(1);
     }
 
     let effect_dir = client_dir.join("effect");
     if !effect_dir.exists() {
-        eprintln!("Error: effect/ directory not found in {}", client_dir.display());
+        eprintln!(
+            "Error: effect/ directory not found in {}",
+            client_dir.display()
+        );
         std::process::exit(1);
     }
 

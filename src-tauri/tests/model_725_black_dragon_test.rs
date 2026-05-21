@@ -418,7 +418,8 @@ fn roundtrip_725_lab() {
         nodes: vec![],
     };
     // Use 0 meshes since this is just a skeleton test (no mesh data)
-    let (skin, mut nodes) = original_lab.to_gltf_skin_and_nodes_multi(&mut fields_to_aggregate, 0, None);
+    let (skin, mut nodes) =
+        original_lab.to_gltf_skin_and_nodes_multi(&mut fields_to_aggregate, 0, None);
     original_lab.to_gltf_animations_and_sampler(&mut fields_to_aggregate, None);
 
     let gltf_root = gltf::json::Root {
@@ -573,8 +574,7 @@ fn roundtrip_725_lgo_part0() {
     let original_lab = load_lab(&lab_path).expect("Failed to parse LAB");
 
     let lgo_path = test_dir.join("0725000000.lgo");
-    let original_lgo =
-        CharacterGeometricModel::from_file(lgo_path).expect("Failed to parse LGO");
+    let original_lgo = CharacterGeometricModel::from_file(lgo_path).expect("Failed to parse LGO");
 
     let orig_mesh = original_lgo.mesh_info.as_ref().expect("No mesh info");
     println!(
@@ -752,12 +752,12 @@ fn test_multipart_import_creates_two_lgo_files() {
     let original_lab = load_lab(&lab_path).expect("Failed to parse LAB");
 
     let lgo_part0_path = test_dir.join("0725000000.lgo");
-    let original_lgo_part0 =
-        CharacterGeometricModel::from_file(lgo_part0_path.clone()).expect("Failed to parse LGO part 0");
+    let original_lgo_part0 = CharacterGeometricModel::from_file(lgo_part0_path.clone())
+        .expect("Failed to parse LGO part 0");
 
     let lgo_part1_path = test_dir.join("0725000001.lgo");
-    let original_lgo_part1 =
-        CharacterGeometricModel::from_file(lgo_part1_path.clone()).expect("Failed to parse LGO part 1");
+    let original_lgo_part1 = CharacterGeometricModel::from_file(lgo_part1_path.clone())
+        .expect("Failed to parse LGO part 1");
 
     let orig_part0_vertices = original_lgo_part0
         .mesh_info
@@ -816,7 +816,8 @@ fn test_multipart_import_creates_two_lgo_files() {
     };
 
     // Export skeleton with 2 mesh nodes
-    let (skin, nodes) = original_lab.to_gltf_skin_and_nodes_multi(&mut fields_to_aggregate, 2, None);
+    let (skin, nodes) =
+        original_lab.to_gltf_skin_and_nodes_multi(&mut fields_to_aggregate, 2, None);
     fields_to_aggregate.skin.push(skin);
     fields_to_aggregate.nodes.extend(nodes);
 
@@ -1002,11 +1003,11 @@ fn test_multipart_import_creates_two_lgo_files() {
     println!("    - 0725000001.lgo");
 
     // Re-read and verify
-    let reread_part0 =
-        CharacterGeometricModel::from_file(part0_path.clone()).expect("Failed to parse re-read part 0");
+    let reread_part0 = CharacterGeometricModel::from_file(part0_path.clone())
+        .expect("Failed to parse re-read part 0");
 
-    let reread_part1 =
-        CharacterGeometricModel::from_file(part1_path.clone()).expect("Failed to parse re-read part 1");
+    let reread_part1 = CharacterGeometricModel::from_file(part1_path.clone())
+        .expect("Failed to parse re-read part 1");
 
     let reread_part0_vertices = reread_part0.mesh_info.as_ref().unwrap().vertex_seq.len();
     let reread_part1_vertices = reread_part1.mesh_info.as_ref().unwrap().vertex_seq.len();

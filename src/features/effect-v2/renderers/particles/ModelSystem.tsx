@@ -1,54 +1,75 @@
+import { useEffect, useMemo, useReducer, useRef, useState } from "react";
+import { useFrame } from "@react-three/fiber";
 import { ParticleSystemProps } from "./types";
 import { ParticleVisual } from "./ParticleVisual";
-import { useParticleLifecycle, Particle } from "./useParticleLifecycle";
-import { randf } from "../../helpers";
-import { ParSystem } from "@/types/effect-v2";
-
-/**
- * Model particles use the same spherical random velocity as Blast.
- * The modelName field references a .eff (or .lgo) which ParticleVisual handles.
- * PKO→Three.js coordinate swap: [0]→X, [2]→Y, [1]→Z.
- */
-function initModelParticle(p: Particle, _i: number, system: ParSystem) {
-  p.dir.set(
-    randf(system.velocity) * (Math.random() < 0.5 ? system.direction[0] : -system.direction[0]),
-    randf(system.velocity) * system.direction[2],
-    randf(system.velocity) * (Math.random() < 0.5 ? system.direction[1] : -system.direction[1]),
-  );
-  p.accel.set(system.acceleration[0], system.acceleration[2], system.acceleration[1]);
-  p.pos.set(
-    randf(system.range[0]),
-    randf(system.range[2]),
-    randf(system.range[1]),
-  );
-}
-
-/**
- * Default physics: pos += dir*dt, dir += accel*dt.
- * Same as BlastSystem movement.
- */
-function moveModelParticle(p: Particle, _i: number, dt: number) {
-  p.pos.addScaledVector(p.dir, dt);
-  p.dir.addScaledVector(p.accel, dt);
-}
+import { useParticleLifecycle } from "./useParticleLifecycle";
+import { initModelParticle, moveModelParticle } from "./modelKinematics";
 
 /** Type 5 — 3D model used as particle (e.g., debris chunks). ParticleVisual loads .eff models. */
-export function ModelSystem({ system, onComplete, loop }: ParticleSystemProps) {
+export function ModelSystem({
+  system,
+  onComplete,
+  loop,
+  emitterPositionRef,
+  sourceDirectionRef,
+}: ParticleSystemProps) {
+  const sharedEffectElapsedRef = useRef(0);
+  const [, forceRender] = useReducer((n: number) => n + 1, 0);
+  const lastAliveCountRef = useRef(0);
+  const isNestedEffect = system.modelName.trim().toLowerCase().endsWith(".eff");
+  const [nestedEffectComplete, setNestedEffectComplete] = useState(false);
+  const singleParticleSystem = useMemo(
+    () => ({ ...system, particleCount: 1 }),
+    [system],
+  );
+  const completionSentRef = useRef(false);
+
+  useEffect(() => {
+    setNestedEffectComplete(false);
+    completionSentRef.current = false;
+  }, [system.modelName, loop]);
+
+  const handleNestedEffectComplete = () => {
+    if (!isNestedEffect || loop || completionSentRef.current) return;
+    completionSentRef.current = true;
+    setNestedEffectComplete(true);
+    onComplete?.();
+  };
+
   const particlesRef = useParticleLifecycle({
-    system,
+    system: singleParticleSystem,
     loop,
     onComplete,
+    emitterPositionRef,
+    sharedEffectElapsedRef,
+    frameEndBehavior: "reset",
     initParticle: initModelParticle,
-    moveParticle: moveModelParticle,
+    moveParticle: (p, i, dt, sys, pathOffset) =>
+      moveModelParticle(p, i, dt, sys, emitterPositionRef?.current, pathOffset),
   });
 
-  const alive = particlesRef.current.filter((p) => p.alive);
+  useFrame(() => {
+    const aliveCount = particlesRef.current.filter((p) => p.alive).length;
+    if (aliveCount !== lastAliveCountRef.current || aliveCount > 0) {
+      lastAliveCountRef.current = aliveCount;
+      forceRender();
+    }
+  });
+
+  const alive = nestedEffectComplete ? [] : particlesRef.current.filter((p) => p.alive);
 
   return (
     <group>
       {alive.map((p) => (
         <group key={p.index} position={p.pos} scale={p.size}>
-          <ParticleVisual system={system} particle={p} loop={loop} />
+          <ParticleVisual
+            system={system}
+            particle={p}
+            loop={loop}
+            sourceDirectionRef={sourceDirectionRef}
+            sharedEffectElapsedRef={sharedEffectElapsedRef}
+            onNestedEffectComplete={handleNestedEffectComplete}
+          />
         </group>
       ))}
     </group>

@@ -35,6 +35,7 @@ use crate::character::{
     },
     GLTFFieldsToAggregate,
 };
+use crate::client_paths;
 use crate::d3d::{D3DFormat, D3DPool, D3DPrimitiveType, D3DVertexElement9};
 use crate::map::scene_model::decode_dds_with_alpha;
 use crate::math::{LwMatrix44, LwSphere, LwVector2, LwVector3};
@@ -1722,7 +1723,13 @@ fn build_single_material(
 
             'search: for dir in &dirs {
                 for ext in &exts {
-                    let candidate = project_dir.join(dir).join(tex_name).with_extension(ext);
+                    let candidate = if let Some(texture_rel) = dir.strip_prefix("texture/") {
+                        client_paths::asset_file(project_dir, "texture", texture_rel)
+                    } else {
+                        client_paths::asset_dir(project_dir, "texture")
+                    }
+                    .join(tex_name)
+                    .with_extension(ext);
                     if !candidate.exists() {
                         continue;
                     }
@@ -1732,7 +1739,10 @@ fn build_single_material(
                             let rgba = img.to_rgba8();
                             let mut png_data = Vec::new();
                             let mut cursor = std::io::Cursor::new(&mut png_data);
-                            if image::DynamicImage::ImageRgba8(rgba).write_to(&mut cursor, image::ImageFormat::Png).is_ok() {
+                            if image::DynamicImage::ImageRgba8(rgba)
+                                .write_to(&mut cursor, image::ImageFormat::Png)
+                                .is_ok()
+                            {
                                 let data_uri = format!(
                                     "data:image/png;base64,{}",
                                     BASE64_STANDARD.encode(&png_data)
@@ -1889,7 +1899,7 @@ fn resolve_item_model_path(project_dir: &Path, model_id: &str) -> Option<PathBuf
     let target = format!("{}.lgo", model_id).to_lowercase();
 
     // Check model/item/ directory
-    let item_dir = project_dir.join("model/item");
+    let item_dir = client_paths::asset_file(project_dir, "model", "item");
     if item_dir.exists() {
         for entry in std::fs::read_dir(&item_dir).ok()?.flatten() {
             if let Some(file_name) = entry.file_name().to_str() {
@@ -1900,8 +1910,14 @@ fn resolve_item_model_path(project_dir: &Path, model_id: &str) -> Option<PathBuf
         }
     }
 
+    if client_paths::table_file(project_dir, "ItemFirstInfo.bin").exists()
+        || client_paths::table_file(project_dir, "ItemSecondInfo.bin").exists()
+    {
+        return None;
+    }
+
     // Fallback: check model/character/ directory (some items share character models)
-    let char_dir = project_dir.join("model/character");
+    let char_dir = client_paths::asset_file(project_dir, "model", "character");
     if char_dir.exists() {
         let padded_target = format!("{:0>10}.lgo", model_id).to_lowercase();
         for entry in std::fs::read_dir(&char_dir).ok()?.flatten() {
@@ -1946,6 +1962,50 @@ mod tests {
         let encoded = encode_pko_texture(&original);
         let decoded = decode_pko_texture(&encoded);
         assert_eq!(decoded, original);
+    }
+
+    #[test]
+    fn demon_item_resolution_does_not_fall_back_to_character_models() {
+        let root = std::env::temp_dir().join(format!(
+            "pko_tools_demon_item_model_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let table_dir = root.join("Data").join("Table");
+        let character_dir = root.join("Data").join("model").join("character");
+        std::fs::create_dir_all(&table_dir).unwrap();
+        std::fs::create_dir_all(&character_dir).unwrap();
+        std::fs::write(table_dir.join("ItemFirstInfo.bin"), []).unwrap();
+        std::fs::write(character_dir.join("2140010004.lgo"), []).unwrap();
+
+        assert!(resolve_item_model_path(&root, "2140010004").is_none());
+
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn demon_data_root_item_resolution_does_not_fall_back_to_character_models() {
+        let data_root = std::env::temp_dir().join(format!(
+            "pko_tools_demon_data_item_model_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let table_dir = data_root.join("Table");
+        let character_dir = data_root.join("model").join("character");
+        std::fs::create_dir_all(&table_dir).unwrap();
+        std::fs::create_dir_all(&character_dir).unwrap();
+        std::fs::write(table_dir.join("ItemFirstInfo.bin"), []).unwrap();
+        std::fs::write(character_dir.join("2140010004.lgo"), []).unwrap();
+
+        assert!(resolve_item_model_path(&data_root, "2140010004").is_none());
+
+        let _ = std::fs::remove_dir_all(data_root);
     }
 
     #[test]

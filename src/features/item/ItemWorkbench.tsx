@@ -21,6 +21,7 @@ import ItemModelViewer from "./ItemModelViewer";
 import { ItemMetadataPanel } from "./ItemMetadataPanel";
 import { ForgeCategorySelector } from "./ForgeCategorySelector";
 import { ForgeEffectInfoPanel } from "./ForgeEffectInfoPanel";
+import { ForgeTracePanel } from "./ForgeTracePanel";
 import { ItemViewerToolbar } from "./ItemViewerToolbar";
 import { DecompileTablesPanel } from "./DecompileTablesPanel";
 import { DummyPlacementOverlay } from "./DummyPlacementOverlay";
@@ -179,6 +180,14 @@ export default function ItemWorkbench() {
               preview={forgePreview}
               effectConfig={effectConfig}
               effectCategory={effectCategory}
+            />
+          )}
+          {!isWorkbenchMode && (
+            <ForgeTracePanel
+              projectId={currentProject?.id ?? null}
+              weaponItemId={selectedItem?.id ?? null}
+              weaponName={selectedItem?.name ?? null}
+              charType={charType}
             />
           )}
           {!isWorkbenchMode && <DecompileTablesPanel open={showTables} />}

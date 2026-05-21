@@ -12,8 +12,8 @@ describe("createEffectTexture", () => {
     expect(make().colorSpace).toBe(THREE.SRGBColorSpace);
   });
 
-  it("flips Y axis", () => {
-    expect(make().flipY).toBe(true);
+  it("does not flip Y axis (Rust decoder returns OpenGL-order rows)", () => {
+    expect(make().flipY).toBe(false);
   });
 
   it("uses linear mag filter", () => {

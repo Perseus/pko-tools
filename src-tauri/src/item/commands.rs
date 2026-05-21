@@ -1,6 +1,6 @@
-use std::str::FromStr;
+use std::{path::Path, str::FromStr};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{projects::project::Project, AppState};
 
@@ -542,6 +542,215 @@ pub async fn get_forge_effect_preview(
     })
 }
 
+#[derive(Debug, Deserialize)]
+pub struct ForgeTraceGemInput {
+    pub item_id: u32,
+    pub level: u32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ForgeTraceGemResolved {
+    pub slot: u32,
+    pub item_id: u32,
+    pub item_name: String,
+    pub level: u32,
+    pub stone_info_id: i32,
+    pub stone_type: i32,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ForgeTraceParticle {
+    pub lane_tier: u32,
+    pub base_effect_id: i32,
+    pub final_effect_id: u32,
+    pub dummy_id: i32,
+    pub scale: f32,
+    pub par_file: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ForgeTraceResult {
+    pub weapon_item_id: u32,
+    pub weapon_name: String,
+    pub weapon_model_id: String,
+    pub char_type: u32,
+    pub gems: Vec<ForgeTraceGemResolved>,
+    pub total_level: u32,
+    pub effect_level: u32,
+    pub alpha: f32,
+    pub stone_types_input: Vec<i32>,
+    pub category: u32,
+    pub item_refine_values: Vec<i16>,
+    pub refine_effect_id: Option<i32>,
+    pub light_id: Option<i32>,
+    pub lit_entry: Option<lit::ItemLitEntry>,
+    pub particles: Vec<ForgeTraceParticle>,
+}
+
+pub(crate) fn resolve_forge_combination(
+    project_id: uuid::Uuid,
+    project_dir: &Path,
+    weapon_item_id: u32,
+    char_type: u32,
+    gems: Vec<ForgeTraceGemInput>,
+) -> Result<ForgeTraceResult, String> {
+    let weapon_item = get_item(project_id, weapon_item_id).map_err(|e| e.to_string())?;
+    let weapon_model_id = match char_type {
+        0 => weapon_item.model_lance.clone(),
+        1 => weapon_item.model_carsise.clone(),
+        2 => weapon_item.model_phyllis.clone(),
+        3 => weapon_item.model_ami.clone(),
+        _ => weapon_item.model_lance.clone(),
+    };
+    let stone_info = refine::load_stone_info(project_dir).map_err(|e| e.to_string())?;
+    let refine_info_table =
+        refine::load_item_refine_info(project_dir).map_err(|e| e.to_string())?;
+    let refine_effect_table =
+        refine::load_refine_effects(project_dir).map_err(|e| e.to_string())?;
+    let scene_effects =
+        sceneffect::load_scene_effect_info(project_dir).map_err(|e| e.to_string())?;
+
+    let mut resolved_gems = Vec::new();
+    let mut stone_types = vec![-1, -1, -1];
+    let mut total_level = 0u32;
+
+    for (idx, gem) in gems.iter().take(3).enumerate() {
+        if gem.item_id == 0 || gem.level == 0 {
+            continue;
+        }
+
+        let gem_item = get_item(project_id, gem.item_id).map_err(|e| e.to_string())?;
+        let stone = stone_info
+            .by_item_id
+            .get(&(gem.item_id as i32))
+            .ok_or_else(|| format!("StoneInfo entry not found for gem item {}", gem.item_id))?;
+
+        stone_types[idx] = stone.stone_type;
+        total_level += gem.level;
+        resolved_gems.push(ForgeTraceGemResolved {
+            slot: idx as u32 + 1,
+            item_id: gem.item_id,
+            item_name: gem_item.name,
+            level: gem.level,
+            stone_info_id: stone.id,
+            stone_type: stone.stone_type,
+        });
+    }
+
+    let category = refine::stone_effect_category(stone_types[0], stone_types[1], stone_types[2]);
+    let effect_level = if total_level >= 1 {
+        ((total_level - 1) / 4).min(3)
+    } else {
+        0
+    };
+    let alpha = compute_forge_alpha(total_level);
+
+    let refine_info = refine_info_table.entries.get(&(weapon_item_id as i32));
+    let item_refine_values = refine_info
+        .map(|info| info.values.clone())
+        .unwrap_or_else(|| vec![0; 14]);
+
+    let refine_effect_id = if category >= 1 {
+        refine_info
+            .and_then(|info| info.values.get((category - 1) as usize).copied())
+            .filter(|id| *id > 0)
+            .map(|id| id as i32)
+    } else {
+        None
+    };
+
+    let effect_entry = refine_effect_id.and_then(|refine_effect_id| {
+        refine_effect_table
+            .entries
+            .iter()
+            .find(|e| e.id == refine_effect_id)
+    });
+
+    let light_id = effect_entry.and_then(|entry| (entry.light_id != 0).then_some(entry.light_id));
+    let lit_entry = if let Some(lid) = light_id {
+        let lit_info =
+            lit::get_item_lit_info(project_dir, lid as u32).map_err(|e| e.to_string())?;
+        lit_info.and_then(|info| {
+            info.lits
+                .get(effect_level as usize)
+                .cloned()
+                .or_else(|| info.lits.first().cloned())
+        })
+    } else {
+        None
+    };
+
+    let char_idx = (char_type as usize).min(3);
+    let cha_scale = refine_info
+        .and_then(|info| info.cha_effect_scale.get(char_idx).copied())
+        .filter(|scale| *scale > 0.0)
+        .unwrap_or(1.0);
+
+    let mut particles = Vec::new();
+    if let Some(effect_entry) = effect_entry {
+        for tier in 0..4 {
+            let flat_idx = char_idx * 4 + tier;
+            let base_effect_id = effect_entry.effect_ids.get(flat_idx).copied().unwrap_or(0) as i32;
+            if base_effect_id == 0 {
+                continue;
+            }
+
+            let final_effect_id = (base_effect_id as u32) * 10 + effect_level;
+            let dummy_id = effect_entry.dummy_ids.get(tier).copied().unwrap_or(0) as i32;
+            let par_file = scene_effects
+                .get(&final_effect_id)
+                .map(|entry| entry.filename.clone());
+
+            particles.push(ForgeTraceParticle {
+                lane_tier: tier as u32,
+                base_effect_id,
+                final_effect_id,
+                dummy_id,
+                scale: cha_scale,
+                par_file,
+            });
+        }
+    }
+
+    Ok(ForgeTraceResult {
+        weapon_item_id,
+        weapon_name: weapon_item.name,
+        weapon_model_id,
+        char_type,
+        gems: resolved_gems,
+        total_level,
+        effect_level,
+        alpha,
+        stone_types_input: stone_types,
+        category,
+        item_refine_values,
+        refine_effect_id,
+        light_id,
+        lit_entry,
+        particles,
+    })
+}
+
+#[tauri::command]
+pub async fn trace_forge_combination(
+    project_id: String,
+    weapon_item_id: u32,
+    char_type: u32,
+    gems: Vec<ForgeTraceGemInput>,
+) -> Result<ForgeTraceResult, String> {
+    let project_id =
+        uuid::Uuid::from_str(&project_id).map_err(|_| "Invalid project id".to_string())?;
+    let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
+
+    resolve_forge_combination(
+        project_id,
+        project.project_directory.as_ref(),
+        weapon_item_id,
+        char_type,
+        gems,
+    )
+}
+
 // ============================================================================
 // Table decompile commands
 // ============================================================================
@@ -555,7 +764,7 @@ pub async fn decompile_item_refine_info(
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
     let project_dir = project.project_directory.as_ref();
 
-    let input_path = project_dir.join("scripts/table/ItemRefineInfo.bin");
+    let input_path = crate::client_paths::table_file(project_dir, "ItemRefineInfo.bin");
     let output_path = project_dir
         .join("pko-tools")
         .join("exports")
@@ -576,7 +785,7 @@ pub async fn decompile_item_refine_effect_info(
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
     let project_dir = project.project_directory.as_ref();
 
-    let input_path = project_dir.join("scripts/table/ItemRefineEffectInfo.bin");
+    let input_path = crate::client_paths::table_file(project_dir, "ItemRefineEffectInfo.bin");
     let output_path = project_dir
         .join("pko-tools")
         .join("exports")
@@ -597,7 +806,7 @@ pub async fn decompile_scene_effect_info(
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
     let project_dir = project.project_directory.as_ref();
 
-    let input_path = project_dir.join("scripts/table/sceneffectinfo.bin");
+    let input_path = crate::client_paths::table_file(project_dir, "sceneffectinfo.bin");
     let output_path = project_dir
         .join("pko-tools")
         .join("exports")
@@ -618,7 +827,7 @@ pub async fn decompile_stone_info(
     let project = Project::get_project(project_id).map_err(|e| e.to_string())?;
     let project_dir = project.project_directory.as_ref();
 
-    let input_path = project_dir.join("scripts/table/StoneInfo.bin");
+    let input_path = crate::client_paths::table_file(project_dir, "StoneInfo.bin");
     let output_path = project_dir
         .join("pko-tools")
         .join("exports")

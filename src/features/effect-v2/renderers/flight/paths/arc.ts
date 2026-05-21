@@ -1,5 +1,6 @@
 import { FlightContext } from "../FlightPathController";
 import * as THREE from "three";
+import { isPointInstrPointRange } from "./pathMath";
 
 /**
  * RenderIdx 4 — Arc
@@ -13,9 +14,10 @@ export function flightArc(ctx: FlightContext, group: THREE.Group): void {
     const dir = new THREE.Vector3().subVectors(ctx.target, ctx.origin).normalize();
     const horizontalDist = ctx.origin.distanceTo(ctx.target);
 
-    // Arc center: midpoint between origin and target, dropped below by half the distance
+    // Arc center: midpoint between origin and target, dropped below by half the distance.
+    // PKO runtime is z-up, so the C++ `arcOrg.z -= halfDistance` stays on Z.
     const arcOrg = new THREE.Vector3().addVectors(ctx.origin, ctx.target).multiplyScalar(0.5);
-    arcOrg.y -= horizontalDist / 2;
+    arcOrg.z -= horizontalDist / 2;
 
     const radius = ctx.origin.distanceTo(arcOrg);
 
@@ -28,6 +30,7 @@ export function flightArc(ctx: FlightContext, group: THREE.Group): void {
   }
 
   const dir = ctx.state.dir as THREE.Vector3;
+  ctx.sourceDirection = dir;
   const arcOrg = ctx.state.arcOrg as THREE.Vector3;
   const radius = ctx.state.radius as number;
 
@@ -41,7 +44,7 @@ export function flightArc(ctx: FlightContext, group: THREE.Group): void {
   const dirToBase = new THREE.Vector3().subVectors(basePoint, arcOrg).normalize();
   group.position.copy(arcOrg).addScaledVector(dirToBase, radius);
 
-  if (group.position.distanceTo(ctx.target) < 0.5) {
+  if (isPointInstrPointRange(group.position, ctx.target, 0.5)) {
     ctx.done = true;
   }
 }

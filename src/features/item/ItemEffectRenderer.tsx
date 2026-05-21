@@ -12,6 +12,7 @@ import {
   createTriangleGeometry,
   createTrianglePlaneGeometry,
   createCylinderGeometry,
+  resolveTextureCandidates,
 } from "@/features/effect/rendering";
 import { interpolateFrame } from "@/features/effect/animation";
 import { applySubEffectFrame } from "@/features/effect/applySubEffectFrame";
@@ -24,16 +25,19 @@ import {
 /** Effect animation type enum matching game engine I_Effect.h */
 const EFFECT_FRAMETEX = 1;
 
-
-const TEX_EXTENSIONS = [".tga", ".TGA", ".bmp", ".BMP", ".dds", ".png"];
-
 /** Create geometry matching the game's built-in effect primitives.
  *  Delegates to shared C++-faithful geometry functions from rendering.ts. */
 function createGeometry(sub: SubEffect): THREE.BufferGeometry {
   const name = (sub.modelName || "").toLowerCase();
 
   if (name === "cylinder" || name === "cone")
-    return createCylinderGeometry(sub.topRadius || 0.5, sub.botRadius || 0.5, sub.height || 1, sub.segments || 16);
+    return createCylinderGeometry(
+      sub.topRadius ?? 0.5,
+      sub.botRadius ?? 0.5,
+      sub.height ?? 1,
+      sub.segments ?? 16,
+      name === "cone" ? 1.5 : 1,
+    );
   if (name === "rect" || name === "") return createRectGeometry();
   if (name === "rectplane") return createRectPlaneGeometry();
   if (name === "rectz") return createRectZGeometry();
@@ -233,23 +237,16 @@ function EffectGroup({ effectName, projectId, projectDir, dummyMatrix, effectSca
     async function loadSingleTexture(texName: string) {
       if (!texName || newTextures.has(texName)) return;
 
-      const basePath = `${projectDir}/texture/effect/${texName}`;
       let decoded: { width: number; height: number; data: string } | null =
         null;
 
-      // Try with the name as-is first (might already have extension)
-      try {
-        decoded = await tryDecode(basePath);
-      } catch {
-        // Try common extensions
-        for (const ext of TEX_EXTENSIONS) {
-          if (cancelled) return;
-          try {
-            decoded = await tryDecode(`${basePath}${ext}`);
-            break;
-          } catch {
-            // Try next extension
-          }
+      for (const path of resolveTextureCandidates(texName, projectDir)) {
+        if (cancelled) return;
+        try {
+          decoded = await tryDecode(path);
+          break;
+        } catch {
+          // Try next candidate path.
         }
       }
 

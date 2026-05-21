@@ -63,13 +63,19 @@ pub fn load_map(data: &[u8]) -> Result<ParsedMap> {
                 return Err(anyhow!("MAP tile data truncated at offset {}", pos));
             }
 
-            let dw_tile_info = u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
+            let dw_tile_info =
+                u32::from_le_bytes([data[pos], data[pos + 1], data[pos + 2], data[pos + 3]]);
             let bt_tile_info = data[pos + 4];
             let s_color = i16::from_le_bytes([data[pos + 5], data[pos + 6]]);
             let c_height = data[pos + 7] as i8;
             let s_region = i16::from_le_bytes([data[pos + 8], data[pos + 9]]);
             let bt_island = data[pos + 10];
-            let bt_block = [data[pos + 11], data[pos + 12], data[pos + 13], data[pos + 14]];
+            let bt_block = [
+                data[pos + 11],
+                data[pos + 12],
+                data[pos + 13],
+                data[pos + 14],
+            ];
 
             tiles.push(MapTile {
                 dw_tile_info,
@@ -134,8 +140,16 @@ mod tests {
 
             assert!(parsed.header.n_width > 0, "{}: n_width", path.display());
             assert!(parsed.header.n_height > 0, "{}: n_height", path.display());
-            assert!(parsed.section_cnt_x > 0, "{}: section_cnt_x", path.display());
-            assert!(parsed.section_cnt_y > 0, "{}: section_cnt_y", path.display());
+            assert!(
+                parsed.section_cnt_x > 0,
+                "{}: section_cnt_x",
+                path.display()
+            );
+            assert!(
+                parsed.section_cnt_y > 0,
+                "{}: section_cnt_y",
+                path.display()
+            );
 
             let expected_sections = (parsed.section_cnt_x * parsed.section_cnt_y) as usize;
             assert_eq!(
