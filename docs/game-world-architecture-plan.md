@@ -46,15 +46,15 @@ Assets/
 └── Maps/                            (existing, unchanged)
     ├── xmas/
     │   ├── manifest.json            (re-exported with collision_grid + region_grid)
-    │   └── xmas.gltf
-    └── buildings/*.gltf
+    │   └── native PKO map files     (.map/.obj/.atr/.blk as needed)
+    └── buildings/*.gltf             (asset-level building exports only)
 ```
 
 ## Implementation Steps
 
-### Step 0: Re-export xmas map
-Run pko-tools map exporter on xmas to generate manifest.json with `collision_grid` and `region_grid`.
-- Rust code already generates these at `src-tauri/src/map/terrain.rs:1199-1258`
+### Step 0: Re-export xmas map data
+Run the native PKO map-data exporter on xmas to generate manifest.json with `collision_grid` and `region_grid`. Do not export the whole map as glTF/GLB; maps stay in native PKO map structures, while glTF remains appropriate for individual assets such as buildings.
+- Rust code already generates these grids in `src-tauri/src/map/terrain.rs`
 - Format: `collision_grid.data` = base64 bytes, 2x tile resolution, 0=walkable
 - Replace current `Assets/Maps/xmas/manifest.json`
 

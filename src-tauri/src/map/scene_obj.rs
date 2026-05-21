@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+
 use serde::Serialize;
 
 // ============================================================================
@@ -25,6 +27,14 @@ pub struct SceneObject {
     pub scale: i16,
 }
 
+/// A raw 20-byte SSceneObjInfo record kept so patched exports can preserve
+/// records that are not surfaced as editable placements.
+#[derive(Debug, Clone)]
+pub struct RawSceneObjectRecord {
+    pub section_no: usize,
+    pub bytes: [u8; 20],
+}
+
 /// Parsed .obj scene object file.
 #[derive(Debug, Serialize)]
 pub struct ParsedObjFile {
@@ -32,5 +42,12 @@ pub struct ParsedObjFile {
     pub section_cnt_y: i32,
     pub section_width: i32,
     pub section_height: i32,
+    pub section_obj_num: i32,
     pub objects: Vec<SceneObject>,
+    #[serde(skip)]
+    pub raw_records: Vec<RawSceneObjectRecord>,
+    #[serde(skip)]
+    pub object_raw_indices: Vec<usize>,
+    #[serde(skip)]
+    pub dirty_object_indices: BTreeSet<usize>,
 }

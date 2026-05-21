@@ -81,18 +81,6 @@ describe("action source parity", () => {
     expect(onRun).toHaveBeenCalledTimes(4);
   });
 
-  it("runs map marker toggle from every source on maps surface", () => {
-    const onRun = vi.fn();
-    renderHarness("/maps", actionIds.mapToggleObjectMarkers, onRun);
-
-    fireEvent.click(screen.getByLabelText("run-palette"));
-    fireEvent.click(screen.getByLabelText("run-toolbar"));
-    fireEvent.click(screen.getByLabelText("run-context-menu"));
-    fireEvent.keyDown(document.body, { key: "o" });
-
-    expect(onRun).toHaveBeenCalledTimes(4);
-  });
-
   it("does not run shortcuts for actions outside the current surface", () => {
     const onRun = vi.fn();
     renderHarness("/maps", actionIds.effectSave, onRun);

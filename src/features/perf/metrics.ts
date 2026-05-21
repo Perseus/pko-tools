@@ -10,6 +10,7 @@ export const perfSurfaces = [
   "effects",
   "items",
   "maps",
+  "mapEditor",
   "buildings",
 ] as const;
 
@@ -61,6 +62,7 @@ const frameSamplesBySurface: Record<PerfSurface, number[]> = {
   effects: [],
   items: [],
   maps: [],
+  mapEditor: [],
   buildings: [],
 };
 

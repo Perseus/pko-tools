@@ -13,7 +13,16 @@ fn main() {
         panic!("Kaitai scaffold generation failed: {err}");
     }
 
-    tauri_build::build();
+    let mut tauri_attributes = tauri_build::Attributes::new();
+    if env::var_os("CARGO_FEATURE_MCP").is_some() {
+        println!("cargo:rerun-if-changed=capabilities-mcp");
+        tauri_attributes = tauri_attributes.capabilities_path_pattern("./capabilities-mcp/**/*");
+    }
+
+    tauri_build::try_build(tauri_attributes).unwrap_or_else(|err| {
+        println!("{err:#}");
+        std::process::exit(1);
+    });
 }
 
 fn build_kaitai_rust_scaffold() -> Result<(), String> {
